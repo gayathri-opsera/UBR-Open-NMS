@@ -6,6 +6,11 @@ export interface GpsLocation {
   coordinates: [number, number]; // [lng, lat]
 }
 
+export interface DeviceTag {
+  key: string;
+  value: string;
+}
+
 export interface Device {
   id: string;
   deviceId: string;
@@ -21,7 +26,7 @@ export interface Device {
   networkId?: string;
   organizationId?: string;
   hierarchyId?: string;
-  tags?: string[];
+  tags?: DeviceTag[];
   pendingCommandCount?: number;
   registeredAt?: string;
   lastSeenAt?: string;

@@ -64,7 +64,7 @@ export default function DeviceDetailPage(): React.ReactElement {
   const [diagError, setDiagError] = useState<string | null>(null);
 
   // Tags
-  const [tags, setTags] = useState<string[]>([]);
+  const [tags, setTags] = useState<Array<{ key: string; value: string }>>([]);
   const [tagInput, setTagInput] = useState('');
   const [tagSaving, setTagSaving] = useState(false);
 
@@ -103,15 +103,17 @@ export default function DeviceDetailPage(): React.ReactElement {
 
   const handleAddTag = async () => {
     if (!tagInput.trim() || !device) return;
-    const next = [...new Set([...tags, tagInput.trim()])];
+    const [k, ...rest] = tagInput.trim().split(':');
+    const newTag = rest.length ? { key: k, value: rest.join(':') } : { key: 'tag', value: k };
+    const next = [...tags.filter((x) => !(x.key === newTag.key && x.value === newTag.value)), newTag];
     setTagSaving(true);
     await updateDeviceTags(device.id, next).catch(() => {});
     setTags(next); setTagInput(''); setTagSaving(false);
   };
 
-  const handleRemoveTag = async (t: string) => {
+  const handleRemoveTag = async (t: { key: string; value: string }) => {
     if (!device) return;
-    const next = tags.filter((x) => x !== t);
+    const next = tags.filter((x) => !(x.key === t.key && x.value === t.value));
     await updateDeviceTags(device.id, next).catch(() => {});
     setTags(next);
   };
@@ -289,8 +291,8 @@ export default function DeviceDetailPage(): React.ReactElement {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
               {tags.length === 0 && <span style={{ color: C.faint, fontSize: 12 }}>No tags</span>}
               {tags.map((t) => (
-                <span key={t} style={{ background: C.hi, color: C.blue, padding: '2px 8px', borderRadius: 4, fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {t}
+                <span key={`${t.key}:${t.value}`} style={{ background: C.hi, color: C.blue, padding: '2px 8px', borderRadius: 4, fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {t.key}:{t.value}
                   <button onClick={() => handleRemoveTag(t)} style={{ background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: 11 }}>×</button>
                 </span>
               ))}

@@ -46,16 +46,18 @@ export default function DevicesPage(): React.ReactElement {
 
   const handleAddTag = async (tag: string) => {
     if (!selected || !tag.trim()) return;
-    const tags = [...(selected.tags ?? []), tag.trim()];
+    const [k, ...rest] = tag.trim().split(':');
+    const newTag = rest.length ? { key: k, value: rest.join(':') } : { key: 'tag', value: k };
+    const tags = [...(selected.tags ?? []), newTag];
     const updated = await updateDeviceTags(selected.id, tags);
     setSelected(updated);
     setTagInput('');
     setDevices((prev) => prev.map((d) => d.id === updated.id ? updated : d));
   };
 
-  const handleRemoveTag = async (tag: string) => {
+  const handleRemoveTag = async (tag: { key: string; value: string }) => {
     if (!selected) return;
-    const tags = (selected.tags ?? []).filter((t) => t !== tag);
+    const tags = (selected.tags ?? []).filter((t) => !(t.key === tag.key && t.value === tag.value));
     const updated = await updateDeviceTags(selected.id, tags);
     setSelected(updated);
     setDevices((prev) => prev.map((d) => d.id === updated.id ? updated : d));
@@ -211,8 +213,8 @@ export default function DevicesPage(): React.ReactElement {
           <Section title="Tags">
             <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 6, marginBottom: 10 }}>
               {(selected.tags ?? []).map((tag) => (
-                <span key={tag} style={{ background: '#1e3a5f', color: '#60a5fa', padding: '3px 10px', borderRadius: 12, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {tag}
+                <span key={`${tag.key}:${tag.value}`} style={{ background: '#1e3a5f', color: '#60a5fa', padding: '3px 10px', borderRadius: 12, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {tag.key}:{tag.value}
                   <button onClick={() => handleRemoveTag(tag)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 12, padding: 0 }}>×</button>
                 </span>
               ))}

@@ -73,13 +73,13 @@ export default function DashboardPage(): React.ReactElement {
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
 
   // Derived lists with filters applied
-  const circles = useMemo(() => [...new Set(devices.flatMap((d) => d.tags?.filter((t) => t.startsWith('circle:')) ?? []).map((t) => t.replace('circle:', '')))], [devices]);
+  const circles = useMemo(() => [...new Set(devices.flatMap((d) => (d.tags ?? []).filter((t) => t.key === 'circle').map((t) => t.value)))] , [devices]);
   const models   = useMemo(() => [...new Set(devices.map((d) => d.model).filter(Boolean))], [devices]);
   const firmwares = useMemo(() => [...new Set(devices.map((d) => d.firmwareVersion).filter(Boolean))], [devices]);
 
   const filtered = useMemo(() => devices.filter((d) => {
     if (deviceTab !== 'ALL' && d.deviceType !== deviceTab) return false;
-    if (filterCircle && !d.tags?.includes(`circle:${filterCircle}`)) return false;
+    if (filterCircle && !d.tags?.some((t) => t.key === 'circle' && t.value === filterCircle)) return false;
     if (filterModel && d.model !== filterModel) return false;
     if (filterFirmware && d.firmwareVersion !== filterFirmware) return false;
     return true;
