@@ -41,6 +41,40 @@ export async function getVersionHistory(deviceId: string): Promise<ConfigVersion
   return res.data;
 }
 
+export async function pushFirmware(deviceId: string, firmwareVersion: string, firmwareUrl?: string): Promise<PushResult> {
+  const res = await apiClient.post<PushResult>(`/config/push/${deviceId}`, null, {
+    params: { templateId: 'firmware', firmware: 'true', firmwareVersion, firmwareUrl: firmwareUrl ?? '' },
+  });
+  return res.data;
+}
+
+export async function bulkFirmware(deviceIds: string[], firmwareVersion: string, firmwareUrl?: string): Promise<ConfigJob> {
+  const res = await apiClient.post<ConfigJob>('/config/bulk-push', null, {
+    params: { deviceIds: deviceIds.join(','), templateId: 'firmware', firmware: 'true', firmwareVersion, firmwareUrl: firmwareUrl ?? '' },
+  });
+  return res.data;
+}
+
+export async function pushDeviceParam(deviceId: string, params: Record<string, string | number | boolean>): Promise<PushResult> {
+  const res = await apiClient.post<PushResult>(`/config/push/${deviceId}`, params, {
+    params: { templateId: 'inline', actor: 'nms-operator' },
+  });
+  return res.data;
+}
+
+export interface MissingDataReport {
+  deviceId: string;
+  missingMetrics: string[];
+  lastDataAt: string | null;
+  gapDurationMs: number;
+}
+
+export async function fetchMissingData(networkId?: string): Promise<MissingDataReport[]> {
+  const res = await apiClient.get<MissingDataReport[]>('/diagnostics/missing-data',
+    networkId ? { params: { networkId } } : undefined);
+  return res.data;
+}
+
 // ── Internal shape normalization ──────────────────────────────────────────────
 
 /** Config-service returns flat fields; collect them into a `parameters` map */

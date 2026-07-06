@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import type { Role } from '../../auth/tokens';
 
 interface NavItem {
@@ -23,6 +24,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export function AppShell({ children }: { children: React.ReactNode }): React.ReactElement {
   const { user, logout } = useAuth();
+  const { theme, toggleTheme, isDark } = useTheme();
   const navigate = useNavigate();
 
   const userRole = user?.role ?? '';
@@ -36,20 +38,23 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ display: 'flex', height: '100vh', fontFamily: 'system-ui, sans-serif', background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
       {/* Sidebar navigation */}
       <nav
         aria-label="Main navigation"
         style={{
-          width: 220, background: '#0d1b2a', color: '#e0e8f0',
+          width: 220,
+          background: 'var(--bg-surface)',
+          color: 'var(--text-primary)',
           display: 'flex', flexDirection: 'column', padding: '20px 0',
-          borderRight: '1px solid #1e293b', flexShrink: 0,
+          borderRight: '1px solid var(--border-subtle)',
+          flexShrink: 0,
         }}
       >
         {/* Logo */}
-        <div style={{ padding: '0 20px 20px', borderBottom: '1px solid #1e293b', marginBottom: 8 }}>
-          <div style={{ fontSize: 17, fontWeight: 800, color: '#60a5fa', letterSpacing: '-0.3px' }}>UBR NMS</div>
-          <div style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>Network Management</div>
+        <div style={{ padding: '0 20px 16px', borderBottom: '1px solid var(--border-subtle)', marginBottom: 8 }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--accent)', letterSpacing: '-0.3px' }}>UBR NMS</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Network Management</div>
         </div>
 
         {/* Nav links */}
@@ -62,9 +67,9 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
               style={({ isActive }) => ({
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '9px 20px', textDecoration: 'none',
-                color: isActive ? '#e2e8f0' : '#94a3b8',
-                background: isActive ? 'rgba(96,165,250,0.12)' : 'transparent',
-                borderLeft: isActive ? '3px solid #60a5fa' : '3px solid transparent',
+                color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                background: isActive ? 'var(--accent-subtle)' : 'transparent',
+                borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
                 fontSize: 13, fontWeight: isActive ? 600 : 400,
                 transition: 'background 0.1s',
               })}
@@ -75,15 +80,45 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
           ))}
         </div>
 
+        {/* Theme toggle */}
+        <div style={{ padding: '10px 20px', borderTop: '1px solid var(--border-subtle)' }}>
+          <button
+            onClick={toggleTheme}
+            aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+            title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+            style={{
+              width: '100%',
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-secondary)',
+              padding: '6px 10px', borderRadius: 6,
+              cursor: 'pointer', fontSize: 12,
+              transition: 'background 0.15s',
+            }}
+          >
+            <span style={{ fontSize: 14 }}>{isDark ? '☀' : '◑'}</span>
+            <span>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
+            <span style={{
+              marginLeft: 'auto',
+              background: 'var(--accent-bg)',
+              color: 'var(--accent)',
+              fontSize: 10, padding: '1px 6px', borderRadius: 3, fontWeight: 700,
+            }}>
+              {theme.toUpperCase()}
+            </span>
+          </button>
+        </div>
+
         {/* User info + logout */}
-        <div style={{ padding: '16px 20px', borderTop: '1px solid #1e293b' }}>
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-subtle)' }}>
           {user && (
             <>
-              <div style={{ fontSize: 13, color: '#cbd5e1', fontWeight: 600, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {user.fullName || user.email}
               </div>
-              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 10 }}>
-                <span style={{ background: '#1e3a5f', color: '#93c5fd', padding: '1px 6px', borderRadius: 3, fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+                <span style={{ background: 'var(--accent-bg)', color: 'var(--accent)', padding: '1px 6px', borderRadius: 3, fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>
                   {user.role}
                 </span>
               </div>
@@ -93,7 +128,7 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
             onClick={handleLogout}
             aria-label="Sign out"
             style={{
-              background: 'none', border: '1px solid #374151', color: '#94a3b8',
+              background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
               padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 12,
               width: '100%', textAlign: 'left',
             }}
@@ -109,22 +144,37 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
         <header
           role="banner"
           style={{
-            background: '#0f172a', borderBottom: '1px solid #1e293b',
-            padding: '0 24px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            background: 'var(--bg-card)',
+            borderBottom: '1px solid var(--border-subtle)',
+            padding: '0 24px', height: 52,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             flexShrink: 0,
           }}
         >
-          <span style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 15 }}>Network Operations Center</span>
-          <span style={{ color: '#64748b', fontSize: 12 }}>{user?.email}</span>
+          <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 15 }}>Network Operations Center</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{user?.email}</span>
+            <button
+              onClick={toggleTheme}
+              aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`}
+              style={{
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-secondary)',
+                borderRadius: 4, padding: '4px 10px',
+                cursor: 'pointer', fontSize: 12,
+              }}
+            >
+              {isDark ? '☀ Light' : '◑ Dark'}
+            </button>
+          </div>
         </header>
 
         {/* Skip-to-content link for keyboard users */}
         <a
           href="#main-content"
-          style={{
-            position: 'absolute', left: -9999, top: 'auto', width: 1, height: 1, overflow: 'hidden',
-          }}
-          onFocus={(e) => { (e.currentTarget as HTMLAnchorElement).style.cssText = 'position:fixed;top:8px;left:8px;width:auto;height:auto;padding:8px 16px;background:#2563eb;color:#fff;border-radius:4px;font-size:14px;font-weight:600;z-index:9999;text-decoration:none;'; }}
+          style={{ position: 'absolute', left: -9999, top: 'auto', width: 1, height: 1, overflow: 'hidden' }}
+          onFocus={(e) => { (e.currentTarget as HTMLAnchorElement).style.cssText = 'position:fixed;top:8px;left:8px;width:auto;height:auto;padding:8px 16px;background:var(--accent);color:#fff;border-radius:4px;font-size:14px;font-weight:600;z-index:9999;text-decoration:none;'; }}
           onBlur={(e) => { (e.currentTarget as HTMLAnchorElement).style.cssText = 'position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;'; }}
         >
           Skip to main content
@@ -135,7 +185,7 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
           id="main-content"
           role="main"
           tabIndex={-1}
-          style={{ flex: 1, overflow: 'auto', padding: 24, background: '#0a1628' }}
+          style={{ flex: 1, overflow: 'auto', padding: 24, background: 'var(--bg-base)' }}
         >
           {children}
         </main>

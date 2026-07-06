@@ -11,7 +11,7 @@ export async function fetchDevice(id: string): Promise<Device> {
   return res.data;
 }
 
-export async function updateDeviceTags(id: string, tags: string[]): Promise<Device> {
+export async function updateDeviceTags(id: string, tags: Array<{ key: string; value: string }>): Promise<Device> {
   const res = await apiClient.put<Device>(`/devices/${id}/tags`, { tags });
   return res.data;
 }

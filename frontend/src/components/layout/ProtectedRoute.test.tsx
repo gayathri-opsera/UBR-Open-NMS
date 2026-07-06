@@ -17,6 +17,7 @@ describe('ProtectedRoute', () => {
   function setup(isAuthenticated: boolean, role: string) {
     vi.mocked(authCtx.useAuth).mockReturnValue({
       isAuthenticated,
+      isLoading: false,
       user: isAuthenticated ? { id: '1', username: 'u', email: 'e', role: role as never, fullName: 'F' } : null,
       login: vi.fn(),
       logout: vi.fn(),

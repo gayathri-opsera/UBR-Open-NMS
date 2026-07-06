@@ -257,49 +257,51 @@ export default function ConfigPage(): React.ReactElement {
 
       {/* ── Bulk Operations Tab ───────────────────────────────── */}
       {activeTab === 'bulk' && (
-        <div style={{ background: '#0d1b2a', border: '1px solid #1e293b', borderRadius: 8, padding: 20 }}>
-          <h3 style={{ color: '#e2e8f0', marginTop: 0 }}>Bulk Configuration Push</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <div>
-              <label style={label}>Network ID</label>
-              <input style={input} value={bulkNetworkId} onChange={(e) => setBulkNetworkId(e.target.value)} placeholder="net-1" />
+        <div>
+          <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 20, marginBottom: 12 }}>
+            <h3 style={{ color: 'var(--text-primary)', marginTop: 0 }}>Bulk Configuration Push</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div>
+                <label style={label}>Network ID</label>
+                <input style={input} value={bulkNetworkId} onChange={(e) => setBulkNetworkId(e.target.value)} placeholder="net-1" />
+              </div>
+              <div>
+                <label style={label}>Template *</label>
+                <select style={input} value={bulkTemplateId} onChange={(e) => setBulkTemplateId(e.target.value)}>
+                  <option value="">Select template…</option>
+                  {templates.map((t) => <option key={t.id} value={t.id!}>{t.name}</option>)}
+                </select>
+              </div>
             </div>
-            <div>
-              <label style={label}>Template *</label>
-              <select style={input} value={bulkTemplateId} onChange={(e) => setBulkTemplateId(e.target.value)}>
-                <option value="">Select template…</option>
-                {templates.map((t) => <option key={t.id} value={t.id!}>{t.name}</option>)}
-              </select>
+            <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 12 }}>
+              Note: offline devices will be queued with 72-hour TTL.
             </div>
-          </div>
-          <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 12 }}>
-            Note: offline devices will be queued with 72-hour TTL.
-          </div>
-          <button
-            onClick={handleBulkPush}
-            disabled={!bulkTemplateId}
-            style={{ background: '#1e3a5f', border: 'none', color: '#60a5fa', padding: '8px 24px', borderRadius: 4, cursor: 'pointer', fontSize: 13 }}
-          >
-            Start Bulk Push
-          </button>
+            <button onClick={handleBulkPush} disabled={!bulkTemplateId}
+              style={{ background: 'var(--accent-bg)', border: 'none', color: 'var(--accent)', padding: '8px 24px', borderRadius: 4, cursor: 'pointer', fontSize: 13 }}>
+              Start Bulk Push
+            </button>
 
-          {currentJob && (
-            <div style={{ marginTop: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', fontSize: 13, marginBottom: 6 }}>
-                <span>Job: {currentJob.jobId}</span>
-                <span style={{ color: currentJob.status === 'COMPLETED' ? '#86efac' : '#60a5fa' }}>{currentJob.status}</span>
+            {currentJob && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 13, marginBottom: 6 }}>
+                  <span>Job: {currentJob.jobId}</span>
+                  <span style={{ color: currentJob.status === 'COMPLETED' ? '#86efac' : 'var(--accent)' }}>{currentJob.status}</span>
+                </div>
+                <div style={{ background: 'var(--bg-card)', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+                  <div style={{ background: 'var(--accent)', height: '100%', width: `${currentJob.progressPercent}%`, transition: 'width 0.5s' }} />
+                </div>
+                <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                  <span style={{ color: '#86efac' }}>✓ {currentJob.successCount}</span>
+                  <span style={{ color: '#f87171' }}>✗ {currentJob.failureCount}</span>
+                  <span style={{ color: '#fcd34d' }}>⏳ {currentJob.pendingCount}</span>
+                  <span>of {currentJob.totalDevices}</span>
+                </div>
               </div>
-              <div style={{ background: '#0f172a', borderRadius: 4, height: 8, overflow: 'hidden' }}>
-                <div style={{ background: '#2563eb', height: '100%', width: `${currentJob.progressPercent}%`, transition: 'width 0.5s' }} />
-              </div>
-              <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: '#64748b' }}>
-                <span style={{ color: '#86efac' }}>✓ {currentJob.successCount}</span>
-                <span style={{ color: '#f87171' }}>✗ {currentJob.failureCount}</span>
-                <span style={{ color: '#fcd34d' }}>⏳ {currentJob.pendingCount}</span>
-                <span>of {currentJob.totalDevices}</span>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          {/* Bulk Firmware Upgrade */}
+          <BulkFirmwarePanel />
         </div>
       )}
 
@@ -349,9 +351,66 @@ export default function ConfigPage(): React.ReactElement {
               </div>
             </div>
           ))}
-          {versions.length === 0 && historyDeviceId && <div style={{ color: '#475569', fontSize: 13 }}>No history found for {historyDeviceId}</div>}
+          {versions.length === 0 && historyDeviceId && <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>No history found for {historyDeviceId}</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+function BulkFirmwarePanel() {
+  const [fwVersion, setFwVersion] = useState('');
+  const [fwUrl, setFwUrl] = useState('');
+  const [deviceIds, setDeviceIds] = useState('');
+  const [status, setStatus] = useState<{ type: 'ok' | 'err' | 'info'; text: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const inp: React.CSSProperties = {
+    background: 'var(--bg-input)', border: '1px solid var(--border-default)', borderRadius: 4,
+    color: 'var(--text-primary)', padding: '6px 10px', fontSize: 12, width: '100%',
+  };
+
+  const handleBulkFirmware = async () => {
+    if (!fwVersion.trim()) { setStatus({ type: 'err', text: 'Enter a firmware version.' }); return; }
+    const ids = deviceIds.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+    if (ids.length === 0) { setStatus({ type: 'err', text: 'Enter at least one device ID.' }); return; }
+    setLoading(true); setStatus(null);
+    const { bulkFirmware } = await import('../api/config.api');
+    bulkFirmware(ids, fwVersion, fwUrl || undefined)
+      .then((job) => setStatus({ type: 'ok', text: `Bulk firmware job ${job.jobId} started for ${ids.length} devices.` }))
+      .catch(() => setStatus({ type: 'err', text: 'Bulk firmware upgrade failed.' }))
+      .finally(() => setLoading(false));
+  };
+
+  return (
+    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 20 }}>
+      <h3 style={{ color: 'var(--text-primary)', marginTop: 0, fontSize: 15 }}>⬆ Bulk Firmware Upgrade (CF-01)</h3>
+      <div style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 14 }}>
+        Push a firmware upgrade to multiple devices simultaneously. Offline devices will be queued.
+      </div>
+      {status && (
+        <div style={{ background: status.type === 'ok' ? '#14532d' : status.type === 'err' ? '#7f1d1d' : 'var(--accent-bg)', border: `1px solid ${status.type === 'ok' ? '#22c55e' : status.type === 'err' ? '#ef4444' : 'var(--accent)'}`, borderRadius: 6, padding: '8px 14px', marginBottom: 12, color: status.type === 'ok' ? '#86efac' : status.type === 'err' ? '#fca5a5' : 'var(--accent)', fontSize: 13 }}>
+          {status.text}
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+        <div>
+          <label style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block', marginBottom: 3 }}>Target Firmware Version *</label>
+          <input style={inp} placeholder="e.g. 3.5.2.1" value={fwVersion} onChange={(e) => setFwVersion(e.target.value)} />
+        </div>
+        <div>
+          <label style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block', marginBottom: 3 }}>Firmware URL (optional)</label>
+          <input style={inp} placeholder="https://..." value={fwUrl} onChange={(e) => setFwUrl(e.target.value)} />
+        </div>
+        <div style={{ gridColumn: '1/-1' }}>
+          <label style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block', marginBottom: 3 }}>Device IDs (comma or newline separated) *</label>
+          <textarea style={{ ...inp, height: 80, resize: 'vertical' }} placeholder="CPE-001, CPE-002, BTS-001…" value={deviceIds} onChange={(e) => setDeviceIds(e.target.value)} />
+        </div>
+      </div>
+      <button onClick={handleBulkFirmware} disabled={loading || !fwVersion || !deviceIds}
+        style={{ background: 'var(--accent-bg)', border: 'none', color: '#f59e0b', padding: '8px 20px', borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600, opacity: (!fwVersion || !deviceIds) ? 0.5 : 1 }}>
+        {loading ? 'Queuing…' : '⬆ Start Bulk Firmware Upgrade'}
+      </button>
     </div>
   );
 }

@@ -44,3 +44,29 @@ export function buildExportUrl(filter: AlarmFilter, format: 'csv' | 'xls'): stri
   const params = new URLSearchParams({ ...filter as Record<string, string>, format });
   return `/api/v1/alarms/export?${params}`;
 }
+
+// ── Threshold management (EV-05) ─────────────────────────────────────────────
+
+export interface AlarmThreshold {
+  id?: string;
+  metricName: string;
+  operator: 'GT' | 'LT' | 'GTE' | 'LTE';
+  thresholdValue: number;
+  severity: 'CRITICAL' | 'MAJOR' | 'MINOR' | 'WARNING';
+  alarmName: string;
+  deviceType?: 'BTS' | 'CPE' | 'IDU' | 'ALL';
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export async function fetchAlarmThresholds(): Promise<AlarmThreshold[]> {
+  const res = await apiClient.get<AlarmThreshold[]>('/alarms/thresholds');
+  return res.data;
+}
+
+export async function createAlarmThreshold(threshold: Omit<AlarmThreshold, 'id' | 'createdAt' | 'updatedAt'>): Promise<AlarmThreshold> {
+  const res = await apiClient.post<AlarmThreshold>('/alarms/thresholds', threshold);
+  return res.data;
+}
+

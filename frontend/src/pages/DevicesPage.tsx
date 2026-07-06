@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Device, DeviceFilter, DeviceType, DeviceStatus } from '../api/devices.types';
 import { buildExportUrl, fetchDevices, searchByGps, updateDeviceTags } from '../api/devices.api';
 import { DeviceTable } from '../components/devices/DeviceTable';
@@ -6,8 +7,15 @@ import { DeviceTable } from '../components/devices/DeviceTable';
 const PAGE_SIZE = 50;
 
 export default function DevicesPage(): React.ReactElement {
+  const [searchParams] = useSearchParams();
+  const initStatus = searchParams.get('status') as DeviceStatus | null;
+  const initType = searchParams.get('type') as DeviceType | null;
+
   const [devices, setDevices] = useState<Device[]>([]);
-  const [filter, setFilter] = useState<DeviceFilter>({});
+  const [filter, setFilter] = useState<DeviceFilter>({
+    ...(initStatus ? { status: initStatus } : {}),
+    ...(initType ? { deviceType: initType } : {}),
+  });
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Device | null>(null);

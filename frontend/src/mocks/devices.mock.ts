@@ -8,7 +8,7 @@ export const MOCK_DEVICES: Device[] = [
     firmwareVersion: '3.4.1', status: 'ONLINE',
     location: { type: 'Point', coordinates: [90.4125, 23.8103] },
     networkId: 'net-1', organizationId: 'org-1',
-    tags: ['circle-dhaka', 'tier1'],
+    tags: [{ key: 'circle', value: 'dhaka' }, { key: 'tier', value: '1' }],
     pendingCommandCount: 2,
     birthCertificate: { vendor: 'Senao', pn: 'ENH900', orderId: 'ORD-001' },
   },
@@ -28,7 +28,7 @@ export const MOCK_DEVICES: Device[] = [
     ipAddress: '192.168.2.50', manufacturer: 'Senao', model: 'EAP1750H',
     firmwareVersion: '2.8.0', status: 'OFFLINE',
     networkId: 'net-2', organizationId: 'org-1',
-    tags: ['circle-chittagong'],
+    tags: [{ key: 'circle', value: 'chittagong' }],
     pendingCommandCount: 0,
   },
 ];
