@@ -1,0 +1,174 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Alarm Service API
+  version: "1.0.0"
+  description: >
+    Alarm query, filter, acknowledgement, export, and top-reported analytics
+    for UBR NMS. Alarms are sourced from the raw-alarms Kafka topic via
+    deduplication and root-cause correlation.
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: alarms
+    description: Alarm queries and acknowledgement
+  - name: export
+    description: Alarm data export
+
+paths:
+  /alarms:
+    get:
+      tags: [alarms]
+      summary: List alarms with filters
+      operationId: listAlarms
+      parameters:
+        - $ref: 'components.yaml#/components/parameters/QueryOffset'
+        - $ref: 'components.yaml#/components/parameters/QueryLimit'
+        - name: severity
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/AlarmSeverity' }
+        - name: state
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/AlarmState' }
+        - name: deviceId
+          in: query
+          schema: { type: string }
+        - name: deviceType
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        - name: region
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          description: Start of time range (ISO 8601)
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          description: End of time range (ISO 8601)
+          schema: { type: string, format: date-time }
+        - name: acknowledged
+          in: query
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Paginated alarm list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: 'components.yaml#/components/schemas/AlarmRecord' }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "401": { description: Unauthorized, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /alarms/top-reported:
+    get:
+      tags: [alarms]
+      summary: Get top N alarms by frequency over a time window
+      operationId: getTopReportedAlarms
+      parameters:
+        - name: n
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+        - name: windowHours
+          in: query
+          schema: { type: integer, minimum: 1, default: 24 }
+        - name: deviceType
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/DeviceType' }
+      responses:
+        "200":
+          description: Top N alarm names with counts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    alarmName: { type: string }
+                    count:     { type: integer }
+                    severity:  { $ref: 'components.yaml#/components/schemas/AlarmSeverity' }
+
+  /alarms/export:
+    get:
+      tags: [export]
+      summary: Export filtered alarms as CSV or XLSX
+      operationId: exportAlarms
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [csv, xlsx], default: csv }
+        - name: severity
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/AlarmSeverity' }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: File download
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+
+  /alarms/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [alarms]
+      summary: Get alarm by ID
+      operationId: getAlarm
+      responses:
+        "200": { description: Alarm found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/AlarmRecord' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /alarms/{id}/acknowledge:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      tags: [alarms]
+      summary: Acknowledge an alarm (operator+)
+      operationId: acknowledgeAlarm
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment: { type: string }
+      responses:
+        "200": { description: Alarm acknowledged, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/AlarmRecord' } } } }
+        "400": { description: Already acknowledged, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    AlarmRecord:     { $ref: 'components.yaml#/components/schemas/AlarmRecord' }
+    AlarmSeverity:   { $ref: 'components.yaml#/components/schemas/AlarmSeverity' }
+    AlarmState:      { $ref: 'components.yaml#/components/schemas/AlarmState' }
+    DeviceType:      { $ref: 'components.yaml#/components/schemas/DeviceType' }
+    ErrorResponse:   { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+    PaginatedResponse: { $ref: 'components.yaml#/components/schemas/PaginatedResponse' }

@@ -1,0 +1,68 @@
+[
+  {
+    "deviceId": "d1a2b3c4-0001-4abc-8001-aabbccddeeff",
+    "serialNumber": "SN-BTS-NORTH-001",
+    "macAddress": "AA:BB:CC:DD:EE:01",
+    "ipAddress": "10.10.1.10",
+    "deviceType": "BTS",
+    "model": "Senao ENH1750EXT",
+    "firmwareVersion": "v3.2.1",
+    "region": "NORTH",
+    "latitude": 28.6139,
+    "longitude": 77.2090,
+    "elevation": 15.0,
+    "azimuth": 90,
+    "tilt": 3,
+    "status": "online",
+    "uptimeSeconds": 864000,
+    "connectedBtsSerial": null,
+    "connectedCpeCount": 12,
+    "connectedIduCount": 2,
+    "tags": [
+      { "key": "site", "value": "SITE-NORTH-01" },
+      { "key": "circle", "value": "DELHI" }
+    ],
+    "organizationId": "org-airtel-north",
+    "networkId": "net-north-001",
+    "createdAt": "2024-01-10T08:00:00Z",
+    "updatedAt": "2024-01-15T10:00:00Z"
+  },
+  {
+    "deviceId": "d1a2b3c4-0002-4abc-8002-aabbccddeeff",
+    "serialNumber": "SN-CPE-CUST-001",
+    "macAddress": "BB:CC:DD:EE:FF:01",
+    "ipAddress": "10.10.2.100",
+    "deviceType": "CPE",
+    "model": "Senao EAP300",
+    "firmwareVersion": "v2.1.0",
+    "region": "NORTH",
+    "status": "online",
+    "uptimeSeconds": 172800,
+    "connectedBtsSerial": "SN-BTS-NORTH-001",
+    "tags": [],
+    "organizationId": "org-airtel-north",
+    "networkId": "net-north-001",
+    "createdAt": "2024-01-12T09:00:00Z",
+    "updatedAt": "2024-01-15T10:00:00Z"
+  },
+  {
+    "deviceId": "d1a2b3c4-0003-4abc-8003-aabbccddeeff",
+    "serialNumber": "SN-IDU-LINK-001",
+    "macAddress": "CC:DD:EE:FF:00:01",
+    "ipAddress": "10.10.3.50",
+    "deviceType": "IDU",
+    "model": "Senao IDU-2600",
+    "firmwareVersion": "v1.8.3",
+    "region": "SOUTH",
+    "status": "offline",
+    "uptimeSeconds": 0,
+    "connectedBtsSerial": null,
+    "tags": [
+      { "key": "site", "value": "SITE-SOUTH-05" }
+    ],
+    "organizationId": "org-airtel-south",
+    "networkId": "net-south-005",
+    "createdAt": "2024-01-05T07:30:00Z",
+    "updatedAt": "2024-01-15T14:22:00Z"
+  }
+]

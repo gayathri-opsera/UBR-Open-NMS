@@ -1,0 +1,22 @@
+{
+  "name": "@ubr-nms/shared-utils",
+  "version": "0.1.0",
+  "description": "Shared Node.js utilities for UBR NMS microservices",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest --forceExit",
+    "test:coverage": "jest --coverage --forceExit"
+  },
+  "dependencies": {
+    "opossum": "^8.1.1",
+    "winston": "^3.11.0",
+    "prom-client": "^15.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coverageThreshold": { "global": { "lines": 80 } }
+  }
+}

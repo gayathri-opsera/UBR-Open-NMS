@@ -1,0 +1,55 @@
+apiVersion: v2
+name: ubrnms
+description: UBR Open Network Management System — umbrella chart
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+dependencies:
+  - name: auth-service
+    version: "1.0.0"
+    repository: "file://../auth-service"
+  - name: alarm-service
+    version: "1.0.0"
+    repository: "file://../alarm-service"
+  - name: inventory-service
+    version: "1.0.0"
+    repository: "file://../inventory-service"
+  - name: kpi-aggregation-service
+    version: "1.0.0"
+    repository: "file://../kpi-aggregation-service"
+  - name: kpi-query-service
+    version: "1.0.0"
+    repository: "file://../kpi-query-service"
+  - name: diagnostics-service
+    version: "1.0.0"
+    repository: "file://../diagnostics-service"
+  - name: report-service
+    version: "1.0.0"
+    repository: "file://../report-service"
+  - name: config-management-service
+    version: "1.0.0"
+    repository: "file://../config-management-service"
+  - name: topology-service
+    version: "1.0.0"
+    repository: "file://../topology-service"
+  - name: notification-service
+    version: "1.0.0"
+    repository: "file://../notification-service"
+  - name: audit-service
+    version: "1.0.0"
+    repository: "file://../audit-service"
+  - name: event-collector
+    version: "1.0.0"
+    repository: "file://../event-collector"
+  - name: kpi-collector
+    version: "1.0.0"
+    repository: "file://../kpi-collector"
+  - name: discovery-service
+    version: "1.0.0"
+    repository: "file://../discovery-service"
+  - name: api-gateway
+    version: "1.0.0"
+    repository: "file://../api-gateway"
+  - name: health-monitor
+    version: "1.0.0"
+    repository: "file://../health-monitor"

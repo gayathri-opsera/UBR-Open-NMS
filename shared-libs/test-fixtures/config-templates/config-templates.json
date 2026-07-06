@@ -1,0 +1,53 @@
+[
+  {
+    "templateId": "tmpl-0001-4aaa-8001-000000000001",
+    "templateName": "BTS-Standard-5GHz",
+    "deviceType": "BTS",
+    "parameters": {
+      "radioChannel": 36,
+      "txPowerDbm": 20,
+      "ssid": "UBR-AIRTEL",
+      "beaconInterval": 100,
+      "dtimPeriod": 1
+    },
+    "validationSchema": {
+      "radioChannel": { "type": "integer", "minimum": 36, "maximum": 165 },
+      "txPowerDbm": { "type": "integer", "minimum": 1, "maximum": 23 }
+    },
+    "version": 2,
+    "createdBy": "admin",
+    "isDefault": true,
+    "createdAt": "2024-01-01T08:00:00Z",
+    "updatedAt": "2024-01-10T09:00:00Z"
+  },
+  {
+    "templateId": "tmpl-0002-4aaa-8002-000000000002",
+    "templateName": "CPE-Home-Basic",
+    "deviceType": "CPE",
+    "parameters": {
+      "dhcpEnabled": true,
+      "lanSubnet": "192.168.1.0/24",
+      "natEnabled": true
+    },
+    "version": 1,
+    "createdBy": "operator1",
+    "isDefault": false,
+    "createdAt": "2024-01-05T10:00:00Z",
+    "updatedAt": "2024-01-05T10:00:00Z"
+  },
+  {
+    "templateId": "tmpl-0003-4aaa-8003-000000000003",
+    "templateName": "IDU-Link-P2P",
+    "deviceType": "IDU",
+    "parameters": {
+      "frequency": 5800,
+      "bandwidth": 40,
+      "encryptionKey": "CHANGE_ME"
+    },
+    "version": 1,
+    "createdBy": "admin",
+    "isDefault": true,
+    "createdAt": "2024-01-03T07:00:00Z",
+    "updatedAt": "2024-01-03T07:00:00Z"
+  }
+]

@@ -1,0 +1,306 @@
+name: UBR NMS — Auth Service CI/CD
+# Triggered on push/PR to services/auth-service/**
+on:
+  push:
+    paths:
+      - "services/auth-service/**"
+      - ".github/workflows/auth-service.yml"
+  pull_request:
+    paths:
+      - "services/auth-service/**"
+      - ".github/workflows/auth-service.yml"
+
+env:
+  SERVICE: auth-service
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/auth-service
+
+jobs:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 1: Build
+  # ─────────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/auth-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/auth-service/package-lock.json
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Validate no secrets in repo
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate no .env files committed
+        run: |
+          if git ls-files | grep -qE '\.env$|\.env\.(local|prod|staging)$'; then
+            echo "ERROR: .env file found in repository"
+            exit 1
+          fi
+      - name: Validate node_modules not committed
+        run: |
+          if git ls-files | grep -q 'node_modules/'; then
+            echo "ERROR: node_modules found in repository"
+            exit 1
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 2: Test (coverage gate)
+  # ─────────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: build
+    defaults:
+      run:
+        working-directory: services/auth-service
+    services:
+      mongodb:
+        image: mongo:7
+        ports: ["27017:27017"]
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/auth-service/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Run unit tests with coverage
+        run: npm test -- --coverage --coverageThreshold='{"global":{"lines":80,"branches":80,"functions":80,"statements":80}}'
+        env:
+          NODE_ENV: test
+          MONGODB_URI: mongodb://localhost:27017/test
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          JWT_SECRET: test-secret
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 3: Security Scan
+  # ─────────────────────────────────────────────────────────────────────────────
+  scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    defaults:
+      run:
+        working-directory: services/auth-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/auth-service/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Snyk dependency scan
+        uses: snyk/actions/node@master
+        continue-on-error: false
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --file=services/auth-service/package.json
+      - name: Semgrep SAST
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: "p/javascript p/nodejs p/security-audit"
+          generateSarif: "1"
+      - name: SonarQube Analysis
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: services/auth-service
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 4: Package (Docker build + push)
+  # ─────────────────────────────────────────────────────────────────────────────
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    needs: [test, scan]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/auth-service
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Container vulnerability scan (Grype)
+        uses: anchore/scan-action@v3
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          fail-build: true
+          severity-cutoff: high
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 5: Deploy Dev (ArgoCD)
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy-dev:
+    name: Deploy (dev)
+    runs-on: ubuntu-latest
+    needs: package
+    environment: dev
+    steps:
+      - name: ArgoCD sync — dev
+        run: |
+          argocd app set ubrnms-dev-${{ env.SERVICE }} \
+            --helm-set image.tag=${{ needs.package.outputs.image-tag }}
+          argocd app sync ubrnms-dev-${{ env.SERVICE }} --timeout 300
+          argocd app wait ubrnms-dev-${{ env.SERVICE }} --health --timeout 300
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 6: Integration test in dev
+  # ─────────────────────────────────────────────────────────────────────────────
+  test-dev:
+    name: Integration Test (dev)
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run auth-flow integration scenario
+        run: |
+          pip install --quiet pyyaml aiohttp
+          python test-harness/scenario-runner/src/runner.py \
+            test-harness/scenario-runner/scenarios/auth-flow.yaml
+        env:
+          AUTH_URL: https://auth.dev.ubrnms.internal
+          ALARM_URL: https://api.dev.ubrnms.internal
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 7: Deploy Staging
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy (staging)
+    runs-on: ubuntu-latest
+    needs: test-dev
+    environment: staging
+    steps:
+      - name: ArgoCD sync — staging
+        run: |
+          argocd app set ubrnms-staging-${{ env.SERVICE }} \
+            --helm-set image.tag=${{ needs.package.outputs.image-tag }}
+          argocd app sync ubrnms-staging-${{ env.SERVICE }} --timeout 300
+          argocd app wait ubrnms-staging-${{ env.SERVICE }} --health --timeout 300
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 8: Smoke test staging
+  # ─────────────────────────────────────────────────────────────────────────────
+  test-staging:
+    name: Smoke Test (staging)
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run smoke scenarios
+        run: |
+          pip install --quiet pyyaml aiohttp
+          python test-harness/scenario-runner/src/runner.py \
+            test-harness/scenario-runner/scenarios/auth-flow.yaml
+        env:
+          AUTH_URL: https://auth.staging.ubrnms.example.com
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 9: Deploy Production (canary)
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy-prod:
+    name: Deploy (prod — canary)
+    runs-on: ubuntu-latest
+    needs: test-staging
+    environment: production
+    steps:
+      - name: ArgoCD canary sync — prod
+        run: |
+          argocd app set ubrnms-prod-${{ env.SERVICE }} \
+            --helm-set image.tag=${{ needs.package.outputs.image-tag }} \
+            --helm-set rollout.canaryWeight=10
+          argocd app sync ubrnms-prod-${{ env.SERVICE }} --timeout 300
+          argocd app wait ubrnms-prod-${{ env.SERVICE }} --health --timeout 300
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 10: Canary validation (error rate gate)
+  # ─────────────────────────────────────────────────────────────────────────────
+  canary-validation:
+    name: Canary Validation
+    runs-on: ubuntu-latest
+    needs: deploy-prod
+    steps:
+      - name: Check error rate via Prometheus
+        run: |
+          ERROR_RATE=$(curl -sf "$PROMETHEUS_URL/api/v1/query" \
+            --data-urlencode "query=rate(http_requests_total{service=\"$SERVICE\",status=~\"5..\"}[5m]) / rate(http_requests_total{service=\"$SERVICE\"}[5m]) * 100" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); r=d['data']['result']; print(float(r[0]['value'][1]) if r else 0)" 2>/dev/null || echo 0)
+          echo "Error rate: ${ERROR_RATE}%"
+          if [ "$(echo "$ERROR_RATE > 1" | bc -l)" = "1" ]; then
+            echo "ERROR: Canary error rate ${ERROR_RATE}% exceeds 1% threshold — triggering rollback"
+            exit 1
+          fi
+          echo "Canary healthy — promoting to 100%"
+          argocd app set ubrnms-prod-${{ env.SERVICE }} --helm-set rollout.canaryWeight=100
+          argocd app sync ubrnms-prod-${{ env.SERVICE }}
+        env:
+          PROMETHEUS_URL: ${{ secrets.PROMETHEUS_URL }}
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 11: Rollback gate (triggered on canary failure)
+  # ─────────────────────────────────────────────────────────────────────────────
+  rollback:
+    name: Rollback
+    runs-on: ubuntu-latest
+    needs: canary-validation
+    if: failure()
+    steps:
+      - name: Rollback via ArgoCD
+        run: |
+          echo "Rolling back ${{ env.SERVICE }} in production"
+          argocd app rollback ubrnms-prod-${{ env.SERVICE }}
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}

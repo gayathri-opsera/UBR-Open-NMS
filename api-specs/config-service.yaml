@@ -1,0 +1,192 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Config Service API
+  version: "1.0.0"
+  description: >
+    Template-based configuration management for UBR NMS devices.
+    Supports NETCONF, CLI, and TR-069 push protocols with approval workflows,
+    bulk operations, and 72-hour offline command queuing.
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: templates
+    description: Config template CRUD
+  - name: jobs
+    description: Config push jobs
+
+paths:
+  /config/templates:
+    get:
+      tags: [templates]
+      summary: List config templates
+      operationId: listTemplates
+      parameters:
+        - $ref: 'components.yaml#/components/parameters/QueryOffset'
+        - $ref: 'components.yaml#/components/parameters/QueryLimit'
+        - name: deviceType
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/DeviceType' }
+      responses:
+        "200":
+          description: Paginated template list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: 'components.yaml#/components/schemas/ConfigTemplate' }
+    post:
+      tags: [templates]
+      summary: Create a new config template (operator+)
+      operationId: createTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTemplateRequest' }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ConfigTemplate' } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "409": { description: Template name conflict, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /config/templates/{id}:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    get:
+      tags: [templates]
+      summary: Get template by ID
+      operationId: getTemplate
+      responses:
+        "200": { description: Template found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ConfigTemplate' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+    put:
+      tags: [templates]
+      summary: Update template (operator+)
+      operationId: updateTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTemplateRequest' }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ConfigTemplate' } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+    delete:
+      tags: [templates]
+      summary: Delete template (admin only)
+      operationId: deleteTemplate
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /config/push:
+    post:
+      tags: [jobs]
+      summary: Push config to one device (operator+, requires approval)
+      operationId: pushConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PushConfigRequest' }
+      responses:
+        "202": { description: Job queued, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ConfigJobStatus' } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "404": { description: Device or template not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /config/bulk-push:
+    post:
+      tags: [jobs]
+      summary: Push config to multiple devices (up to 10,000, operator+)
+      operationId: bulkPushConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkPushRequest' }
+      responses:
+        "202": { description: Bulk job queued, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/BulkJobResponse' } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /config/jobs/{id}/status:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    get:
+      tags: [jobs]
+      summary: Get config job status
+      operationId: getJobStatus
+      responses:
+        "200": { description: Job status, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ConfigJob' } } } }
+        "404": { description: Job not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    ConfigTemplate:  { $ref: 'components.yaml#/components/schemas/ConfigTemplate' }
+    ConfigJob:       { $ref: 'components.yaml#/components/schemas/ConfigJob' }
+    DeviceType:      { $ref: 'components.yaml#/components/schemas/DeviceType' }
+    ErrorResponse:   { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+    PaginatedResponse: { $ref: 'components.yaml#/components/schemas/PaginatedResponse' }
+
+    CreateTemplateRequest:
+      type: object
+      required: [templateName, deviceType, parameters]
+      properties:
+        templateName:     { type: string }
+        deviceType:       { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        parameters:       { type: object }
+        validationSchema: { type: object }
+        isDefault:        { type: boolean, default: false }
+
+    UpdateTemplateRequest:
+      type: object
+      properties:
+        templateName:     { type: string }
+        parameters:       { type: object }
+        validationSchema: { type: object }
+
+    PushConfigRequest:
+      type: object
+      required: [deviceId, templateId]
+      properties:
+        deviceId:    { type: string }
+        templateId:  { type: string, format: uuid }
+        parameters:  { type: object }
+        protocol:    { $ref: 'components.yaml#/components/schemas/ConfigProtocol' }
+        scheduledAt: { type: string, format: date-time }
+
+    BulkPushRequest:
+      type: object
+      required: [deviceIds, templateId]
+      properties:
+        deviceIds:   { type: array, items: { type: string }, maxItems: 10000 }
+        templateId:  { type: string, format: uuid }
+        parameters:  { type: object }
+        protocol:    { $ref: 'components.yaml#/components/schemas/ConfigProtocol' }
+        scheduledAt: { type: string, format: date-time }
+
+    ConfigJobStatus:
+      type: object
+      properties:
+        jobId:    { type: string, format: uuid }
+        status:   { $ref: 'components.yaml#/components/schemas/ConfigStatus' }
+        message:  { type: string }
+
+    BulkJobResponse:
+      type: object
+      properties:
+        bulkJobId:    { type: string, format: uuid }
+        totalDevices: { type: integer }
+        jobIds:       { type: array, items: { type: string, format: uuid } }
+        status:       { $ref: 'components.yaml#/components/schemas/ConfigStatus' }

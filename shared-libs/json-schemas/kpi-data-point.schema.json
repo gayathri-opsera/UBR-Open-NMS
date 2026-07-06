@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/kpi-data-point.schema.json",
+  "title": "KPIDataPoint",
+  "description": "A single KPI measurement from a device.",
+  "type": "object",
+  "required": ["deviceId", "kpiName", "value", "timestamp"],
+  "properties": {
+    "deviceId":     { "type": "string" },
+    "serialNumber": { "type": "string" },
+    "deviceType":   { "type": "string", "enum": ["BTS", "CPE", "IDU"] },
+    "kpiName":      { "type": "string" },
+    "value":        { "type": "number" },
+    "unit":         { "type": "string" },
+    "pollInterval": { "type": "integer", "description": "Poll interval in seconds", "default": 300 },
+    "timestamp":    { "type": "string", "format": "date-time" },
+    "granularity":  { "type": "string", "enum": ["raw", "15min", "1hour", "daily"], "default": "raw" }
+  }
+}

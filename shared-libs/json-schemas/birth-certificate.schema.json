@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/birth-certificate.schema.json",
+  "title": "BirthCertificate",
+  "description": "Immutable device identity record registered at first check-in. Matches inventory-sync format.",
+  "type": "object",
+  "required": ["serialNumber", "macAddress", "model", "deviceType", "registeredAt"],
+  "properties": {
+    "serialNumber":     { "type": "string" },
+    "macAddress":       { "type": "string", "pattern": "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$" },
+    "model":            { "type": "string" },
+    "deviceType":       { "type": "string", "enum": ["BTS", "CPE", "IDU"] },
+    "firmware":         { "type": "string" },
+    "systemName":       { "type": "string" },
+    "ipAddress":        { "type": "string", "format": "ipv4" },
+    "publicKey":        { "type": "string", "description": "PEM-encoded device public key for mTLS" },
+    "hmacSignature":    { "type": "string", "description": "HMAC-SHA256 signature of the birth certificate payload" },
+    "organizationId":   { "type": ["string", "null"] },
+    "networkId":        { "type": ["string", "null"] },
+    "registeredAt":     { "type": "string", "format": "date-time" }
+  }
+}

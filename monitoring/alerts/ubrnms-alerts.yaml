@@ -1,0 +1,133 @@
+groups:
+  - name: ubrnms.services
+    rules:
+
+      # ── Service Down ──────────────────────────────────────────────────────
+      - alert: ServiceDown
+        expr: up{job=~"(auth|alarm|inventory|kpi-aggregation|kpi-query|diagnostics|report|config-management|topology|notification|audit|event-collector|kpi-collector|discovery|api-gateway|health-monitor)-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Service {{ $labels.job }} is DOWN"
+          description: "{{ $labels.job }} ({{ $labels.instance }}) has been unreachable for more than 1 minute."
+          runbook_url: "https://runbooks.ubrnms.example.com/service-down"
+
+      # ── High CPU ──────────────────────────────────────────────────────────
+      - alert: HighCPU
+        expr: rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High CPU on {{ $labels.job }}: {{ $value | printf \"%.1f\" }}%"
+          description: "Service {{ $labels.job }} on {{ $labels.instance }} has CPU utilization > 80% for 5 minutes."
+          runbook_url: "https://runbooks.ubrnms.example.com/high-cpu"
+
+      # ── High Memory ───────────────────────────────────────────────────────
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High memory on {{ $labels.instance }}: {{ $value | printf \"%.1f\" }}%"
+          description: "Memory utilization > 85% on {{ $labels.instance }} for 5 minutes."
+          runbook_url: "https://runbooks.ubrnms.example.com/high-memory"
+
+  - name: ubrnms.kafka
+    rules:
+
+      # ── Kafka Consumer Lag ────────────────────────────────────────────────
+      - alert: KafkaConsumerLagHigh
+        expr: kafka_consumer_lag > 10000
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Kafka consumer lag high: {{ $labels.topic }}/{{ $labels.partition }} = {{ $value }}"
+          description: "Consumer group {{ $labels.job }} has lag {{ $value }} on {{ $labels.topic }}/{{ $labels.partition }}."
+          runbook_url: "https://runbooks.ubrnms.example.com/kafka-consumer-lag"
+
+      - alert: KafkaConsumerLagCritical
+        expr: kafka_consumer_lag > 100000
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "CRITICAL Kafka consumer lag: {{ $labels.topic }} = {{ $value }}"
+          description: "Consumer group is severely behind. Message processing may be stalled."
+          runbook_url: "https://runbooks.ubrnms.example.com/kafka-consumer-lag"
+
+  - name: ubrnms.slo
+    rules:
+
+      # ── API Latency P99 SLO ───────────────────────────────────────────────
+      - alert: APILatencyP99Degraded
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          slo: api-latency
+        annotations:
+          summary: "API P99 latency > 1s on {{ $labels.job }}"
+          description: "P99 API latency is {{ $value | printf \"%.2f\" }}s on {{ $labels.job }}. SLO target: 500ms."
+          runbook_url: "https://runbooks.ubrnms.example.com/api-latency"
+
+      - alert: APILatencyP99SLOViolation
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 2.0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          slo: api-latency
+        annotations:
+          summary: "CRITICAL: API P99 latency > 2s on {{ $labels.job }} — SLO violated"
+          description: "P99 API latency {{ $value | printf \"%.2f\" }}s severely exceeds 500ms SLO target."
+          runbook_url: "https://runbooks.ubrnms.example.com/api-latency"
+
+      # ── Alarm Pipeline Latency SLO ────────────────────────────────────────
+      - alert: AlarmPipelineLatencyDegraded
+        expr: histogram_quantile(0.99, rate(alarm_correlation_latency_seconds_bucket[5m])) > 5.0
+        for: 3m
+        labels:
+          severity: warning
+          team: noc
+          slo: alarm-pipeline
+        annotations:
+          summary: "Alarm pipeline P99 latency > 5s"
+          description: "Alarm correlation P99 latency is {{ $value | printf \"%.1f\" }}s. SLO target: 3s."
+          runbook_url: "https://runbooks.ubrnms.example.com/alarm-pipeline-latency"
+
+  - name: ubrnms.database
+    rules:
+
+      # ── Database Replication Lag ──────────────────────────────────────────
+      - alert: MongoDBReplicationLag
+        expr: mongodb_replication_lag_seconds > 30
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "MongoDB replication lag {{ $value | printf \"%.0f\" }}s"
+          description: "MongoDB replica {{ $labels.instance }} is {{ $value }}s behind primary."
+          runbook_url: "https://runbooks.ubrnms.example.com/mongodb-replication"
+
+      # ── High Error Rate ───────────────────────────────────────────────────
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Error rate > 5% on {{ $labels.job }}"
+          description: "Error rate on {{ $labels.job }} is {{ $value | printf \"%.1f\" }}% (HTTP 5xx)."
+          runbook_url: "https://runbooks.ubrnms.example.com/high-error-rate"

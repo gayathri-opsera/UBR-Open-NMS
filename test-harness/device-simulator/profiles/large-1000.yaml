@@ -1,0 +1,48 @@
+profile_name: large-1000
+description: "1000-device profile for load testing"
+
+fleet:
+  total_devices: 1000
+  bts_ratio: 0.25
+  device_models:
+    bts: [ENS500EXT, ENH220EXT, ENS620EXT, ENS620]
+    cpe: [ENH200EXT, EOA7530, ENH202EXT, EOC5510]
+
+checkin:
+  interval_seconds: 120
+  jitter_seconds: 30
+
+snmp:
+  version: "2c"
+  community: "public"
+  trap_rate_per_minute: 0.5
+
+syslog:
+  rate_per_minute: 2
+  facility: 16
+  severity_distribution:
+    debug:   0.02
+    info:    0.70
+    notice:  0.15
+    warning: 0.10
+    error:   0.03
+
+kpi:
+  rssi_dbm:    {min: -85, max: -35, mean: -57, stddev: 12}
+  snr_db:      {min: 4,   max: 42,  mean: 27,  stddev: 7}
+  throughput_mbps: {min: 0.5, max: 200, mean: 60, stddev: 25}
+  cpu_usage_pct:   {min: 3,   max: 95,  mean: 32, stddev: 16}
+  memory_free_pct: {min: 10,  max: 85,  mean: 50, stddev: 15}
+
+state_transitions:
+  offline_probability: 0.03
+  recovery_probability: 0.75
+  faulty_probability: 0.008
+
+alarm_storm:
+  enabled: true
+  trigger_probability: 0.003
+  devices_affected_ratio: 0.10
+  burst_duration_seconds: 120
+
+metrics_port: 9100

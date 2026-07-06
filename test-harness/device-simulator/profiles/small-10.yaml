@@ -1,0 +1,84 @@
+# ──────────────────────────────────────────────────────────────────
+# UBR NMS Device Fleet Simulator — device profile schema
+# Supports 6 scale profiles: 10 / 100 / 1K / 10K / 100K / 1M devices
+# ──────────────────────────────────────────────────────────────────
+profile_name: small-10
+description: "10-device profile for smoke testing"
+
+fleet:
+  total_devices: 10
+  bts_ratio: 0.4          # 40% BTS, 60% CPE
+  device_models:
+    bts:
+      - ENS500EXT
+      - ENH220EXT
+    cpe:
+      - ENH200EXT
+      - EOA7530
+
+# Periodic check-in to Discovery Service
+checkin:
+  interval_seconds: 30
+  jitter_seconds: 5
+
+# SNMP trap generation
+snmp:
+  version: "2c"            # "2c" or "3"
+  community: "public"
+  trap_rate_per_minute: 2  # per device
+  enterprise_oid_prefix: "1.3.6.1.4.1.28776"
+
+# Syslog message generation
+syslog:
+  rate_per_minute: 5       # per device
+  facility: 16             # local0
+  severity_distribution:
+    debug:   0.10
+    info:    0.60
+    notice:  0.15
+    warning: 0.10
+    error:   0.05
+
+# KPI poll responses (when SNMP GET is received)
+kpi:
+  rssi_dbm:
+    min: -80
+    max: -40
+    mean: -60
+    stddev: 10
+  snr_db:
+    min: 5
+    max: 40
+    mean: 25
+    stddev: 6
+  throughput_mbps:
+    min: 1
+    max: 150
+    mean: 50
+    stddev: 20
+  cpu_usage_pct:
+    min: 5
+    max: 95
+    mean: 30
+    stddev: 15
+  memory_free_pct:
+    min: 10
+    max: 80
+    mean: 50
+    stddev: 15
+
+# Device state transitions
+state_transitions:
+  offline_probability: 0.02       # probability device goes offline per cycle
+  recovery_probability: 0.80      # probability offline device recovers per cycle
+  faulty_probability: 0.005       # probability device becomes faulty per cycle
+
+# Alarm storm simulation
+alarm_storm:
+  enabled: false
+  trigger_probability: 0.001      # probability of storm per check cycle
+  devices_affected_ratio: 0.20    # % of fleet involved
+  burst_duration_seconds: 60
+
+# Metrics
+metrics_port: 9100

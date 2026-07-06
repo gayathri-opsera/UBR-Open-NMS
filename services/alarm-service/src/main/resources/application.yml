@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: alarm-service
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_alarms}
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      group-id: alarm-service
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+
+server:
+  port: ${PORT:8083}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+kafka:
+  topics:
+    raw-alarms: ${KAFKA_TOPIC_RAW_ALARMS:raw-alarms}
+    processed-alarms: ${KAFKA_TOPIC_PROCESSED_ALARMS:processed-alarms}
+    netcool-alarms-forward: ${KAFKA_TOPIC_NETCOOL:netcool-alarms-forward}
+
+alarm:
+  dedup:
+    window-minutes: ${ALARM_DEDUP_WINDOW_MINUTES:5}
+  retention-days: ${ALARM_RETENTION_DAYS:7}
+  export:
+    max-rows: ${ALARM_EXPORT_MAX_ROWS:10000}

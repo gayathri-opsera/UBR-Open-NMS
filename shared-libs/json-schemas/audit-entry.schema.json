@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/audit-entry.schema.json",
+  "title": "AuditEntry",
+  "description": "Immutable audit log entry for all state-changing operations.",
+  "type": "object",
+  "required": ["auditId", "actor", "action", "resource", "outcome", "timestamp"],
+  "properties": {
+    "auditId":    { "type": "string", "format": "uuid" },
+    "actor":      {
+      "type": "object",
+      "required": ["userId", "username", "role"],
+      "properties": {
+        "userId":    { "type": "string" },
+        "username":  { "type": "string" },
+        "role":      { "type": "string" },
+        "ipAddress": { "type": "string" }
+      }
+    },
+    "action":     { "type": "string" },
+    "resource":   {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string" },
+        "id":   { "type": "string" }
+      }
+    },
+    "payload":    { "type": "object" },
+    "outcome":    { "type": "string", "enum": ["success", "failure", "denied"] },
+    "errorMessage": { "type": ["string", "null"] },
+    "timestamp":  { "type": "string", "format": "date-time" }
+  }
+}

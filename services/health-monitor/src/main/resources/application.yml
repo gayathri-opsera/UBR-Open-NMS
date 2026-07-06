@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: health-monitor
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_health}
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+
+server:
+  port: ${SERVER_PORT:8092}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+health-monitor:
+  prometheus-url: ${PROMETHEUS_URL:http://localhost:9090}
+  check-interval-seconds: ${HEALTH_CHECK_INTERVAL:30}
+  kafka-topic: ${ALARM_TOPIC:raw-alarms}
+  thresholds:
+    cpu-percent: ${CPU_THRESHOLD:80.0}
+    memory-free-percent: ${MEMORY_FREE_THRESHOLD:20.0}
+    storage-percent: ${STORAGE_THRESHOLD:85.0}
+    login-fail-window-minutes: ${LOGIN_FAIL_WINDOW:5}
+    login-fail-max: ${LOGIN_FAIL_MAX:5}
+  services: ${HEALTH_MONITOR_SERVICES:auth-service,alarm-service,inventory-service,kpi-aggregation-service,kpi-query-service,diagnostics-service,report-service,config-service,topology-service,notification-service,audit-service,netcool-forwarder,mycom-forwarder,syslog-forwarder}
+  infrastructure: ${HEALTH_MONITOR_INFRA:kafka,mongodb,redis}

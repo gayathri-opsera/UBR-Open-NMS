@@ -1,0 +1,93 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Discovery Service API
+  version: "1.0.0"
+  description: >
+    Device onboarding and discovery management for UBR NMS.
+    Handles mTLS check-in, SNMP/ICMP scan triggers, and discovery status.
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: discovery
+    description: Device discovery and scan management
+
+paths:
+  /discovery/scan:
+    post:
+      tags: [discovery]
+      summary: Trigger a network discovery scan (operator+)
+      operationId: triggerScan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScanRequest' }
+      responses:
+        "202": { description: Scan started, content: { application/json: { schema: { $ref: '#/components/schemas/ScanJob' } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /discovery/scan/{scanId}/status:
+    parameters:
+      - name: scanId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [discovery]
+      summary: Get scan job status
+      operationId: getScanStatus
+      responses:
+        "200": { description: Scan status, content: { application/json: { schema: { $ref: '#/components/schemas/ScanJob' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /discovery/check-in:
+    post:
+      tags: [discovery]
+      summary: Device self-registration at first boot (mTLS endpoint)
+      operationId: deviceCheckIn
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'components.yaml#/components/schemas/BirthCertificate' }
+      responses:
+        "201": { description: Device registered and birth certificate stored, content: { application/json: { schema: { $ref: '#/components/schemas/CheckInResponse' } } } }
+        "400": { description: Invalid payload or HMAC failure, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "409": { description: Device already registered, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    ScanRequest:
+      type: object
+      required: [subnetCidr]
+      properties:
+        subnetCidr:  { type: string, example: "10.10.1.0/24" }
+        protocol:    { type: string, enum: [SNMP, ICMP, both], default: both }
+        snmpCommunity: { type: string, default: public }
+        timeoutMs:   { type: integer, default: 5000 }
+
+    ScanJob:
+      type: object
+      properties:
+        scanId:       { type: string, format: uuid }
+        status:       { type: string, enum: [pending, running, completed, failed] }
+        subnetCidr:   { type: string }
+        devicesFound: { type: integer }
+        startedAt:    { type: string, format: date-time }
+        completedAt:  { type: string, format: date-time, nullable: true }
+
+    CheckInResponse:
+      type: object
+      properties:
+        deviceId:   { type: string, format: uuid }
+        registered: { type: boolean }
+        message:    { type: string }

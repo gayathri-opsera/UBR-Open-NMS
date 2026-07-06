@@ -1,0 +1,41 @@
+{
+  "name": "audit-service",
+  "version": "1.0.0",
+  "description": "UBR NMS Audit Service — immutable audit logging with MongoDB TTL and syslog forwarding",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest",
+    "test:unit": "jest --testPathPattern=tests/unit",
+    "test:integration": "jest --testPathPattern=tests/integration",
+    "lint": "eslint src tests"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^8.2.0",
+    "kafkajs": "^2.2.4",
+    "winston": "^3.12.0",
+    "uuid": "^9.0.0",
+    "syslog-client": "^1.1.1",
+    "json2csv": "^6.0.0-alpha.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4",
+    "mongodb-memory-server": "^9.1.6",
+    "nodemon": "^3.1.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coverageThreshold": {
+      "global": {
+        "branches": 70,
+        "functions": 80,
+        "lines": 80,
+        "statements": 80
+      }
+    }
+  }
+}

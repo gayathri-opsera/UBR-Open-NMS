@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: inventory-service
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_inventory}
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      group-id: inventory-service
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 10
+
+server:
+  port: ${PORT:8082}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+kafka:
+  topics:
+    device-discovered: ${KAFKA_TOPIC_DEVICE_DISCOVERED:device-discovered}
+    inventory-sync: ${KAFKA_TOPIC_INVENTORY_SYNC:inventory-sync}
+
+inventory:
+  export:
+    max-rows: ${INVENTORY_EXPORT_MAX_ROWS:10000}
+  search:
+    default-radius-km: ${INVENTORY_SEARCH_DEFAULT_RADIUS_KM:1.0}
+
+logging:
+  level:
+    com.ubrnms: ${LOG_LEVEL:INFO}

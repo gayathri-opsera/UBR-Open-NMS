@@ -1,0 +1,44 @@
+[
+  {
+    "serialNumber": "SN-BTS-NORTH-001",
+    "macAddress": "AA:BB:CC:DD:EE:01",
+    "model": "Senao ENH1750EXT",
+    "deviceType": "BTS",
+    "firmware": "v3.2.1",
+    "systemName": "BTS-NORTH-01",
+    "ipAddress": "10.10.1.10",
+    "publicKey": "-----BEGIN PUBLIC KEY-----\nMFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAMock==\n-----END PUBLIC KEY-----",
+    "hmacSignature": "sha256:abc123def456789",
+    "organizationId": "org-airtel-north",
+    "networkId": "net-north-001",
+    "registeredAt": "2024-01-10T08:00:00Z"
+  },
+  {
+    "serialNumber": "SN-CPE-CUST-001",
+    "macAddress": "BB:CC:DD:EE:FF:01",
+    "model": "Senao EAP300",
+    "deviceType": "CPE",
+    "firmware": "v2.1.0",
+    "systemName": "CPE-CUST-001",
+    "ipAddress": "10.10.2.100",
+    "publicKey": "-----BEGIN PUBLIC KEY-----\nMFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBANmock==\n-----END PUBLIC KEY-----",
+    "hmacSignature": "sha256:xyz789abc123456",
+    "organizationId": "org-airtel-north",
+    "networkId": "net-north-001",
+    "registeredAt": "2024-01-12T09:00:00Z"
+  },
+  {
+    "serialNumber": "SN-IDU-LINK-001",
+    "macAddress": "CC:DD:EE:FF:00:01",
+    "model": "Senao IDU-2600",
+    "deviceType": "IDU",
+    "firmware": "v1.8.3",
+    "systemName": "IDU-SOUTH-05",
+    "ipAddress": "10.10.3.50",
+    "publicKey": "-----BEGIN PUBLIC KEY-----\nMFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAOmock==\n-----END PUBLIC KEY-----",
+    "hmacSignature": "sha256:def456ghi789012",
+    "organizationId": "org-airtel-south",
+    "networkId": "net-south-005",
+    "registeredAt": "2024-01-05T07:30:00Z"
+  }
+]

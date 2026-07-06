@@ -1,0 +1,50 @@
+[
+  {
+    "alarmId": "a1b2c3d4-0001-4aaa-8001-000000000001",
+    "deviceId": "d1a2b3c4-0001-4abc-8001-aabbccddeeff",
+    "deviceType": "BTS",
+    "alarmName": "LINK_DOWN",
+    "alarmDescription": "Ethernet backhaul link failure detected on primary interface",
+    "severity": "CRITICAL",
+    "state": "RAISED",
+    "correlationGroup": "LINK-GROUP-NORTH-01",
+    "rootCause": "Physical layer fault on eth0",
+    "acknowledged": false,
+    "acknowledgedBy": null,
+    "raisedAt": "2024-01-15T14:30:00Z",
+    "clearedAt": null,
+    "ttlExpiry": "2024-01-22T14:30:00Z"
+  },
+  {
+    "alarmId": "a1b2c3d4-0002-4aaa-8002-000000000002",
+    "deviceId": "d1a2b3c4-0002-4abc-8002-aabbccddeeff",
+    "deviceType": "CPE",
+    "alarmName": "HIGH_CPU_UTILIZATION",
+    "alarmDescription": "CPU utilization exceeded 90% for 5 minutes",
+    "severity": "MAJOR",
+    "state": "ACKNOWLEDGED",
+    "correlationGroup": "PERF-GROUP-NORTH-01",
+    "rootCause": "Traffic storm on LAN interface",
+    "acknowledged": true,
+    "acknowledgedBy": "operator1",
+    "raisedAt": "2024-01-15T12:00:00Z",
+    "clearedAt": null,
+    "ttlExpiry": "2024-01-22T12:00:00Z"
+  },
+  {
+    "alarmId": "a1b2c3d4-0003-4aaa-8003-000000000003",
+    "deviceId": "d1a2b3c4-0003-4abc-8003-aabbccddeeff",
+    "deviceType": "IDU",
+    "alarmName": "DEVICE_UNREACHABLE",
+    "alarmDescription": "ICMP ping timeout — device has not responded for 5 minutes",
+    "severity": "CRITICAL",
+    "state": "CLEARED",
+    "correlationGroup": "REACHABILITY-SOUTH-05",
+    "rootCause": "Power outage at site SITE-SOUTH-05",
+    "acknowledged": true,
+    "acknowledgedBy": "admin",
+    "raisedAt": "2024-01-15T08:00:00Z",
+    "clearedAt": "2024-01-15T09:30:00Z",
+    "ttlExpiry": "2024-01-22T08:00:00Z"
+  }
+]

@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/config-template.schema.json",
+  "title": "ConfigTemplate",
+  "type": "object",
+  "required": ["templateId", "templateName", "deviceType"],
+  "properties": {
+    "templateId":       { "type": "string", "format": "uuid" },
+    "templateName":     { "type": "string" },
+    "deviceType":       { "type": "string", "enum": ["BTS", "CPE", "IDU"] },
+    "parameters":       { "type": "object" },
+    "validationSchema": { "type": "object" },
+    "version":          { "type": "integer", "minimum": 1 },
+    "createdBy":        { "type": "string" },
+    "isDefault":        { "type": "boolean", "default": false },
+    "createdAt":        { "type": "string", "format": "date-time" },
+    "updatedAt":        { "type": "string", "format": "date-time" }
+  }
+}

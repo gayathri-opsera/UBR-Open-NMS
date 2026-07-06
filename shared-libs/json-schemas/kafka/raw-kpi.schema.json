@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/kafka/raw-kpi.schema.json",
+  "title": "RawKPIMessage",
+  "description": "Kafka message on raw-kpi topic — polled by KPI Collector (Go) via SNMP every 5 minutes.",
+  "type": "object",
+  "required": ["deviceId", "kpiName", "value", "timestamp"],
+  "properties": {
+    "deviceId":     { "type": "string" },
+    "serialNumber": { "type": "string" },
+    "deviceType":   { "type": "string", "enum": ["BTS", "CPE", "IDU"] },
+    "kpiName":      { "type": "string" },
+    "value":        { "type": "number" },
+    "unit":         { "type": "string" },
+    "timestamp":    { "type": "string", "format": "date-time" }
+  }
+}

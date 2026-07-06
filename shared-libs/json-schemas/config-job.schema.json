@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/config-job.schema.json",
+  "title": "ConfigJob",
+  "type": "object",
+  "required": ["jobId", "templateId", "deviceIds", "status", "createdBy"],
+  "properties": {
+    "jobId":        { "type": "string", "format": "uuid" },
+    "templateId":   { "type": "string", "format": "uuid" },
+    "deviceIds":    { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "parameters":   { "type": "object" },
+    "status":       { "type": "string", "enum": ["pending", "queued", "running", "completed", "failed", "rolled_back"] },
+    "protocol":     { "type": "string", "enum": ["NETCONF", "CLI", "TR-069"], "default": "NETCONF" },
+    "approvedBy":   { "type": ["string", "null"] },
+    "createdBy":    { "type": "string" },
+    "scheduledAt":  { "type": ["string", "null"], "format": "date-time" },
+    "startedAt":    { "type": ["string", "null"], "format": "date-time" },
+    "completedAt":  { "type": ["string", "null"], "format": "date-time" },
+    "ttlExpiry":    { "type": "string", "format": "date-time", "description": "72-hour TTL for offline command queuing" },
+    "createdAt":    { "type": "string", "format": "date-time" }
+  }
+}

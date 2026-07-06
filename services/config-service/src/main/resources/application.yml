@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: config-service
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_config}
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+
+server:
+  port: ${PORT:8084}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+kafka:
+  topics:
+    config-push: ${KAFKA_TOPIC_CONFIG_PUSH:config-push}
+
+config:
+  pending-command:
+    ttl-hours: ${PENDING_COMMAND_TTL_HOURS:72}
+  bulk:
+    max-devices: ${BULK_MAX_DEVICES:10000}

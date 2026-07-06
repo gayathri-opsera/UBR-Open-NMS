@@ -1,0 +1,600 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UBR Open NMS — Local Development Stack
+# Usage: docker compose -f docker-compose.dev.yml up --build
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-java-env: &java-env
+  KAFKA_BROKERS: kafka:9092
+  MONGO_URI: mongodb://mongo:27017/ubrnms
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  LOG_LEVEL: info
+
+x-node-env: &node-env
+  NODE_ENV: development
+  KAFKA_BROKERS: kafka:9092
+  MONGO_URI: mongodb://mongo:27017/ubrnms
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  LOG_LEVEL: info
+
+x-healthcheck-http: &healthcheck-http
+  interval: 15s
+  timeout: 5s
+  retries: 10
+  start_period: 30s
+
+networks:
+  nms-net:
+    driver: bridge
+
+volumes:
+  mongo-data:
+  redis-data:
+  zookeeper-data:
+  kafka-data:
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INFRASTRUCTURE
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+
+  mongo:
+    image: mongo:7.0
+    container_name: nms-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      <<: *healthcheck-http
+
+  redis:
+    image: redis:7-alpine
+    container_name: nms-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6380:6379"   # host 6380 → container 6379 (avoids conflict with other local Redis)
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      <<: *healthcheck-http
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: nms-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181"]
+      <<: *healthcheck-http
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: nms-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+      # 7-day retention ensures store-and-forward during extended Netcool/downstream outages
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: -1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "9093:9093"      # host access via localhost:9093
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 40s
+
+  # Kafka topic initialiser — runs once then exits
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: nms-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [nms-net]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for topic in raw-alarms processed-alarms kpi-events inventory-events \
+                     operational-events audit-events netcool-alarms-forward \
+                     mycom-kpi-export mobinet-inventory-sync syslog-events \
+                     raw-alarms-dlq kpi-events-dlq netcool-alarms-dlq syslog-dlq; do
+          kafka-topics --bootstrap-server kafka:9092 \
+            --create --if-not-exists \
+            --topic $$topic --partitions 3 --replication-factor 1
+          echo "Topic ready: $$topic"
+        done
+    restart: "no"
+
+  # ── SERVICES ───────────────────────────────────────────────────────────────
+
+  auth-service:
+    build:
+      context: services/auth-service
+      dockerfile: Dockerfile
+    container_name: nms-auth
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *node-env
+      AUTH_PORT: "3001"
+      CORS_ORIGIN: "http://localhost:5173"
+      MAX_CONCURRENT_SESSIONS: "20"
+      JWT_PRIVATE_KEY: "${JWT_PRIVATE_KEY}"
+      JWT_PUBLIC_KEY: "${JWT_PUBLIC_KEY}"
+      # LDAP disabled in dev — auth will fall back to local accounts
+      LDAP_URL: "ldap://localhost:389"
+      LDAP_TLS_REJECT_UNAUTHORIZED: "false"
+    ports:
+      - "3001:3001"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/healthz"]
+      <<: *healthcheck-http
+
+  alarm-service:
+    build:
+      context: services/alarm-service
+      dockerfile: Dockerfile
+    container_name: nms-alarm
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: *java-env
+      PORT: "8083"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_alarms
+    ports:
+      - "8083:8083"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/actuator/health"]
+      <<: *healthcheck-http
+
+  inventory-service:
+    build:
+      context: services/inventory-service
+      dockerfile: Dockerfile
+    container_name: nms-inventory
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: *java-env
+      PORT: "8082"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_inventory
+    ports:
+      - "8187:8082"   # host 8187 → container 8082 (avoids conflict with openrails-monitor)
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/actuator/health"]
+      <<: *healthcheck-http
+
+  discovery-service:
+    build:
+      context: services/discovery-service
+      dockerfile: Dockerfile
+    container_name: nms-discovery
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      PORT: "8081"
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_ENABLED: "true"
+      HMAC_SECRET: dev-hmac-secret-change-in-prod
+      LOG_LEVEL: info
+    ports:
+      - "8081:8081"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/healthz"]
+      <<: *healthcheck-http
+
+  event-collector:
+    build:
+      context: services/event-collector
+      dockerfile: Dockerfile
+    container_name: nms-event-collector
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_ENABLED: "true"
+      HTTP_PORT: "9090"
+      LOG_LEVEL: info
+    ports:
+      - "9095:9090"   # HTTP/metrics on 9095 (avoids conflict with prometheus:9090)
+      - "1620:1620/udp"  # SNMP trap listener
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/healthz"]
+      <<: *healthcheck-http
+
+  config-service:
+    build:
+      context: services/config-service
+      dockerfile: Dockerfile
+    container_name: nms-config
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      <<: *java-env
+      PORT: "8084"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_config
+    ports:
+      - "8084:8084"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/actuator/health"]
+      <<: *healthcheck-http
+
+  topology-service:
+    build:
+      context: services/topology-service
+      dockerfile: Dockerfile
+    container_name: nms-topology
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      <<: *java-env
+      PORT: "8086"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_topology
+    ports:
+      - "8086:8086"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8086/actuator/health"]
+      <<: *healthcheck-http
+
+  kpi-aggregation-service:
+    build:
+      context: services/kpi-aggregation-service
+      dockerfile: Dockerfile
+    container_name: nms-kpi-agg
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment:
+      <<: *java-env
+      PORT: "8088"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_kpi
+    ports:
+      - "8088:8088"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8088/actuator/health"]
+      <<: *healthcheck-http
+
+  kpi-query-service:
+    build:
+      context: services/kpi-query-service
+      dockerfile: Dockerfile
+    container_name: nms-kpi-query
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *java-env
+      PORT: "8089"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_kpi
+    ports:
+      - "8089:8089"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8089/actuator/health"]
+      <<: *healthcheck-http
+
+  diagnostics-service:
+    build:
+      context: services/diagnostics-service
+      dockerfile: Dockerfile
+    container_name: nms-diagnostics
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      <<: *java-env
+      PORT: "8090"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_diagnostics
+    ports:
+      - "8090:8090"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/actuator/health"]
+      <<: *healthcheck-http
+
+  health-monitor:
+    build:
+      context: services/health-monitor
+      dockerfile: Dockerfile
+    container_name: nms-health-monitor
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: *java-env
+      PORT: "8092"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_health
+      PROMETHEUS_URL: "http://prometheus:9090"
+      SPRING_APPLICATION_JSON: ""
+    ports:
+      - "8092:8092"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8092/actuator/health"]
+      <<: *healthcheck-http
+
+  report-service:
+    build:
+      context: services/report-service
+      dockerfile: Dockerfile
+    container_name: nms-report
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      PORT: "8091"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_reports
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      LOG_LEVEL: info
+    ports:
+      - "8091:8091"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/healthz')"]
+      <<: *healthcheck-http
+
+  notification-service:
+    build:
+      context: services/notification-service
+      dockerfile: Dockerfile
+    container_name: nms-notification
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *node-env
+      PORT: "3003"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_notifications
+      KAFKA_ENABLED: "true"
+    ports:
+      - "3003:3003"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3003/healthz"]
+      <<: *healthcheck-http
+
+  audit-service:
+    build:
+      context: services/audit-service
+      dockerfile: Dockerfile
+    container_name: nms-audit
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: *node-env
+      PORT: "3007"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_audit
+      KAFKA_ENABLED: "true"
+    ports:
+      - "3007:3007"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3007/healthz"]
+      <<: *healthcheck-http
+
+  api-gateway:
+    build:
+      context: services/api-gateway
+      dockerfile: Dockerfile
+    container_name: nms-gateway
+    restart: unless-stopped
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      alarm-service:
+        condition: service_healthy
+    environment:
+      <<: *node-env
+      PORT: "3000"
+      JWT_PUBLIC_KEY: "${JWT_PUBLIC_KEY}"
+      JWT_ISSUER: ubr-nms
+      JWT_AUDIENCE: ubr-nms-api
+      CORS_ORIGIN: "http://localhost:5173"
+      AUTH_SERVICE_URL: "http://auth-service:3001"
+      INVENTORY_SERVICE_URL: "http://inventory-service:8082"
+      ALARM_SERVICE_URL: "http://alarm-service:8083"
+      CONFIG_SERVICE_URL: "http://config-service:8084"
+      DISCOVERY_SERVICE_URL: "http://discovery-service:8081"
+      TOPOLOGY_SERVICE_URL: "http://topology-service:8086"
+      AUDIT_SERVICE_URL: "http://audit-service:3007"
+      NOTIFICATION_SERVICE_URL: "http://notification-service:3003"
+      KPI_SERVICE_URL: "http://kpi-query-service:8089"
+      REPORT_SERVICE_URL: "http://report-service:8091"
+      DIAGNOSTICS_SERVICE_URL: "http://diagnostics-service:8090"
+      EVENT_COLLECTOR_URL: "http://event-collector:9090"
+    ports:
+      - "3100:3000"   # host 3100 → container 3000 (avoids conflict with aitutor-frontend)
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      <<: *healthcheck-http
+
+  # ── Forwarders (Go) ────────────────────────────────────────────────────────
+
+  netcool-forwarder:
+    build:
+      context: services/netcool-forwarder
+      dockerfile: Dockerfile
+    container_name: nms-netcool-fwd
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_SOURCE_TOPIC: netcool-alarms-forward
+      KAFKA_DLQ_TOPIC: netcool-alarms-dlq
+      CONSUMER_GROUP_ID: netcool-forwarder
+      NETCOOL_KAFKA_BROKERS: kafka:9092
+      NETCOOL_TOPIC: netcool-inbound
+      METRICS_PORT: "9102"
+    ports:
+      - "9102:9102"
+    networks: [nms-net]
+
+  mycom-forwarder:
+    build:
+      context: services/mycom-forwarder
+      dockerfile: Dockerfile
+    container_name: nms-mycom-fwd
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_SOURCE_TOPIC: mycom-kpi-export
+      KAFKA_DLQ_TOPIC: kpi-events-dlq
+      METRICS_PORT: "9103"
+    ports:
+      - "9103:9103"
+    networks: [nms-net]
+
+  syslog-forwarder:
+    build:
+      context: services/syslog-forwarder
+      dockerfile: Dockerfile
+    container_name: nms-syslog-fwd
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_SOURCE_TOPIC: operational-events
+      SYSLOG_HOST: "127.0.0.1"
+      SYSLOG_PORT: "514"
+      SYSLOG_PROTOCOL: UDP
+      METRICS_PORT: "9104"
+    ports:
+      - "9104:9104"
+    networks: [nms-net]
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: "http://localhost:3000"
+    container_name: nms-frontend
+    restart: unless-stopped
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    networks: [nms-net]
+
+  # ── Monitoring ─────────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.51.1
+    container_name: nms-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts:/etc/prometheus/rules:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    networks: [nms-net]
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: nms-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3030:3000"
+    depends_on:
+      - prometheus
+    networks: [nms-net]

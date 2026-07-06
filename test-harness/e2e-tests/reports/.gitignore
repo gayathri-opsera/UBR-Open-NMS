@@ -1,0 +1,4 @@
+# E2E test reports directory
+# Generated reports are gitignored (dynamic output)
+*.xml
+*.html

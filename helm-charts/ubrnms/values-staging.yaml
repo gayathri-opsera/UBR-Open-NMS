@@ -1,0 +1,54 @@
+# Staging environment values
+# Services use HPA with reduced min/max replicas vs production
+global:
+  environment: staging
+  imageTag: "staging"
+  imagePullPolicy: Always
+
+auth-service:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+  ingress:
+    enabled: true
+    hosts:
+      - host: auth.staging.ubrnms.example.com
+        paths: [{path: /api/v1/auth, pathType: Prefix}]
+    tls:
+      - secretName: ubrnms-staging-tls
+        hosts: ["*.staging.ubrnms.example.com"]
+
+alarm-service:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+
+event-collector:
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+
+kpi-collector:
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 15
+
+api-gateway:
+  replicaCount: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+  ingress:
+    enabled: true
+    hosts:
+      - host: api.staging.ubrnms.example.com
+        paths: [{path: /, pathType: Prefix}]
+    tls:
+      - secretName: ubrnms-staging-tls
+        hosts: ["api.staging.ubrnms.example.com"]

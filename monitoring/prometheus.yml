@@ -1,0 +1,112 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: ubrnms
+    env: production
+
+rule_files:
+  - /etc/prometheus/rules/*.yaml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # ── Platform Services ──────────────────────────────────────────────────────
+  - job_name: auth-service
+    static_configs:
+      - targets: ["auth-service:3000"]
+    metrics_path: /metrics
+
+  - job_name: alarm-service
+    static_configs:
+      - targets: ["alarm-service:8080"]
+    metrics_path: /actuator/prometheus
+
+  - job_name: inventory-service
+    static_configs:
+      - targets: ["inventory-service:8080"]
+    metrics_path: /actuator/prometheus
+
+  - job_name: kpi-aggregation-service
+    static_configs:
+      - targets: ["kpi-aggregation-service:8080"]
+    metrics_path: /actuator/prometheus
+
+  - job_name: kpi-query-service
+    static_configs:
+      - targets: ["kpi-query-service:8089"]
+    metrics_path: /actuator/prometheus
+
+  - job_name: diagnostics-service
+    static_configs:
+      - targets: ["diagnostics-service:8090"]
+    metrics_path: /actuator/prometheus
+
+  - job_name: report-service
+    static_configs:
+      - targets: ["report-service:8091"]
+    metrics_path: /metrics
+
+  - job_name: config-management-service
+    static_configs:
+      - targets: ["config-management-service:8080"]
+    metrics_path: /actuator/prometheus
+
+  - job_name: topology-service
+    static_configs:
+      - targets: ["topology-service:8080"]
+    metrics_path: /actuator/prometheus
+
+  - job_name: notification-service
+    static_configs:
+      - targets: ["notification-service:3030"]
+    metrics_path: /metrics
+
+  - job_name: audit-service
+    static_configs:
+      - targets: ["audit-service:3040"]
+    metrics_path: /metrics
+
+  - job_name: event-collector
+    static_configs:
+      - targets: ["event-collector:8080"]
+    metrics_path: /actuator/prometheus
+
+  - job_name: kpi-collector
+    static_configs:
+      - targets: ["kpi-collector:8080"]
+    metrics_path: /actuator/prometheus
+
+  - job_name: discovery-service
+    static_configs:
+      - targets: ["discovery-service:8080"]
+    metrics_path: /metrics
+
+  - job_name: api-gateway
+    static_configs:
+      - targets: ["api-gateway:3010"]
+    metrics_path: /metrics
+
+  - job_name: health-monitor
+    static_configs:
+      - targets: ["health-monitor:8092"]
+    metrics_path: /actuator/prometheus
+
+  # ── Go Forwarders ──────────────────────────────────────────────────────────
+  - job_name: netcool-forwarder
+    static_configs:
+      - targets: ["netcool-forwarder:9102"]
+    metrics_path: /metrics
+
+  - job_name: mycom-forwarder
+    static_configs:
+      - targets: ["mycom-forwarder:9103"]
+    metrics_path: /metrics
+
+  - job_name: syslog-forwarder
+    static_configs:
+      - targets: ["syslog-forwarder:9104"]
+    metrics_path: /metrics

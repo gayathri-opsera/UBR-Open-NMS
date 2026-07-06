@@ -1,0 +1,48 @@
+# ──────────────────────────────────────────────────────────────────
+# Scenario: Device Onboarding
+# Flow: check-in → inventory registration → Mobinet sync
+# ──────────────────────────────────────────────────────────────────
+name: device-onboarding
+description: "End-to-end device onboarding: check-in → inventory → Mobinet"
+timeout_seconds: 120
+
+setup:
+  - action: reset_stub
+    stub: mobinet
+  - action: reset_stub
+    stub: netcool
+
+steps:
+  - name: device-checkin
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/devices/checkin"
+    body:
+      deviceId: "CPE-TEST-001"
+      serialNumber: "SN-ONBOARD-001"
+      deviceType: "CPE"
+      model: "ENH200EXT"
+      ipAddress: "10.2.0.1"
+      macAddress: "AA:BB:CC:DD:EE:01"
+    expect_status: 200
+
+  - name: verify-inventory-registered
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/CPE-TEST-001"
+    expect_status: 200
+    retry:
+      times: 5
+      delay_seconds: 2
+
+  - name: verify-mobinet-sync
+    action: assert_stub_received
+    stub: mobinet
+    min_count: 1
+    retry:
+      times: 10
+      delay_seconds: 1
+    assert_field: "messages[0].message.serialNumber"
+    assert_value: "SN-ONBOARD-001"
+
+cleanup:
+  - action: reset_stub
+    stub: mobinet

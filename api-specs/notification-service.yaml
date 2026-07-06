@@ -1,0 +1,131 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Notification Service API
+  version: "1.0.0"
+  description: >
+    Server-Sent Events (SSE) for real-time alarm notifications to the React SPA.
+    Also supports notification rule CRUD.
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: notifications
+    description: Real-time notifications and subscription management
+
+paths:
+  /notifications/stream:
+    get:
+      tags: [notifications]
+      summary: Subscribe to real-time notifications via SSE
+      operationId: subscribeNotifications
+      description: >
+        Opens a Server-Sent Event stream. Events are emitted for new alarms,
+        alarm state changes, and system health alerts. Clients should reconnect
+        with Last-Event-ID on disconnect.
+      parameters:
+        - name: severityFilter
+          in: query
+          description: Only stream alarms at or above this severity
+          schema: { $ref: 'components.yaml#/components/schemas/AlarmSeverity' }
+        - name: deviceType
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/DeviceType' }
+      responses:
+        "200":
+          description: SSE stream (text/event-stream)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "SSE events: data: <JSON AlarmRecord>"
+        "401": { description: Unauthorized, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /notifications/rules:
+    get:
+      tags: [notifications]
+      summary: List notification rules
+      operationId: listNotificationRules
+      parameters:
+        - $ref: 'components.yaml#/components/parameters/QueryOffset'
+        - $ref: 'components.yaml#/components/parameters/QueryLimit'
+      responses:
+        "200":
+          description: Notification rules
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/NotificationRule' }
+
+    post:
+      tags: [notifications]
+      summary: Create notification rule (operator+)
+      operationId: createNotificationRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationRule' }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationRule' } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /notifications/rules/{id}:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    put:
+      tags: [notifications]
+      summary: Update notification rule
+      operationId: updateNotificationRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationRule' }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationRule' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+    delete:
+      tags: [notifications]
+      summary: Delete notification rule
+      operationId: deleteNotificationRule
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    ErrorResponse: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+    PaginatedResponse: { $ref: 'components.yaml#/components/schemas/PaginatedResponse' }
+
+    NotificationRule:
+      type: object
+      required: [ruleName, severity, channels]
+      properties:
+        ruleId:      { type: string, format: uuid, readOnly: true }
+        ruleName:    { type: string }
+        severity:    { $ref: 'components.yaml#/components/schemas/AlarmSeverity' }
+        deviceType:  { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        region:      { type: string }
+        channels:
+          type: array
+          items:
+            type: object
+            required: [type]
+            properties:
+              type:       { type: string, enum: [email, sms, webhook, syslog] }
+              target:     { type: string }
+        isActive:    { type: boolean, default: true }
+        createdBy:   { type: string, readOnly: true }
+        createdAt:   { type: string, format: date-time, readOnly: true }

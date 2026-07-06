@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: topology-service
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_topology}
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      group-id: topology-service
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+server:
+  port: ${PORT:8086}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+kafka:
+  topics:
+    device-inventory-changes: ${KAFKA_TOPIC_INVENTORY_CHANGES:inventory-sync}
+
+topology:
+  max-cascade-hops: 3
+  search:
+    default-radius-km: 1.0

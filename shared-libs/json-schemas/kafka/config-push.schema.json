@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/kafka/config-push.schema.json",
+  "title": "ConfigPushMessage",
+  "description": "Kafka message on config-push topic — dispatched by Config Service to Config Push Worker.",
+  "type": "object",
+  "required": ["jobId", "deviceId", "templateId", "protocol", "parameters"],
+  "properties": {
+    "jobId":       { "type": "string", "format": "uuid" },
+    "deviceId":    { "type": "string" },
+    "deviceType":  { "type": "string", "enum": ["BTS", "CPE", "IDU"] },
+    "templateId":  { "type": "string", "format": "uuid" },
+    "protocol":    { "type": "string", "enum": ["NETCONF", "CLI", "TR-069"] },
+    "parameters":  { "type": "object" },
+    "approvedBy":  { "type": "string" },
+    "ttlExpiry":   { "type": "string", "format": "date-time" },
+    "enqueuedAt":  { "type": "string", "format": "date-time" }
+  }
+}

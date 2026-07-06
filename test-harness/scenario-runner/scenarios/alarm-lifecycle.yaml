@@ -1,0 +1,68 @@
+name: alarm-lifecycle
+description: "Alarm lifecycle: SNMP trap → correlation → Netcool forward → clear"
+timeout_seconds: 180
+
+setup:
+  - action: reset_stub
+    stub: netcool
+
+steps:
+  - name: send-snmp-trap
+    action: http_post
+    url: "${EVENT_COLLECTOR_URL}/api/v1/events/trap"
+    body:
+      version: "2c"
+      community: "public"
+      agentAddr: "10.1.0.1"
+      enterprise: "1.3.6.1.4.1.28776.1"
+      genericTrap: 2
+      specificTrap: 0
+      deviceId: "BTS-ALARM-001"
+      varBinds:
+        - oid: "1.3.6.1.2.1.1.3.0"
+          type: "TimeTicks"
+          value: 12345
+    expect_status: 202
+
+  - name: verify-alarm-in-nms
+    action: http_get
+    url: "${ALARM_URL}/api/v1/alarms?deviceId=BTS-ALARM-001&state=ACTIVE"
+    expect_status: 200
+    expect_body_contains: "BTS-ALARM-001"
+    retry:
+      times: 15
+      delay_seconds: 1
+
+  - name: verify-netcool-forwarded
+    action: assert_stub_received
+    stub: netcool
+    min_count: 1
+    retry:
+      times: 15
+      delay_seconds: 1
+
+  - name: send-clear-trap
+    action: http_post
+    url: "${EVENT_COLLECTOR_URL}/api/v1/events/trap"
+    body:
+      version: "2c"
+      community: "public"
+      agentAddr: "10.1.0.1"
+      enterprise: "1.3.6.1.4.1.28776.1"
+      genericTrap: 3
+      specificTrap: 0
+      deviceId: "BTS-ALARM-001"
+      varBinds: []
+    expect_status: 202
+
+  - name: verify-alarm-cleared
+    action: http_get
+    url: "${ALARM_URL}/api/v1/alarms?deviceId=BTS-ALARM-001&state=CLEAR"
+    expect_status: 200
+    retry:
+      times: 10
+      delay_seconds: 1
+
+cleanup:
+  - action: reset_stub
+    stub: netcool

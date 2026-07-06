@@ -1,0 +1,58 @@
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  background: #0a1628;
+  color: #e2e8f0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Remove Vite template centering */
+#root {
+  max-width: 100%;
+  text-align: left;
+  border: none;
+  display: block;
+}
+
+/* Focus ring — keyboard navigation */
+:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* Remove default button/input chrome */
+button { font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0a1628; }
+::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2563eb; }
+
+/* Skeleton shimmer animation */
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Table row hover */
+.nms-table tbody tr:hover {
+  background: #112240 !important;
+}
+
+/* Sortable column header */
+.nms-th-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.nms-th-sortable:hover {
+  color: #93c5fd !important;
+}

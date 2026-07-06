@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: kpi-query-service
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_kpi}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+
+server:
+  port: ${PORT:8089}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+kafka:
+  topics:
+    raw-alarms: ${KAFKA_TOPIC_RAW_ALARMS:raw-alarms}
+
+kpi:
+  cache:
+    ttl-seconds: ${KPI_CACHE_TTL_SECONDS:60}
+  export:
+    max-rows: ${KPI_EXPORT_MAX_ROWS:50000}
+  hot-data-days: ${KPI_HOT_DATA_DAYS:7}

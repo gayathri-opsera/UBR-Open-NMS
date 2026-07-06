@@ -1,0 +1,99 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Audit Service API
+  version: "1.0.0"
+  description: >
+    Immutable audit log queries for UBR NMS. 1-year retention.
+    All state-changing operations across all services emit audit entries.
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: audit
+
+paths:
+  /audit:
+    get:
+      tags: [audit]
+      summary: Query audit log (admin only)
+      operationId: queryAuditLog
+      parameters:
+        - $ref: 'components.yaml#/components/parameters/QueryOffset'
+        - $ref: 'components.yaml#/components/parameters/QueryLimit'
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: resourceType
+          in: query
+          schema: { type: string }
+        - name: outcome
+          in: query
+          schema: { type: string, enum: [success, failure, denied] }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Paginated audit log
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: 'components.yaml#/components/schemas/AuditEntry' }
+        "401": { description: Unauthorized, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "403": { description: Forbidden (admin only), content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /audit/{id}:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    get:
+      tags: [audit]
+      summary: Get audit entry by ID
+      operationId: getAuditEntry
+      responses:
+        "200": { description: Audit entry, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/AuditEntry' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /audit/export:
+    get:
+      tags: [audit]
+      summary: Export audit log (admin only)
+      operationId: exportAuditLog
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [csv, xlsx], default: csv }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Audit export file
+          content:
+            text/csv: { schema: { type: string, format: binary } }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    AuditEntry:   { $ref: 'components.yaml#/components/schemas/AuditEntry' }
+    ErrorResponse: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+    PaginatedResponse: { $ref: 'components.yaml#/components/schemas/PaginatedResponse' }

@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: diagnostics-service
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_diagnostics}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+
+server:
+  port: ${PORT:8090}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+kafka:
+  topics:
+    diag-commands: ${KAFKA_TOPIC_DIAG:diag-commands}
+    diag-results: ${KAFKA_TOPIC_DIAG_RESULTS:diag-results}
+    audit-events: ${KAFKA_TOPIC_AUDIT:audit-events}
+
+diagnostics:
+  timeout-seconds: ${DIAG_TIMEOUT_SECONDS:60}
+  reboot-timeout-seconds: ${DIAG_REBOOT_TIMEOUT_SECONDS:5}
+  cache-ttl-seconds: ${DIAG_CACHE_TTL_SECONDS:300}

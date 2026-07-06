@@ -1,0 +1,249 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Auth Service API
+  version: "1.0.0"
+  description: >
+    Authentication, token management, and user CRUD for UBR NMS.
+    Integrates with Airtel NIAM (LDAP/LDAPS), issues RS256 JWT access tokens
+    (15-min TTL) and opaque refresh tokens (24-hr in Redis).
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: auth
+    description: Login, token refresh, logout
+  - name: users
+    description: User CRUD (admin only)
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Authenticate user against LDAP/MongoDB
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, example: jdoe }
+                password: { type: string, format: password, example: "P@ssw0rd!2024" }
+      responses:
+        "200":
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:  { type: string }
+                  refreshToken: { type: string }
+                  expiresIn:    { type: integer, example: 900 }
+                  role:         { $ref: 'components.yaml#/components/schemas/UserRole' }
+        "400":
+          description: Validation error
+          content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+              example:
+                code: INVALID_CREDENTIALS
+                message: Username or password is incorrect
+        "403":
+          description: Account locked
+          content:
+            application/json:
+              schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+              example:
+                code: ACCOUNT_LOCKED
+                message: Account locked due to 5 failed attempts
+        "503":
+          description: LDAP/Auth service unavailable
+          content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Exchange refresh token for new access token
+      security: []
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "200":
+          description: New access token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:  { type: string }
+                  refreshToken: { type: string }
+                  expiresIn:    { type: integer }
+        "401":
+          description: Invalid or expired refresh token
+          content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Invalidate the current session (revokes refresh token)
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "204":
+          description: Session invalidated
+        "401":
+          description: Unauthorized
+          content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
+
+  /users:
+    get:
+      tags: [users]
+      summary: List all users (admin only)
+      operationId: listUsers
+      parameters:
+        - $ref: 'components.yaml#/components/parameters/QueryOffset'
+        - $ref: 'components.yaml#/components/parameters/QueryLimit'
+      responses:
+        "200":
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/UserProfile' }
+        "401": { description: Unauthorized, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "403": { description: Forbidden, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+    post:
+      tags: [users]
+      summary: Create a new user (admin only)
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserRequest' }
+      responses:
+        "201":
+          description: User created
+          content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "409": { description: Username already exists, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /users/{id}:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    get:
+      tags: [users]
+      summary: Get user by ID
+      operationId: getUser
+      responses:
+        "200": { description: User found, content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+    put:
+      tags: [users]
+      summary: Update user role or status (admin only)
+      operationId: updateUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateUserRequest' }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+    delete:
+      tags: [users]
+      summary: Delete user (admin only)
+      operationId: deleteUser
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /users/{id}/change-password:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    post:
+      tags: [users]
+      summary: Change user password (admin resets; user changes own)
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword:     { type: string, format: password }
+      responses:
+        "204": { description: Password changed }
+        "400": { description: Password complexity violation, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    UserProfile:
+      type: object
+      properties:
+        userId:    { type: string, format: uuid }
+        username:  { type: string }
+        email:     { type: string, format: email }
+        role:      { $ref: 'components.yaml#/components/schemas/UserRole' }
+        isActive:  { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    CreateUserRequest:
+      type: object
+      required: [username, password, role]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64 }
+        password: { type: string, format: password, minLength: 12 }
+        email:    { type: string, format: email }
+        role:     { $ref: 'components.yaml#/components/schemas/UserRole' }
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        role:     { $ref: 'components.yaml#/components/schemas/UserRole' }
+        isActive: { type: boolean }

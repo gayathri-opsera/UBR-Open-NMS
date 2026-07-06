@@ -1,0 +1,5 @@
+apiVersion: v2
+name: ubrnms-common
+description: Shared Helm library chart for all UBR NMS microservices
+type: library
+version: 1.0.0

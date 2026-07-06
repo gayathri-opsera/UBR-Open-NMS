@@ -1,0 +1,98 @@
+replicaCount: 2
+
+image:
+  repository: ubrnms/auth-service
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+containerPort: 3000
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+probes:
+  liveness:
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 5
+
+namespace: ubr-platform
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: auth.ubrnms.local
+      paths:
+        - path: /api/v1/auth
+          pathType: Prefix
+  tls: []
+
+env:
+  - name: NODE_ENV
+    value: "production"
+  - name: PORT
+    value: "3000"
+  - name: MONGODB_URI
+    valueFrom:
+      secretKeyRef:
+        name: auth-service-secrets
+        key: MONGODB_URI
+  - name: REDIS_HOST
+    valueFrom:
+      secretKeyRef:
+        name: auth-service-secrets
+        key: REDIS_HOST
+  - name: JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: auth-service-secrets
+        key: JWT_SECRET
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ubr-ingress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ubr-data

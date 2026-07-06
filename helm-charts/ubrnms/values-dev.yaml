@@ -1,0 +1,63 @@
+# Development environment values
+# All services use minimal resource requests, single replicas, HPA disabled
+global:
+  environment: dev
+  imageTag: "latest"
+  imagePullPolicy: Always
+
+auth-service:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  resources:
+    requests: {cpu: "50m", memory: "128Mi"}
+    limits: {cpu: "500m", memory: "512Mi"}
+  ingress:
+    enabled: true
+    hosts:
+      - host: auth.dev.ubrnms.local
+        paths: [{path: /api/v1/auth, pathType: Prefix}]
+  env:
+    - name: NODE_ENV
+      value: "development"
+    - name: PORT
+      value: "3000"
+    - name: MONGODB_URI
+      value: "mongodb://mongodb.ubr-data:27017/ubrnms_auth"
+    - name: REDIS_HOST
+      value: "redis.ubr-data"
+    - name: JWT_SECRET
+      value: "dev-secret-change-in-prod"
+
+alarm-service:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  resources:
+    requests: {cpu: "100m", memory: "256Mi"}
+    limits: {cpu: "1", memory: "1Gi"}
+
+kpi-aggregation-service:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+
+event-collector:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+
+kpi-collector:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+
+api-gateway:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  ingress:
+    enabled: true
+    hosts:
+      - host: api.dev.ubrnms.local
+        paths: [{path: /, pathType: Prefix}]

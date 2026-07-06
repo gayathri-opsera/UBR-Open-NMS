@@ -1,0 +1,235 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Inventory Service API
+  version: "1.0.0"
+  description: >
+    Device inventory CRUD, search, export, birth certificate management,
+    and organizational hierarchy for UBR NMS (Java/Spring Boot service).
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: devices
+    description: Device CRUD and search
+  - name: birth-certificates
+    description: Immutable device identity records
+  - name: export
+    description: Data export endpoints
+
+paths:
+  /devices:
+    get:
+      tags: [devices]
+      summary: List devices with optional filters
+      operationId: listDevices
+      parameters:
+        - $ref: 'components.yaml#/components/parameters/QueryOffset'
+        - $ref: 'components.yaml#/components/parameters/QueryLimit'
+        - name: deviceType
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        - name: status
+          in: query
+          schema: { type: string, enum: [online, offline, provisioning, decommissioned] }
+        - name: region
+          in: query
+          schema: { type: string }
+        - name: organizationId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paginated device list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: 'components.yaml#/components/schemas/DeviceEntity' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+    post:
+      tags: [devices]
+      summary: Register a new device (admin/operator)
+      operationId: createDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDeviceRequest' }
+      responses:
+        "201":
+          description: Device registered
+          content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/DeviceEntity' } } }
+        "400": { $ref: '#/components/responses/ValidationError' }
+        "409": { description: Serial number already registered, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /devices/search:
+    post:
+      tags: [devices]
+      summary: Advanced device search (IP, MAC, serial, GPS radius, tags)
+      operationId: searchDevices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeviceSearchRequest' }
+      responses:
+        "200":
+          description: Matching devices
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: 'components.yaml#/components/schemas/DeviceEntity' }
+        "400": { $ref: '#/components/responses/ValidationError' }
+
+  /devices/export:
+    get:
+      tags: [export]
+      summary: Export device list as CSV or XLSX
+      operationId: exportDevices
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [csv, xlsx], default: csv }
+        - name: deviceType
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        - name: region
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: File download
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "400": { $ref: '#/components/responses/ValidationError' }
+
+  /devices/{id}:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    get:
+      tags: [devices]
+      summary: Get device by ID
+      operationId: getDevice
+      responses:
+        "200": { description: Device found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/DeviceEntity' } } } }
+        "404": { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [devices]
+      summary: Update device metadata (operator+)
+      operationId: updateDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateDeviceRequest' }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/DeviceEntity' } } } }
+        "400": { $ref: '#/components/responses/ValidationError' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [devices]
+      summary: Decommission device (admin only)
+      operationId: decommissionDevice
+      responses:
+        "204": { description: Decommissioned }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /devices/{id}/birth-certificate:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    get:
+      tags: [birth-certificates]
+      summary: Retrieve immutable birth certificate for a device
+      operationId: getBirthCertificate
+      responses:
+        "200": { description: Birth certificate, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/BirthCertificate' } } } }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
+    NotFound:
+      description: Resource not found
+      content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
+    ValidationError:
+      description: Request validation failed
+      content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
+    ServiceUnavailable:
+      description: Service temporarily unavailable
+      content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
+
+  schemas:
+    ErrorResponse:
+      $ref: 'components.yaml#/components/schemas/ErrorResponse'
+    BirthCertificate:
+      $ref: 'components.yaml#/components/schemas/BirthCertificate'
+
+    CreateDeviceRequest:
+      type: object
+      required: [serialNumber, macAddress, deviceType]
+      properties:
+        serialNumber:    { type: string }
+        macAddress:      { type: string }
+        ipAddress:       { type: string, format: ipv4 }
+        deviceType:      { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        model:           { type: string }
+        firmwareVersion: { type: string }
+        region:          { type: string }
+        latitude:        { type: number }
+        longitude:       { type: number }
+        organizationId:  { type: string }
+        networkId:       { type: string }
+        tags:            { type: array, items: { $ref: 'components.yaml#/components/schemas/DeviceTag' } }
+
+    UpdateDeviceRequest:
+      type: object
+      properties:
+        ipAddress:       { type: string }
+        firmwareVersion: { type: string }
+        region:          { type: string }
+        latitude:        { type: number }
+        longitude:       { type: number }
+        tags:            { type: array, items: { $ref: 'components.yaml#/components/schemas/DeviceTag' } }
+        organizationId:  { type: string }
+        networkId:       { type: string }
+
+    DeviceSearchRequest:
+      type: object
+      properties:
+        ipAddress:      { type: string }
+        macAddress:     { type: string }
+        serialNumber:   { type: string }
+        deviceType:     { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        tags:           { type: array, items: { $ref: 'components.yaml#/components/schemas/DeviceTag' } }
+        gpsRadius:
+          type: object
+          properties:
+            latitude:   { type: number }
+            longitude:  { type: number }
+            radiusKm:   { type: number, default: 5 }
+        offset: { type: integer, default: 0 }
+        limit:  { type: integer, default: 50, maximum: 1000 }

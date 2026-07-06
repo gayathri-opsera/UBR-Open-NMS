@@ -1,0 +1,381 @@
+openapi: "3.1.0"
+info:
+  title: UBR Open NMS — Public API
+  version: "1.0.0"
+  description: |
+    REST API for the UBR Open Network Management System.
+    All endpoints require a Bearer JWT token obtained from `/api/v1/auth/login`
+    except the `/api/v1/auth/*` endpoints themselves.
+  contact:
+    name: UBR NMS Engineering
+    email: nms-api@example.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.ubrnms.example.com
+    description: Production
+  - url: https://api.staging.ubrnms.example.com
+    description: Staging
+  - url: http://localhost:3010
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+    description: Authentication and token management
+  - name: alarms
+    description: Alarm lifecycle management
+  - name: inventory
+    description: Device inventory
+  - name: kpi
+    description: Key Performance Indicators
+  - name: config
+    description: Configuration management
+  - name: diagnostics
+    description: Device diagnostics and ping-trace
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: {type: string}
+        message: {type: string}
+        statusCode: {type: integer}
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: {type: string, example: admin}
+        password: {type: string, format: password, example: secret}
+
+    LoginResponse:
+      type: object
+      properties:
+        accessToken: {type: string}
+        refreshToken: {type: string}
+        expiresIn: {type: integer, example: 3600}
+
+    Alarm:
+      type: object
+      properties:
+        id: {type: string, example: "64a1b2c3d4e5f6a7b8c9d0e1"}
+        alarmId: {type: string, example: "ALM-20240115-001"}
+        alarmName: {type: string, example: "linkDown"}
+        severity: {type: string, enum: [CRITICAL, MAJOR, MINOR, WARNING, CLEAR]}
+        state: {type: string, enum: [ACTIVE, ACKNOWLEDGED, CLEAR]}
+        deviceId: {type: string, example: "BTS-001"}
+        raisedAt: {type: string, format: date-time}
+        clearedAt: {type: string, format: date-time, nullable: true}
+        description: {type: string}
+
+    Device:
+      type: object
+      properties:
+        id: {type: string}
+        deviceId: {type: string, example: "BTS-SITE-001"}
+        serialNumber: {type: string, example: "SN123456789"}
+        deviceType: {type: string, enum: [BTS, CPE]}
+        model: {type: string, example: "ENH500EXT"}
+        ipAddress: {type: string, format: ipv4}
+        macAddress: {type: string}
+        status: {type: string, enum: [ONLINE, OFFLINE, UNKNOWN]}
+        registeredAt: {type: string, format: date-time}
+
+    KpiRecord:
+      type: object
+      properties:
+        deviceId: {type: string}
+        granularity: {type: string, enum: [1m, 5m, 15m, 1h, 1d]}
+        timestamp: {type: string, format: date-time}
+        metrics:
+          type: object
+          additionalProperties: {type: number}
+          example:
+            txPower: 23.5
+            rxSignal: -68.2
+            channelUtilization: 45.3
+
+paths:
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Login and obtain JWT tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: {type: string}
+      responses:
+        "200":
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Refresh token expired or invalid
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Invalidate current session
+      responses:
+        "204":
+          description: Logged out successfully
+
+  /api/v1/alarms:
+    get:
+      tags: [alarms]
+      summary: List alarms with optional filters
+      parameters:
+        - name: deviceId
+          in: query
+          schema: {type: string}
+        - name: severity
+          in: query
+          schema: {type: string, enum: [CRITICAL, MAJOR, MINOR, WARNING, CLEAR]}
+        - name: state
+          in: query
+          schema: {type: string, enum: [ACTIVE, ACKNOWLEDGED, CLEAR]}
+        - name: from
+          in: query
+          schema: {type: string, format: date-time}
+        - name: to
+          in: query
+          schema: {type: string, format: date-time}
+        - name: page
+          in: query
+          schema: {type: integer, default: 0}
+        - name: size
+          in: query
+          schema: {type: integer, default: 20, maximum: 200}
+      responses:
+        "200":
+          description: Alarm list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Alarm"
+        "401":
+          description: Unauthorized
+
+  /api/v1/alarms/{id}/acknowledge:
+    post:
+      tags: [alarms]
+      summary: Acknowledge an alarm (OPERATOR role required)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Alarm acknowledged
+        "403":
+          description: Insufficient role (requires OPERATOR or ADMIN)
+        "404":
+          description: Alarm not found
+
+  /api/v1/devices:
+    get:
+      tags: [inventory]
+      summary: List devices
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [ONLINE, OFFLINE, UNKNOWN]}
+        - name: deviceType
+          in: query
+          schema: {type: string, enum: [BTS, CPE]}
+        - name: page
+          in: query
+          schema: {type: integer, default: 0}
+        - name: size
+          in: query
+          schema: {type: integer, default: 20}
+      responses:
+        "200":
+          description: Device list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Device"
+
+  /api/v1/devices/{deviceId}:
+    get:
+      tags: [inventory]
+      summary: Get device by ID
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Device record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "404":
+          description: Device not found
+
+  /api/v1/kpi:
+    get:
+      tags: [kpi]
+      summary: Query KPI data
+      parameters:
+        - name: deviceId
+          in: query
+          required: true
+          schema: {type: string}
+        - name: granularity
+          in: query
+          schema: {type: string, enum: [1m, 5m, 15m, 1h, 1d], default: "5m"}
+        - name: from
+          in: query
+          schema: {type: string, format: date-time}
+        - name: to
+          in: query
+          schema: {type: string, format: date-time}
+        - name: metrics
+          in: query
+          schema:
+            type: array
+            items: {type: string}
+      responses:
+        "200":
+          description: KPI records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KpiRecord"
+
+  /api/v1/config/templates:
+    get:
+      tags: [config]
+      summary: List configuration templates
+      responses:
+        "200":
+          description: Template list
+    post:
+      tags: [config]
+      summary: Create configuration template (ADMIN role)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, parameters]
+              properties:
+                name: {type: string}
+                isDefault: {type: boolean, default: false}
+                parameters: {type: object, additionalProperties: true}
+      responses:
+        "201":
+          description: Template created
+        "403":
+          description: Requires ADMIN role
+
+  /api/v1/config/push:
+    post:
+      tags: [config]
+      summary: Push configuration to a device (ADMIN role)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId, templateId]
+              properties:
+                deviceId: {type: string}
+                templateId: {type: string}
+      responses:
+        "202":
+          description: Config push queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId: {type: string}
+                  status: {type: string, enum: [PENDING, IN_PROGRESS, SUCCESS, FAILED, EXPIRED]}
+        "403":
+          description: Requires ADMIN role
+
+  /api/v1/diagnostics/ping:
+    post:
+      tags: [diagnostics]
+      summary: Ping a device (OPERATOR role)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId]
+              properties:
+                deviceId: {type: string}
+                count: {type: integer, default: 5, maximum: 20}
+      responses:
+        "200":
+          description: Ping results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deviceId: {type: string}
+                  reachable: {type: boolean}
+                  rttMs: {type: number}
+                  packetLoss: {type: number}

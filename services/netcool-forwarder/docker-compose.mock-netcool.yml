@@ -1,0 +1,36 @@
+# Mock Netcool Kafka endpoint configuration for integration testing.
+# Use with: docker compose -f docker-compose.dev.yml -f services/netcool-forwarder/docker-compose.mock-netcool.yml up netcool-forwarder
+
+services:
+  # Mock Netcool Kafka endpoint — a second Kafka broker simulating the IBM Netcool OMNIbus Kafka endpoint.
+  mock-netcool-kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: mock-netcool-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://mock-netcool-kafka:29093,PLAINTEXT_HOST://localhost:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:29093,CONTROLLER://0.0.0.0:29094,PLAINTEXT_HOST://0.0.0.0:9093"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@mock-netcool-kafka:29094"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qg"
+    ports:
+      - "9093:9093"
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9093", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [nms-net]
+
+  netcool-forwarder:
+    environment:
+      NETCOOL_KAFKA_BROKERS: mock-netcool-kafka:29093
+      NETCOOL_TOPIC: netcool-inbound
+    depends_on:
+      mock-netcool-kafka:
+        condition: service_healthy

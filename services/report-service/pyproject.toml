@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "report-service"
+version = "1.0.0"
+description = "UBR NMS Report Service — cross-source report generation"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "motor>=3.4.0",
+    "aiofiles>=23.2.1",
+    "openpyxl>=3.1.2",
+    "python-dotenv>=1.0.1",
+    "httpx>=0.27.0",
+    "apscheduler>=3.10.4",
+    "aiosmtplib>=3.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.7",
+    "anyio>=4.4.0",
+]

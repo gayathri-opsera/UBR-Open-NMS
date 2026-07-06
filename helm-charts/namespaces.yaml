@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ubr-platform
+  labels:
+    kubernetes.io/metadata.name: ubr-platform
+    app.kubernetes.io/part-of: ubrnms
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ubr-data
+  labels:
+    kubernetes.io/metadata.name: ubr-data
+    app.kubernetes.io/part-of: ubrnms
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ubr-monitoring
+  labels:
+    kubernetes.io/metadata.name: ubr-monitoring
+    app.kubernetes.io/part-of: ubrnms
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ubr-ingress
+  labels:
+    kubernetes.io/metadata.name: ubr-ingress
+    app.kubernetes.io/part-of: ubrnms

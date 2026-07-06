@@ -1,0 +1,232 @@
+name: UBR NMS — Netcool Forwarder CI/CD
+on:
+  push:
+    paths:
+      - "services/netcool-forwarder/**"
+      - ".github/workflows/netcool-forwarder.yml"
+  pull_request:
+    paths:
+      - "services/netcool-forwarder/**"
+      - ".github/workflows/netcool-forwarder.yml"
+
+env:
+  SERVICE: netcool-forwarder
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/netcool-forwarder
+
+jobs:
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/netcool-forwarder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Validate no secrets committed
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate no .env files committed
+        run: |
+          if git ls-files | grep -qE '\.env$|\.env\.(local|prod|staging)$'; then
+            echo "ERROR: .env file found in repository"; exit 1
+          fi
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: build
+    defaults:
+      run:
+        working-directory: services/netcool-forwarder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: Install / build
+        run: go build ./...
+      - name: Run tests with coverage gate
+        run: go test ./... -cover 
+        env:
+          CI: true
+
+  scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    defaults:
+      run:
+        working-directory: services/netcool-forwarder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: Install / build
+        run: go build ./...
+
+      - name: Snyk dependency scan
+        uses: snyk/actions/golang@master
+        env:
+          SNYK_TOKEN: ${ secrets.SNYK_TOKEN }
+        with:
+          args: --severity-threshold=high
+      - name: Semgrep SAST
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: "p/security-audit"
+      - name: SonarQube Analysis
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: services/netcool-forwarder
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    needs: [test, scan]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: services/netcool-forwarder
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: anchore/scan-action@v3
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          fail-build: true
+          severity-cutoff: high
+
+  deploy-dev:
+    name: Deploy (dev)
+    runs-on: ubuntu-latest
+    needs: package
+    environment: dev
+    steps:
+      - name: ArgoCD sync — dev
+        run: |
+          argocd app set ubrnms-dev-${{ env.SERVICE }} --helm-set image.tag=${{ needs.package.outputs.image-tag }}
+          argocd app sync ubrnms-dev-${{ env.SERVICE }} --timeout 300
+          argocd app wait ubrnms-dev-${{ env.SERVICE }} --health --timeout 300
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+  test-dev:
+    name: Integration Test (dev)
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet pyyaml aiohttp
+      - run: python test-harness/scenario-runner/src/runner.py test-harness/scenario-runner/scenarios/device-onboarding.yaml
+        env:
+          DISCOVERY_URL: https://discovery.dev.ubrnms.internal
+          INVENTORY_URL: https://inventory.dev.ubrnms.internal
+          STUB_URL: https://stubs.dev.ubrnms.internal
+
+  deploy-staging:
+    name: Deploy (staging)
+    runs-on: ubuntu-latest
+    needs: test-dev
+    environment: staging
+    steps:
+      - name: ArgoCD sync — staging
+        run: |
+          argocd app set ubrnms-staging-${{ env.SERVICE }} --helm-set image.tag=${{ needs.package.outputs.image-tag }}
+          argocd app sync ubrnms-staging-${{ env.SERVICE }} --timeout 300
+          argocd app wait ubrnms-staging-${{ env.SERVICE }} --health --timeout 300
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+  test-staging:
+    name: Smoke Test (staging)
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet pyyaml aiohttp
+      - run: python test-harness/scenario-runner/src/runner.py test-harness/scenario-runner/scenarios/auth-flow.yaml
+        env:
+          AUTH_URL: https://auth.staging.ubrnms.example.com
+
+  deploy-prod:
+    name: Deploy (prod — canary 10%)
+    runs-on: ubuntu-latest
+    needs: test-staging
+    environment: production
+    steps:
+      - name: ArgoCD canary sync — prod
+        run: |
+          argocd app set ubrnms-prod-${{ env.SERVICE }} \
+            --helm-set image.tag=${{ needs.package.outputs.image-tag }} \
+            --helm-set rollout.canaryWeight=10
+          argocd app sync ubrnms-prod-${{ env.SERVICE }} --timeout 300
+          argocd app wait ubrnms-prod-${{ env.SERVICE }} --health --timeout 300
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+  canary-validation:
+    name: Canary Validation
+    runs-on: ubuntu-latest
+    needs: deploy-prod
+    steps:
+      - name: Error rate gate (< 1%)
+        run: |
+          ERROR_RATE=$(curl -sf "$PROMETHEUS_URL/api/v1/query"             --data-urlencode 'query=rate(http_requests_total[5m])'             | python3 -c "import json,sys; d=json.load(sys.stdin); r=d['data']['result']; print(float(r[0]['value'][1]) if r else 0)" || echo 0)
+          echo "Error rate: ${ERROR_RATE}%"
+          if [ "$(echo "${ERROR_RATE} > 1" | bc -l)" = "1" ]; then
+            echo "Canary error rate > 1% -- rollback triggered"; exit 1
+          fi
+          argocd app set ubrnms-prod-${{ env.SERVICE }} --helm-set rollout.canaryWeight=100
+          argocd app sync ubrnms-prod-${{ env.SERVICE }}
+        env:
+          PROMETHEUS_URL: ${{ secrets.PROMETHEUS_URL }}
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+  rollback:
+    name: Rollback (on failure)
+    runs-on: ubuntu-latest
+    needs: canary-validation
+    if: failure()
+    steps:
+      - name: ArgoCD rollback
+        run: argocd app rollback ubrnms-prod-${{ env.SERVICE }}
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}

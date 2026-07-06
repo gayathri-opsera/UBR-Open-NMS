@@ -1,0 +1,164 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS KPI Query Service API
+  version: "1.0.0"
+  description: >
+    KPI time-series query, aggregation rollup access, and threshold management
+    for UBR NMS. Data sourced from ScyllaDB (raw + aggregated KPIs).
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: kpi
+    description: KPI queries and threshold management
+
+paths:
+  /kpi:
+    get:
+      tags: [kpi]
+      summary: Query KPI data points
+      operationId: queryKPIs
+      parameters:
+        - name: deviceId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: kpiName
+          in: query
+          schema: { type: string }
+        - name: granularity
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/KPIGranularity' }
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+        - $ref: 'components.yaml#/components/parameters/QueryOffset'
+        - $ref: 'components.yaml#/components/parameters/QueryLimit'
+      responses:
+        "200":
+          description: KPI data points
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: 'components.yaml#/components/schemas/KPIDataPoint' }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "404": { description: Device not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /kpi/latest:
+    get:
+      tags: [kpi]
+      summary: Get latest KPI values for a device
+      operationId: getLatestKPIs
+      parameters:
+        - name: deviceId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Latest KPI readings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: 'components.yaml#/components/schemas/KPIDataPoint' }
+        "404": { description: Device not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /kpi/thresholds:
+    get:
+      tags: [kpi]
+      summary: List KPI thresholds
+      operationId: listThresholds
+      parameters:
+        - $ref: 'components.yaml#/components/parameters/QueryOffset'
+        - $ref: 'components.yaml#/components/parameters/QueryLimit'
+        - name: deviceType
+          in: query
+          schema: { $ref: 'components.yaml#/components/schemas/DeviceType' }
+      responses:
+        "200":
+          description: Threshold definitions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/KPIThreshold' }
+
+    post:
+      tags: [kpi]
+      summary: Create KPI threshold (operator+)
+      operationId: createThreshold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KPIThreshold' }
+      responses:
+        "201": { description: Threshold created, content: { application/json: { schema: { $ref: '#/components/schemas/KPIThreshold' } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /kpi/thresholds/{id}:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    put:
+      tags: [kpi]
+      summary: Update threshold
+      operationId: updateThreshold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KPIThreshold' }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/KPIThreshold' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+    delete:
+      tags: [kpi]
+      summary: Delete threshold (operator+)
+      operationId: deleteThreshold
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    KPIDataPoint:  { $ref: 'components.yaml#/components/schemas/KPIDataPoint' }
+    DeviceType:    { $ref: 'components.yaml#/components/schemas/DeviceType' }
+    ErrorResponse: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+    PaginatedResponse: { $ref: 'components.yaml#/components/schemas/PaginatedResponse' }
+    KPIGranularity: { $ref: 'components.yaml#/components/schemas/KPIGranularity' }
+
+    KPIThreshold:
+      type: object
+      required: [kpiName, deviceType, warningThreshold, criticalThreshold]
+      properties:
+        thresholdId:        { type: string, format: uuid, readOnly: true }
+        kpiName:            { type: string }
+        deviceType:         { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        warningThreshold:   { type: number }
+        criticalThreshold:  { type: number }
+        direction:          { type: string, enum: [above, below], default: above }
+        unit:               { type: string }
+        createdBy:          { type: string, readOnly: true }
+        createdAt:          { type: string, format: date-time, readOnly: true }

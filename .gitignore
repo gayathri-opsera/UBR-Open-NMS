@@ -1,0 +1,38 @@
+# Forge
+.forge-commit-ready
+.forge/project-id
+.cursor/hooks.json
+.cursor/hooks/
+.cursor/rules/forge-workflow.mdc
+
+# Node.js
+node_modules/
+npm-debug.log*
+.npm
+*.tgz
+dist/
+build/
+coverage/
+.env
+*.env.local
+
+# Java / Maven build artifacts
+target/
+*.class
+*.jar
+*.war
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# Go
+*.exe
+*.test
+
+# OS
+.DS_Store
+Thumbs.db

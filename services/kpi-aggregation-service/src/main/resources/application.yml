@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: kpi-aggregation-service
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_kpi}
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      group-id: kpi-aggregation-service
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+
+server:
+  port: ${PORT:8088}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+kafka:
+  topics:
+    raw-kpi: ${KAFKA_TOPIC_RAW_KPI:raw-kpi}
+    mycom-kpi-export: ${KAFKA_TOPIC_MYCOM:mycom-kpi-export}
+
+kpi:
+  aggregation:
+    bucket-15min-minutes: 15
+    bucket-1hour-minutes: 60
+    bucket-daily-minutes: 1440
+  mycom:
+    export-interval-minutes: ${MYCOM_EXPORT_INTERVAL_MINUTES:15}
+  retention:
+    warm-ttl-days: ${KPI_WARM_TTL_DAYS:90}

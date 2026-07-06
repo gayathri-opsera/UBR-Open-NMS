@@ -1,0 +1,111 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Topology Service API
+  version: "1.0.0"
+  description: Network topology graph computation and map visualization for UBR NMS.
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: topology
+    description: Network topology queries
+
+paths:
+  /topology:
+    get:
+      tags: [topology]
+      summary: Get network topology graph
+      operationId: getTopologyGraph
+      parameters:
+        - name: region
+          in: query
+          schema: { type: string }
+        - name: organizationId
+          in: query
+          schema: { type: string }
+        - name: depth
+          in: query
+          description: Max traversal depth (BTS→CPE hops, max 3)
+          schema: { type: integer, minimum: 1, maximum: 3, default: 3 }
+      responses:
+        "200":
+          description: Topology graph
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopologyGraph' }
+        "401": { description: Unauthorized, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /topology/device/{id}:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    get:
+      tags: [topology]
+      summary: Get subtopology rooted at a specific device
+      operationId: getDeviceTopology
+      responses:
+        "200": { description: Device subtopology, content: { application/json: { schema: { $ref: '#/components/schemas/TopologyGraph' } } } }
+        "404": { description: Device not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /topology/map:
+    get:
+      tags: [topology]
+      summary: Get devices with geo-coordinates for map view
+      operationId: getMapView
+      parameters:
+        - name: region
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [online, offline, all], default: all }
+      responses:
+        "200":
+          description: Device geo list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DeviceGeoPoint' }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    TopologyNode:
+      type: object
+      properties:
+        id:         { type: string }
+        deviceType: { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        label:      { type: string }
+        status:     { type: string }
+        latitude:   { type: number }
+        longitude:  { type: number }
+
+    TopologyEdge:
+      type: object
+      properties:
+        source: { type: string }
+        target: { type: string }
+        type:   { type: string, enum: [wireless, wired] }
+
+    TopologyGraph:
+      type: object
+      properties:
+        nodes: { type: array, items: { $ref: '#/components/schemas/TopologyNode' } }
+        edges: { type: array, items: { $ref: '#/components/schemas/TopologyEdge' } }
+        updatedAt: { type: string, format: date-time }
+
+    DeviceGeoPoint:
+      type: object
+      properties:
+        deviceId:   { type: string }
+        deviceType: { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        status:     { type: string }
+        latitude:   { type: number }
+        longitude:  { type: number }
+        label:      { type: string }

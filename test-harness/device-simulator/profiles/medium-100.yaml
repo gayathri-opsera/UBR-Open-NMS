@@ -1,0 +1,48 @@
+profile_name: medium-100
+description: "100-device profile for functional integration testing"
+
+fleet:
+  total_devices: 100
+  bts_ratio: 0.3
+  device_models:
+    bts: [ENS500EXT, ENH220EXT, ENS620EXT]
+    cpe: [ENH200EXT, EOA7530, ENH202EXT]
+
+checkin:
+  interval_seconds: 60
+  jitter_seconds: 15
+
+snmp:
+  version: "2c"
+  community: "public"
+  trap_rate_per_minute: 1
+
+syslog:
+  rate_per_minute: 3
+  facility: 16
+  severity_distribution:
+    debug:   0.05
+    info:    0.65
+    notice:  0.15
+    warning: 0.10
+    error:   0.05
+
+kpi:
+  rssi_dbm:    {min: -80, max: -40, mean: -58, stddev: 10}
+  snr_db:      {min: 5,   max: 40,  mean: 26,  stddev: 6}
+  throughput_mbps: {min: 1, max: 150, mean: 55, stddev: 22}
+  cpu_usage_pct:   {min: 5, max: 90,  mean: 28, stddev: 14}
+  memory_free_pct: {min: 15, max: 80, mean: 52, stddev: 13}
+
+state_transitions:
+  offline_probability: 0.02
+  recovery_probability: 0.80
+  faulty_probability: 0.005
+
+alarm_storm:
+  enabled: true
+  trigger_probability: 0.002
+  devices_affected_ratio: 0.15
+  burst_duration_seconds: 90
+
+metrics_port: 9100

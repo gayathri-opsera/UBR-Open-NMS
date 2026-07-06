@@ -1,0 +1,85 @@
+# Production environment values
+# Full HPA ranges per architecture spec; node affinity for data services
+global:
+  environment: production
+  imageTag: "1.0.0"
+  imagePullPolicy: IfNotPresent
+
+auth-service:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: auth-service
+            topologyKey: kubernetes.io/hostname
+  ingress:
+    enabled: true
+    hosts:
+      - host: auth.ubrnms.example.com
+        paths: [{path: /api/v1/auth, pathType: Prefix}]
+    tls:
+      - secretName: ubrnms-prod-tls
+        hosts: ["*.ubrnms.example.com"]
+
+alarm-service:
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 16
+  resources:
+    requests: {cpu: "500m", memory: "1Gi"}
+    limits: {cpu: "2", memory: "2Gi"}
+
+event-collector:
+  autoscaling:
+    enabled: true
+    minReplicas: 6
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 50
+  resources:
+    requests: {cpu: "500m", memory: "1Gi"}
+    limits: {cpu: "2", memory: "2Gi"}
+
+kpi-collector:
+  autoscaling:
+    enabled: true
+    minReplicas: 8
+    maxReplicas: 30
+    targetCPUUtilizationPercentage: 50
+  resources:
+    requests: {cpu: "500m", memory: "1Gi"}
+    limits: {cpu: "2", memory: "2Gi"}
+
+kpi-aggregation-service:
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 12
+  nodeSelector:
+    pool: data
+  tolerations:
+    - key: "dedicated"
+      operator: "Equal"
+      value: "data"
+      effect: "NoSchedule"
+
+api-gateway:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+  ingress:
+    enabled: true
+    hosts:
+      - host: api.ubrnms.example.com
+        paths: [{path: /, pathType: Prefix}]
+    tls:
+      - secretName: ubrnms-prod-tls
+        hosts: ["api.ubrnms.example.com"]

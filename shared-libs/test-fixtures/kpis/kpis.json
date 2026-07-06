@@ -1,0 +1,35 @@
+[
+  {
+    "deviceId": "d1a2b3c4-0001-4abc-8001-aabbccddeeff",
+    "serialNumber": "SN-BTS-NORTH-001",
+    "deviceType": "BTS",
+    "kpiName": "channelUtilizationPct",
+    "value": 72.5,
+    "unit": "percent",
+    "pollInterval": 300,
+    "timestamp": "2024-01-15T14:05:00Z",
+    "granularity": "raw"
+  },
+  {
+    "deviceId": "d1a2b3c4-0002-4abc-8002-aabbccddeeff",
+    "serialNumber": "SN-CPE-CUST-001",
+    "deviceType": "CPE",
+    "kpiName": "rxSignalStrengthDbm",
+    "value": -68.2,
+    "unit": "dBm",
+    "pollInterval": 300,
+    "timestamp": "2024-01-15T14:05:00Z",
+    "granularity": "raw"
+  },
+  {
+    "deviceId": "d1a2b3c4-0001-4abc-8001-aabbccddeeff",
+    "serialNumber": "SN-BTS-NORTH-001",
+    "deviceType": "BTS",
+    "kpiName": "throughputMbps",
+    "value": 142.3,
+    "unit": "Mbps",
+    "pollInterval": 300,
+    "timestamp": "2024-01-15T14:00:00Z",
+    "granularity": "15min"
+  }
+]

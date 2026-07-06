@@ -1,0 +1,221 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Shared Components
+  version: "1.0.0"
+  description: Reusable component schemas referenced by all UBR NMS service specs.
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PathDeviceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    QueryOffset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    QueryLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+    QueryCorrelationId:
+      name: X-Correlation-ID
+      in: header
+      schema: { type: string }
+
+  schemas:
+    # ── Pagination wrapper ─────────────────────────────────────────────────────
+    PaginatedResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items: {}
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    PaginationMeta:
+      type: object
+      required: [total, offset, limit]
+      properties:
+        total:  { type: integer }
+        offset: { type: integer }
+        limit:  { type: integer }
+
+    # ── Error response ─────────────────────────────────────────────────────────
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:    { type: string, example: VALIDATION_ERROR }
+        message: { type: string }
+        details: { type: object }
+
+    # ── Enums ──────────────────────────────────────────────────────────────────
+    DeviceType:
+      type: string
+      enum: [BTS, CPE, IDU]
+
+    AlarmSeverity:
+      type: string
+      enum: [CRITICAL, MAJOR, MINOR, WARNING, INDETERMINATE, CLEARED]
+
+    AlarmState:
+      type: string
+      enum: [RAISED, ACKNOWLEDGED, CLEARED]
+
+    UserRole:
+      type: string
+      enum: [admin, operator, user]
+
+    ConfigProtocol:
+      type: string
+      enum: [NETCONF, CLI, TR-069]
+
+    ConfigStatus:
+      type: string
+      enum: [pending, queued, running, completed, failed, rolled_back]
+
+    KPIGranularity:
+      type: string
+      enum: [raw, 15min, 1hour, daily]
+
+    # ── Entities ───────────────────────────────────────────────────────────────
+    DeviceTag:
+      type: object
+      required: [key, value]
+      properties:
+        key:   { type: string }
+        value: { type: string }
+
+    DeviceEntity:
+      type: object
+      required: [deviceId, serialNumber, macAddress, deviceType, status]
+      properties:
+        deviceId:        { type: string, format: uuid }
+        serialNumber:    { type: string }
+        macAddress:      { type: string }
+        ipAddress:       { type: string, format: ipv4 }
+        deviceType:      { $ref: '#/components/schemas/DeviceType' }
+        model:           { type: string }
+        firmwareVersion: { type: string }
+        region:          { type: string }
+        latitude:        { type: number }
+        longitude:       { type: number }
+        status:          { type: string, enum: [online, offline, provisioning, decommissioned] }
+        uptimeSeconds:   { type: integer }
+        connectedBtsSerial: { type: string, nullable: true }
+        connectedCpeCount:  { type: integer }
+        connectedIduCount:  { type: integer }
+        tags:            { type: array, items: { $ref: '#/components/schemas/DeviceTag' } }
+        organizationId:  { type: string }
+        networkId:       { type: string }
+        createdAt:       { type: string, format: date-time }
+        updatedAt:       { type: string, format: date-time }
+
+    AlarmRecord:
+      type: object
+      required: [alarmId, deviceId, alarmName, severity, state, raisedAt]
+      properties:
+        alarmId:          { type: string, format: uuid }
+        deviceId:         { type: string }
+        deviceType:       { $ref: '#/components/schemas/DeviceType' }
+        alarmName:        { type: string }
+        alarmDescription: { type: string }
+        severity:         { $ref: '#/components/schemas/AlarmSeverity' }
+        state:            { $ref: '#/components/schemas/AlarmState' }
+        correlationGroup: { type: string }
+        rootCause:        { type: string }
+        acknowledged:     { type: boolean }
+        acknowledgedBy:   { type: string, nullable: true }
+        raisedAt:         { type: string, format: date-time }
+        clearedAt:        { type: string, format: date-time, nullable: true }
+
+    KPIDataPoint:
+      type: object
+      required: [deviceId, kpiName, value, timestamp]
+      properties:
+        deviceId:     { type: string }
+        serialNumber: { type: string }
+        deviceType:   { $ref: '#/components/schemas/DeviceType' }
+        kpiName:      { type: string }
+        value:        { type: number }
+        unit:         { type: string }
+        pollInterval: { type: integer }
+        timestamp:    { type: string, format: date-time }
+        granularity:  { $ref: '#/components/schemas/KPIGranularity' }
+
+    ConfigTemplate:
+      type: object
+      required: [templateId, templateName, deviceType]
+      properties:
+        templateId:    { type: string, format: uuid }
+        templateName:  { type: string }
+        deviceType:    { $ref: '#/components/schemas/DeviceType' }
+        parameters:    { type: object }
+        version:       { type: integer }
+        createdBy:     { type: string }
+        isDefault:     { type: boolean }
+        createdAt:     { type: string, format: date-time }
+        updatedAt:     { type: string, format: date-time }
+
+    ConfigJob:
+      type: object
+      required: [jobId, templateId, deviceIds, status, createdBy]
+      properties:
+        jobId:       { type: string, format: uuid }
+        templateId:  { type: string, format: uuid }
+        deviceIds:   { type: array, items: { type: string } }
+        status:      { $ref: '#/components/schemas/ConfigStatus' }
+        protocol:    { $ref: '#/components/schemas/ConfigProtocol' }
+        approvedBy:  { type: string, nullable: true }
+        createdBy:   { type: string }
+        startedAt:   { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        createdAt:   { type: string, format: date-time }
+
+    BirthCertificate:
+      type: object
+      required: [serialNumber, macAddress, model, deviceType, registeredAt]
+      properties:
+        serialNumber:   { type: string }
+        macAddress:     { type: string }
+        model:          { type: string }
+        deviceType:     { $ref: '#/components/schemas/DeviceType' }
+        firmware:       { type: string }
+        systemName:     { type: string }
+        ipAddress:      { type: string }
+        hmacSignature:  { type: string }
+        organizationId: { type: string, nullable: true }
+        networkId:      { type: string, nullable: true }
+        registeredAt:   { type: string, format: date-time }
+
+    AuditEntry:
+      type: object
+      required: [auditId, actor, action, resource, outcome, timestamp]
+      properties:
+        auditId:      { type: string, format: uuid }
+        actor:
+          type: object
+          properties:
+            userId:    { type: string }
+            username:  { type: string }
+            role:      { type: string }
+            ipAddress: { type: string }
+        action:       { type: string }
+        resource:
+          type: object
+          properties:
+            type: { type: string }
+            id:   { type: string }
+        outcome:      { type: string, enum: [success, failure, denied] }
+        errorMessage: { type: string, nullable: true }
+        timestamp:    { type: string, format: date-time }

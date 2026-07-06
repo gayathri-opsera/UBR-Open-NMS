@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/kafka/mycom-kpi-export.schema.json",
+  "title": "MycomKPIExportMessage",
+  "description": "Northbound KPI export to Mycom OST. Exact format from BRD Section 4.3.",
+  "type": "object",
+  "required": ["deviceId", "serialNumber", "timestamp"],
+  "properties": {
+    "deviceId":     { "type": "string" },
+    "serialNumber": { "type": "string" },
+    "ipAddress":    { "type": "string" },
+    "timestamp":    { "type": "string", "format": "date-time" },
+    "wireless5GhzRadio": {
+      "type": "object",
+      "properties": {
+        "txPowerDbm":             { "type": "number" },
+        "rxSignalStrengthDbm":    { "type": "number" },
+        "channelUtilizationPct":  { "type": "number" },
+        "snrDb":                  { "type": "number" },
+        "connectedClients":       { "type": "integer" },
+        "modulation":             { "type": "string" },
+        "throughputMbps":         { "type": "number" }
+      }
+    },
+    "ethernetPorts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "portId":       { "type": "string" },
+          "txBytesTotal": { "type": "integer" },
+          "rxBytesTotal": { "type": "integer" },
+          "txErrorsPct":  { "type": "number" },
+          "rxErrorsPct":  { "type": "number" },
+          "linkUptime":   { "type": "integer" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+name: kpi-pipeline
+description: "KPI pipeline: SNMP poll → aggregation → Mycom export"
+timeout_seconds: 120
+
+setup:
+  - action: reset_stub
+    stub: mycom
+
+steps:
+  - name: trigger-kpi-poll
+    action: http_post
+    url: "${KPI_COLLECTOR_URL}/api/v1/polls/trigger"
+    body:
+      deviceId: "CPE-KPI-001"
+    expect_status: 202
+
+  - name: verify-kpi-stored
+    action: http_get
+    url: "${KPI_QUERY_URL}/api/v1/kpi?deviceId=CPE-KPI-001&granularity=1m"
+    expect_status: 200
+    retry:
+      times: 10
+      delay_seconds: 2
+
+  - name: verify-mycom-export
+    action: assert_stub_received
+    stub: mycom
+    min_count: 1
+    retry:
+      times: 15
+      delay_seconds: 1
+
+cleanup:
+  - action: reset_stub
+    stub: mycom

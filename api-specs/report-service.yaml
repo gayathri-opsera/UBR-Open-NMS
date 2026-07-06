@@ -1,0 +1,113 @@
+openapi: "3.0.3"
+info:
+  title: UBR NMS Report Service API
+  version: "1.0.0"
+  description: Scheduled and on-demand report generation and export for UBR NMS.
+
+servers:
+  - url: /api/v1
+    description: Via API Gateway
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: reports
+
+paths:
+  /reports:
+    get:
+      tags: [reports]
+      summary: List available report templates and recent reports
+      operationId: listReports
+      parameters:
+        - $ref: 'components.yaml#/components/parameters/QueryOffset'
+        - $ref: 'components.yaml#/components/parameters/QueryLimit'
+      responses:
+        "200":
+          description: Paginated report list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: 'components.yaml#/components/schemas/PaginatedResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ReportMeta' }
+
+  /reports/generate:
+    post:
+      tags: [reports]
+      summary: Generate a report (async)
+      operationId: generateReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportRequest' }
+      responses:
+        "202": { description: Report generation started, content: { application/json: { schema: { $ref: '#/components/schemas/ReportMeta' } } } }
+        "400": { description: Validation error, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /reports/{id}:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    get:
+      tags: [reports]
+      summary: Get report status/metadata
+      operationId: getReport
+      responses:
+        "200": { description: Report metadata, content: { application/json: { schema: { $ref: '#/components/schemas/ReportMeta' } } } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+  /reports/{id}/download:
+    parameters:
+      - $ref: 'components.yaml#/components/parameters/PathDeviceId'
+    get:
+      tags: [reports]
+      summary: Download completed report file
+      operationId: downloadReport
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [pdf, xlsx, csv], default: pdf }
+      responses:
+        "200":
+          description: Report file
+          content:
+            application/pdf:         { schema: { type: string, format: binary } }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } }
+            text/csv:                { schema: { type: string, format: binary } }
+        "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "409": { description: Report not yet complete, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    ReportRequest:
+      type: object
+      required: [reportType, from, to]
+      properties:
+        reportType:  { type: string, enum: [alarm-summary, kpi-trend, device-health, config-audit, availability] }
+        from:        { type: string, format: date-time }
+        to:          { type: string, format: date-time }
+        deviceType:  { $ref: 'components.yaml#/components/schemas/DeviceType' }
+        region:      { type: string }
+        organizationId: { type: string }
+        format:      { type: string, enum: [pdf, xlsx, csv], default: pdf }
+
+    ReportMeta:
+      type: object
+      properties:
+        reportId:    { type: string, format: uuid }
+        reportType:  { type: string }
+        status:      { type: string, enum: [pending, running, completed, failed] }
+        requestedBy: { type: string }
+        from:        { type: string, format: date-time }
+        to:          { type: string, format: date-time }
+        format:      { type: string }
+        fileSizeBytes: { type: integer }
+        createdAt:   { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }

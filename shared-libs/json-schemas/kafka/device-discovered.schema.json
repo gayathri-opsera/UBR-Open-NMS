@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/kafka/device-discovered.schema.json",
+  "title": "DeviceDiscoveredMessage",
+  "description": "Kafka message emitted by Discovery Service when a new device completes mTLS check-in.",
+  "type": "object",
+  "required": ["deviceId", "serialNumber", "macAddress", "deviceType", "discoveredAt"],
+  "properties": {
+    "deviceId":     { "type": "string", "format": "uuid" },
+    "serialNumber": { "type": "string" },
+    "macAddress":   { "type": "string" },
+    "ipAddress":    { "type": "string" },
+    "deviceType":   { "type": "string", "enum": ["BTS", "CPE", "IDU"] },
+    "model":        { "type": "string" },
+    "firmware":     { "type": "string" },
+    "discoveredAt": { "type": "string", "format": "date-time" }
+  }
+}

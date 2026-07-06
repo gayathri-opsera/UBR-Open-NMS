@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/device-entity.schema.json",
+  "title": "DeviceEntity",
+  "description": "Canonical representation of a BTS or CPE device in the UBR NMS inventory.",
+  "type": "object",
+  "required": ["deviceId", "serialNumber", "macAddress", "deviceType", "status"],
+  "properties": {
+    "deviceId":         { "type": "string", "format": "uuid" },
+    "serialNumber":     { "type": "string", "minLength": 1, "maxLength": 64 },
+    "macAddress":       { "type": "string", "pattern": "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$" },
+    "ipAddress":        { "type": "string", "format": "ipv4" },
+    "deviceType":       { "type": "string", "enum": ["BTS", "CPE", "IDU"] },
+    "model":            { "type": "string" },
+    "firmwareVersion":  { "type": "string" },
+    "region":           { "type": "string" },
+    "latitude":         { "type": "number", "minimum": -90, "maximum": 90 },
+    "longitude":        { "type": "number", "minimum": -180, "maximum": 180 },
+    "elevation":        { "type": "number" },
+    "azimuth":          { "type": "integer", "minimum": 0, "maximum": 359 },
+    "tilt":             { "type": "integer" },
+    "status":           { "type": "string", "enum": ["online", "offline", "provisioning", "decommissioned"] },
+    "uptimeSeconds":    { "type": "integer", "minimum": 0 },
+    "connectedBtsSerial": { "type": ["string", "null"] },
+    "connectedCpeCount": { "type": "integer", "minimum": 0 },
+    "connectedIduCount": { "type": "integer", "minimum": 0 },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "value"],
+        "properties": {
+          "key":   { "type": "string" },
+          "value": { "type": "string" }
+        }
+      }
+    },
+    "organizationId":   { "type": "string" },
+    "networkId":        { "type": "string" },
+    "createdAt":        { "type": "string", "format": "date-time" },
+    "updatedAt":        { "type": "string", "format": "date-time" }
+  }
+}
