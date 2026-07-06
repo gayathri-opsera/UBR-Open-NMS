@@ -9,8 +9,21 @@ interface Props {
 }
 
 export function ProtectedRoute({ children, allowedRoles }: Props): React.ReactElement {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
+
+  // While rehydrating auth from localStorage, show nothing (avoids flash-redirect to /login)
+  if (isLoading) {
+    return (
+      <div style={{
+        minHeight: '100vh', background: '#0a1628',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#60a5fa', fontSize: 14,
+      }}>
+        Loading…
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;

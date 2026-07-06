@@ -20,27 +20,56 @@ export interface AuthState {
   isAuthenticated: boolean;
 }
 
-let _tokens: AuthTokens | null = null;
+const TOKENS_KEY = 'nms_tokens';
+const USER_KEY   = 'nms_user';
+
+// ── Token persistence ─────────────────────────────────────────────────────────
 
 export function setTokens(tokens: AuthTokens): void {
-  _tokens = tokens;
+  try { localStorage.setItem(TOKENS_KEY, JSON.stringify(tokens)); } catch { /* quota exceeded */ }
 }
 
 export function clearTokens(): void {
-  _tokens = null;
+  try {
+    localStorage.removeItem(TOKENS_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch { /* ignore */ }
 }
 
 export function getAccessToken(): string | null {
-  if (!_tokens) return null;
-  return _tokens.accessToken;
+  try {
+    const raw = localStorage.getItem(TOKENS_KEY);
+    if (!raw) return null;
+    return (JSON.parse(raw) as AuthTokens).accessToken ?? null;
+  } catch { return null; }
 }
 
 export function getRefreshToken(): string | null {
-  if (!_tokens) return null;
-  return _tokens.refreshToken;
+  try {
+    const raw = localStorage.getItem(TOKENS_KEY);
+    if (!raw) return null;
+    return (JSON.parse(raw) as AuthTokens).refreshToken ?? null;
+  } catch { return null; }
 }
 
 export function isTokenExpired(): boolean {
-  if (!_tokens) return true;
-  return Date.now() >= _tokens.expiresAt - 30_000; // 30s buffer
+  try {
+    const raw = localStorage.getItem(TOKENS_KEY);
+    if (!raw) return true;
+    const { expiresAt } = JSON.parse(raw) as AuthTokens;
+    return Date.now() >= expiresAt - 30_000; // 30 s buffer
+  } catch { return true; }
+}
+
+// ── User info persistence ──────────────────────────────────────────────────────
+
+export function setStoredUser(user: UserInfo): void {
+  try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch { /* quota */ }
+}
+
+export function getStoredUser(): UserInfo | null {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? (JSON.parse(raw) as UserInfo) : null;
+  } catch { return null; }
 }
