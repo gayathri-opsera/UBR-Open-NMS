@@ -148,7 +148,7 @@ export default function ConfigPage(): React.ReactElement {
                   <td style={{ padding: '8px 12px' }}>
                     {t.isDefault && <span style={{ background: '#14532d', color: '#86efac', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>Default</span>}
                   </td>
-                  <td style={{ padding: '8px 12px', color: '#64748b', fontSize: 12 }}>{Object.keys(t.parameters).length} params</td>
+                  <td style={{ padding: '8px 12px', color: '#64748b', fontSize: 12 }}>{Object.keys(t.parameters ?? {}).length} params</td>
                   <td style={{ padding: '8px 12px', color: '#475569', fontSize: 12 }}>{t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '—'}</td>
                   <td style={{ padding: '8px 12px' }}>
                     <div style={{ display: 'flex', gap: 4 }}>
