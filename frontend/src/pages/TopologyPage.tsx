@@ -22,7 +22,7 @@ export default function TopologyPage(): React.ReactElement {
   const [graph, setGraph] = useState<TGraph>({ nodes: [], edges: [], nodeCount: 0, edgeCount: 0 });
   const [view, setView] = useState<ViewMode>('graph');
   const [loading, setLoading] = useState(false);
-  const [networkId, setNetworkId] = useState('net-1');
+  const [networkId, setNetworkId] = useState('');          // '' = all networks
   const [hovered, setHovered] = useState<TopologyNode | null>(null);
   const [selected, setSelected] = useState<TopologyNode | null>(null);
   const [search, setSearch] = useState('');
@@ -45,9 +45,8 @@ export default function TopologyPage(): React.ReactElement {
   const [historyRange, setHistoryRange] = useState<'24h' | '3d' | '7d'>('24h');
 
   useEffect(() => {
-    if (!networkId) return;
     setLoading(true);
-    fetchTopology(networkId).then(setGraph).catch(() => {}).finally(() => setLoading(false));
+    fetchTopology(networkId || undefined).then(setGraph).catch(() => {}).finally(() => setLoading(false));
   }, [networkId]);
 
   // Load event history when a device is selected and history tab is open
@@ -109,10 +108,15 @@ export default function TopologyPage(): React.ReactElement {
           </button>
         </div>
 
-        <label htmlFor="topology-network-id" style={{ position: 'absolute', left: -9999, width: 1, height: 1, overflow: 'hidden' }}>Network ID</label>
-        <input id="topology-network-id" aria-label="Network ID"
-          style={{ background: '#0f172a', border: '1px solid #1e3a5f', borderRadius: 4, color: '#e2e8f0', padding: '6px 10px', fontSize: 13, width: 180 }}
-          value={networkId} onChange={(e) => setNetworkId(e.target.value)} placeholder="Network ID" />
+        <label htmlFor="topology-network-id" style={{ position: 'absolute', left: -9999, width: 1, height: 1, overflow: 'hidden' }}>Network</label>
+        <select id="topology-network-id" aria-label="Select network"
+          style={{ background: '#0f172a', border: '1px solid #1e3a5f', borderRadius: 4, color: '#e2e8f0', padding: '6px 10px', fontSize: 13, width: 220, cursor: 'pointer' }}
+          value={networkId} onChange={(e) => setNetworkId(e.target.value)}>
+          <option value="">🌐 All Networks (14 nodes)</option>
+          <option value="net-delhi-north-001">📍 Delhi North</option>
+          <option value="net-delhi-south-001">📍 Delhi South</option>
+          <option value="net-mumbai-west-001">📍 Mumbai West</option>
+        </select>
 
         <div style={{ display: 'flex', gap: 4 }} role="search" aria-label="Search topology nodes">
           <label htmlFor="topology-search" style={{ position: 'absolute', left: -9999, width: 1, height: 1, overflow: 'hidden' }}>Search</label>
@@ -195,7 +199,7 @@ export default function TopologyPage(): React.ReactElement {
         {/* Main graph/map */}
         <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden' }}>
           {loading && <LoadingBox msg="Loading topology…" />}
-          {!loading && graph.nodeCount === 0 && <EmptyBox icon="🗺" title="No topology data" sub="Enter a Network ID above." />}
+          {!loading && graph.nodeCount === 0 && <EmptyBox icon="🗺" title="No topology data" sub="Select a network above or wait for services to start." />}
           {!loading && graph.nodeCount > 0 && effectiveView === 'graph' && (
             <TopologyGraph2D graph={graph} highlightedId={highlightedId} onNodeClick={handleNodeClick} onNodeHover={setHovered} />
           )}
