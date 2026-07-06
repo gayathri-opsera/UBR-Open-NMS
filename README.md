@@ -78,9 +78,63 @@ UBR-Open-NMS/
 ## Quick Start
 
 ```bash
-# Install all Node.js dependencies
-npm install
+# 1. Start the full local stack (MongoDB, Redis, Kafka + all services)
+docker compose -f docker-compose.dev.yml up --build -d
 
+# 2. Seed the database with realistic test data
+make seed
+# or directly: cd scripts && npm install && node seed.js
+
+# 3. Open the UI
+open http://localhost:5173
+```
+
+---
+
+## Seed Data
+
+The `scripts/seed.js` script populates all MongoDB collections with realistic data
+so every UI feature can be tested immediately.
+
+| Collection         | What is seeded |
+|--------------------|----------------|
+| `users`            | 5 users (admin, operator, noc_operator, viewer, disabled) |
+| `organizations`    | 2 orgs: Airtel Delhi & Airtel Mumbai |
+| `hierarchy_views`  | 2 circles: Delhi North, Mumbai West |
+| `networks`         | 3 networks (DN, DS, MW) |
+| `devices`          | **14 devices** — 3 BTS, 8 CPE, 3 IDU across Delhi & Mumbai |
+| `birth_certificates` | 5 auto-registration records |
+| `alarms`           | **10 alarms** — 2 CRITICAL, 2 MAJOR, 2 MINOR, 1 WARNING, 1 ACK, 2 CLEARED |
+| `alarm_thresholds` | 8 default threshold rules |
+| `kpi_warm`         | **1,521 hourly buckets** — 7 days × 9 devices (RSSI, SNR, CPU, throughput, …) |
+| `config_templates` | 4 templates: BTS-Standard, CPE-Home, CPE-Enterprise, IDU-P2P |
+| `config_versions`  | 4 config change history records |
+| `pending_commands` | 2 in-flight device commands (REBOOT, FIRMWARE_UPGRADE) |
+| `topology_nodes`   | 14 nodes mirroring the device fleet |
+
+### Login credentials after seeding
+
+| Role       | Username      | Password          |
+|------------|---------------|-------------------|
+| Admin      | `admin`       | `Admin@NMS2024!`  |
+| Operator   | `operator`    | `Operator@NMS2024!` |
+| NOC Ops    | `noc_operator`| `NocOp@NMS2024!`  |
+| Viewer     | `viewer`      | `Viewer@NMS2024!` |
+
+```bash
+# Re-seed from scratch (drops all NMS collections first)
+make seed-reset
+# or: cd scripts && node seed.js --reset
+
+# Target a different MongoDB instance
+MONGO_URL=mongodb://user:pass@host:27017 make seed
+```
+
+---
+
+## Other Make targets
+
+```bash
 # Build all services (stubs)
 make build-all
 

@@ -1,0 +1,14 @@
+{
+  "name": "ubrnms-seed",
+  "version": "1.0.0",
+  "description": "Seed script for UBR Open NMS local development database",
+  "main": "seed.js",
+  "scripts": {
+    "seed": "node seed.js",
+    "seed:reset": "node seed.js --reset"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "mongodb": "^6.5.0"
+  }
+}

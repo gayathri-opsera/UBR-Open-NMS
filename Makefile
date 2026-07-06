@@ -1,4 +1,4 @@
-.PHONY: build-all test-all lint-all clean help
+.PHONY: build-all test-all lint-all clean help seed seed-reset
 
 SERVICES := api-gateway auth-service alarm-service audit-service \
             config-service event-collector kpi-query notification-service \
@@ -6,6 +6,12 @@ SERVICES := api-gateway auth-service alarm-service audit-service \
             topology-service config-push-worker report-service
 
 ##@ Build
+
+seed: ## Seed the local MongoDB with dev/test data (idempotent)
+	@cd scripts && npm install --silent && node seed.js
+
+seed-reset: ## Drop all NMS collections then re-seed from scratch
+	@cd scripts && npm install --silent && node seed.js --reset
 
 build-all: ## Build all services
 	@echo "Building all services..."
