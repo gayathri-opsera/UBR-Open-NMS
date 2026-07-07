@@ -48,3 +48,5 @@ spec:
             periodSeconds: 30
       securityContext:
         runAsNonRoot: true
+        runAsUser: 100
+        fsGroup: 100
