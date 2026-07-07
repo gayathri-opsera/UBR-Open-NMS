@@ -187,8 +187,8 @@ jobs:
           ECR_URI="$AWS_ACCOUNT.dkr.ecr.${{ env.REGION }}.amazonaws.com/${{ env.ECR_REPO }}"
           OVERLAY=".opsera-ubr-nms/k8s/frontend/overlays/dev"
 
+          cd $OVERLAY
           kustomize edit set image "PLACEHOLDER_FRONTEND_ECR_URI=$ECR_URI:${{ needs.build-image.outputs.image-tag }}"
-        working-directory: ${{ github.workspace }}/$OVERLAY
 
       - name: Validate kustomize build
         run: |
