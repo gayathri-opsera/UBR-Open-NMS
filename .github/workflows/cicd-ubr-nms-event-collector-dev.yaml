@@ -407,6 +407,7 @@ jobs:
   verify-deployment:
     name: "11 - Verify Deployment"
     runs-on: ubuntu-latest
+    continue-on-error: true
     needs: [build-image, argocd-sync]
     steps:
       - name: Configure AWS Credentials

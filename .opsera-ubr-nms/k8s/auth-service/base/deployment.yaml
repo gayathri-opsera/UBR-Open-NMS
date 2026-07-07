@@ -25,8 +25,30 @@ spec:
           ports:
             - containerPort: 3001
           env:
+            - name: NODE_ENV
+              value: "production"
             - name: ENV
               value: "dev"
+            - name: AUTH_PORT
+              value: "3001"
+            - name: MONGO_URI
+              value: "mongodb://mongodb.opsera-ubr-nms-dev.svc.cluster.local:27017/ubr_nms"
+            - name: REDIS_HOST
+              value: "redis.opsera-ubr-nms-dev.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: CORS_ORIGIN
+              value: "https://ubr-nms-dev.opsera.io"
+            - name: JWT_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-secrets
+                  key: JWT_PRIVATE_KEY
+            - name: JWT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-secrets
+                  key: JWT_PUBLIC_KEY
           resources:
             requests:
               cpu: 100m
@@ -36,13 +58,13 @@ spec:
               memory: 512Mi
           readinessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 3001
             initialDelaySeconds: 30
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 3001
             initialDelaySeconds: 60
             periodSeconds: 30

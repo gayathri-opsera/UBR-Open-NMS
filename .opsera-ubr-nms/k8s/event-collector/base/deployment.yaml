@@ -27,6 +27,10 @@ spec:
           env:
             - name: ENV
               value: "dev"
+            - name: METRICS_PORT
+              value: "9090"
+            - name: LOG_LEVEL
+              value: "info"
           resources:
             requests:
               cpu: 100m
@@ -36,15 +40,15 @@ spec:
               memory: 512Mi
           readinessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 9090
-            initialDelaySeconds: 30
+            initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 9090
-            initialDelaySeconds: 60
+            initialDelaySeconds: 20
             periodSeconds: 30
       securityContext:
         runAsNonRoot: true

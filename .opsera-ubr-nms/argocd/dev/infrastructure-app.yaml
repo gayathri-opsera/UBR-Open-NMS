@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opsera-ubr-nms-infrastructure-dev
+  namespace: argocd
+  labels:
+    tenant: opsera
+    app: ubr-nms
+    component: infrastructure
+    environment: dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/gayathri-opsera/UBR-Open-NMS.git
+    targetRevision: main-clean
+    path: .opsera-ubr-nms/k8s/infrastructure
+  destination:
+    name: opsera-usw2-np
+    namespace: opsera-ubr-nms-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
