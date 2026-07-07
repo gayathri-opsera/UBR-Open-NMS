@@ -1,5 +1,4 @@
-FROM golang:1.22-alpine AS builder
-RUN apk add --no-cache gcc musl-dev
+FROM golang:1.22 AS builder
 WORKDIR /app
 COPY go.mod ./
 RUN go mod download && go mod tidy || true
