@@ -211,14 +211,14 @@ jobs:
           git add -A
           git commit -m "chore: update mobinet-sync image to ${{ needs.build-image.outputs.image-tag }} [skip ci]"
           for i in 1 2 3; do
-            if git push origin main; then
+            if git push origin HEAD; then
               echo "✅ Pushed manifests"
               exit 0
             fi
             echo "Push failed, retrying ($i/3)..."
-            if ! git pull --rebase origin main; then
+            if ! git pull --rebase origin HEAD; then
               git rebase --abort || true
-              git pull --no-rebase origin main
+              git pull --no-rebase origin HEAD
             fi
             sleep 3
           done
