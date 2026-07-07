@@ -25,15 +25,21 @@ spec:
           ports:
             - containerPort: 8083
           env:
+            - name: MONGO_URI
+              value: "mongodb://mongodb.opsera-ubr-nms-dev.svc.cluster.local:27017/ubr_nms"
+            - name: KAFKA_BROKERS
+              value: "kafka.opsera-ubr-nms-dev.svc.cluster.local:9092"
+            - name: KAFKA_ENABLED
+              value: "true"
             - name: ENV
               value: "dev"
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
+              cpu: 50m
+              memory: 128Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 200m
+              memory: 256Mi
           readinessProbe:
             httpGet:
               path: /health

@@ -6,3 +6,4 @@ namespace: opsera-ubr-nms-dev
 resources:
   - mongodb.yaml
   - redis.yaml
+  - kafka.yaml
