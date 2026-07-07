@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opsera-ubr-nms-kpi-collector-dev
+  namespace: argocd
+  labels:
+    tenant: opsera
+    app: ubr-nms
+    service: kpi-collector
+    environment: dev
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/gayathri-opsera/UBR-Open-NMS.git
+    targetRevision: main
+    path: .opsera-ubr-nms/k8s/kpi-collector/overlays/dev
+  destination:
+    name: opsera-usw2-np
+    namespace: opsera-ubr-nms-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

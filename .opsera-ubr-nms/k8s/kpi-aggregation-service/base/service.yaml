@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kpi-aggregation-service
+  labels:
+    app: kpi-aggregation-service
+    tenant: opsera
+spec:
+  selector:
+    app: kpi-aggregation-service
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088
+  type: ClusterIP

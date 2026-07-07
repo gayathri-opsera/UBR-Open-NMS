@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: diagnostics-service
+  labels:
+    app: diagnostics-service
+    tenant: opsera
+spec:
+  selector:
+    app: diagnostics-service
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+  type: ClusterIP

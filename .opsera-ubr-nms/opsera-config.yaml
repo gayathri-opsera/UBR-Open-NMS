@@ -1,0 +1,35 @@
+# Opsera Code-to-Cloud Configuration
+# UBR Open NMS - Senao
+tenant: opsera
+app: ubr-nms
+region: us-west-2
+hub_cluster: argocd-usw2
+spoke_cluster: opsera-usw2-np
+argocd_server: argocd-usw2.agent.opsera.dev
+namespace_pattern: "opsera-ubr-nms-{env}"
+branch: main
+environments:
+  - dev
+services:
+  - frontend
+  - api-gateway
+  - auth-service
+  - audit-service
+  - notification-service
+  - alarm-service
+  - config-service
+  - diagnostics-service
+  - health-monitor
+  - inventory-service
+  - kpi-aggregation-service
+  - kpi-query-service
+  - report-service
+  - topology-service
+  - config-push-worker
+  - discovery-service
+  - event-collector
+  - kpi-collector
+  - mobinet-sync
+  - mycom-forwarder
+  - netcool-forwarder
+  - syslog-forwarder

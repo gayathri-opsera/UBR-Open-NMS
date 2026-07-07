@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syslog-forwarder
+  labels:
+    app: syslog-forwarder
+    tenant: opsera
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: syslog-forwarder
+  template:
+    metadata:
+      labels:
+        app: syslog-forwarder
+        tenant: opsera
+    spec:
+      serviceAccountName: ubr-nms
+      imagePullSecrets:
+        - name: ecr-pull-secret
+      containers:
+        - name: syslog-forwarder
+          image: PLACEHOLDER_SYSLOG_FORWARDER_ECR_URI
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ENV
+              value: "dev"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      securityContext:
+        runAsNonRoot: true

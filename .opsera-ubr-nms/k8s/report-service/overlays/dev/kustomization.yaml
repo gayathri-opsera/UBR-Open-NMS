@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: opsera-ubr-nms-dev
+
+resources:
+  - ../../base
+  - namespace.yaml
+
+images:
+  - name: PLACEHOLDER_REPORT_SERVICE_ECR_URI
+    newName: PLACEHOLDER_REPORT_SERVICE_ECR_URI
+    newTag: v1.0.0
+
+labels:
+  - pairs:
+      environment: dev
+      tenant: opsera
+    includeSelectors: false

@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: report-service
+  labels:
+    app: report-service
+    tenant: opsera
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: report-service
+  template:
+    metadata:
+      labels:
+        app: report-service
+        tenant: opsera
+    spec:
+      serviceAccountName: ubr-nms
+      imagePullSecrets:
+        - name: ecr-pull-secret
+      containers:
+        - name: report-service
+          image: PLACEHOLDER_REPORT_SERVICE_ECR_URI
+          ports:
+            - containerPort: 8091
+          env:
+            - name: ENV
+              value: "dev"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8091
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8091
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      securityContext:
+        runAsNonRoot: true

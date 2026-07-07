@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opsera-ubr-nms-dev
+  labels:
+    tenant: opsera
+    app: ubr-nms
+    environment: dev

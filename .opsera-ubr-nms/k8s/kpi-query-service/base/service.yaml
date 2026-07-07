@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kpi-query-service
+  labels:
+    app: kpi-query-service
+    tenant: opsera
+spec:
+  selector:
+    app: kpi-query-service
+  ports:
+    - name: http
+      port: 8089
+      targetPort: 8089
+  type: ClusterIP
