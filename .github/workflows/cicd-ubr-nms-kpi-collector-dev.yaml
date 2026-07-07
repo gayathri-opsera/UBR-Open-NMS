@@ -109,19 +109,19 @@ jobs:
         run: |
           SHORT_SHA="${{ github.sha }}"
           SHORT_SHA="${{SHORT_SHA:0:8}}"
-          TAG="${{ env.ENV }}-${{SHORT_SHA}}-$(date +%Y%m%d%H%M%S)"
-          echo "tag=${{TAG}}" >> $GITHUB_OUTPUT
-          echo "✅ Image tag: ${{TAG}}"
+          TAG="${{ env.ENV }}-$SHORT_SHA-$(date +%Y%m%d%H%M%S)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "✅ Image tag: $TAG"
 
       - name: Build Docker image
         run: |
           IMAGE_URI="${{ steps.login.outputs.registry }}/${{ env.ECR_REPO }}:${{ steps.tag.outputs.tag }}"
           docker build \
             -f services/kpi-collector/Dockerfile \
-            -t "${{IMAGE_URI}}" \
+            -t "$IMAGE_URI" \
             services/kpi-collector
-          echo "IMAGE_URI=${{IMAGE_URI}}" >> $GITHUB_ENV
-          echo "✅ Build complete: ${{IMAGE_URI}}"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          echo "✅ Build complete: $IMAGE_URI"
 
   # ── Stage 4: Grype Container Scan ────────────────────────────
   grype-scan:
@@ -206,18 +206,18 @@ jobs:
       - name: Update image tag in kustomization
         run: |
           AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-          ECR_URI="${{AWS_ACCOUNT}}.dkr.ecr.${{ env.REGION }}.amazonaws.com/${{ env.ECR_REPO }}"
+          ECR_URI="$AWS_ACCOUNT.dkr.ecr.${{ env.REGION }}.amazonaws.com/${{ env.ECR_REPO }}"
           OVERLAY=".opsera-ubr-nms/k8s/kpi-collector/overlays/dev"
 
-          kustomize edit set image "PLACEHOLDER_KPI_COLLECTOR_ECR_URI=${{ECR_URI}}:${{ needs.build-image.outputs.image-tag }}"
-        working-directory: ${{ github.workspace }}/${{OVERLAY}}
+          kustomize edit set image "PLACEHOLDER_KPI_COLLECTOR_ECR_URI=$ECR_URI:${{ needs.build-image.outputs.image-tag }}"
+        working-directory: ${{ github.workspace }}/$OVERLAY
 
       - name: Validate kustomize build
         run: |
           OVERLAY=".opsera-ubr-nms/k8s/kpi-collector/overlays/dev"
-          if ! kubectl kustomize "${{OVERLAY}}" > /dev/null 2>&1; then
+          if ! kubectl kustomize "$OVERLAY" > /dev/null 2>&1; then
             echo "❌ Kustomize build validation FAILED"
-            kubectl kustomize "${{OVERLAY}}"
+            kubectl kustomize "$OVERLAY"
             exit 1
           fi
           echo "✅ Kustomize build validated"
@@ -297,9 +297,9 @@ jobs:
           ECR_TOKEN=$(aws ecr get-login-password --region ${{ env.REGION }})
           kubectl create secret docker-registry ecr-pull-secret \
             --namespace ${{ env.NAMESPACE }} \
-            --docker-server="${{AWS_ACCOUNT}}.dkr.ecr.${{ env.REGION }}.amazonaws.com" \
+            --docker-server="$AWS_ACCOUNT.dkr.ecr.${{ env.REGION }}.amazonaws.com" \
             --docker-username=AWS \
-            --docker-password="${{ECR_TOKEN}}" \
+            --docker-password="$ECR_TOKEN" \
             --dry-run=client -o yaml | kubectl apply -f -
           echo "✅ ECR pull secret refreshed"
 
@@ -324,9 +324,9 @@ jobs:
       - name: ArgoCD Hard Refresh
         run: |
           APP_ARGOCD="opsera-ubr-nms-kpi-collector-dev"
-          kubectl patch app "${{APP_ARGOCD}}" -n argocd --type merge \
+          kubectl patch app "$APP_ARGOCD" -n argocd --type merge \
             -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
-          echo "✅ Hard refresh triggered: ${{APP_ARGOCD}}"
+          echo "✅ Hard refresh triggered: $APP_ARGOCD"
           sleep 5
 
   # ── Stage 10: ArgoCD Sync ─────────────────────────────────────
@@ -351,7 +351,7 @@ jobs:
       - name: Trigger ArgoCD Sync
         run: |
           APP_ARGOCD="opsera-ubr-nms-kpi-collector-dev"
-          kubectl patch app "${{APP_ARGOCD}}" -n argocd --type merge \
+          kubectl patch app "$APP_ARGOCD" -n argocd --type merge \
             -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"HEAD"}}}'
           echo "✅ Sync triggered"
 
@@ -359,19 +359,19 @@ jobs:
         run: |
           APP_ARGOCD="opsera-ubr-nms-kpi-collector-dev"
           for i in $(seq 1 60); do
-            HEALTH=$(kubectl get app "${{APP_ARGOCD}}" -n argocd \
+            HEALTH=$(kubectl get app "$APP_ARGOCD" -n argocd \
               -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
-            OPERATION=$(kubectl get app "${{APP_ARGOCD}}" -n argocd \
+            OPERATION=$(kubectl get app "$APP_ARGOCD" -n argocd \
               -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "Unknown")
-            echo "[${{i}}/60] Health: ${{HEALTH}}, Operation: ${{OPERATION}}"
-            if [ "${{HEALTH}}" = "Healthy" ] && [ "${{OPERATION}}" = "Succeeded" ]; then
+            echo "[${{i}}/60] Health: $HEALTH, Operation: $OPERATION"
+            if [ "$HEALTH" = "Healthy" ] && [ "$OPERATION" = "Succeeded" ]; then
               echo "✅ ArgoCD sync succeeded"
               exit 0
             fi
             sleep 10
           done
           echo "⚠️  Sync timeout — checking status"
-          kubectl get app "${{APP_ARGOCD}}" -n argocd -o yaml | grep -A5 "operationState:"
+          kubectl get app "$APP_ARGOCD" -n argocd -o yaml | grep -A5 "operationState:"
           exit 1
 
   # ── Stage 11: Verify Deployment ───────────────────────────────
@@ -398,18 +398,18 @@ jobs:
           NS="opsera-ubr-nms-dev"
           SVC="kpi-collector"
           for i in $(seq 1 60); do
-            if kubectl get deployment "${{SVC}}" -n "${{NS}}" &>/dev/null; then
+            if kubectl get deployment "$SVC" -n "$NS" &>/dev/null; then
               echo "✅ Deployment found"
               break
             fi
             echo "⏳ Waiting for deployment... (${{i}}/60)"
             sleep 5
           done
-          kubectl wait --for=condition=available --timeout=300s deployment/"${{SVC}}" -n "${{NS}}"
-          RUNNING=$(kubectl get pods -n "${{NS}}" -l app="${{SVC}}" \
+          kubectl wait --for=condition=available --timeout=300s deployment/"$SVC" -n "$NS"
+          RUNNING=$(kubectl get pods -n "$NS" -l app="$SVC" \
             --field-selector=status.phase=Running -o name | wc -l)
-          echo "✅ ${{RUNNING}} pod(s) running for kpi-collector"
-          kubectl get pods -n "${{NS}}" -l app="kpi-collector" -o wide
+          echo "✅ $RUNNING pod(s) running for kpi-collector"
+          kubectl get pods -n "$NS" -l app="kpi-collector" -o wide
 
   # ── Stage 12: Deployment Landscape (MUST BE LAST) ─────────────
   deployment-landscape:

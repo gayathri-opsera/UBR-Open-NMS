@@ -34,7 +34,7 @@ jobs:
       - name: Get AWS Account Info
         run: |
           AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-          echo "AWS Account: ${AWS_ACCOUNT}"
+          echo "AWS Account: $AWS_ACCOUNT"
           echo "Region: ${{ env.AWS_REGION }}"
 
       - name: Install kubectl
@@ -43,14 +43,18 @@ jobs:
       - name: Check EKS Clusters
         run: |
           echo "Checking hub cluster: ${{ env.HUB_CLUSTER }}"
-          aws eks describe-cluster --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}             --query 'cluster.status' --output text || echo "⚠️  Hub cluster not found - will be created"
+          aws eks describe-cluster --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }} \
+            --query 'cluster.status' --output text 2>/dev/null || echo "⚠️  Hub cluster not found"
           echo "Checking spoke cluster: ${{ env.SPOKE_CLUSTER }}"
-          aws eks describe-cluster --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}             --query 'cluster.status' --output text || echo "⚠️  Spoke cluster not found - will be created"
+          aws eks describe-cluster --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }} \
+            --query 'cluster.status' --output text 2>/dev/null || echo "⚠️  Spoke cluster not found"
 
-      - name: Check ArgoCD Spoke Registration
+      - name: Check ArgoCD Registration
         run: |
-          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }} 2>/dev/null || echo "Hub cluster kubeconfig update skipped"
-          kubectl get secret -n argocd -l argocd.argoproj.io/secret-type=cluster 2>/dev/null | grep ${{ env.SPOKE_CLUSTER }}             && echo "✅ Spoke registered" || echo "⚠️  Spoke not registered yet"
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }} 2>/dev/null || \
+            echo "Hub cluster kubeconfig skipped (cluster may not exist yet)"
+          kubectl get secret -n argocd -l argocd.argoproj.io/secret-type=cluster 2>/dev/null | \
+            grep ${{ env.SPOKE_CLUSTER }} && echo "✅ Spoke registered" || echo "⚠️  Spoke not registered yet"
 
   # ── 02 ECR Repositories ──────────────────────────────────────
   ecr-setup:
@@ -67,38 +71,40 @@ jobs:
 
       - name: Create ECR Repositories (Idempotent)
         run: |
-          REPOS=(
-          - opsera/ubr-nms-frontend
-          - opsera/ubr-nms-api-gateway
-          - opsera/ubr-nms-auth-service
-          - opsera/ubr-nms-audit-service
-          - opsera/ubr-nms-notification-service
-          - opsera/ubr-nms-alarm-service
-          - opsera/ubr-nms-config-service
-          - opsera/ubr-nms-diagnostics-service
-          - opsera/ubr-nms-health-monitor
-          - opsera/ubr-nms-inventory-service
-          - opsera/ubr-nms-kpi-aggregation-service
-          - opsera/ubr-nms-kpi-query-service
-          - opsera/ubr-nms-report-service
-          - opsera/ubr-nms-topology-service
-          - opsera/ubr-nms-config-push-worker
-          - opsera/ubr-nms-discovery-service
-          - opsera/ubr-nms-event-collector
-          - opsera/ubr-nms-kpi-collector
-          - opsera/ubr-nms-mobinet-sync
-          - opsera/ubr-nms-mycom-forwarder
-          - opsera/ubr-nms-netcool-forwarder
-          - opsera/ubr-nms-syslog-forwarder
-          )
-          for REPO in "${{REPOS[@]}}"; do
-            if aws ecr describe-repositories --repository-names "${{REPO}}" --region ${{ env.AWS_REGION }} &>/dev/null; then
-              echo "✅ ECR repo exists: ${{REPO}}"
+          create_repo() {
+            REPO="$1"
+            if aws ecr describe-repositories --repository-names "$REPO" --region ${{ env.AWS_REGION }} &>/dev/null; then
+              echo "✅ ECR repo exists: $REPO"
             else
-              aws ecr create-repository --repository-name "${{REPO}}" --region ${{ env.AWS_REGION }}                 --image-scanning-configuration scanOnPush=true                 --encryption-configuration encryptionType=AES256
-              echo "✅ Created ECR repo: ${{REPO}}"
+              aws ecr create-repository --repository-name "$REPO" --region ${{ env.AWS_REGION }} \
+                --image-scanning-configuration scanOnPush=true \
+                --encryption-configuration encryptionType=AES256
+              echo "✅ Created ECR repo: $REPO"
             fi
-          done
+          }
+
+          create_repo "opsera/ubr-nms-frontend"
+          create_repo "opsera/ubr-nms-api-gateway"
+          create_repo "opsera/ubr-nms-auth-service"
+          create_repo "opsera/ubr-nms-audit-service"
+          create_repo "opsera/ubr-nms-notification-service"
+          create_repo "opsera/ubr-nms-alarm-service"
+          create_repo "opsera/ubr-nms-config-service"
+          create_repo "opsera/ubr-nms-diagnostics-service"
+          create_repo "opsera/ubr-nms-health-monitor"
+          create_repo "opsera/ubr-nms-inventory-service"
+          create_repo "opsera/ubr-nms-kpi-aggregation-service"
+          create_repo "opsera/ubr-nms-kpi-query-service"
+          create_repo "opsera/ubr-nms-report-service"
+          create_repo "opsera/ubr-nms-topology-service"
+          create_repo "opsera/ubr-nms-config-push-worker"
+          create_repo "opsera/ubr-nms-discovery-service"
+          create_repo "opsera/ubr-nms-event-collector"
+          create_repo "opsera/ubr-nms-kpi-collector"
+          create_repo "opsera/ubr-nms-mobinet-sync"
+          create_repo "opsera/ubr-nms-mycom-forwarder"
+          create_repo "opsera/ubr-nms-netcool-forwarder"
+          create_repo "opsera/ubr-nms-syslog-forwarder"
 
   # ── 03 ArgoCD Configuration ───────────────────────────────────
   argocd-setup:
@@ -124,28 +130,30 @@ jobs:
 
       - name: Register Spoke Cluster in ArgoCD (Idempotent)
         run: |
-          SPOKE_ARN=$(aws eks describe-cluster --name ${{ env.SPOKE_CLUSTER }}             --region ${{ env.AWS_REGION }} --query 'cluster.arn' --output text 2>/dev/null || echo "")
-          if [ -z "${{SPOKE_ARN}}" ]; then
+          SPOKE_ARN=$(aws eks describe-cluster --name ${{ env.SPOKE_CLUSTER }} \
+            --region ${{ env.AWS_REGION }} --query 'cluster.arn' --output text 2>/dev/null || echo "")
+          if [ -z "$SPOKE_ARN" ]; then
             echo "⚠️  Spoke cluster not found, skipping registration"
             exit 0
           fi
-          if kubectl get secret -n argocd -l argocd.argoproj.io/secret-type=cluster 2>/dev/null | grep -q ${{ env.SPOKE_CLUSTER }}; then
+          if kubectl get secret -n argocd -l argocd.argoproj.io/secret-type=cluster 2>/dev/null | \
+              grep -q ${{ env.SPOKE_CLUSTER }}; then
             echo "✅ Spoke already registered"
           else
-            kubectl apply -f - <<EOF
+            kubectl apply -f - <<'MANIFEST'
           apiVersion: v1
           kind: Secret
           metadata:
-            name: ${{ env.SPOKE_CLUSTER }}
+            name: opsera-usw2-np
             namespace: argocd
             labels:
               argocd.argoproj.io/secret-type: cluster
           type: Opaque
           stringData:
-            name: ${{ env.SPOKE_CLUSTER }}
+            name: opsera-usw2-np
             server: https://kubernetes.default.svc
-            config: '{"execProviderConfig":{"command":"aws","args":["eks","get-token","--cluster-name","${{ env.SPOKE_CLUSTER }}"],"apiVersion":"client.authentication.k8s.io/v1beta1"}}'
-          EOF
+            config: '{"execProviderConfig":{"command":"aws","args":["eks","get-token","--cluster-name","opsera-usw2-np"],"apiVersion":"client.authentication.k8s.io/v1beta1"}}'
+          MANIFEST
             echo "✅ Spoke cluster registered"
           fi
 
@@ -154,7 +162,12 @@ jobs:
           if kubectl get secret -n argocd ubr-nms-repo &>/dev/null; then
             echo "✅ ArgoCD repo secret exists"
           else
-            kubectl create secret generic ubr-nms-repo               --namespace argocd               --from-literal=type=git               --from-literal=url=https://github.com/gayathri-opsera/UBR-Open-NMS.git               --from-literal=password=${{ secrets.GITHUB_TOKEN }}               --from-literal=username=x-access-token
+            kubectl create secret generic ubr-nms-repo \
+              --namespace argocd \
+              --from-literal=type=git \
+              --from-literal=url=https://github.com/gayathri-opsera/UBR-Open-NMS.git \
+              --from-literal=password=${{ secrets.GH_PAT }} \
+              --from-literal=username=x-access-token
             kubectl label secret ubr-nms-repo -n argocd argocd.argoproj.io/secret-type=repository
             echo "✅ ArgoCD repo secret created"
           fi
@@ -179,14 +192,18 @@ jobs:
         run: |
           aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
 
-      - name: Setup Namespace (Idempotent)
+      - name: Setup Namespaces (Idempotent)
         run: |
-          ENV="${{ inputs.environment }}"
-          [ "${{ENV}}" = "all" ] && ENVS="dev qa staging prod" || ENVS="${{ENV}}"
-          for E in ${{ENVS}}; do
-            NS="opsera-ubr-nms-${{E}}"
-            kubectl create namespace "${{NS}}" --dry-run=client -o yaml | kubectl apply -f -
-            echo "✅ Namespace ready: ${{NS}}"
+          INPUT_ENV="${{ inputs.environment }}"
+          if [ "$INPUT_ENV" = "all" ]; then
+            ENVS="dev qa staging prod"
+          else
+            ENVS="$INPUT_ENV"
+          fi
+          for E in $ENVS; do
+            NS="opsera-ubr-nms-$E"
+            kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
+            echo "✅ Namespace ready: $NS"
           done
 
   # ── 05 Verification ───────────────────────────────────────────
@@ -208,10 +225,13 @@ jobs:
       - name: Verify All Components
         run: |
           echo "=== ECR Repositories ==="
-          aws ecr describe-repositories --region ${{ env.AWS_REGION }}             --query 'repositories[?starts_with(repositoryName, `opsera/ubr-nms`)].repositoryName'             --output table
+          aws ecr describe-repositories --region ${{ env.AWS_REGION }} \
+            --query 'repositories[?starts_with(repositoryName, `opsera/ubr-nms`)].repositoryName' \
+            --output table
 
           echo "=== Namespaces ==="
-          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }} 2>/dev/null
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
           kubectl get namespaces | grep opsera-ubr-nms || echo "No namespaces yet"
 
           echo "✅ Bootstrap verification complete"
