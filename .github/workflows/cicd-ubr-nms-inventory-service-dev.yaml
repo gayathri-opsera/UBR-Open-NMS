@@ -108,7 +108,7 @@ jobs:
         id: tag
         run: |
           SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${{SHORT_SHA:0:8}}"
+          SHORT_SHA="${SHORT_SHA:0:8}"
           TAG="${{ env.ENV }}-$SHORT_SHA-$(date +%Y%m%d%H%M%S)"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "✅ Image tag: $TAG"
@@ -237,7 +237,7 @@ jobs:
               echo "✅ Pushed manifests"
               exit 0
             fi
-            echo "Push failed, retrying (${{i}}/3)..."
+            echo "Push failed, retrying ($i/3)..."
             if ! git pull --rebase origin main; then
               git rebase --abort || true
               git pull --no-rebase origin main
@@ -363,7 +363,7 @@ jobs:
               -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
             OPERATION=$(kubectl get app "$APP_ARGOCD" -n argocd \
               -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "Unknown")
-            echo "[${{i}}/60] Health: $HEALTH, Operation: $OPERATION"
+            echo "[$i/60] Health: $HEALTH, Operation: $OPERATION"
             if [ "$HEALTH" = "Healthy" ] && [ "$OPERATION" = "Succeeded" ]; then
               echo "✅ ArgoCD sync succeeded"
               exit 0
@@ -402,7 +402,7 @@ jobs:
               echo "✅ Deployment found"
               break
             fi
-            echo "⏳ Waiting for deployment... (${{i}}/60)"
+            echo "⏳ Waiting for deployment... ($i/60)"
             sleep 5
           done
           kubectl wait --for=condition=available --timeout=300s deployment/"$SVC" -n "$NS"
