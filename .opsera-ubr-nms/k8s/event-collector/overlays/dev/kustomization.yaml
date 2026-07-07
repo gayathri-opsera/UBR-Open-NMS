@@ -4,16 +4,15 @@ kind: Kustomization
 namespace: opsera-ubr-nms-dev
 
 resources:
-  - ../../base
-  - namespace.yaml
+- ../../base
+- namespace.yaml
 
 images:
-  - name: PLACEHOLDER_EVENT_COLLECTOR_ECR_URI
-    newName: PLACEHOLDER_EVENT_COLLECTOR_ECR_URI
-    newTag: v1.0.0
+- name: PLACEHOLDER_EVENT_COLLECTOR_ECR_URI
+  newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-event-collector
+  newTag: dev-5b82d3d6-20260707224205
 
 labels:
-  - pairs:
-      environment: dev
-      tenant: opsera
-    includeSelectors: false
+- pairs:
+    environment: dev
+    tenant: opsera
