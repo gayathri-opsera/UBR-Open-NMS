@@ -250,8 +250,15 @@ jobs:
 
       - name: Apply ArgoCD Application manifest
         run: |
+          APP_ARGOCD="opsera-ubr-nms-kpi-collector-dev"
+          # Delete first to clear any stale cached manifest-generation errors
+          kubectl delete app "$APP_ARGOCD" -n argocd --ignore-not-found=true
+          echo "Waiting 20s for ArgoCD to release app..."
+          sleep 20
           kubectl apply -f .opsera-ubr-nms/argocd/dev/kpi-collector-app.yaml
-          echo "✅ ArgoCD app created/updated: opsera-ubr-nms-kpi-collector-dev"
+          echo "✅ ArgoCD app recreated: $APP_ARGOCD"
+          echo "Waiting 45s for ArgoCD to load manifests from main-clean..."
+          sleep 45
 
   # ── Stage 8 & 9: Refresh ECR Secret + ArgoCD Refresh ────────
   refresh-ecr-secret:
