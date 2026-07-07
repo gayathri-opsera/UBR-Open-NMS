@@ -336,11 +336,46 @@ jobs:
       - name: Connect to Hub Cluster
         run: aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.REGION }}
 
+      - name: Refresh ArgoCD Repository Credentials
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "${GH_PAT}" ]; then
+            echo "❌ GH_PAT secret missing — ArgoCD cannot read private repo manifests"
+            exit 1
+          fi
+          REPO_URL="https://github.com/gayathri-opsera/UBR-Open-NMS.git"
+          kubectl delete secret "repo-ubr-open-nms" -n argocd --ignore-not-found
+          kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: repo-ubr-open-nms
+            namespace: argocd
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          type: Opaque
+          stringData:
+            type: git
+            url: ${REPO_URL}
+            password: ${GH_PAT}
+            username: git
+          EOF
+          echo "✅ Refreshed ArgoCD credentials for ${REPO_URL}"
+
+      - name: ArgoCD Hard Refresh
+        run: |
+          APP_ARGOCD="opsera-ubr-nms-alarm-service-dev"
+          kubectl patch app "$APP_ARGOCD" -n argocd --type merge \
+            -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
+          echo "Hard refresh requested — waiting 30s for ArgoCD to re-fetch repo..."
+          sleep 30
+
       - name: Trigger ArgoCD Sync
         run: |
           APP_ARGOCD="opsera-ubr-nms-alarm-service-dev"
           kubectl patch app "$APP_ARGOCD" -n argocd --type merge \
-            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"HEAD"}}}'
+            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"main-clean","prune":true}}}'
           echo "✅ Sync triggered"
 
       - name: Wait for Sync Completion
@@ -349,20 +384,26 @@ jobs:
           for i in $(seq 1 60); do
             HEALTH=$(kubectl get app "$APP_ARGOCD" -n argocd \
               -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
-            OPERATION=$(kubectl get app "$APP_ARGOCD" -n argocd \
+            PHASE=$(kubectl get app "$APP_ARGOCD" -n argocd \
               -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "Unknown")
-            echo "[$i/60] Health: $HEALTH, Operation: $OPERATION"
-            if [ "$HEALTH" = "Healthy" ] && [ "$OPERATION" = "Succeeded" ]; then
-              echo "✅ ArgoCD sync succeeded"
+            echo "[$i/60] Health: $HEALTH | Phase: $PHASE"
+            if [ "$PHASE" = "Succeeded" ]; then
+              echo "✅ ArgoCD sync Succeeded (Health: $HEALTH)"
               exit 0
+            fi
+            if [ "$PHASE" = "Failed" ] || [ "$PHASE" = "Error" ]; then
+              MSG=$(kubectl get app "$APP_ARGOCD" -n argocd \
+                -o jsonpath='{.status.operationState.message}' 2>/dev/null || echo "")
+              echo "❌ ArgoCD sync $PHASE: $MSG"
+              kubectl get app "$APP_ARGOCD" -n argocd -o yaml | grep -A 10 "operationState:"
+              exit 1
             fi
             sleep 10
           done
-          echo "⚠️  Sync timeout — checking status"
-          kubectl get app "$APP_ARGOCD" -n argocd -o yaml | grep -A5 "operationState:"
+          echo "⚠️  Sync timed out after 10 min"
+          kubectl get app "$APP_ARGOCD" -n argocd -o yaml | grep -A 10 "operationState:"
           exit 1
 
-  # ── Stage 11: Verify Deployment ───────────────────────────────
   verify-deployment:
     name: "11 - Verify Deployment"
     runs-on: ubuntu-latest
