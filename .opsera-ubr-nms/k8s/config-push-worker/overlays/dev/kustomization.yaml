@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_CONFIG_PUSH_WORKER_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-config-push-worker
-  newTag: dev-9d82fb80-20260707233546
+  newTag: dev-7a600c0f-20260708023117
 
 labels:
 - pairs:
