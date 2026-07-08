@@ -31,7 +31,7 @@ permissions:
 
 # C2C RULE: serialize all manifest pushes to main-clean to prevent non-fast-forward conflicts
 concurrency:
-  group: ubr-nms-manifests
+  group: ${{ github.workflow }}-manifests
   cancel-in-progress: false
 
 
