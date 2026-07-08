@@ -4,7 +4,6 @@ package poller
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
