@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { buildExportUrl as alarmExport } from '../api/alarms.api';
-import { buildExportUrl as deviceExport } from '../api/devices.api';
-import { buildExportUrl as kpiExport } from '../api/kpi.api';
+import { downloadAlarmExport } from '../api/alarms.api';
+import { downloadDeviceExport } from '../api/devices.api';
+import { downloadKpiExport } from '../api/kpi.api';
 import { KPI_PARAMS } from '../api/kpi.types';
 import type { Severity, AlarmState } from '../api/alarms.types';
 import type { DeviceType } from '../api/devices.types';
-import type { KpiParam } from '../api/kpi.types';
+import type { KpiParam, Granularity } from '../api/kpi.types';
 
 const C = {
   card: '#0d1b2a', border: '#1e293b', hi: '#1e3a5f',
@@ -44,29 +44,38 @@ export default function ReportsPage(): React.ReactElement {
   const [kpiFrom, setKpiFrom] = useState(daysAgo(7));
   const [kpiTo, setKpiTo] = useState(now());
   const [kpiParams, setKpiParams] = useState<KpiParam[]>(['rssi', 'snr', 'throughputDL', 'throughputUL']);
-  const [kpiGranularity, setKpiGranularity] = useState<'15MIN' | '1HOUR' | 'DAILY'>('1HOUR');
+  const [kpiGranularity, setKpiGranularity] = useState<Granularity>('1HOUR');
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
 
   const toggleKpiParam = (p: KpiParam) => setKpiParams((prev) =>
     prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p],
   );
 
-  // Build export URLs
-  const alarmCsvUrl = alarmExport(
-    { from: alarmFrom ? new Date(alarmFrom).toISOString() : undefined, to: alarmTo ? new Date(alarmTo).toISOString() : undefined, state: alarmState as AlarmState || undefined, severity: alarmSeverity ? [alarmSeverity as Severity] : undefined, networkId: alarmNetwork || undefined },
-    'csv',
-  );
-  const alarmXlsUrl = alarmExport(
-    { from: alarmFrom ? new Date(alarmFrom).toISOString() : undefined, to: alarmTo ? new Date(alarmTo).toISOString() : undefined, state: alarmState as AlarmState || undefined, severity: alarmSeverity ? [alarmSeverity as Severity] : undefined, networkId: alarmNetwork || undefined },
-    'xls',
-  );
-  const invCsvUrl = deviceExport({ deviceType: invType as DeviceType || undefined, status: invStatus as any || undefined, networkId: invNetwork || undefined }, 'csv');
-  const invXlsUrl = deviceExport({ deviceType: invType as DeviceType || undefined, status: invStatus as any || undefined, networkId: invNetwork || undefined }, 'xls');
-  const kpiCsvUrl = kpiDevice
-    ? kpiExport(kpiDevice, kpiParams, kpiGranularity, new Date(kpiFrom).toISOString(), new Date(kpiTo).toISOString(), 'csv')
-    : '#';
-  const kpiXlsUrl = kpiDevice
-    ? kpiExport(kpiDevice, kpiParams, kpiGranularity, new Date(kpiFrom).toISOString(), new Date(kpiTo).toISOString(), 'xls')
-    : '#';
+  const alarmFilter = {
+    from: alarmFrom ? new Date(alarmFrom).toISOString() : undefined,
+    to: alarmTo ? new Date(alarmTo).toISOString() : undefined,
+    state: alarmState as AlarmState || undefined,
+    severity: alarmSeverity ? [alarmSeverity as Severity] : undefined,
+    networkId: alarmNetwork || undefined,
+  };
+  const invFilter = {
+    deviceType: invType as DeviceType || undefined,
+    status: invStatus as any || undefined,
+    networkId: invNetwork || undefined,
+  };
+
+  async function handleDownload(key: string, fn: () => Promise<void>) {
+    setDownloading(key);
+    setDlError(null);
+    try {
+      await fn();
+    } catch {
+      setDlError('Download failed. Please try again.');
+    } finally {
+      setDownloading(null);
+    }
+  }
 
   const inp: React.CSSProperties = {
     background: '#0f172a', border: `1px solid ${C.hi}`, borderRadius: 4,
@@ -96,15 +105,20 @@ export default function ReportsPage(): React.ReactElement {
         ))}
       </div>
 
+      {dlError && <div style={{ color: '#f87171', fontSize: 12, marginBottom: 10 }}>⚠ {dlError}</div>}
+
       {/* ── Alarms ── */}
       {tab === 'alarms' && (
         <ReportPanel
           title="Alarms & Event History"
           desc="Export all alarms captured by the NMS. Covers up to 7 days of history per the retention policy."
-          csvUrl={alarmCsvUrl}
-          xlsUrl={alarmXlsUrl}
+          onCsv={() => handleDownload('alarm-csv', () => downloadAlarmExport(alarmFilter, 'csv'))}
+          onXls={() => handleDownload('alarm-xls', () => downloadAlarmExport(alarmFilter, 'xls'))}
           csvLabel="Export Alarms CSV"
           xlsLabel="Export Alarms XLS"
+          loading={downloading}
+          csvKey="alarm-csv"
+          xlsKey="alarm-xls"
         >
           <FilterRow>
             <FilterField label="From">
@@ -142,10 +156,13 @@ export default function ReportsPage(): React.ReactElement {
         <ReportPanel
           title="Device Inventory Export"
           desc="Export the complete device inventory including all BTS, CPE, and IDU devices with all stored fields."
-          csvUrl={invCsvUrl}
-          xlsUrl={invXlsUrl}
+          onCsv={() => handleDownload('inv-csv', () => downloadDeviceExport(invFilter, 'csv'))}
+          onXls={() => handleDownload('inv-xls', () => downloadDeviceExport(invFilter, 'xls'))}
           csvLabel="Export Inventory CSV"
           xlsLabel="Export Inventory XLS"
+          loading={downloading}
+          csvKey="inv-csv"
+          xlsKey="inv-xls"
         >
           <FilterRow>
             <FilterField label="Device Type">
@@ -178,10 +195,13 @@ export default function ReportsPage(): React.ReactElement {
         <ReportPanel
           title="KPI Data Export"
           desc="Export historical KPI time-series data for a device. Requires a Device ID."
-          csvUrl={kpiCsvUrl}
-          xlsUrl={kpiXlsUrl}
+          onCsv={() => handleDownload('kpi-csv', () => downloadKpiExport(kpiDevice, kpiParams, kpiGranularity, new Date(kpiFrom).toISOString(), new Date(kpiTo).toISOString(), 'csv'))}
+          onXls={() => handleDownload('kpi-xls', () => downloadKpiExport(kpiDevice, kpiParams, kpiGranularity, new Date(kpiFrom).toISOString(), new Date(kpiTo).toISOString(), 'xls'))}
           csvLabel="Export KPI CSV"
           xlsLabel="Export KPI XLS"
+          loading={downloading}
+          csvKey="kpi-csv"
+          xlsKey="kpi-xls"
           disabled={!kpiDevice}
           disabledMsg="Enter a Device ID to enable export"
         >
@@ -224,11 +244,21 @@ export default function ReportsPage(): React.ReactElement {
 
 // ── Sub-components ─────────────────────────────────────────────────────────
 
-function ReportPanel({ title, desc, csvUrl, xlsUrl, csvLabel, xlsLabel, children, disabled, disabledMsg }: {
-  title: string; desc: string; csvUrl: string; xlsUrl: string;
+function ReportPanel({ title, desc, onCsv, onXls, csvLabel, xlsLabel, children,
+                       disabled, disabledMsg, loading, csvKey, xlsKey }: {
+  title: string; desc: string;
+  onCsv: () => void; onXls: () => void;
   csvLabel: string; xlsLabel: string; children?: React.ReactNode;
   disabled?: boolean; disabledMsg?: string;
+  loading: string | null; csvKey: string; xlsKey: string;
 }) {
+  const btnStyle = (bg: string, color: string, off: boolean): React.CSSProperties => ({
+    background: off ? '#1e293b' : bg, border: 'none',
+    color: off ? '#374151' : color, padding: '8px 18px', borderRadius: 4,
+    fontSize: 13, cursor: off ? 'not-allowed' : 'pointer',
+    opacity: loading && !off ? 0.7 : 1,
+    display: 'flex', alignItems: 'center', gap: 6,
+  });
   return (
     <div style={{ background: '#0d1b2a', border: '1px solid #1e293b', borderRadius: 8, padding: 20 }}>
       <div style={{ marginBottom: 14 }}>
@@ -236,17 +266,19 @@ function ReportPanel({ title, desc, csvUrl, xlsUrl, csvLabel, xlsLabel, children
         <div style={{ color: '#64748b', fontSize: 13 }}>{desc}</div>
       </div>
       {children}
-      <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
-        <a href={disabled ? undefined : csvUrl}
-          style={{ background: disabled ? '#1e293b' : '#1e3a5f', border: 'none', color: disabled ? '#374151' : '#60a5fa', padding: '8px 18px', borderRadius: 4, textDecoration: 'none', fontSize: 13, cursor: disabled ? 'not-allowed' : 'pointer' }}
-          download onClick={(e) => disabled && e.preventDefault()}>
-          ⬇ {csvLabel}
-        </a>
-        <a href={disabled ? undefined : xlsUrl}
-          style={{ background: disabled ? '#1e293b' : '#14532d', border: 'none', color: disabled ? '#374151' : '#86efac', padding: '8px 18px', borderRadius: 4, textDecoration: 'none', fontSize: 13, cursor: disabled ? 'not-allowed' : 'pointer' }}
-          download onClick={(e) => disabled && e.preventDefault()}>
-          ⬇ {xlsLabel}
-        </a>
+      <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          onClick={disabled ? undefined : onCsv}
+          disabled={!!disabled || loading === csvKey}
+          style={btnStyle('#1e3a5f', '#60a5fa', !!disabled)}>
+          {loading === csvKey ? '⏳' : '⬇'} {csvLabel}
+        </button>
+        <button
+          onClick={disabled ? undefined : onXls}
+          disabled={!!disabled || loading === xlsKey}
+          style={btnStyle('#14532d', '#86efac', !!disabled)}>
+          {loading === xlsKey ? '⏳' : '⬇'} {xlsLabel}
+        </button>
         {disabled && disabledMsg && <span style={{ color: '#64748b', fontSize: 12 }}>← {disabledMsg}</span>}
       </div>
     </div>

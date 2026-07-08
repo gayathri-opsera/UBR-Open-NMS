@@ -40,7 +40,18 @@ export async function fetchPendingCommands(id: string): Promise<unknown[]> {
   return res.data;
 }
 
-export function buildExportUrl(filter: DeviceFilter, format: 'csv' | 'xls'): string {
-  const params = new URLSearchParams({ ...filter as Record<string, string>, format });
-  return `/api/v1/devices/export?${params}`;
+export async function downloadDeviceExport(filter: DeviceFilter, format: 'csv' | 'xls'): Promise<void> {
+  const clean: Record<string, string> = {};
+  for (const [k, v] of Object.entries(filter)) {
+    if (v !== undefined && v !== null && v !== '') clean[k] = String(v);
+  }
+  clean.format = format;
+  const res = await apiClient.get('/devices/export', { params: clean, responseType: 'blob' });
+  const ext = format === 'xls' ? 'xlsx' : 'csv';
+  const url = URL.createObjectURL(new Blob([res.data]));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `devices-export.${ext}`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

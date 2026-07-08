@@ -46,8 +46,17 @@ export async function deleteThreshold(id: string): Promise<void> {
   await apiClient.delete(`/kpi/thresholds/${id}`);
 }
 
-export function buildExportUrl(deviceId: string, params: KpiParam[], granularity: Granularity,
-                                from: string, to: string, format: 'csv' | 'xls'): string {
-  const p = new URLSearchParams({ deviceId, metrics: params.join(','), granularity, from, to, format });
-  return `/api/v1/kpi/export?${p}`;
+export async function downloadKpiExport(deviceId: string, params: KpiParam[], granularity: Granularity,
+                                         from: string, to: string, format: 'csv' | 'xls'): Promise<void> {
+  const res = await apiClient.get('/kpi/export', {
+    params: { deviceId, metrics: params.join(','), granularity, from, to, format },
+    responseType: 'blob',
+  });
+  const ext = format === 'xls' ? 'xlsx' : 'csv';
+  const url = URL.createObjectURL(new Blob([res.data]));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `kpi-${deviceId}.${ext}`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

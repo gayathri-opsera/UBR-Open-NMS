@@ -53,9 +53,20 @@ export async function fetchAlarmTypeCounts(scope?: { organizationId?: string; ne
   return [];
 }
 
-export function buildExportUrl(filter: AlarmFilter, format: 'csv' | 'xls'): string {
-  const params = new URLSearchParams({ ...filter as Record<string, string>, format });
-  return `/api/v1/alarms/export?${params}`;
+export async function downloadAlarmExport(filter: AlarmFilter, format: 'csv' | 'xls'): Promise<void> {
+  const clean: Record<string, string> = {};
+  for (const [k, v] of Object.entries(filter)) {
+    if (v !== undefined && v !== null && v !== '') clean[k] = Array.isArray(v) ? v.join(',') : String(v);
+  }
+  clean.format = format;
+  const res = await apiClient.get('/alarms/export', { params: clean, responseType: 'blob' });
+  const ext = format === 'xls' ? 'xlsx' : 'csv';
+  const url = URL.createObjectURL(new Blob([res.data]));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `alarms-export.${ext}`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Threshold management (EV-05) ─────────────────────────────────────────────
