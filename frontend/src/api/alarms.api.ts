@@ -20,10 +20,23 @@ function defaultRange() {
 
 export async function fetchTopAlarms(scope?: { organizationId?: string; networkId?: string; from?: string; to?: string }): Promise<TopAlarm[]> {
   const { from, to } = defaultRange();
-  const res = await apiClient.get<TopAlarm[]>('/alarms/top-reported', {
+  const res = await apiClient.get<unknown>('/alarms/top-reported', {
     params: { from, to, limit: 10, ...scope },
   });
-  return res.data;
+  const raw = res.data;
+  if (!raw) return [];
+  // Java Map.Entry serializes as [{key, value}] — normalize to [{alarmType, count}]
+  if (Array.isArray(raw)) {
+    return (raw as Array<Record<string, unknown>>).map((item) => ({
+      alarmType: String(item.alarmType ?? item.key ?? item.type ?? ''),
+      count: Number(item.count ?? item.value ?? 0),
+    }));
+  }
+  // Map<String, Long> → {SIGNAL_LOSS: 5, ...}
+  if (typeof raw === 'object') {
+    return Object.entries(raw as Record<string, number>).map(([alarmType, count]) => ({ alarmType, count }));
+  }
+  return [];
 }
 
 export async function fetchAlarmTypeCounts(scope?: { organizationId?: string; networkId?: string; from?: string; to?: string }): Promise<AlarmTypeStat[]> {

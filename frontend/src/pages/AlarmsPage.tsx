@@ -342,7 +342,7 @@ function TopAlarmsBarChart({ alarms }: { alarms: { alarmType: string; count: num
           <g key={a.alarmType}>
             <text x={labelW - 6} y={y + barH / 2 + 4} textAnchor="end" fill="var(--text-secondary)" fontSize={11}
               style={{ fontFamily: 'system-ui, sans-serif' }}>
-              {a.alarmType.length > 22 ? a.alarmType.slice(0, 22) + '…' : a.alarmType}
+              {(a.alarmType ?? '').length > 22 ? (a.alarmType ?? '').slice(0, 22) + '…' : (a.alarmType ?? 'Unknown')}
             </text>
             <rect x={labelW} y={y} width={barWidth} height={barH} fill={color} rx={3} fillOpacity={0.85} />
             <text x={labelW + barWidth + 6} y={y + barH / 2 + 4} fill={color} fontSize={11} fontWeight={700}
