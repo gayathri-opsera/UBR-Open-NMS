@@ -34,7 +34,7 @@ export interface AlarmFilter {
 export interface TopAlarm {
   alarmType: string;
   count: number;
-  severity: Severity;
+  severity?: Severity;
 }
 
 export interface AlarmTypeStat {
