@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev l
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -o mobinet-sync ./cmd/...
+RUN go mod tidy && CGO_ENABLED=1 GOOS=linux go build -o mobinet-sync ./cmd/...
 
 FROM debian:12-slim
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
