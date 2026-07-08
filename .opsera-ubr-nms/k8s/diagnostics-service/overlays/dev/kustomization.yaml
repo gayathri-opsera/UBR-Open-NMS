@@ -4,16 +4,15 @@ kind: Kustomization
 namespace: opsera-ubr-nms-dev
 
 resources:
-  - ../../base
-  - namespace.yaml
+- ../../base
+- namespace.yaml
 
 images:
-  - name: PLACEHOLDER_DIAGNOSTICS_SERVICE_ECR_URI
-    newName: PLACEHOLDER_DIAGNOSTICS_SERVICE_ECR_URI
-    newTag: v1.0.0
+- name: PLACEHOLDER_DIAGNOSTICS_SERVICE_ECR_URI
+  newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-diagnostics-service
+  newTag: dev-7439e19c-20260708021253
 
 labels:
-  - pairs:
-      environment: dev
-      tenant: opsera
-    includeSelectors: false
+- pairs:
+    environment: dev
+    tenant: opsera
