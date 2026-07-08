@@ -51,15 +51,17 @@ spec:
             - name: mongo-data
               mountPath: /data/db
           readinessProbe:
-            exec:
-              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            tcpSocket:
+              port: 27017
             initialDelaySeconds: 15
             periodSeconds: 10
+            failureThreshold: 5
           livenessProbe:
-            exec:
-              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-            initialDelaySeconds: 30
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 60
             periodSeconds: 30
+            failureThreshold: 5
   volumeClaimTemplates:
     - metadata:
         name: mongo-data
