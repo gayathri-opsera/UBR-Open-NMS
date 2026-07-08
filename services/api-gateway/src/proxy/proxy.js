@@ -84,4 +84,33 @@ function buildProxyRoutes(config) {
   };
 }
 
-module.exports = { buildProxyRoutes, createServiceProxy };
+/**
+ * Creates a direct (no circuit breaker, no timeout) proxy for SSE/streaming endpoints.
+ * The circuit breaker must never wrap SSE connections because they are long-lived and
+ * the CB timeout would misclassify healthy streams as failures, opening the circuit.
+ */
+function createSseProxy(serviceUrl) {
+  return proxy(serviceUrl, {
+    proxyReqPathResolver: req => req.originalUrl,
+    parseReqBody: false,
+    limit: '1mb',
+    proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
+      // Signal to the upstream that we want SSE; disable proxy-level buffering
+      proxyReqOpts.headers['x-correlation-id'] = srcReq.correlationId || '';
+      if (srcReq.user) {
+        proxyReqOpts.headers['x-user-id']   = srcReq.user.sub  || '';
+        proxyReqOpts.headers['x-user-role'] = srcReq.user.role || '';
+      }
+      // Disable Node.js socket timeout for streaming connections
+      if (srcReq.socket) srcReq.socket.setTimeout(0);
+      return proxyReqOpts;
+    },
+    userResHeaderDecorator: (headers) => {
+      // Preserve SSE headers set by the upstream
+      headers['x-accel-buffering'] = 'no'; // Disable nginx buffering
+      return headers;
+    },
+  });
+}
+
+module.exports = { buildProxyRoutes, createServiceProxy, createSseProxy };

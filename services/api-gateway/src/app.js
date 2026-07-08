@@ -10,7 +10,7 @@ const { requireRole } = require('./middleware/rbac.middleware');
 const { rateLimiter } = require('./middleware/ratelimit.middleware');
 const { correlationId } = require('./middleware/correlation.middleware');
 const { requestLogger } = require('./middleware/logger.middleware');
-const { buildProxyRoutes } = require('./proxy/proxy');
+const { buildProxyRoutes, createSseProxy } = require('./proxy/proxy');
 
 function createApp(redisClient) {
   const app = express();
@@ -27,6 +27,10 @@ function createApp(redisClient) {
 
   app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
   app.get('/readyz', (_req, res) => res.json({ status: 'ready' }));
+
+  // SSE notification stream must be mounted BEFORE circuit-broken routes.
+  // The circuit breaker timeout would kill long-lived SSE connections and open the circuit.
+  app.use('/api/v1/notifications/stream', createSseProxy(config.services.notification));
 
   const proxyRoutes = buildProxyRoutes(config);
   for (const [prefix, handler] of Object.entries(proxyRoutes)) {
