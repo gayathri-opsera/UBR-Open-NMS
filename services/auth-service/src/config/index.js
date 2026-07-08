@@ -51,7 +51,7 @@ module.exports = {
   },
 
   session: {
-    maxConcurrent: parseInt(process.env.MAX_CONCURRENT_SESSIONS || '3', 10),
+    maxConcurrent: parseInt(process.env.MAX_CONCURRENT_SESSIONS || '10', 10),
     idleTimeoutSeconds: parseInt(process.env.SESSION_IDLE_TIMEOUT_SECONDS || '1800', 10),
     cleanupIntervalSeconds: 60,
   },
@@ -59,8 +59,8 @@ module.exports = {
   password: {
     minLength: 12,
     bcryptRounds: 12,
-    maxFailedAttempts: 5,
-    lockoutDurationSeconds: 30 * 60,
+    maxFailedAttempts: parseInt(process.env.MAX_FAILED_ATTEMPTS || '100', 10),
+    lockoutDurationSeconds: parseInt(process.env.LOCKOUT_DURATION_SECONDS || String(30 * 60), 10),
     historyDepth: 12,
   },
 

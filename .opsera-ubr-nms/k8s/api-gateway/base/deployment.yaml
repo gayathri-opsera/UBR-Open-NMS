@@ -68,9 +68,9 @@ spec:
             - name: CB_RESET_MS
               value: "15000"
             - name: JWT_ISSUER
-              value: "ubr-nms-auth"
-            - name: JWT_AUDIENCE
               value: "ubr-nms"
+            - name: JWT_AUDIENCE
+              value: "ubr-nms-api"
             - name: JWT_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:

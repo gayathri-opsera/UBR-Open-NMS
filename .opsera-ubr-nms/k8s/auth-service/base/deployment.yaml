@@ -41,6 +41,12 @@ spec:
               value: "6379"
             - name: CORS_ORIGIN
               value: "https://ubr-nms-dev.opsera.io"
+            - name: MAX_FAILED_ATTEMPTS
+              value: "100"
+            - name: LOCKOUT_DURATION_SECONDS
+              value: "60"
+            - name: MAX_CONCURRENT_SESSIONS
+              value: "10"
             - name: JWT_PRIVATE_KEY
               valueFrom:
                 secretKeyRef:
