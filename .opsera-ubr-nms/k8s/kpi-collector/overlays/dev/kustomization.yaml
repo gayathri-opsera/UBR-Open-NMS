@@ -4,16 +4,15 @@ kind: Kustomization
 namespace: opsera-ubr-nms-dev
 
 resources:
-  - ../../base
-  - namespace.yaml
+- ../../base
+- namespace.yaml
 
 images:
-  - name: PLACEHOLDER_KPI_COLLECTOR_ECR_URI
-    newName: PLACEHOLDER_KPI_COLLECTOR_ECR_URI
-    newTag: v1.0.0
+- name: PLACEHOLDER_KPI_COLLECTOR_ECR_URI
+  newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-kpi-collector
+  newTag: dev-7a600c0f-20260708023111
 
 labels:
-  - pairs:
-      environment: dev
-      tenant: opsera
-    includeSelectors: false
+- pairs:
+    environment: dev
+    tenant: opsera
