@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_REPORT_SERVICE_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-report-service
-  newTag: dev-8039e74f-20260708005816
+  newTag: dev-f6a8a6cb-20260708013427
 
 labels:
 - pairs:
