@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_DIAGNOSTICS_SERVICE_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-diagnostics-service
-  newTag: dev-7439e19c-20260708021253
+  newTag: dev-6e4a1f6b-20260708022050
 
 labels:
 - pairs:
