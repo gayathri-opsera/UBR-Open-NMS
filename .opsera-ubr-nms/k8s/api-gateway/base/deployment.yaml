@@ -27,12 +27,55 @@ spec:
           ports:
             - containerPort: 3000
           env:
+            - name: PORT
+              value: "3000"
             - name: REDIS_HOST
               value: "redis.opsera-ubr-nms-dev.svc.cluster.local"
             - name: REDIS_PORT
               value: "6379"
             - name: ENV
               value: "dev"
+            - name: CORS_ORIGIN
+              value: "https://ubr-nms-frontend-dev.agent.opsera.dev"
+            - name: AUTH_SERVICE_URL
+              value: "http://auth-service.opsera-ubr-nms-dev.svc.cluster.local:3001"
+            - name: INVENTORY_SERVICE_URL
+              value: "http://inventory-service.opsera-ubr-nms-dev.svc.cluster.local:8082"
+            - name: ALARM_SERVICE_URL
+              value: "http://alarm-service.opsera-ubr-nms-dev.svc.cluster.local:8083"
+            - name: CONFIG_SERVICE_URL
+              value: "http://config-service.opsera-ubr-nms-dev.svc.cluster.local:8084"
+            - name: KPI_SERVICE_URL
+              value: "http://kpi-query-service.opsera-ubr-nms-dev.svc.cluster.local:8089"
+            - name: TOPOLOGY_SERVICE_URL
+              value: "http://topology-service.opsera-ubr-nms-dev.svc.cluster.local:8086"
+            - name: DISCOVERY_SERVICE_URL
+              value: "http://discovery-service.opsera-ubr-nms-dev.svc.cluster.local:8081"
+            - name: AUDIT_SERVICE_URL
+              value: "http://audit-service.opsera-ubr-nms-dev.svc.cluster.local:3007"
+            - name: NOTIFICATION_SERVICE_URL
+              value: "http://notification-service.opsera-ubr-nms-dev.svc.cluster.local:3003"
+            - name: HEALTH_MONITOR_URL
+              value: "http://health-monitor.opsera-ubr-nms-dev.svc.cluster.local:8092"
+            - name: DIAGNOSTICS_SERVICE_URL
+              value: "http://diagnostics-service.opsera-ubr-nms-dev.svc.cluster.local:8090"
+            - name: REPORT_SERVICE_URL
+              value: "http://report-service.opsera-ubr-nms-dev.svc.cluster.local:8091"
+            - name: CB_TIMEOUT_MS
+              value: "10000"
+            - name: CB_ERROR_PCT
+              value: "50"
+            - name: CB_RESET_MS
+              value: "15000"
+            - name: JWT_ISSUER
+              value: "ubr-nms-auth"
+            - name: JWT_AUDIENCE
+              value: "ubr-nms"
+            - name: JWT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-secrets
+                  key: JWT_PUBLIC_KEY
           resources:
             requests:
               cpu: 10m
