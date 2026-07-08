@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_NOTIFICATION_SERVICE_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-notification-service
-  newTag: dev-8039e74f-20260708005815
+  newTag: dev-01cc1e5b-20260708012944
 
 labels:
 - pairs:
