@@ -29,6 +29,16 @@ spec:
           env:
             - name: ENV
               value: "dev"
+            - name: MONGO_URI
+              value: "mongodb://mongodb.opsera-ubr-nms-dev.svc.cluster.local:27017/ubr_nms"
+            - name: KAFKA_BROKERS
+              value: "kafka.opsera-ubr-nms-dev.svc.cluster.local:9092"
+            - name: KAFKA_ENABLED
+              value: "true"
+            - name: MANAGEMENT_HEALTH_KAFKA_ENABLED
+              value: "false"
+            - name: MANAGEMENT_HEALTH_MONGO_ENABLED
+              value: "false"
           resources:
             requests:
               cpu: 10m
@@ -42,12 +52,15 @@ spec:
               port: 8092
             initialDelaySeconds: 60
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 10
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: 8092
             initialDelaySeconds: 90
             periodSeconds: 30
+            timeoutSeconds: 10
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
