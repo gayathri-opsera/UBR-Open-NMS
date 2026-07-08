@@ -25,7 +25,7 @@ spec:
         - name: frontend
           image: PLACEHOLDER_FRONTEND_ECR_URI
           ports:
-            - containerPort: 8080
+            - containerPort: 80
           env:
             - name: ENV
               value: "dev"
@@ -38,17 +38,15 @@ spec:
               memory: 256Mi
           readinessProbe:
             httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 30
+              path: /
+              port: 80
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 60
+              path: /
+              port: 80
+            initialDelaySeconds: 30
             periodSeconds: 30
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 100
-        fsGroup: 100
+        runAsNonRoot: false
