@@ -1,13 +1,46 @@
 *, *::before, *::after { box-sizing: border-box; }
 
-/* ── Dark theme (default) ─────────────────────────────────────── */
+/* ── Light theme (default — matches SDD reference UI) ────────── */
 :root,
+html[data-theme="light"] {
+  --bg-base:       #f0f2f5;
+  --bg-surface:    #ffffff;
+  --bg-card:       #ffffff;
+  --bg-elevated:   #f8f9fa;
+  --bg-input:      #ffffff;
+  --bg-sidebar:    #1b3270;
+  --border-subtle: #e8ecf1;
+  --border-default:#dde1e7;
+  --border-strong: #b0b7c3;
+  --text-primary:  #1a1a2e;
+  --text-secondary:#4a5568;
+  --text-muted:    #718096;
+  --text-dim:      #a0aec0;
+  --accent:        #1967D2;
+  --accent-light:  #4285f4;
+  --accent-subtle: rgba(25,103,210,0.10);
+  --accent-bg:     #e8f0fe;
+  --success:       #16a34a;
+  --success-light: #bbf7d0;
+  --warning:       #d97706;
+  --warning-light: #fef3c7;
+  --danger:        #dc2626;
+  --danger-light:  #fee2e2;
+  --scrollbar-track: #f0f2f5;
+  --scrollbar-thumb: #c1c9d4;
+  --nav-hover:     rgba(255,255,255,0.10);
+  --header-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  --card-shadow:   0 1px 4px rgba(0,0,0,0.07);
+}
+
+/* ── Dark theme ───────────────────────────────────────────────── */
 html[data-theme="dark"] {
   --bg-base:       #0a1628;
   --bg-surface:    #0d1b2a;
   --bg-card:       #0f172a;
   --bg-elevated:   #112240;
   --bg-input:      #0f172a;
+  --bg-sidebar:    #070f1e;
   --border-subtle: #1e293b;
   --border-default:#1e3a5f;
   --border-strong: #374151;
@@ -15,9 +48,9 @@ html[data-theme="dark"] {
   --text-secondary:#94a3b8;
   --text-muted:    #64748b;
   --text-dim:      #475569;
-  --accent:        #60a5fa;
+  --accent:        #4285f4;
   --accent-light:  #93c5fd;
-  --accent-subtle: rgba(96,165,250,0.12);
+  --accent-subtle: rgba(66,133,244,0.12);
   --accent-bg:     #1e3a5f;
   --success:       #22c55e;
   --success-light: #86efac;
@@ -27,36 +60,9 @@ html[data-theme="dark"] {
   --danger-light:  #fca5a5;
   --scrollbar-track: #0a1628;
   --scrollbar-thumb: #1e3a5f;
-  --nav-hover:     rgba(96,165,250,0.08);
-}
-
-/* ── Light theme ──────────────────────────────────────────────── */
-html[data-theme="light"] {
-  --bg-base:       #f1f5f9;
-  --bg-surface:    #ffffff;
-  --bg-card:       #f8fafc;
-  --bg-elevated:   #e2e8f0;
-  --bg-input:      #ffffff;
-  --border-subtle: #e2e8f0;
-  --border-default:#cbd5e1;
-  --border-strong: #94a3b8;
-  --text-primary:  #0f172a;
-  --text-secondary:#334155;
-  --text-muted:    #64748b;
-  --text-dim:      #94a3b8;
-  --accent:        #2563eb;
-  --accent-light:  #3b82f6;
-  --accent-subtle: rgba(37,99,235,0.1);
-  --accent-bg:     #dbeafe;
-  --success:       #16a34a;
-  --success-light: #bbf7d0;
-  --warning:       #d97706;
-  --warning-light: #fef3c7;
-  --danger:        #dc2626;
-  --danger-light:  #fee2e2;
-  --scrollbar-track: #f1f5f9;
-  --scrollbar-thumb: #cbd5e1;
-  --nav-hover:     rgba(37,99,235,0.08);
+  --nav-hover:     rgba(66,133,244,0.08);
+  --header-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  --card-shadow:   0 1px 4px rgba(0,0,0,0.3);
 }
 
 html, body, #root {

@@ -37,8 +37,7 @@ export type TimeRange = '1h' | '6h' | '24h' | '7d';
 
 export function timeRangeToGranularity(tr: TimeRange): Granularity {
   if (tr === '7d') return 'DAILY';
-  if (tr === '24h') return '1HOUR';
-  return '15MIN';
+  return '1HOUR';
 }
 
 export function timeRangeToMs(tr: TimeRange): number {

@@ -151,7 +151,18 @@ export default function ConfigPage(): React.ReactElement {
                   <td style={{ padding: '8px 12px', color: '#64748b', fontSize: 12 }}>{Object.keys(t.parameters ?? {}).length} params</td>
                   <td style={{ padding: '8px 12px', color: '#475569', fontSize: 12 }}>{t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '—'}</td>
                   <td style={{ padding: '8px 12px' }}>
-                    <div style={{ display: 'flex', gap: 4 }}>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' as const }}>
+                      {!t.isDefault && (
+                        <button onClick={async () => {
+                          if (!t.id) return;
+                          try {
+                            await updateTemplate(t.id, { ...t, isDefault: true });
+                            setTemplates((prev) => prev.map((x) => ({ ...x, isDefault: x.id === t.id })));
+                          } catch { /* ignore */ }
+                        }} style={{ background: '#14532d', border: '1px solid #22c55e', color: '#86efac', padding: '3px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                          ★ Set Default
+                        </button>
+                      )}
                       <button onClick={() => setEditingTemplate(t)} style={{ background: 'none', border: '1px solid #374151', color: '#60a5fa', padding: '3px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>Edit</button>
                       <button onClick={() => t.id && handleDeleteTemplate(t.id)} style={{ background: 'none', border: '1px solid #374151', color: '#f87171', padding: '3px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>Delete</button>
                     </div>

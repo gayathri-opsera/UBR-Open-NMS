@@ -12,13 +12,12 @@ export function ProtectedRoute({ children, allowedRoles }: Props): React.ReactEl
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
 
-  // While rehydrating auth from localStorage, show nothing (avoids flash-redirect to /login)
   if (isLoading) {
     return (
       <div style={{
-        minHeight: '100vh', background: '#0a1628',
+        minHeight: '100vh', background: 'var(--bg-base)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: '#60a5fa', fontSize: 14,
+        color: 'var(--accent)', fontSize: 14,
       }}>
         Loading…
       </div>
@@ -29,8 +28,11 @@ export function ProtectedRoute({ children, allowedRoles }: Props): React.ReactEl
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/dashboard" replace />;
+  // Case-insensitive role check so 'admin' matches 'Admin' etc.
+  if (allowedRoles && user) {
+    const userRoleLower = user.role.toLowerCase();
+    const allowed = allowedRoles.some((r) => r.toLowerCase() === userRoleLower);
+    if (!allowed) return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;

@@ -1,8 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Device, DeviceFilter, DeviceType, DeviceStatus } from '../api/devices.types';
-import { buildExportUrl, fetchDevices, searchByGps, updateDeviceTags } from '../api/devices.api';
+import { buildExportUrl, createDevice, deleteDevice, fetchDevices, searchByGps, updateDeviceTags } from '../api/devices.api';
 import { DeviceTable } from '../components/devices/DeviceTable';
+
+const EMPTY_FORM = {
+  deviceId: '', deviceType: 'CPE' as DeviceType, serialNumber: '', macAddress: '',
+  ipAddress: '', manufacturer: 'Senao', model: '', firmwareVersion: '',
+  status: 'PROVISIONING' as DeviceStatus, networkId: '', organizationId: '',
+};
 
 const PAGE_SIZE = 50;
 
@@ -22,6 +28,16 @@ export default function DevicesPage(): React.ReactElement {
   const [gpsSearch, setGpsSearch] = useState({ lat: '', lng: '', radius: '1' });
   const [gpsResults, setGpsResults] = useState<Device[] | null>(null);
   const [tagInput, setTagInput] = useState('');
+
+  // Add device modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState({ ...EMPTY_FORM });
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addLoading, setAddLoading] = useState(false);
+
+  // Delete state
+  const [deleteConfirm, setDeleteConfirm] = useState<Device | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,28 +87,76 @@ export default function DevicesPage(): React.ReactElement {
     setDevices((prev) => prev.map((d) => d.id === updated.id ? updated : d));
   };
 
+  const handleCreate = async () => {
+    if (!addForm.deviceId.trim() || !addForm.serialNumber.trim() || !addForm.ipAddress.trim()) {
+      setAddError('Device ID, Serial Number, and IP Address are required.');
+      return;
+    }
+    setAddLoading(true);
+    setAddError(null);
+    try {
+      const created = await createDevice(addForm as Omit<Device, 'id'>);
+      setDevices((prev) => [created, ...prev]);
+      setShowAddModal(false);
+      setAddForm({ ...EMPTY_FORM });
+    } catch {
+      setAddError('Failed to create device. Check that Device ID and Serial Number are unique.');
+    } finally {
+      setAddLoading(false);
+    }
+  };
+
+  const handleDelete = async (device: Device) => {
+    setDeleteLoading(true);
+    try {
+      await deleteDevice(device.id);
+      setDevices((prev) => prev.filter((d) => d.id !== device.id));
+      setSelected(null);
+      setDeleteConfirm(null);
+    } catch {
+      /* ignore */
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   const displayDevices = gpsResults ?? devices;
   const paginated = displayDevices.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.ceil(displayDevices.length / PAGE_SIZE);
 
-  const label: React.CSSProperties = { color: '#94a3b8', fontSize: 12, display: 'block', marginBottom: 4 };
+  const label: React.CSSProperties = { color: 'var(--text-secondary)', fontSize: 12, display: 'block', marginBottom: 4 };
   const input: React.CSSProperties = {
-    background: '#0f172a', border: '1px solid #1e3a5f', borderRadius: 4,
-    color: '#e2e8f0', padding: '6px 10px', fontSize: 13, width: '100%', boxSizing: 'border-box',
+    background: 'var(--bg-input)', border: '1px solid var(--border-default)', borderRadius: 4,
+    color: 'var(--text-primary)', padding: '6px 10px', fontSize: 13, width: '100%', boxSizing: 'border-box',
+  };
+  const btnPrimary: React.CSSProperties = {
+    background: 'var(--accent)', border: 'none', color: '#fff',
+    padding: '7px 18px', borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+  };
+  const btnDanger: React.CSSProperties = {
+    background: '#ef4444', border: 'none', color: '#fff',
+    padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+  };
+  const btnGhost: React.CSSProperties = {
+    background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
+    padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 13,
   };
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ color: '#e2e8f0', margin: 0 }}>
+        <h2 style={{ color: 'var(--text-primary)', margin: 0 }}>
           Devices
-          <span style={{ color: '#64748b', fontWeight: 400, fontSize: 16, marginLeft: 12 }}>
+          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 16, marginLeft: 12 }}>
             ({displayDevices.length})
           </span>
         </h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          <a href={buildExportUrl(filter, 'csv')} style={{ background: 'none', border: '1px solid #374151', color: '#94a3b8', padding: '6px 14px', borderRadius: 4, textDecoration: 'none', fontSize: 13 }}>Export CSV</a>
-          <a href={buildExportUrl(filter, 'xls')} style={{ background: 'none', border: '1px solid #374151', color: '#94a3b8', padding: '6px 14px', borderRadius: 4, textDecoration: 'none', fontSize: 13 }}>Export XLS</a>
+          <a href={buildExportUrl(filter, 'csv')} style={{ ...btnGhost, textDecoration: 'none' }}>Export CSV</a>
+          <a href={buildExportUrl(filter, 'xls')} style={{ ...btnGhost, textDecoration: 'none' }}>Export XLS</a>
+          <button onClick={() => { setAddForm({ ...EMPTY_FORM }); setAddError(null); setShowAddModal(true); }} style={btnPrimary}>
+            + Add Device
+          </button>
         </div>
       </div>
 
@@ -135,8 +199,8 @@ export default function DevicesPage(): React.ReactElement {
       </div>
 
       {/* GPS search */}
-      <div style={{ background: '#0d1b2a', border: '1px solid #1e293b', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-        <div style={{ color: '#94a3b8', fontSize: 12, fontWeight: 600, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>GPS Search</div>
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+        <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>GPS Search</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, alignItems: 'flex-end' }}>
           <div>
             <label style={label}>Latitude</label>
@@ -150,23 +214,15 @@ export default function DevicesPage(): React.ReactElement {
             <label style={label}>Radius (km)</label>
             <input style={{ ...input, width: 80 }} value={gpsSearch.radius} onChange={(e) => setGpsSearch((g) => ({ ...g, radius: e.target.value }))} />
           </div>
-          <button
-            onClick={handleGpsSearch}
-            style={{ background: '#1e3a5f', border: 'none', color: '#60a5fa', padding: '7px 16px', borderRadius: 4, cursor: 'pointer', fontSize: 13 }}
-          >
+          <button onClick={handleGpsSearch} style={{ background: 'var(--accent-bg)', border: 'none', color: 'var(--accent)', padding: '7px 16px', borderRadius: 4, cursor: 'pointer', fontSize: 13 }}>
             Search
           </button>
           {gpsResults && (
-            <button
-              onClick={() => setGpsResults(null)}
-              style={{ background: 'none', border: '1px solid #374151', color: '#9ca3af', padding: '7px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 13 }}
-            >
-              Clear GPS
-            </button>
+            <button onClick={() => setGpsResults(null)} style={btnGhost}>Clear GPS</button>
           )}
         </div>
         {gpsResults && (
-          <div style={{ color: '#60a5fa', fontSize: 13, marginTop: 8 }}>{gpsResults.length} devices found within {gpsSearch.radius} km</div>
+          <div style={{ color: 'var(--accent)', fontSize: 13, marginTop: 8 }}>{gpsResults.length} devices found within {gpsSearch.radius} km</div>
         )}
       </div>
 
@@ -185,16 +241,19 @@ export default function DevicesPage(): React.ReactElement {
       {selected && (
         <div style={{
           position: 'fixed', top: 0, right: 0, bottom: 0, width: 480,
-          background: '#0d1b2a', borderLeft: '1px solid #1e293b', padding: 24,
+          background: 'var(--bg-surface)', borderLeft: '1px solid var(--border-subtle)', padding: 24,
           overflowY: 'auto', zIndex: 100,
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
-            <h3 style={{ color: '#e2e8f0', margin: 0 }}>{selected.deviceType} — {selected.serialNumber}</h3>
+            <h3 style={{ color: 'var(--text-primary)', margin: 0 }}>{selected.deviceType} — {selected.serialNumber}</h3>
             <div style={{ display: 'flex', gap: 6 }}>
-              <a href={`/devices/${selected.id}`} style={{ background: '#1e3a5f', border: 'none', color: '#60a5fa', padding: '4px 12px', borderRadius: 4, textDecoration: 'none', fontSize: 12, cursor: 'pointer' }}>
+              <a href={`/devices/${selected.id}`} style={{ background: 'var(--accent-bg)', border: 'none', color: 'var(--accent)', padding: '4px 12px', borderRadius: 4, textDecoration: 'none', fontSize: 12 }}>
                 Full Detail →
               </a>
-              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 18 }}>✕</button>
+              <button onClick={() => setDeleteConfirm(selected)} style={{ background: 'none', border: '1px solid #ef4444', color: '#ef4444', padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+                Delete
+              </button>
+              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 18 }}>✕</button>
             </div>
           </div>
 
@@ -221,12 +280,12 @@ export default function DevicesPage(): React.ReactElement {
           <Section title="Tags">
             <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 6, marginBottom: 10 }}>
               {(selected.tags ?? []).map((tag) => (
-                <span key={`${tag.key}:${tag.value}`} style={{ background: '#1e3a5f', color: '#60a5fa', padding: '3px 10px', borderRadius: 12, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span key={`${tag.key}:${tag.value}`} style={{ background: 'var(--accent-bg)', color: 'var(--accent)', padding: '3px 10px', borderRadius: 12, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
                   {tag.key}:{tag.value}
-                  <button onClick={() => handleRemoveTag(tag)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 12, padding: 0 }}>×</button>
+                  <button onClick={() => handleRemoveTag(tag)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, padding: 0 }}>×</button>
                 </span>
               ))}
-              {(selected.tags ?? []).length === 0 && <span style={{ color: '#475569', fontSize: 13 }}>No tags</span>}
+              {(selected.tags ?? []).length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tags</span>}
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <input
@@ -234,9 +293,9 @@ export default function DevicesPage(): React.ReactElement {
                 value={tagInput}
                 onChange={(e) => setTagInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleAddTag(tagInput); }}
-                placeholder="Add tag (Enter)"
+                placeholder="circle:delhi or tag:value"
               />
-              <button onClick={() => handleAddTag(tagInput)} style={{ background: '#1e3a5f', border: 'none', color: '#60a5fa', padding: '0 14px', borderRadius: 4, cursor: 'pointer' }}>+</button>
+              <button onClick={() => handleAddTag(tagInput)} style={{ background: 'var(--accent-bg)', border: 'none', color: 'var(--accent)', padding: '0 14px', borderRadius: 4, cursor: 'pointer' }}>+</button>
             </div>
           </Section>
 
@@ -247,6 +306,110 @@ export default function DevicesPage(): React.ReactElement {
           )}
         </div>
       )}
+
+      {/* ── Add Device Modal ─────────────────────────────────────────── */}
+      {showAddModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 28, width: 560, maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
+              <h3 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 18 }}>Add New Device</h3>
+              <button onClick={() => setShowAddModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 20 }}>✕</button>
+            </div>
+
+            {addError && (
+              <div style={{ background: '#7f1d1d', border: '1px solid #ef4444', borderRadius: 6, padding: '10px 14px', color: '#fca5a5', fontSize: 13, marginBottom: 16 }}>
+                {addError}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div>
+                <label style={label}>Device ID <span style={{ color: '#ef4444' }}>*</span></label>
+                <input style={input} value={addForm.deviceId} onChange={(e) => setAddForm((f) => ({ ...f, deviceId: e.target.value }))} placeholder="dev-cpe-xxx-001" />
+              </div>
+              <div>
+                <label style={label}>Device Type <span style={{ color: '#ef4444' }}>*</span></label>
+                <select style={input} value={addForm.deviceType} onChange={(e) => setAddForm((f) => ({ ...f, deviceType: e.target.value as DeviceType }))}>
+                  <option value="CPE">CPE</option>
+                  <option value="BTS">BTS</option>
+                  <option value="IDU">IDU</option>
+                </select>
+              </div>
+              <div>
+                <label style={label}>Serial Number <span style={{ color: '#ef4444' }}>*</span></label>
+                <input style={input} value={addForm.serialNumber} onChange={(e) => setAddForm((f) => ({ ...f, serialNumber: e.target.value }))} placeholder="SN-XXXXXX" />
+              </div>
+              <div>
+                <label style={label}>IP Address <span style={{ color: '#ef4444' }}>*</span></label>
+                <input style={input} value={addForm.ipAddress} onChange={(e) => setAddForm((f) => ({ ...f, ipAddress: e.target.value }))} placeholder="192.168.1.100" />
+              </div>
+              <div>
+                <label style={label}>MAC Address</label>
+                <input style={input} value={addForm.macAddress} onChange={(e) => setAddForm((f) => ({ ...f, macAddress: e.target.value }))} placeholder="AA:BB:CC:DD:EE:FF" />
+              </div>
+              <div>
+                <label style={label}>Status</label>
+                <select style={input} value={addForm.status} onChange={(e) => setAddForm((f) => ({ ...f, status: e.target.value as DeviceStatus }))}>
+                  <option value="PROVISIONING">Provisioning</option>
+                  <option value="ONLINE">Online</option>
+                  <option value="OFFLINE">Offline</option>
+                </select>
+              </div>
+              <div>
+                <label style={label}>Manufacturer</label>
+                <input style={input} value={addForm.manufacturer} onChange={(e) => setAddForm((f) => ({ ...f, manufacturer: e.target.value }))} placeholder="Senao" />
+              </div>
+              <div>
+                <label style={label}>Model</label>
+                <input style={input} value={addForm.model} onChange={(e) => setAddForm((f) => ({ ...f, model: e.target.value }))} placeholder="ENS620EXT" />
+              </div>
+              <div>
+                <label style={label}>Firmware Version</label>
+                <input style={input} value={addForm.firmwareVersion} onChange={(e) => setAddForm((f) => ({ ...f, firmwareVersion: e.target.value }))} placeholder="2.1.4" />
+              </div>
+              <div>
+                <label style={label}>Network ID</label>
+                <input style={input} value={addForm.networkId} onChange={(e) => setAddForm((f) => ({ ...f, networkId: e.target.value }))} placeholder="net-delhi-north-001" />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={label}>Organization ID</label>
+                <input style={input} value={addForm.organizationId} onChange={(e) => setAddForm((f) => ({ ...f, organizationId: e.target.value }))} placeholder="org-airtel-delhi-001" />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
+              <button onClick={() => setShowAddModal(false)} style={btnGhost}>Cancel</button>
+              <button onClick={handleCreate} disabled={addLoading} style={{ ...btnPrimary, opacity: addLoading ? 0.6 : 1 }}>
+                {addLoading ? 'Creating…' : 'Create Device'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirmation Dialog ───────────────────────────────── */}
+      {deleteConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg-surface)', border: '1px solid #ef4444', borderRadius: 10, padding: 28, width: 400 }}>
+            <h3 style={{ color: '#ef4444', margin: '0 0 12px' }}>Delete Device</h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: '0 0 8px' }}>
+              Are you sure you want to permanently delete:
+            </p>
+            <p style={{ color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: 14, margin: '0 0 20px', background: 'var(--bg-base)', padding: '8px 12px', borderRadius: 4 }}>
+              {deleteConfirm.deviceId} — {deleteConfirm.serialNumber}
+            </p>
+            <p style={{ color: '#94a3b8', fontSize: 12, margin: '0 0 20px' }}>
+              This action cannot be undone. All KPI history and config for this device will also be lost.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button onClick={() => setDeleteConfirm(null)} style={btnGhost}>Cancel</button>
+              <button onClick={() => handleDelete(deleteConfirm)} disabled={deleteLoading} style={{ ...btnDanger, opacity: deleteLoading ? 0.6 : 1 }}>
+                {deleteLoading ? 'Deleting…' : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -254,7 +417,7 @@ export default function DevicesPage(): React.ReactElement {
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.ReactElement {
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ color: '#60a5fa', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{title}</div>
+      <div style={{ color: 'var(--accent)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{title}</div>
       {children}
     </div>
   );
@@ -262,9 +425,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Field({ label, value }: { label: string; value: string }): React.ReactElement {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #0f172a' }}>
-      <span style={{ color: '#64748b', fontSize: 12, flex: '0 0 140px' }}>{label}</span>
-      <span style={{ color: '#cbd5e1', fontSize: 13, fontFamily: 'monospace', textAlign: 'right' }}>{value}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+      <span style={{ color: 'var(--text-muted)', fontSize: 12, flex: '0 0 140px' }}>{label}</span>
+      <span style={{ color: 'var(--text-secondary)', fontSize: 13, fontFamily: 'monospace', textAlign: 'right' }}>{value}</span>
     </div>
   );
 }

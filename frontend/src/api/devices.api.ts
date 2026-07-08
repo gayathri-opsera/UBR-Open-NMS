@@ -11,6 +11,20 @@ export async function fetchDevice(id: string): Promise<Device> {
   return res.data;
 }
 
+export async function createDevice(device: Omit<Device, 'id'>): Promise<Device> {
+  const res = await apiClient.post<Device>('/devices', device);
+  return res.data;
+}
+
+export async function updateDevice(id: string, updates: Partial<Device>): Promise<Device> {
+  const res = await apiClient.put<Device>(`/devices/${id}`, updates);
+  return res.data;
+}
+
+export async function deleteDevice(id: string): Promise<void> {
+  await apiClient.delete(`/devices/${id}`);
+}
+
 export async function updateDeviceTags(id: string, tags: Array<{ key: string; value: string }>): Promise<Device> {
   const res = await apiClient.put<Device>(`/devices/${id}/tags`, { tags });
   return res.data;

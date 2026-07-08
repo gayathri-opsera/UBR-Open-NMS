@@ -26,6 +26,7 @@ export default function AlarmsPage(): React.ReactElement {
   const [page, setPage] = useState(0);
   const [topAlarms, setTopAlarms] = useState<TopAlarm[]>([]);
   const [typeCounts, setTypeCounts] = useState<AlarmTypeStat[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const audioRef = useRef<AudioContext | null>(null);
 
@@ -41,13 +42,15 @@ export default function AlarmsPage(): React.ReactElement {
 
   useEffect(() => {
     setLoading(true);
+    setLoadError(null);
     const timeout = setTimeout(() => setLoading(false), 30_000);
     Promise.all([
-      fetchAlarms(filter),
+      fetchAlarms(filter).catch(() => [] as Alarm[]),
       fetchTopAlarms({ organizationId: filter.organizationId, networkId: filter.networkId }).catch(() => [] as TopAlarm[]),
       fetchAlarmTypeCounts({ organizationId: filter.organizationId, networkId: filter.networkId }).catch(() => [] as AlarmTypeStat[]),
     ])
       .then(([a, top, types]) => { setAlarms(a); setTopAlarms(top); setTypeCounts(types); })
+      .catch(() => setLoadError('Unable to load alarms. Please check that the alarm service is running.'))
       .finally(() => { clearTimeout(timeout); setLoading(false); });
     return () => clearTimeout(timeout);
   }, [filter]);
@@ -107,14 +110,20 @@ export default function AlarmsPage(): React.ReactElement {
   };
 
   const SEV_BADGE: Record<string, { bg: string; color: string }> = {
-    CRITICAL: { bg: '#7f1d1d', color: '#fca5a5' },
-    MAJOR:    { bg: '#7c2d12', color: '#fdba74' },
-    MINOR:    { bg: '#713f12', color: '#fde68a' },
-    WARNING:  { bg: '#1e3a5f', color: '#93c5fd' },
+    CRITICAL: { bg: '#dc2626', color: '#fff' },
+    MAJOR:    { bg: '#ea580c', color: '#fff' },
+    MINOR:    { bg: '#d97706', color: '#fff' },
+    WARNING:  { bg: '#2563eb', color: '#fff' },
   };
 
   return (
     <div role="main" aria-label="Alarm management" style={{ color: 'var(--text-primary)' }}>
+      {loadError && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626', borderRadius: 6, padding: '10px 16px', marginBottom: 16, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>⚠️</span> {loadError}
+          <button onClick={() => setLoadError(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontSize: 16, lineHeight: 1 }}>✕</button>
+        </div>
+      )}
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ color: 'var(--text-primary)', margin: 0 }}>
@@ -144,22 +153,35 @@ export default function AlarmsPage(): React.ReactElement {
         <>
           <AlarmFilterPanel filter={filter} onChange={(f) => { setFilter(f); setPage(0); }} />
           <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-            <WidgetPanel title={`Top Alarms (${topAlarms.length})`} style={{ flex: 1 }}>
-              {topAlarms.slice(0, 10).map((t) => (
-                <div key={t.alarmType} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, color: 'var(--text-primary)' }}>
-                  <span>{t.alarmType}</span>
-                  <span style={{ color: '#f87171', fontWeight: 600 }}>{t.count}</span>
-                </div>
-              ))}
-              {topAlarms.length === 0 && <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>No data</span>}
-            </WidgetPanel>
-            <WidgetPanel title="Alarm Types" style={{ flex: 1 }}>
-              {typeCounts.map((s) => (
-                <div key={s.alarmType} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, color: 'var(--text-primary)' }}>
-                  <span>{s.alarmType}</span>
-                  <span style={{ color: 'var(--text-secondary)' }}>{s.count}</span>
-                </div>
-              ))}
+            {/* Top Reported Alarms — SVG bar chart */}
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 16, flex: 2 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+                Top Reported Alarms — Last 7 Days
+              </div>
+              {topAlarms.length === 0 ? (
+                <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>No data</span>
+              ) : (
+                <TopAlarmsBarChart alarms={topAlarms.slice(0, 8)} />
+              )}
+            </div>
+
+            {/* Alarm type counts */}
+            <WidgetPanel title={`Alarm Type Counts (${typeCounts.length})`} style={{ flex: 1 }}>
+              {typeCounts.map((s) => {
+                const maxCount = Math.max(...typeCounts.map((x) => x.count), 1);
+                const pct = (s.count / maxCount) * 100;
+                return (
+                  <div key={s.alarmType} style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                      <span style={{ color: 'var(--text-primary)', fontSize: 12 }}>{s.alarmType}</span>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600 }}>{s.count}</span>
+                    </div>
+                    <div style={{ background: 'var(--bg-base)', borderRadius: 2, height: 4 }}>
+                      <div style={{ background: 'var(--accent)', height: '100%', width: `${pct}%`, borderRadius: 2 }} />
+                    </div>
+                  </div>
+                );
+              })}
               {typeCounts.length === 0 && <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>No data</span>}
             </WidgetPanel>
           </div>
@@ -180,7 +202,7 @@ export default function AlarmsPage(): React.ReactElement {
       {pageTab === 'thresholds' && (
         <div>
           {thrMsg && (
-            <div role="alert" style={{ background: thrMsg.type === 'ok' ? '#14532d' : '#7f1d1d', border: `1px solid ${thrMsg.type === 'ok' ? '#22c55e' : '#ef4444'}`, borderRadius: 6, padding: '8px 14px', marginBottom: 14, color: thrMsg.type === 'ok' ? '#86efac' : '#fca5a5', fontSize: 13, display: 'flex', justifyContent: 'space-between' }}>
+            <div role="alert" style={{ background: thrMsg.type === 'ok' ? '#f0fdf4' : '#fef2f2', border: `1px solid ${thrMsg.type === 'ok' ? '#16a34a' : '#dc2626'}`, borderRadius: 6, padding: '8px 14px', marginBottom: 14, color: thrMsg.type === 'ok' ? '#15803d' : '#dc2626', fontSize: 13, display: 'flex', justifyContent: 'space-between' }}>
               {thrMsg.text}
               <button onClick={() => setThrMsg(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>×</button>
             </div>
@@ -302,6 +324,35 @@ export default function AlarmsPage(): React.ReactElement {
         </div>
       )}
     </div>
+  );
+}
+
+function TopAlarmsBarChart({ alarms }: { alarms: { alarmType: string; count: number }[] }) {
+  const max = Math.max(...alarms.map((a) => a.count), 1);
+  const BAR_COLORS = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e', '#14b8a6', '#3b82f6', '#a855f7'];
+  const barH = 16; const barGap = 8; const labelW = 180; const chartW = 280;
+  const totalH = alarms.length * (barH + barGap);
+  return (
+    <svg width={labelW + chartW + 50} height={totalH} style={{ display: 'block', overflow: 'visible' }}>
+      {alarms.map((a, i) => {
+        const barWidth = Math.max((a.count / max) * chartW, 4);
+        const y = i * (barH + barGap);
+        const color = BAR_COLORS[i % BAR_COLORS.length];
+        return (
+          <g key={a.alarmType}>
+            <text x={labelW - 6} y={y + barH / 2 + 4} textAnchor="end" fill="var(--text-secondary)" fontSize={11}
+              style={{ fontFamily: 'system-ui, sans-serif' }}>
+              {a.alarmType.length > 22 ? a.alarmType.slice(0, 22) + '…' : a.alarmType}
+            </text>
+            <rect x={labelW} y={y} width={barWidth} height={barH} fill={color} rx={3} fillOpacity={0.85} />
+            <text x={labelW + barWidth + 6} y={y + barH / 2 + 4} fill={color} fontSize={11} fontWeight={700}
+              style={{ fontFamily: 'monospace' }}>
+              {a.count}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 

@@ -6,20 +6,24 @@ import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { AppShell } from './components/layout/AppShell';
 import { LoginPage } from './pages/LoginPage';
 
-const DashboardPage    = lazy(() => import('./pages/DashboardPage'));
-const DevicesPage      = lazy(() => import('./pages/DevicesPage'));
-const DeviceDetailPage = lazy(() => import('./pages/DeviceDetailPage'));
-const AlarmsPage       = lazy(() => import('./pages/AlarmsPage'));
-const TopologyPage     = lazy(() => import('./pages/TopologyPage'));
-const KpiPage          = lazy(() => import('./pages/KpiPage'));
-const ConfigPage       = lazy(() => import('./pages/ConfigPage'));
-const ReportsPage      = lazy(() => import('./pages/ReportsPage'));
-const AdminPage        = lazy(() => import('./pages/AdminPage'));
-const NotFoundPage     = lazy(() => import('./pages/NotFoundPage'));
+const DashboardPage          = lazy(() => import('./pages/DashboardPage'));
+const DevicesPage            = lazy(() => import('./pages/DevicesPage'));
+const DeviceDetailPage       = lazy(() => import('./pages/DeviceDetailPage'));
+const AlarmsPage             = lazy(() => import('./pages/AlarmsPage'));
+const TopologyPage           = lazy(() => import('./pages/TopologyPage'));
+const KpiPage                = lazy(() => import('./pages/KpiPage'));
+const ConfigPage             = lazy(() => import('./pages/ConfigPage'));
+const ReportsPage            = lazy(() => import('./pages/ReportsPage'));
+const AdminPage              = lazy(() => import('./pages/AdminPage'));
+const DiscoveryPage          = lazy(() => import('./pages/DiscoveryPage'));
+const TroubleshootingPage    = lazy(() => import('./pages/TroubleshootingPage'));
+const NotificationRulesPage  = lazy(() => import('./pages/NotificationRulesPage'));
+const CustomDashboardPage    = lazy(() => import('./pages/CustomDashboardPage'));
+const NotFoundPage           = lazy(() => import('./pages/NotFoundPage'));
 
 function LoadingFallback(): React.ReactElement {
   return (
-    <div style={{ color: '#60a5fa', padding: 24, fontSize: 14 }}>Loading…</div>
+    <div style={{ color: 'var(--accent)', padding: 24, fontSize: 14 }}>Loading…</div>
   );
 }
 
@@ -38,12 +42,16 @@ export default function App(): React.ReactElement {
                 <AppShell>
                   <Suspense fallback={<LoadingFallback />}>
                     <Routes>
-                      <Route path="/dashboard"   element={<DashboardPage />} />
-                      <Route path="/devices"     element={<DevicesPage />} />
-                      <Route path="/devices/:id" element={<DeviceDetailPage />} />
-                      <Route path="/alarms"      element={<AlarmsPage />} />
-                      <Route path="/topology"    element={<TopologyPage />} />
-                      <Route path="/kpi"         element={<KpiPage />} />
+                      <Route path="/dashboard"        element={<DashboardPage />} />
+                      <Route path="/devices"          element={<DevicesPage />} />
+                      <Route path="/devices/:id"      element={<DeviceDetailPage />} />
+                      <Route path="/alarms"           element={<AlarmsPage />} />
+                      <Route path="/topology"         element={<TopologyPage />} />
+                      <Route path="/kpi"              element={<KpiPage />} />
+                      <Route path="/discovery"        element={<DiscoveryPage />} />
+                      <Route path="/troubleshoot"     element={<TroubleshootingPage />} />
+                      <Route path="/notifications"    element={<NotificationRulesPage />} />
+                      <Route path="/dashboards"       element={<CustomDashboardPage />} />
                       <Route
                         path="/config"
                         element={

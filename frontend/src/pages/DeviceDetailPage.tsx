@@ -340,13 +340,28 @@ export default function DeviceDetailPage(): React.ReactElement {
 
           <FieldCard title="Birth Certificate (NMS-IV-05)" full>
             {bc && Object.keys(bc).length > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 4 }}>
-                {Object.entries(bc).map(([k, v]) => (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid var(--bg-card)' }}>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{k}</span>
-                    <span style={{ color: 'var(--text-primary)', fontSize: 12, fontFamily: 'monospace' }}>{String(v)}</span>
-                  </div>
-                ))}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                    Captured: {bc.capturedAt ? new Date(String(bc.capturedAt)).toLocaleString() : 'N/A'}
+                  </span>
+                  <button onClick={async () => {
+                    try {
+                      await apiClient.post(`/devices/${device.id}/capture-birth-certificate`);
+                      window.location.reload();
+                    } catch { alert('Re-capture triggered — data will refresh shortly.'); }
+                  }} style={{ background: 'var(--accent-bg)', border: '1px solid var(--accent)', color: 'var(--accent)', padding: '3px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                    🔄 Re-capture
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 4 }}>
+                  {Object.entries(bc).map(([k, v]) => (
+                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid var(--bg-card)' }}>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{k}</span>
+                      <span style={{ color: 'var(--text-primary)', fontSize: 12, fontFamily: 'monospace' }}>{String(v)}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
               <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>

@@ -52,54 +52,54 @@ function kpiBuckets(deviceId, deviceType, networkId, days = 7) {
     if (deviceType === 'BTS') {
       buckets.push({
         deviceId, deviceType, networkId,
-        granularity: '1H',
+        granularity: '1HOUR',
         bucketStart, bucketEnd,
         sampleCount: 12,
         ttlExpiry: new Date(bucketEnd.getTime() + 30 * 86_400_000),
         metrics: {
-          channelUtilizationPct: stats(55 + dayPhase * 20 + noise(), 5, 10),
-          connectedClients:      stats(8  + Math.round(dayPhase * 4), 1, 3),
-          txThroughputMbps:      stats(85 + dayPhase * 30 + noise(), 10, 15),
-          rxThroughputMbps:      stats(40 + dayPhase * 15 + noise(), 5, 8),
-          txPowerDbm:            stats(20 + noise() * 0.5, 0.5, 1),
-          cpuPct:                stats(35 + dayPhase * 15 + noise(), 5, 8),
-          memoryPct:             stats(55 + dayPhase * 10 + noise(), 3, 6),
-          packetLossPct:         stats(Math.max(0, 0.5 + noise() * 0.3), 0.1, 0.5),
-          temperature:           stats(42 + dayPhase * 5 + noise(), 1, 3),
+          channelUtilization: stats(55 + dayPhase * 20 + noise(), 5, 10),
+          connectedClients:   stats(8  + Math.round(dayPhase * 4), 1, 3),
+          throughputUL:       stats(85 + dayPhase * 30 + noise(), 10, 15),
+          throughputDL:       stats(40 + dayPhase * 15 + noise(), 5, 8),
+          txPower:            stats(20 + noise() * 0.5, 0.5, 1),
+          cpuUtilization:     stats(35 + dayPhase * 15 + noise(), 5, 8),
+          memoryUtilization:  stats(55 + dayPhase * 10 + noise(), 3, 6),
+          retryRate:          stats(Math.max(0, 0.5 + noise() * 0.3), 0.1, 0.5),
+          temperature:        stats(42 + dayPhase * 5 + noise(), 1, 3),
         },
       });
     } else if (deviceType === 'CPE') {
       const rssiBase = -62 + noise();
       buckets.push({
         deviceId, deviceType, networkId,
-        granularity: '1H',
+        granularity: '1HOUR',
         bucketStart, bucketEnd,
         sampleCount: 12,
         ttlExpiry: new Date(bucketEnd.getTime() + 30 * 86_400_000),
         metrics: {
-          rssiDbm:          stats(rssiBase, 2, 5),
-          snrDb:            stats(Math.max(5, 25 + (rssiBase + 62)), 1, 3),
-          txThroughputMbps: stats(15 + dayPhase * 8 + noise(), 2, 4),
-          rxThroughputMbps: stats(30 + dayPhase * 10 + noise(), 3, 6),
-          cpuPct:           stats(28 + dayPhase * 10 + noise(), 4, 8),
-          memoryPct:        stats(45 + dayPhase * 8  + noise(), 3, 5),
-          packetLossPct:    stats(Math.max(0, 0.8 + noise() * 0.5), 0.1, 0.8),
+          rssi:             stats(rssiBase, 2, 5),
+          snr:              stats(Math.max(5, 25 + (rssiBase + 62)), 1, 3),
+          throughputUL:     stats(15 + dayPhase * 8 + noise(), 2, 4),
+          throughputDL:     stats(30 + dayPhase * 10 + noise(), 3, 6),
+          cpuUtilization:   stats(28 + dayPhase * 10 + noise(), 4, 8),
+          memoryUtilization:stats(45 + dayPhase * 8  + noise(), 3, 5),
+          retryRate:        stats(Math.max(0, 0.8 + noise() * 0.5), 0.1, 0.8),
           connectedClients: stats(3 + Math.round(dayPhase * 2), 1, 2),
         },
       });
     } else { // IDU
       buckets.push({
         deviceId, deviceType, networkId,
-        granularity: '1H',
+        granularity: '1HOUR',
         bucketStart, bucketEnd,
         sampleCount: 12,
         ttlExpiry: new Date(bucketEnd.getTime() + 30 * 86_400_000),
         metrics: {
-          rssiDbm:          stats(-55 + noise(), 1, 3),
-          snrDb:            stats(32 + noise(), 1, 2),
-          txThroughputMbps: stats(200 + dayPhase * 50 + noise(), 10, 20),
-          rxThroughputMbps: stats(200 + dayPhase * 50 + noise(), 10, 20),
-          packetLossPct:    stats(Math.max(0, 0.1 + noise() * 0.1), 0.02, 0.1),
+          rssi:         stats(-55 + noise(), 1, 3),
+          snr:          stats(32 + noise(), 1, 2),
+          throughputUL: stats(200 + dayPhase * 50 + noise(), 10, 20),
+          throughputDL: stats(200 + dayPhase * 50 + noise(), 10, 20),
+          retryRate:    stats(Math.max(0, 0.1 + noise() * 0.1), 0.02, 0.1),
         },
       });
     }

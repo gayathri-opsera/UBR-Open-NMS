@@ -21,42 +21,49 @@ export function LoginPage(): React.ReactElement {
       await login(username, password);
       navigate(from, { replace: true });
     } catch (err: unknown) {
-      // Surface the real backend message when available
       const axiosErr = err as { response?: { data?: { error?: { message?: string }; message?: string } }; message?: string };
       const msg =
         axiosErr?.response?.data?.error?.message ||
         axiosErr?.response?.data?.message ||
         axiosErr?.message ||
-        'Login failed. Check credentials and try again.';
+        'Invalid username or password';
       setError(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%', padding: '10px 12px', background: '#0f172a',
-    border: '1px solid #1e3a5f', borderRadius: 6, color: '#e2e8f0',
-    fontSize: 14, boxSizing: 'border-box', marginBottom: 16,
-    outline: 'none',
-  };
-
   return (
     <div style={{
-      minHeight: '100vh', background: '#0a1628',
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #1b3270 0%, #1e4a9e 50%, #1253a4 100%)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
+      {/* Card */}
       <div style={{
-        background: '#0d1b2a', border: '1px solid #1e3a5f',
-        borderRadius: 12, padding: 40, width: 360,
+        background: '#ffffff',
+        borderRadius: 12, padding: '40px 44px',
+        width: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.30)',
       }}>
-        <h1 style={{ color: '#60a5fa', marginBottom: 8, fontSize: 22, fontWeight: 700 }}>UBR NMS</h1>
-        <p style={{ color: '#64748b', marginBottom: 32, fontSize: 14 }}>Network Management System</p>
+        {/* Senao Logo */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+          <svg viewBox="0 0 48 48" width={56} height={56}>
+            <rect x="1" y="1" width="46" height="46" rx="12" fill="#1253a4"/>
+            <path d="M15 20 C15 15.5 18 13 22.5 13 C27 13 29 15.5 29 18.5 C29 22 26.5 23.5 23.5 24.5 C20.5 25.5 18 27.5 18 30.5 C18 33 20 35 24 35.5 L32 35.5"
+              stroke="white" strokeWidth="3" strokeLinecap="round" fill="none"/>
+            <circle cx="24" cy="35.5" r="2" fill="white"/>
+          </svg>
+        </div>
+
+        <h1 style={{ color: '#1b3270', marginBottom: 4, fontSize: 22, fontWeight: 700, textAlign: 'center', letterSpacing: '-0.3px' }}>
+          UBR NMS
+        </h1>
+        <p style={{ color: '#718096', marginBottom: 28, fontSize: 13, textAlign: 'center' }}>
+          Network Management System
+        </p>
+
         <form onSubmit={handleSubmit} noValidate>
-          <label
-            htmlFor="nms-username"
-            style={{ display: 'block', color: '#94a3b8', fontSize: 13, marginBottom: 6 }}
-          >
+          <label htmlFor="nms-username" style={{ display: 'block', color: '#4a5568', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>
             Username
           </label>
           <input
@@ -66,12 +73,18 @@ export function LoginPage(): React.ReactElement {
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
             required
-            style={inputStyle}
+            style={{
+              width: '100%', padding: '10px 12px',
+              background: '#fff', border: '1px solid #dde1e7',
+              borderRadius: 6, color: '#1a1a2e', fontSize: 14,
+              boxSizing: 'border-box', marginBottom: 16, outline: 'none',
+              transition: 'border-color 0.15s',
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = '#1967D2')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = '#dde1e7')}
           />
-          <label
-            htmlFor="nms-password"
-            style={{ display: 'block', color: '#94a3b8', fontSize: 13, marginBottom: 6 }}
-          >
+
+          <label htmlFor="nms-password" style={{ display: 'block', color: '#4a5568', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>
             Password
           </label>
           <input
@@ -82,30 +95,42 @@ export function LoginPage(): React.ReactElement {
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             required
-            style={{ ...inputStyle, marginBottom: error ? 0 : 8 }}
+            style={{
+              width: '100%', padding: '10px 12px',
+              background: '#fff', border: '1px solid #dde1e7',
+              borderRadius: 6, color: '#1a1a2e', fontSize: 14,
+              boxSizing: 'border-box', marginBottom: error ? 8 : 20, outline: 'none',
+              transition: 'border-color 0.15s',
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = '#1967D2')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = '#dde1e7')}
           />
+
           {error && (
-            <p role="alert" style={{ color: '#f87171', fontSize: 13, marginBottom: 8, marginTop: 4 }}>
+            <p role="alert" style={{ color: '#dc2626', fontSize: 13, marginBottom: 16, marginTop: 0 }}>
               {error}
             </p>
           )}
+
           <button
             type="submit"
             disabled={loading || !username || !password}
             style={{
               width: '100%', padding: '11px',
-              background: loading || !username || !password ? '#1e3a5f' : '#2563eb',
+              background: loading || !username || !password ? '#93c5fd' : '#1967D2',
               border: 'none', borderRadius: 6, color: '#fff', fontSize: 14,
               fontWeight: 600,
               cursor: loading || !username || !password ? 'not-allowed' : 'pointer',
-              marginTop: 8,
+              letterSpacing: '0.02em',
+              transition: 'background 0.15s',
             }}
           >
-            {loading ? 'Signing in…' : 'Sign in'}
+            {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
-        <p style={{ color: '#475569', fontSize: 12, marginTop: 20, textAlign: 'center' }}>
-          Default credentials: <span style={{ color: '#60a5fa' }}>admin</span> / Admin@NMS2024!
+
+        <p style={{ color: '#a0aec0', fontSize: 12, marginTop: 20, textAlign: 'center' }}>
+          Default: <span style={{ color: '#1967D2', fontWeight: 600 }}>admin</span> / Admin@NMS2024!
         </p>
       </div>
     </div>

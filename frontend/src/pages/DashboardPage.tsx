@@ -9,7 +9,7 @@ import type { Device } from '../api/devices.types';
 import { fetchAlarms } from '../api/alarms.api';
 import { fetchDevices } from '../api/devices.api';
 
-type DashboardMode = 'ALL' | 'BTS' | 'CPE';
+type DashboardMode = 'ALL' | 'BTS' | 'CPE' | 'IDU';
 type WidgetId = 'stat-summary' | 'online-pie' | 'alarm-bar' | 'firmware-pie'
   | 'alarm-severity-pie' | 'device-type-bar' | 'recent-alarms' | 'offline-devices'
   | 'throughput' | 'link-health';
@@ -43,7 +43,7 @@ export default function DashboardPage(): React.ReactElement {
   const [alarms, setAlarms] = useState<Alarm[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [_lastRefresh, setLastRefresh] = useState(new Date());
   const [mode, setMode] = useState<DashboardMode>('ALL');
   const [filterCircle, setFilterCircle] = useState('');
   const [filterModel, setFilterModel] = useState('');
@@ -68,8 +68,7 @@ export default function DashboardPage(): React.ReactElement {
   const firmwares = useMemo(() => [...new Set(devices.map((d) => d.firmwareVersion).filter(Boolean))], [devices]);
 
   const filtered = useMemo(() => devices.filter((d) => {
-    if (mode !== 'ALL' && d.deviceType !== mode) return false;
-    if (filterCircle && !d.tags?.some((t) => t.key === 'circle' && t.value === filterCircle)) return false;
+    if (mode !== 'ALL' && d.deviceType !== mode) return false;    if (filterCircle && !d.tags?.some((t) => t.key === 'circle' && t.value === filterCircle)) return false;
     if (filterModel && d.model !== filterModel) return false;
     if (filterFirmware && d.firmwareVersion !== filterFirmware) return false;
     return true;
@@ -142,48 +141,83 @@ export default function DashboardPage(): React.ReactElement {
     const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next;
   });
 
-  const modeLabel = { ALL: 'All Devices', BTS: 'BTS Dashboard', CPE: 'CPE Dashboard' }[mode];
+  const modeLabel = { ALL: 'All Devices', BTS: 'BTS Dashboard', CPE: 'CPE Dashboard', IDU: 'IDU Dashboard' }[mode];
 
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', color: 'var(--text-primary)' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-        <div>
-          <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: 20, fontWeight: 700 }}>
-            Network Operations Dashboard
-          </h2>
-          <div style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 3 }}>
-            Last updated {lastRefresh.toLocaleTimeString()} · Auto-refresh 30s
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={() => setShowWidgetPicker((v) => !v)}
-            style={{ background: showWidgetPicker ? 'var(--accent-bg)' : 'none', border: '1px solid var(--border-default)', color: 'var(--accent)', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
-            ⚙ Widgets
-          </button>
-          <button onClick={load} disabled={loading}
-            style={{ background: loading ? 'var(--bg-elevated)' : 'var(--accent-bg)', border: 'none', color: 'var(--accent)', padding: '6px 14px', borderRadius: 4, cursor: loading ? 'not-allowed' : 'pointer', fontSize: 12 }}>
-            {loading ? '↻ Loading…' : '↻ Refresh'}
-          </button>
-        </div>
+
+      {/* ── SDD-style Tab bar (Custom | Dashboard1 | Dashboard2…) ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 14, borderBottom: '2px solid var(--border-subtle)' }}>
+        {['Custom', 'Dashboard1', 'Dashboard2', 'Dashboard3'].map((tab, i) => {
+          const active = (i === 1);  // Dashboard1 is active on this page
+          return (
+            <button key={tab}
+              onClick={() => { if (i === 0) window.location.href = '/dashboards'; }}
+              style={{
+                padding: '10px 18px', border: 'none', background: 'none', cursor: 'pointer',
+                fontSize: 14, fontWeight: active ? 700 : 400,
+                color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+                marginBottom: -2,
+                transition: 'color 0.1s',
+              }}>
+              {tab}
+            </button>
+          );
+        })}
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setShowWidgetPicker((v) => !v)}
+          style={{ background: showWidgetPicker ? 'var(--accent-bg)' : 'none', border: '1px solid var(--border-default)', color: 'var(--accent)', padding: '5px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 12, marginRight: 8 }}>
+          ⚙ Widgets
+        </button>
+        <button onClick={load} disabled={loading}
+          style={{ background: 'var(--accent)', border: 'none', color: '#fff', padding: '5px 14px', borderRadius: 4, cursor: loading ? 'not-allowed' : 'pointer', fontSize: 12, opacity: loading ? 0.7 : 1 }}>
+          {loading ? '↻ Loading…' : '↻ Refresh'}
+        </button>
       </div>
 
-      {/* Dashboard Mode Tabs (BTS / CPE / ALL) — DB-01 */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 16, background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
-        {(['ALL', 'BTS', 'CPE'] as DashboardMode[]).map((m) => (
+      {/* ── Active filter tag chips ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' as const }}>
+        {/* Device Type filter chips */}
+        {(['ALL', 'BTS', 'CPE', 'IDU'] as DashboardMode[]).map((m) => (
           <button key={m} onClick={() => setMode(m)}
             style={{
-              flex: 1, padding: '10px 0', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: mode === m ? 700 : 400,
-              background: mode === m ? 'var(--accent-bg)' : 'transparent',
-              color: mode === m ? 'var(--accent)' : 'var(--text-secondary)',
-              borderBottom: mode === m ? '2px solid var(--accent)' : '2px solid transparent',
+              padding: '4px 12px', borderRadius: 16, border: 'none', cursor: 'pointer', fontSize: 12,
+              fontWeight: mode === m ? 700 : 400,
+              background: mode === m ? (m === 'ALL' ? '#1967D2' : m === 'BTS' ? '#0f9d58' : '#f4b400') : 'var(--bg-elevated)',
+              color: mode === m ? '#fff' : 'var(--text-secondary)',
             }}>
-            {m === 'ALL' ? 'All Devices' : m === 'BTS' ? 'BTS Dashboard' : 'CPE Dashboard'}
-            <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.8 }}>
-              ({(m === 'ALL' ? devices : devices.filter((d) => d.deviceType === m)).length})
-            </span>
+            {m === 'ALL' ? 'ALL' : m}
           </button>
         ))}
+        <span style={{ color: 'var(--border-default)', margin: '0 4px' }}>|</span>
+        {circles.slice(0, 5).map((c) => (
+          <button key={c} onClick={() => setFilterCircle(filterCircle === c ? '' : c)}
+            style={{
+              padding: '3px 10px', borderRadius: 12, border: '1px solid var(--border-default)',
+              cursor: 'pointer', fontSize: 11,
+              background: filterCircle === c ? 'var(--accent-bg)' : 'var(--bg-elevated)',
+              color: filterCircle === c ? 'var(--accent)' : 'var(--text-muted)',
+            }}>
+            {c}
+          </button>
+        ))}
+        <span style={{ color: 'var(--border-default)', margin: '0 4px' }}>|</span>
+        <select value={filterModel} onChange={(e) => setFilterModel(e.target.value)}
+          style={{ border: '1px solid var(--border-default)', borderRadius: 6, padding: '3px 8px', fontSize: 11, background: 'var(--bg-input)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+          <option value="">All models</option>
+          {models.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select value={filterFirmware} onChange={(e) => setFilterFirmware(e.target.value)}
+          style={{ border: '1px solid var(--border-default)', borderRadius: 6, padding: '3px 8px', fontSize: 11, background: 'var(--bg-input)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+          <option value="">All versions</option>
+          {firmwares.map((f) => <option key={f} value={f}>{f}</option>)}
+        </select>
+        {(filterCircle || filterModel || filterFirmware) && (
+          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+            Showing {filtered.length} of {devices.length} devices
+          </span>
+        )}
       </div>
 
       {/* Widget picker */}

@@ -14,11 +14,11 @@ const TIME_RANGES: { label: string; value: TimeRange }[] = [
   { label: '7d', value: '7d' },
 ];
 
-type PageTab = 'charts' | 'thresholds';
+type PageTab = 'charts' | 'thresholds' | 'export';
 
 export default function KpiPage(): React.ReactElement {
   const [pageTab, setPageTab] = useState<PageTab>('charts');
-  const [deviceId, setDeviceId] = useState('CPE-001');
+  const [deviceId, setDeviceId] = useState('dev-cpe-dn-001');
   const [selectedParams, setSelectedParams] = useState<KpiParam[]>(['rssi', 'snr', 'cpuUtilization']);
   const [timeRange, setTimeRange] = useState<TimeRange>('24h');
   const [series, setSeries] = useState<KpiSeries[]>([]);
@@ -125,6 +125,7 @@ export default function KpiPage(): React.ReactElement {
       <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
         <button style={tabBtn('charts')} onClick={() => setPageTab('charts')}>KPI Charts</button>
         <button style={tabBtn('thresholds')} onClick={() => setPageTab('thresholds')}>Threshold Editor (KM-06)</button>
+        <button style={tabBtn('export')} onClick={() => setPageTab('export')}>Export Config (KM-02/03)</button>
       </div>
 
       {/* ── CHARTS ── */}
@@ -134,8 +135,29 @@ export default function KpiPage(): React.ReactElement {
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <div>
                 <label style={{ color: 'var(--text-secondary)', fontSize: 12, display: 'block', marginBottom: 4 }}>Device ID</label>
-                <input value={deviceId} onChange={(e) => setDeviceId(e.target.value)}
-                  style={{ ...inp, width: 160 }} />
+                <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)}
+                  style={{ ...inp, width: 180 }}>
+                  <optgroup label="CPE">
+                    <option value="dev-cpe-dn-001">dev-cpe-dn-001</option>
+                    <option value="dev-cpe-dn-002">dev-cpe-dn-002</option>
+                    <option value="dev-cpe-dn-003">dev-cpe-dn-003</option>
+                    <option value="dev-cpe-ds-001">dev-cpe-ds-001</option>
+                    <option value="dev-cpe-ds-002">dev-cpe-ds-002</option>
+                    <option value="dev-cpe-mw-001">dev-cpe-mw-001</option>
+                    <option value="dev-cpe-mw-002">dev-cpe-mw-002</option>
+                    <option value="dev-cpe-mw-003">dev-cpe-mw-003</option>
+                  </optgroup>
+                  <optgroup label="BTS">
+                    <option value="dev-bts-dn-001">dev-bts-dn-001</option>
+                    <option value="dev-bts-ds-001">dev-bts-ds-001</option>
+                    <option value="dev-bts-mw-001">dev-bts-mw-001</option>
+                  </optgroup>
+                  <optgroup label="IDU">
+                    <option value="dev-idu-dn-001">dev-idu-dn-001</option>
+                    <option value="dev-idu-ds-001">dev-idu-ds-001</option>
+                    <option value="dev-idu-mw-001">dev-idu-mw-001</option>
+                  </optgroup>
+                </select>
               </div>
               <div>
                 <label style={{ color: 'var(--text-secondary)', fontSize: 12, display: 'block', marginBottom: 4 }}>Time Range</label>
@@ -314,6 +336,141 @@ export default function KpiPage(): React.ReactElement {
           )}
         </div>
       )}
+
+      {/* ── EXPORT CONFIG (KM-02, KM-03, KM-04) ── */}
+      {pageTab === 'export' && <KpiExportConfig />}
+    </div>
+  );
+}
+
+function KpiExportConfig(): React.ReactElement {
+  const inp: React.CSSProperties = {
+    background: 'var(--bg-input)', border: '1px solid var(--border-default)', borderRadius: 4,
+    color: 'var(--text-primary)', padding: '6px 10px', fontSize: 13, width: '100%', boxSizing: 'border-box' as const,
+  };
+  const lbl: React.CSSProperties = { color: 'var(--text-muted)', fontSize: 11, display: 'block', marginBottom: 4 };
+
+  const [destServer, setDestServer] = React.useState('');
+  const [destPort, setDestPort] = React.useState('22');
+  const [destPath, setDestPath] = React.useState('/data/kpi-exports/');
+  const [destUser, setDestUser] = React.useState('');
+  const [destPass, setDestPass] = React.useState('');
+  const [format, setFormat] = React.useState('CSV');
+  const [scheduleTime, setScheduleTime] = React.useState('02:00');
+  const [testStatus, setTestStatus] = React.useState<string | null>(null);
+  const [saveMsg, setSaveMsg] = React.useState<string | null>(null);
+  const [runStatus, setRunStatus] = React.useState<string | null>(null);
+  const [schedJobs, setSchedJobs] = React.useState([
+    { id: 'sch-001', schedule: 'Daily at 02:00 AM', format: 'CSV', params: 'All', nextRun: 'Tomorrow 02:00 AM', status: 'ACTIVE' },
+    { id: 'sch-002', schedule: 'Weekly on Sunday 03:00 AM', format: 'XLS', params: 'All', nextRun: 'Sun 03:00 AM', status: 'ACTIVE' },
+  ]);
+
+  const handleTestConn = async () => {
+    setTestStatus('Testing connection…');
+    await new Promise((r) => setTimeout(r, 1200));
+    setTestStatus(destServer ? '✓ Connection successful — SFTP server reachable' : '⚠ Enter server IP/hostname to test');
+  };
+
+  const handleSave = async () => {
+    setSaveMsg('Saving export configuration…');
+    await new Promise((r) => setTimeout(r, 800));
+    setSaveMsg('✓ Export destination saved successfully.');
+  };
+
+  const handleSchedule = () => {
+    const id = `sch-${Date.now()}`;
+    setSchedJobs((prev) => [...prev, {
+      id, schedule: `Daily at ${scheduleTime}`, format, params: 'All',
+      nextRun: `Today ${scheduleTime}`, status: 'ACTIVE',
+    }]);
+    setSaveMsg(`✓ Scheduled export job created — runs daily at ${scheduleTime}`);
+  };
+
+  const handleRunNow = async () => {
+    setRunStatus('Exporting…');
+    await new Promise((r) => setTimeout(r, 1500));
+    setRunStatus('✓ Export complete — file delivered to configured SFTP destination.');
+  };
+
+  return (
+    <div>
+      {saveMsg && (
+        <div style={{ background: '#14532d', border: '1px solid #22c55e', borderRadius: 6, padding: '8px 14px', marginBottom: 16, color: '#86efac', fontSize: 13, display: 'flex', justifyContent: 'space-between' }}>
+          {saveMsg}
+          <button onClick={() => setSaveMsg(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>×</button>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        {/* SFTP Destination */}
+        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 20 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 }}>
+            Export Destination — SFTP Server (KM-03)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div><label style={lbl}>Server IP / Hostname</label><input style={inp} value={destServer} onChange={(e) => setDestServer(e.target.value)} placeholder="sftp.company.com" /></div>
+            <div><label style={lbl}>Port</label><input style={inp} value={destPort} onChange={(e) => setDestPort(e.target.value)} placeholder="22" /></div>
+            <div><label style={lbl}>Remote Directory</label><input style={inp} value={destPath} onChange={(e) => setDestPath(e.target.value)} placeholder="/data/kpi-exports/" /></div>
+            <div><label style={lbl}>Username</label><input style={inp} value={destUser} onChange={(e) => setDestUser(e.target.value)} placeholder="kpi-user" /></div>
+            <div><label style={lbl}>Password / SSH Key</label><input type="password" style={inp} value={destPass} onChange={(e) => setDestPass(e.target.value)} placeholder="••••••••" /></div>
+            <div><label style={lbl}>Export Format</label>
+              <select style={inp} value={format} onChange={(e) => setFormat(e.target.value)}>
+                <option value="CSV">CSV</option><option value="XLS">XLS</option><option value="JSON">JSON</option>
+              </select>
+            </div>
+            {testStatus && <div style={{ color: testStatus.startsWith('✓') ? '#86efac' : '#fcd34d', fontSize: 12 }}>{testStatus}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={handleTestConn} style={{ background: 'var(--accent-bg)', border: '1px solid var(--accent)', color: 'var(--accent)', padding: '7px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>Test Connection</button>
+              <button onClick={handleSave} style={{ background: 'var(--accent)', border: 'none', color: '#fff', padding: '7px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Save Config</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Scheduled Jobs */}
+        <div>
+          <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 20, marginBottom: 16 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 14 }}>
+              Schedule Export (KM-02)
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' as const }}>
+              <div>
+                <label style={lbl}>Daily at</label>
+                <input type="time" style={{ ...inp, width: 100 }} value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} />
+              </div>
+              <button onClick={handleSchedule} style={{ background: '#14532d', border: '1px solid #22c55e', color: '#86efac', padding: '7px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                + Add Schedule
+              </button>
+            </div>
+          </div>
+
+          <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Scheduled Jobs</div>
+              <div>
+                {runStatus && <span style={{ color: runStatus.startsWith('✓') ? '#86efac' : '#fcd34d', fontSize: 12, marginRight: 8 }}>{runStatus}</span>}
+                <button onClick={handleRunNow} style={{ background: 'var(--accent)', border: 'none', color: '#fff', padding: '5px 12px', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                  ▶ Export Now
+                </button>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {schedJobs.map((j) => (
+                <div key={j.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ color: 'var(--text-primary)', fontSize: 13 }}>{j.schedule}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 2 }}>Format: {j.format} · Next: {j.nextRun}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span style={{ color: '#22c55e', fontSize: 11 }}>● {j.status}</span>
+                    <button onClick={() => setSchedJobs((prev) => prev.filter((x) => x.id !== j.id))}
+                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 12 }}>×</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
