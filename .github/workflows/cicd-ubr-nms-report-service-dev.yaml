@@ -29,6 +29,12 @@ permissions:
   id-token: write
   security-events: write
 
+# C2C RULE: serialize all manifest pushes to main-clean to prevent non-fast-forward conflicts
+concurrency:
+  group: ubr-nms-manifests
+  cancel-in-progress: false
+
+
 jobs:
   # ── Stage 1: Bootstrap Prerequisites ─────────────────────────
   check-bootstrap-prerequisites:
@@ -213,17 +219,18 @@ jobs:
           fi
           git add -A
           git commit -m "chore: update report-service image to ${{ needs.build-image.outputs.image-tag }} [skip ci]"
-          for i in 1 2 3; do
+          for i in 1 2 3 4 5; do
             if git push origin HEAD; then
               echo "✅ Pushed manifests"
               exit 0
             fi
-            echo "Push failed, retrying ($i/3)..."
-            if ! git pull --rebase origin HEAD; then
-              git rebase --abort || true
-              git pull --no-rebase origin HEAD
-            fi
-            sleep 3
+            echo "Push failed, retrying ($i/5)..."
+            # Pull remote changes and re-apply our commit on top
+            git fetch origin main-clean
+            git rebase origin/main-clean || { git rebase --abort; git reset --soft origin/main-clean; git add -A; git commit --amend --no-edit; }
+            SLEEP_TIME=$((5 * i))
+            echo "  Waiting ${SLEEP_TIME}s before retry..."
+            sleep $SLEEP_TIME
           done
           exit 1
 
@@ -259,6 +266,15 @@ jobs:
           echo "✅ ArgoCD app recreated: $APP_ARGOCD"
           echo "Waiting 45s for ArgoCD to load manifests from main-clean..."
           sleep 45
+          echo "⏳ Verifying ArgoCD app registered (up to 60s)..."
+          for i in 1 2 3 4 5 6; do
+            if kubectl get app "$APP_ARGOCD" -n argocd &>/dev/null; then
+              echo "✅ App $APP_ARGOCD confirmed registered in ArgoCD"
+              break
+            fi
+            echo "  [$i/6] App not yet visible, waiting 10s..."
+            sleep 10
+          done
 
   # ── Stage 8 & 9: Refresh ECR Secret + ArgoCD Refresh ────────
   refresh-ecr-secret:
