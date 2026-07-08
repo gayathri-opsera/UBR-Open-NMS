@@ -4,16 +4,15 @@ kind: Kustomization
 namespace: opsera-ubr-nms-dev
 
 resources:
-  - ../../base
-  - namespace.yaml
+- ../../base
+- namespace.yaml
 
 images:
-  - name: PLACEHOLDER_MOBINET_SYNC_ECR_URI
-    newName: PLACEHOLDER_MOBINET_SYNC_ECR_URI
-    newTag: v1.0.0
+- name: PLACEHOLDER_MOBINET_SYNC_ECR_URI
+  newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-mobinet-sync
+  newTag: dev-361f2305-20260708025527
 
 labels:
-  - pairs:
-      environment: dev
-      tenant: opsera
-    includeSelectors: false
+- pairs:
+    environment: dev
+    tenant: opsera
