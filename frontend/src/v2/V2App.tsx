@@ -1,10 +1,10 @@
 import React, { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 import { V2AppShell } from './components/layout/V2AppShell';
 import { LoadingState } from './components/common/States';
 import { ErrorBoundary } from './components/common/States';
-import type { Role } from '../../auth/tokens';
+import type { Role } from '../auth/tokens';
 
 import './styles/v2-theme.css';
 import './styles/v2-animations.css';
