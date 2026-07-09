@@ -1,0 +1,162 @@
+/**
+ * v2-theme.mock.css
+ * =============================================================================
+ * Minimal subset of VisualForge V2 design tokens for use in component test
+ * environments (jsdom / Vitest).
+ *
+ * Purpose: jsdom does not compute CSS custom properties from real stylesheets,
+ * so components that reference VF tokens in tests must import this fixture to
+ * avoid undefined variable errors.
+ *
+ * Usage in tests:
+ *   import '../../v2/styles/v2-theme.mock.css';
+ *
+ * or in vitest.config.ts setupFiles:
+ *   setupFiles: ['./src/v2/styles/v2-theme.mock.css']
+ *
+ * This file intentionally contains only a minimal subset — enough to prevent
+ * CSS variable resolution failures in component tests. Full token definitions
+ * live in v2-theme.css.
+ * =============================================================================
+ */
+:root {
+  /* ── Background Hierarchy ─────────────────────────────────────────────── */
+  --vf-canvas:          #07111f;
+  --vf-surface:         #0d1b2a;
+  --vf-elevated:        #112240;
+  --vf-input-bg:        #0f1e30;
+  --vf-sidebar-bg:      #060e1b;
+
+  /* ── Text ────────────────────────────────────────────────────────────── */
+  --vf-text-primary:    #e2e8f0;
+  --vf-text-secondary:  #94a3b8;
+  --vf-text-muted:      #64748b;
+  --vf-text-dim:        #475569;
+  --vf-text-inverse:    #07111f;
+
+  /* ── Border ──────────────────────────────────────────────────────────── */
+  --vf-border-subtle:   #1a2d43;
+  --vf-border-default:  #1e3a5f;
+  --vf-border-strong:   #2d4a6b;
+
+  /* ── Accent ──────────────────────────────────────────────────────────── */
+  --vf-accent:          #4d9eff;
+  --vf-accent-hover:    #74b5ff;
+  --vf-accent-subtle:   rgba(77,158,255,0.12);
+  --vf-accent-bg:       #0d2646;
+
+  /* ── Status ──────────────────────────────────────────────────────────── */
+  --vf-status-online:   #22c55e;
+  --vf-status-offline:  #f87171;
+  --vf-status-degraded: #fbbf24;
+  --vf-status-unknown:  #94a3b8;
+
+  /* ── Severity ────────────────────────────────────────────────────────── */
+  --vf-sev-critical:    #ff4d4d;
+  --vf-sev-critical-bg: #2a0a0a;
+  --vf-sev-major:       #fb923c;
+  --vf-sev-major-bg:    #2a1200;
+  --vf-sev-minor:       #facc15;
+  --vf-sev-minor-bg:    #241e00;
+  --vf-sev-warning:     #fbbf24;
+  --vf-sev-warning-bg:  #1e1800;
+  --vf-sev-clear:       #22c55e;
+  --vf-sev-clear-bg:    #02200c;
+
+  /* ── Shell ───────────────────────────────────────────────────────────── */
+  --vf-shell-active-bg:        rgba(77,158,255,0.15);
+  --vf-shell-hover-bg:         rgba(255,255,255,0.06);
+  --vf-shell-active-indicator: #4d9eff;
+
+  /* ── Semantic States ──────────────────────────────────────────────────── */
+  --vf-success:        #22c55e;
+  --vf-success-subtle: rgba(34,197,94,0.12);
+  --vf-success-bg:     #02200c;
+  --vf-warning:        #f59e0b;
+  --vf-warning-subtle: rgba(245,158,11,0.12);
+  --vf-warning-bg:     #1e1800;
+  --vf-danger:         #ef4444;
+  --vf-danger-subtle:  rgba(239,68,68,0.12);
+  --vf-danger-bg:      #2a0a0a;
+  --vf-info:           #38bdf8;
+  --vf-info-subtle:    rgba(56,189,248,0.12);
+  --vf-info-bg:        #031d2e;
+
+  /* ── Typography ──────────────────────────────────────────────────────── */
+  --vf-font-sans:   system-ui, sans-serif;
+  --vf-font-mono:   monospace;
+
+  --vf-type-display-size:     2.5rem;
+  --vf-type-display-line:     1.2;
+  --vf-type-display-weight:   700;
+  --vf-type-display-tracking: -0.03em;
+
+  --vf-type-h1-size:    1.875rem;
+  --vf-type-h1-line:    1.25;
+  --vf-type-h1-weight:  700;
+  --vf-type-h1-tracking: -0.02em;
+
+  --vf-type-h2-size:    1.375rem;
+  --vf-type-h2-line:    1.3;
+  --vf-type-h2-weight:  600;
+  --vf-type-h2-tracking: -0.01em;
+
+  --vf-type-h3-size:    1.125rem;
+  --vf-type-h3-line:    1.4;
+  --vf-type-h3-weight:  600;
+  --vf-type-h3-tracking: -0.005em;
+
+  --vf-type-h4-size:    0.9375rem;
+  --vf-type-h4-line:    1.45;
+  --vf-type-h4-weight:  600;
+  --vf-type-h4-tracking: 0em;
+
+  --vf-type-body-size:    0.875rem;
+  --vf-type-body-line:    1.6;
+  --vf-type-body-weight:  400;
+  --vf-type-body-tracking: 0em;
+
+  --vf-type-caption-size:    0.75rem;
+  --vf-type-caption-line:    1.5;
+  --vf-type-caption-weight:  400;
+  --vf-type-caption-tracking: 0.01em;
+
+  /* ── Spacing ──────────────────────────────────────────────────────────── */
+  --vf-space-xs:  4px;
+  --vf-space-sm:  8px;
+  --vf-space-md:  16px;
+  --vf-space-lg:  24px;
+  --vf-space-xl:  32px;
+  --vf-space-2xl: 48px;
+  --vf-space-3xl: 64px;
+
+  /* ── Elevation ────────────────────────────────────────────────────────── */
+  --vf-shadow-none:   none;
+  --vf-shadow-low:    0 1px 3px rgba(0,0,0,0.45);
+  --vf-shadow-medium: 0 4px 12px rgba(0,0,0,0.55);
+  --vf-shadow-high:   0 12px 32px rgba(0,0,0,0.65);
+
+  /* ── Border Radius ────────────────────────────────────────────────────── */
+  --vf-radius-sm:   4px;
+  --vf-radius-md:   8px;
+  --vf-radius-lg:   12px;
+  --vf-radius-full: 9999px;
+
+  /* ── Transitions ──────────────────────────────────────────────────────── */
+  --vf-transition-fast:   150ms ease;
+  --vf-transition-normal: 250ms ease;
+  --vf-transition-slow:   350ms ease;
+
+  /* ── Breakpoints ──────────────────────────────────────────────────────── */
+  --vf-bp-md:  1280px;
+  --vf-bp-lg:  1440px;
+  --vf-bp-xl:  1920px;
+  --vf-bp-2xl: 2560px;
+
+  /* ── Scrollbar ────────────────────────────────────────────────────────── */
+  --vf-scrollbar-track: #07111f;
+  --vf-scrollbar-thumb: #1e3a5f;
+
+  /* ── Focus Ring ───────────────────────────────────────────────────────── */
+  --vf-focus-ring: 0 0 0 2px #07111f, 0 0 0 4px #4d9eff;
+}
