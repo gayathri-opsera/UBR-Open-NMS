@@ -1,0 +1,141 @@
+/**
+ * VisualForge V2 Responsive Layout System
+ * =============================================================================
+ * CSS utilities for responsive grid layouts, container queries, and
+ * breakpoint-aware spacing using V2 token breakpoints.
+ *
+ * Breakpoints (from v2-theme.css tokens):
+ *   --vf-bp-md:  1280px
+ *   --vf-bp-lg:  1440px
+ *   --vf-bp-xl:  1920px
+ *   --vf-bp-2xl: 2560px
+ * =============================================================================
+ */
+
+/* ─── Base layout ────────────────────────────────────────────────────────────── */
+
+.vf-container {
+  width: 100%;
+  max-width: var(--vf-bp-xl);
+  margin-inline: auto;
+  padding-inline: var(--vf-space-lg);
+}
+
+.vf-container--fluid {
+  max-width: none;
+}
+
+.vf-container--narrow {
+  max-width: 960px;
+}
+
+/* ─── Page layout ────────────────────────────────────────────────────────────── */
+
+.vf-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vf-space-lg);
+  padding: var(--vf-space-lg);
+  min-height: 0;
+  animation: vf-slide-in-up 200ms ease both;
+}
+
+.vf-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vf-space-md);
+  flex-wrap: wrap;
+}
+
+.vf-page-title {
+  font-size: var(--vf-type-h2-size);
+  font-weight: var(--vf-type-h2-weight);
+  letter-spacing: var(--vf-type-h2-tracking);
+  color: var(--vf-text-primary);
+  margin: 0;
+}
+
+.vf-page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--vf-space-sm);
+  flex-wrap: wrap;
+}
+
+/* ─── Grid system ────────────────────────────────────────────────────────────── */
+
+.vf-grid {
+  display: grid;
+  gap: var(--vf-space-md);
+}
+
+.vf-grid--1 { grid-template-columns: 1fr; }
+.vf-grid--2 { grid-template-columns: repeat(2, 1fr); }
+.vf-grid--3 { grid-template-columns: repeat(3, 1fr); }
+.vf-grid--4 { grid-template-columns: repeat(4, 1fr); }
+
+.vf-grid--auto-sm { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.vf-grid--auto-md { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.vf-grid--auto-lg { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+
+/* ─── Flex utilities ─────────────────────────────────────────────────────────── */
+
+.vf-flex         { display: flex; }
+.vf-flex-col     { display: flex; flex-direction: column; }
+.vf-flex-center  { display: flex; align-items: center; justify-content: center; }
+.vf-flex-between { display: flex; align-items: center; justify-content: space-between; }
+.vf-flex-wrap    { flex-wrap: wrap; }
+.vf-flex-1       { flex: 1; }
+.vf-flex-shrink-0 { flex-shrink: 0; }
+
+/* ─── Gap utilities ──────────────────────────────────────────────────────────── */
+
+.vf-gap-xs  { gap: var(--vf-space-xs); }
+.vf-gap-sm  { gap: var(--vf-space-sm); }
+.vf-gap-md  { gap: var(--vf-space-md); }
+.vf-gap-lg  { gap: var(--vf-space-lg); }
+.vf-gap-xl  { gap: var(--vf-space-xl); }
+
+/* ─── Padding/margin utilities ───────────────────────────────────────────────── */
+
+.vf-p-sm  { padding: var(--vf-space-sm); }
+.vf-p-md  { padding: var(--vf-space-md); }
+.vf-p-lg  { padding: var(--vf-space-lg); }
+.vf-px-md { padding-inline: var(--vf-space-md); }
+.vf-py-sm { padding-block: var(--vf-space-sm); }
+.vf-py-md { padding-block: var(--vf-space-md); }
+
+/* ─── KPI metric grid ────────────────────────────────────────────────────────── */
+
+.vf-kpi-grid {
+  display: grid;
+  gap: var(--vf-space-md);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+/* ─── Responsive overrides at 1280px (md) ────────────────────────────────────── */
+
+@media (max-width: 1280px) {
+  .vf-grid--4 { grid-template-columns: repeat(2, 1fr); }
+  .vf-grid--3 { grid-template-columns: repeat(2, 1fr); }
+  .vf-container { padding-inline: var(--vf-space-md); }
+  .vf-page { padding: var(--vf-space-md); }
+}
+
+/* ─── Responsive overrides at 960px (sm) ─────────────────────────────────────── */
+
+@media (max-width: 960px) {
+  .vf-grid--4,
+  .vf-grid--3,
+  .vf-grid--2 { grid-template-columns: 1fr; }
+  .vf-page-header { flex-direction: column; align-items: flex-start; }
+  .vf-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ─── Ultra-wide (2xl) ───────────────────────────────────────────────────────── */
+
+@media (min-width: 2560px) {
+  .vf-grid--auto-md { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .vf-kpi-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+}

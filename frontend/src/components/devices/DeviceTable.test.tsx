@@ -26,7 +26,8 @@ describe('DeviceTable', () => {
 
   it('shows pending command badge for device with pending > 0', () => {
     render(<DeviceTable devices={MOCK_DEVICES} onSelect={onSelect} />);
-    expect(screen.getByText('2')).toBeInTheDocument(); // d1 has 2 pending
+    // d1 has pendingCommandCount: 2 — badge renders as "⏳ 2"
+    expect(screen.getByText(/⏳\s*2/)).toBeInTheDocument();
   });
 
   it('does not show pending badge when 0', () => {
@@ -49,6 +50,7 @@ describe('DeviceTable', () => {
 
   it('shows dash for devices without GPS', () => {
     render(<DeviceTable devices={MOCK_DEVICES} onSelect={onSelect} />);
-    expect(screen.getByText('—')).toBeInTheDocument();
+    // d3 has no location — multiple '—' cells are expected (lat + lng)
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(1);
   });
 });

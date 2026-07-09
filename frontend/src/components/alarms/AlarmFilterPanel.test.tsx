@@ -31,7 +31,7 @@ describe('AlarmFilterPanel', () => {
 
   it('clears all filters when Clear clicked', () => {
     render(<AlarmFilterPanel filter={{ severity: ['MAJOR'], networkId: 'net-1' }} onChange={onChange} />);
-    fireEvent.click(screen.getByText('Clear'));
+    fireEvent.click(screen.getByText('✕ Clear'));
     expect(onChange).toHaveBeenCalledWith({});
   });
 });

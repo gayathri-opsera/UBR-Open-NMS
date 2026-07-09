@@ -16,7 +16,7 @@ describe('AlarmTable', () => {
 
   it('shows empty state when no alarms', () => {
     render(<AlarmTable alarms={[]} onAcknowledge={onAck} />);
-    expect(screen.getByText(/no alarms matching/i)).toBeInTheDocument();
+    expect(screen.getByText(/no alarms match/i)).toBeInTheDocument();
   });
 
   it('color-codes severity badge', () => {

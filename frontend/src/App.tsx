@@ -5,6 +5,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { AppShell } from './components/layout/AppShell';
 import { LoginPage } from './pages/LoginPage';
+import { V2App } from './v2/V2App';
 
 const DashboardPage          = lazy(() => import('./pages/DashboardPage'));
 const DevicesPage            = lazy(() => import('./pages/DevicesPage'));
@@ -35,6 +36,8 @@ export default function App(): React.ReactElement {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {/* V2 UI — new VisualForge shell mounted at /v2/* */}
+          <Route path="/v2/*" element={<V2App />} />
           <Route
             path="/*"
             element={

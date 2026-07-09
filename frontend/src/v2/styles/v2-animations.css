@@ -1,0 +1,122 @@
+/**
+ * VisualForge V2 Animation System
+ * =============================================================================
+ * Keyframe definitions and animation utility classes for the V2 UI.
+ * Import alongside v2-theme.css for the full animation vocabulary.
+ *
+ * Usage: import './v2/styles/v2-animations.css';
+ * =============================================================================
+ */
+
+/* ─── Core keyframes ─────────────────────────────────────────────────────────── */
+
+@keyframes vf-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes vf-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes vf-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes vf-scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes vf-scale-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.95); }
+}
+
+@keyframes vf-slide-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes vf-slide-in-down {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes vf-slide-in-left {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes vf-slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes vf-skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes vf-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+@keyframes vf-ping {
+  75%, 100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@keyframes vf-bounce {
+  0%, 100% { transform: translateY(0);    animation-timing-function: cubic-bezier(0.8,0,1,1); }
+  50%       { transform: translateY(-12px); animation-timing-function: cubic-bezier(0,0,0.2,1); }
+}
+
+/* ─── Utility animation classes ──────────────────────────────────────────────── */
+
+.vf-animate-spin            { animation: vf-spin var(--vf-transition-normal) linear infinite; }
+.vf-animate-fade-in         { animation: vf-fade-in var(--vf-transition-normal) ease both; }
+.vf-animate-scale-in        { animation: vf-scale-in var(--vf-transition-normal) ease both; }
+.vf-animate-slide-in-up     { animation: vf-slide-in-up var(--vf-transition-normal) ease both; }
+.vf-animate-slide-in-left   { animation: vf-slide-in-left var(--vf-transition-normal) ease both; }
+.vf-animate-pulse           { animation: vf-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+.vf-animate-ping            { animation: vf-ping 1s cubic-bezier(0,0,0.2,1) infinite; }
+
+/* ─── Transition utilities ───────────────────────────────────────────────────── */
+
+.vf-transition              { transition: all var(--vf-transition-normal); }
+.vf-transition-fast         { transition: all var(--vf-transition-fast); }
+.vf-transition-slow         { transition: all var(--vf-transition-slow); }
+.vf-transition-colors       { transition: color var(--vf-transition-fast),
+                                           background-color var(--vf-transition-fast),
+                                           border-color var(--vf-transition-fast); }
+.vf-transition-opacity      { transition: opacity var(--vf-transition-fast); }
+.vf-transition-transform    { transition: transform var(--vf-transition-normal); }
+.vf-transition-shadow       { transition: box-shadow var(--vf-transition-fast); }
+
+/* ─── Hover elevation ────────────────────────────────────────────────────────── */
+
+.vf-hover-lift {
+  transition: transform var(--vf-transition-fast), box-shadow var(--vf-transition-fast);
+}
+.vf-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--vf-shadow-medium);
+}
+
+/* ─── Reduced-motion override ────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

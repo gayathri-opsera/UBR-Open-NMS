@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Alarm, AlarmFilter, AlarmTypeStat, TopAlarm } from '../api/alarms.types';
 import {
-  acknowledgeAlarm, buildExportUrl, fetchAlarmTypeCounts, fetchAlarms, fetchTopAlarms,
+  acknowledgeAlarm, downloadAlarmExport, fetchAlarmTypeCounts, fetchAlarms, fetchTopAlarms,
   fetchAlarmThresholds, createAlarmThreshold,
 } from '../api/alarms.api';
 import type { AlarmThreshold } from '../api/alarms.api';
@@ -137,8 +137,8 @@ export default function AlarmsPage(): React.ReactElement {
             style={{ background: 'none', border: '1px solid var(--border-strong)', color: soundEnabled ? 'var(--accent)' : 'var(--text-secondary)', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 13 }}>
             🔔 Sound {soundEnabled ? 'ON' : 'OFF'}
           </button>
-          <a href={buildExportUrl(filter, 'csv')} style={{ background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: 4, textDecoration: 'none', fontSize: 13 }}>CSV</a>
-          <a href={buildExportUrl(filter, 'xls')} style={{ background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: 4, textDecoration: 'none', fontSize: 13 }}>XLS</a>
+          <button onClick={() => downloadAlarmExport(filter, 'csv')} style={{ background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: 4, fontSize: 13, cursor: 'pointer' }}>CSV</button>
+          <button onClick={() => downloadAlarmExport(filter, 'xls')} style={{ background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: 4, fontSize: 13, cursor: 'pointer' }}>XLS</button>
         </div>
       </div>
 

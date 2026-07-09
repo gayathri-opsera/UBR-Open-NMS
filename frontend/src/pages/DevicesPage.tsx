@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Device, DeviceFilter, DeviceType, DeviceStatus } from '../api/devices.types';
-import { buildExportUrl, createDevice, deleteDevice, fetchDevices, searchByGps, updateDeviceTags } from '../api/devices.api';
+import { downloadDeviceExport, createDevice, deleteDevice, fetchDevices, searchByGps, updateDeviceTags } from '../api/devices.api';
 import { DeviceTable } from '../components/devices/DeviceTable';
 
 const EMPTY_FORM = {
@@ -152,8 +152,8 @@ export default function DevicesPage(): React.ReactElement {
           </span>
         </h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          <a href={buildExportUrl(filter, 'csv')} style={{ ...btnGhost, textDecoration: 'none' }}>Export CSV</a>
-          <a href={buildExportUrl(filter, 'xls')} style={{ ...btnGhost, textDecoration: 'none' }}>Export XLS</a>
+          <button onClick={() => downloadDeviceExport(filter, 'csv')} style={btnGhost}>Export CSV</button>
+          <button onClick={() => downloadDeviceExport(filter, 'xls')} style={btnGhost}>Export XLS</button>
           <button onClick={() => { setAddForm({ ...EMPTY_FORM }); setAddError(null); setShowAddModal(true); }} style={btnPrimary}>
             + Add Device
           </button>

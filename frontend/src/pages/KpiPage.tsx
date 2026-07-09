@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { KpiParam, KpiSeries, KpiThreshold, TimeRange } from '../api/kpi.types';
 import { KPI_PARAMS, timeRangeToGranularity, timeRangeToMs } from '../api/kpi.types';
 import {
-  buildExportUrl, fetchDeviceKpi, fetchThresholds,
+  downloadKpiExport, fetchDeviceKpi, fetchThresholds,
   createThreshold, updateThreshold, deleteThreshold,
 } from '../api/kpi.api';
 import { KpiLineChart } from '../components/kpi/KpiLineChart';
@@ -114,10 +114,10 @@ export default function KpiPage(): React.ReactElement {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ color: 'var(--text-primary)', margin: 0 }}>KPI Dashboard</h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          <a href={buildExportUrl(deviceId, selectedParams, timeRangeToGranularity(timeRange), from, to, 'csv')}
-            style={{ background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: 4, textDecoration: 'none', fontSize: 13 }}>CSV</a>
-          <a href={buildExportUrl(deviceId, selectedParams, timeRangeToGranularity(timeRange), from, to, 'xls')}
-            style={{ background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: 4, textDecoration: 'none', fontSize: 13 }}>XLS</a>
+          <button onClick={() => downloadKpiExport(deviceId, selectedParams, timeRangeToGranularity(timeRange), from, to, 'csv')}
+            style={{ background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: 4, fontSize: 13, cursor: 'pointer' }}>CSV</button>
+          <button onClick={() => downloadKpiExport(deviceId, selectedParams, timeRangeToGranularity(timeRange), from, to, 'xls')}
+            style={{ background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '6px 14px', borderRadius: 4, fontSize: 13, cursor: 'pointer' }}>XLS</button>
         </div>
       </div>
 
