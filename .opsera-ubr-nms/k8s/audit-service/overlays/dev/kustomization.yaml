@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_AUDIT_SERVICE_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-audit-service
-  newTag: dev-450f9d99-20260710052124
+  newTag: dev-de0265ae-20260710053448
 
 labels:
 - pairs:
