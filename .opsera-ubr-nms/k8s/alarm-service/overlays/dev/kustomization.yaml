@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_ALARM_SERVICE_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-alarm-service
-  newTag: dev-d1573382-20260710045625
+  newTag: dev-dd318564-20260710051138
 
 labels:
 - pairs:
