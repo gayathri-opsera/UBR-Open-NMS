@@ -29,7 +29,7 @@ permissions:
   id-token: write
   security-events: write
 
-# C2C RULE: serialize all manifest pushes to main-clean to prevent non-fast-forward conflicts
+# C2C RULE: serialize all manifest pushes to main to prevent non-fast-forward conflicts
 concurrency:
   group: ${{ github.workflow }}-manifests
   cancel-in-progress: false
@@ -226,8 +226,8 @@ jobs:
             fi
             echo "Push failed, retrying ($i/5)..."
             # Pull remote changes and re-apply our commit on top
-            git fetch origin main-clean
-            git rebase origin/main-clean || { git rebase --abort; git reset --soft origin/main-clean; git add -A; git commit --amend --no-edit; }
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort; git reset --soft origin/main; git add -A; git commit --amend --no-edit; }
             SLEEP_TIME=$((5 * i))
             echo "  Waiting ${SLEEP_TIME}s before retry..."
             sleep $SLEEP_TIME
@@ -264,7 +264,7 @@ jobs:
           sleep 20
           kubectl apply -f .opsera-ubr-nms/argocd/dev/kpi-aggregation-service-app.yaml
           echo "✅ ArgoCD app recreated: $APP_ARGOCD"
-          echo "Waiting 45s for ArgoCD to load manifests from main-clean..."
+          echo "Waiting 45s for ArgoCD to load manifests from main..."
           sleep 45
           echo "⏳ Verifying ArgoCD app registered (up to 60s)..."
           for i in 1 2 3 4 5 6; do
@@ -391,7 +391,7 @@ jobs:
         run: |
           APP_ARGOCD="opsera-ubr-nms-kpi-aggregation-service-dev"
           kubectl patch app "$APP_ARGOCD" -n argocd --type merge \
-            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"main-clean","prune":true}}}'
+            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"main","prune":true}}}'
           echo "✅ Sync triggered"
 
       - name: Wait for Sync Completion
