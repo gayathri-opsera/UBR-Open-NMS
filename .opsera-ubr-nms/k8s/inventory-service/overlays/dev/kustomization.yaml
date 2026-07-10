@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_INVENTORY_SERVICE_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-inventory-service
-  newTag: dev-d1573382-20260710045621
+  newTag: dev-c6265001-20260710050545
 
 labels:
 - pairs:
