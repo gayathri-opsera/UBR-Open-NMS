@@ -16,6 +16,7 @@ const hierarchyStub   = require('./routes/hierarchy.stub');
 const groupsStub      = require('./routes/groups.stub');
 const configStub      = require('./routes/config.stub');
 const diagnosticsStub = require('./routes/diagnostics.stub');
+const kpiStub         = require('./routes/kpi.stub');
 
 function createApp(redisClient) {
   const app = express();
@@ -45,6 +46,8 @@ function createApp(redisClient) {
   app.use('/api/v1/config',        configStub);
   // Diagnostics stub — Java diagnostics-service returns 503 in local dev
   app.use('/api/v1/diagnostics',   diagnosticsStub);
+  // KPI stub — kpi-query-service and kpi-aggregation-service are not yet deployed
+  app.use('/api/v1/kpi',           kpiStub);
 
   // System health stub — health-monitor service may not be running in local dev
   app.get('/api/v1/system/health', (_req, res) => {
