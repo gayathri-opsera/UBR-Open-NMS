@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_AUTH_SERVICE_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-auth-service
-  newTag: dev-a3ad1da6-20260708004412
+  newTag: dev-c6265001-20260710050548
 
 labels:
 - pairs:
