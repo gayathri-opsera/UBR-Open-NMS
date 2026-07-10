@@ -15,7 +15,8 @@ export interface LogEntry {
 }
 
 export async function extractDeviceLogs(params: LogRequest): Promise<LogEntry[]> {
-  const res = await apiClient.post<LogEntry[]>(`/diagnostics/logs`, params);
+  const { deviceId, ...body } = params;
+  const res = await apiClient.post<LogEntry[]>(`/diagnostics/${deviceId}/logs`, body);
   return res.data;
 }
 
@@ -31,7 +32,7 @@ export interface SpeedTestResult {
 }
 
 export async function triggerSpeedTest(deviceId: string): Promise<SpeedTestResult> {
-  const res = await apiClient.post<SpeedTestResult>(`/diagnostics/speed-test`, { deviceId });
+  const res = await apiClient.post<SpeedTestResult>(`/diagnostics/${deviceId}/speed-test`, {});
   return res.data;
 }
 
@@ -50,7 +51,7 @@ export interface SpectrumResult {
 }
 
 export async function triggerSpectrumAnalysis(deviceId: string): Promise<SpectrumResult> {
-  const res = await apiClient.post<SpectrumResult>(`/diagnostics/spectrum`, { deviceId });
+  const res = await apiClient.post<SpectrumResult>(`/diagnostics/${deviceId}/spectrum-analysis`, {});
   return res.data;
 }
 

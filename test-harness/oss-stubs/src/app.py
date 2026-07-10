@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, Response as FastAPIResponse
 from stubs import (
     StubStore,
     validate_netcool, validate_mycom, validate_mobinet, validate_syslog_rfc5424,
-    build_gis_tile_response,
+    build_gis_tile_response, validate_niam_bind, NIAM_USERS,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +34,7 @@ STORES: dict[str, StubStore] = {
     "mycom":   StubStore("mycom"),
     "mobinet": StubStore("mobinet"),
     "syslog":  StubStore("syslog"),
+    "niam":    StubStore("niam"),
 }
 
 VALIDATORS = {
@@ -96,6 +97,37 @@ async def receive_syslog(request: Request):
     entry = {"line": line, "valid": not errors, "errors": errors}
     STORES["syslog"].add(entry)
     return {"valid": not errors, "errors": errors}
+
+
+# ── NIAM LDAP stub ────────────────────────────────────────────────────────────
+# Simulates Airtel NIAM LDAP bind + search over HTTP so integration tests can
+# verify the auth-service LDAP integration without a real LDAP server.
+
+@app.post("/api/v1/stub/niam/authenticate")
+async def niam_authenticate(request: Request):
+    body = await request.json()
+    uid      = body.get("uid", "")
+    password = body.get("password", "")
+    success, user, errors = validate_niam_bind(uid, password)
+    entry = {"uid": uid, "success": success, "errors": errors}
+    STORES["niam"].add(entry)
+    if success:
+        return {"success": True, "user": user}
+    return JSONResponse({"success": False, "errors": errors}, status_code=401)
+
+
+@app.get("/api/v1/stub/niam/users/{uid}")
+def niam_user_search(uid: str):
+    """Simulate LDAP search for a user entry (sAMAccountName / uid lookup)."""
+    if uid not in NIAM_USERS:
+        raise HTTPException(404, f"uid={uid}: no such user")
+    return {"found": True, "entry": NIAM_USERS[uid]}
+
+
+@app.get("/api/v1/stub/niam/users")
+def niam_list_users():
+    """Return all stub directory users (for test setup / teardown)."""
+    return {"users": list(NIAM_USERS.values())}
 
 
 # ── GIS stub ──────────────────────────────────────────────────────────────────

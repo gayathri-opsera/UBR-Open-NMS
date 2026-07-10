@@ -129,6 +129,61 @@ def validate_syslog_rfc5424(line: str) -> List[str]:
     return errors
 
 
+# ── NIAM LDAP stub helpers ────────────────────────────────────────────────────
+
+# Pre-seeded test users (uid → attributes).  The auth-service LDAP query looks
+# for the `uid` attribute; the response is modelled after RFC 4519 + Airtel NIAM.
+NIAM_USERS: Dict[str, Dict[str, Any]] = {
+    "admin": {
+        "uid": "admin",
+        "cn": "NMS Admin",
+        "sn": "Admin",
+        "mail": "admin@ubrnms.internal",
+        "userPassword": "{SSHA}hashed",
+        "memberOf": ["cn=nms-admins,ou=groups,dc=ubrnms,dc=internal"],
+        "ubrnmsRole": "admin",
+    },
+    "operator1": {
+        "uid": "operator1",
+        "cn": "NOC Operator 1",
+        "sn": "Operator",
+        "mail": "op1@ubrnms.internal",
+        "userPassword": "{SSHA}hashed",
+        "memberOf": ["cn=nms-operators,ou=groups,dc=ubrnms,dc=internal"],
+        "ubrnmsRole": "operator",
+    },
+    "viewer1": {
+        "uid": "viewer1",
+        "cn": "Read-Only Viewer",
+        "sn": "Viewer",
+        "mail": "viewer1@ubrnms.internal",
+        "userPassword": "{SSHA}hashed",
+        "memberOf": ["cn=nms-viewers,ou=groups,dc=ubrnms,dc=internal"],
+        "ubrnmsRole": "viewer",
+    },
+}
+
+# Simple plaintext passwords accepted by the mock (in production, the real
+# NIAM LDAP would do proper SSHA binding — this is a test stub only).
+NIAM_PASSWORDS: Dict[str, str] = {
+    "admin":     "Admin@NMS2024!",
+    "operator1": "Operator@NMS2024!",
+    "viewer1":   "Viewer@NMS2024!",
+}
+
+
+def validate_niam_bind(uid: str, password: str) -> tuple[bool, Optional[Dict[str, Any]], List[str]]:
+    """Simulate LDAP bind (authenticate) against the NIAM stub directory.
+
+    Returns: (success, user_entry, errors)
+    """
+    if uid not in NIAM_USERS:
+        return False, None, [f"uid={uid}: no such user (LDAP_NO_SUCH_OBJECT)"]
+    if NIAM_PASSWORDS.get(uid) != password:
+        return False, None, ["invalid credentials (LDAP_INVALID_CREDENTIALS)"]
+    return True, NIAM_USERS[uid], []
+
+
 # ── GIS stub response builder ─────────────────────────────────────────────────
 
 def build_gis_tile_response(z: int, x: int, y: int) -> bytes:

@@ -1,0 +1,61 @@
+replicaCount: 1
+
+image:
+  repository: ubrnms/mobinet-sync
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 9090
+
+containerPort: 9090
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+probes:
+  liveness:
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+env:
+  KAFKA_BROKERS: "kafka:9092"
+  KAFKA_CONSUMER_GROUP: "mobinet-sync"
+  METRICS_PORT: "9090"
+  LOG_LEVEL: "info"
+
+kafka:
+  topics:
+    input: "ubrnms.inventory"
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

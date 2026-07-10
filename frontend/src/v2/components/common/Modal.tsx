@@ -14,30 +14,48 @@ const sizeWidths = { sm: 420, md: 560, lg: 720, xl: 960 };
 
 export function Modal({ open, onClose, title, children, footer, size = 'md', closeOnBackdrop = true }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Stable ref so the keydown handler never goes stale without re-adding the listener
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
-  // Trap focus inside modal
+  // Focus the first *input/select/textarea* (skip buttons) when the modal opens.
+  // Runs only when `open` flips true — NOT on every render — so typing doesn't steal focus.
   useEffect(() => {
     if (!open) return;
     const el = dialogRef.current;
     if (!el) return;
-    const focusable = el.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
+    const firstInput = el.querySelector<HTMLElement>('input, select, textarea');
+    firstInput?.focus();
+  }, [open]);
+
+  // Separate effect for keyboard trap — stable, won't re-register on every render.
+  useEffect(() => {
+    if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Tab') {
-        if (e.shiftKey ? document.activeElement === first : document.activeElement === last) {
-          e.preventDefault();
-          (e.shiftKey ? last : first)?.focus();
-        }
+      if (e.key === 'Escape') {
+        onCloseRef.current();
+        return;
       }
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Tab') return;
+      const el = dialogRef.current;
+      if (!el) return;
+      const focusable = Array.from(el.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last  = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
+      }
     };
     document.addEventListener('keydown', handler);
-    first?.focus();
     return () => document.removeEventListener('keydown', handler);
-  }, [open, onClose]);
+  }, [open]);
 
   // Lock body scroll
   useEffect(() => {

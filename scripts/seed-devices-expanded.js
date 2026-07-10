@@ -29,14 +29,14 @@ const NETS = {
 
 // 8 new BTS sites
 const SITES = [
-  { code:'SITE-DEL-E01', name:'Delhi East 01', lat:28.6692, lon:77.2960, org:ORGS.delhi,  net:NETS.netDN, ipPfx:'10.11', freq:5180,  ch:36,  model:'Senao ENH1750EXT' },
-  { code:'SITE-DEL-W01', name:'Delhi West 01', lat:28.6280, lon:77.0840, org:ORGS.delhi,  net:NETS.netDN, ipPfx:'10.12', freq:5500,  ch:100, model:'Senao ENH1750EXT' },
-  { code:'SITE-DEL-S02', name:'Delhi South 02',lat:28.4890, lon:77.2190, org:ORGS.delhi,  net:NETS.netDS, ipPfx:'10.13', freq:5745,  ch:149, model:'Senao ENH1750EXT-AC' },
-  { code:'SITE-DEL-C01', name:'Delhi Central', lat:28.6430, lon:77.2190, org:ORGS.delhi,  net:NETS.netDS, ipPfx:'10.14', freq:5180,  ch:36,  model:'Senao ENH1750EXT' },
-  { code:'SITE-MUM-N01', name:'Mumbai North 01',lat:19.2183, lon:72.9781, org:ORGS.mumbai, net:NETS.netMW, ipPfx:'10.31', freq:5500,  ch:100, model:'Senao ENH1750EXT-AC' },
-  { code:'SITE-MUM-S01', name:'Mumbai South 01',lat:18.9220, lon:72.8347, org:ORGS.mumbai, net:NETS.netMW, ipPfx:'10.32', freq:5745,  ch:149, model:'Senao ENH1750EXT' },
-  { code:'SITE-MUM-E01', name:'Mumbai East 01', lat:19.1136, lon:72.9010, org:ORGS.mumbai, net:NETS.netMW, ipPfx:'10.33', freq:5180,  ch:36,  model:'Senao ENH1750EXT-AC' },
-  { code:'SITE-NCR-G01', name:'Gurugram 01',    lat:28.4595, lon:77.0266, org:ORGS.delhi,  net:NETS.netDN, ipPfx:'10.15', freq:5745,  ch:149, model:'Senao ENH1750EXT' },
+  { code:'SITE-DEL-E01', name:'Delhi East 01', lat:28.6692, lon:77.2960, org:ORGS.delhi,  net:NETS.netDN, ipPfx:'10.11', freq:5180,  ch:36,  model:'A60' },
+  { code:'SITE-DEL-W01', name:'Delhi West 01', lat:28.6280, lon:77.0840, org:ORGS.delhi,  net:NETS.netDN, ipPfx:'10.12', freq:5500,  ch:100, model:'A60' },
+  { code:'SITE-DEL-S02', name:'Delhi South 02',lat:28.4890, lon:77.2190, org:ORGS.delhi,  net:NETS.netDS, ipPfx:'10.13', freq:5745,  ch:149, model:'A60' },
+  { code:'SITE-DEL-C01', name:'Delhi Central', lat:28.6430, lon:77.2190, org:ORGS.delhi,  net:NETS.netDS, ipPfx:'10.14', freq:5180,  ch:36,  model:'A60' },
+  { code:'SITE-MUM-N01', name:'Mumbai North 01',lat:19.2183, lon:72.9781, org:ORGS.mumbai, net:NETS.netMW, ipPfx:'10.31', freq:5500,  ch:100, model:'A60' },
+  { code:'SITE-MUM-S01', name:'Mumbai South 01',lat:18.9220, lon:72.8347, org:ORGS.mumbai, net:NETS.netMW, ipPfx:'10.32', freq:5745,  ch:149, model:'A60' },
+  { code:'SITE-MUM-E01', name:'Mumbai East 01', lat:19.1136, lon:72.9010, org:ORGS.mumbai, net:NETS.netMW, ipPfx:'10.33', freq:5180,  ch:36,  model:'A60' },
+  { code:'SITE-NCR-G01', name:'Gurugram 01',    lat:28.4595, lon:77.0266, org:ORGS.delhi,  net:NETS.netDN, ipPfx:'10.15', freq:5745,  ch:149, model:'A60' },
 ];
 
 const CPE_CUSTOMERS = [
@@ -120,7 +120,7 @@ async function main() {
         _id: cpeId, id: cpeId, deviceType: 'CPE',
         serialNumber: cpeSn, macAddress: mac(devIdx),
         ipAddress: status === 'OFFLINE' ? null : cpeIp,
-        model: 'Senao EAP300', firmwareVersion: fw, softwareVersion: 'NMS-Agent-1.8',
+        model: 'A61', firmwareVersion: fw, softwareVersion: 'NMS-Agent-1.8',
         status, uptimeSeconds: status === 'ONLINE' ? Math.floor(Math.random()*604800) : 0,
         latitude: site.lat + rnd(-0.03, 0.03),
         longitude: site.lon + rnd(-0.03, 0.03),

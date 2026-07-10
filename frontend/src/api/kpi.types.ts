@@ -1,7 +1,10 @@
 export const KPI_PARAMS = [
-  'rssi', 'snr', 'cpuUtilization', 'memoryUtilization',
+  'cpuUtilization', 'memoryUtilization',
   'throughputUL', 'throughputDL', 'channelUtilization',
   'connectedClients', 'txPower', 'retryRate',
+  'temperature',
+  // Radio metrics — present when device reports signal data
+  'rssi', 'snr',
 ] as const;
 export type KpiParam = typeof KPI_PARAMS[number];
 

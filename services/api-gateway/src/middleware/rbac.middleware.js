@@ -27,7 +27,9 @@ const ROUTE_PERMISSIONS = [
 function requireRole(req, res, next) {
   if (!req.user) return next();
 
-  const userRoleLevel = ROLE_HIERARCHY[req.user.role] || 0;
+  // Normalise to lowercase so 'Admin', 'admin', 'ADMIN' all match
+  const normalizedRole = (req.user.role || '').toLowerCase();
+  const userRoleLevel = ROLE_HIERARCHY[normalizedRole] || 0;
 
   for (const entry of ROUTE_PERMISSIONS) {
     if (entry.pattern.test(req.path)) {
@@ -35,7 +37,7 @@ function requireRole(req, res, next) {
       if (userRoleLevel < required) {
         return res.status(403).json({
           code: 'FORBIDDEN',
-          message: `Role '${req.user.role}' is not authorized for this endpoint`,
+          message: `Role '${req.user.role}' is not authorized for this endpoint (requires '${entry.minRole}')`,
         });
       }
       break;

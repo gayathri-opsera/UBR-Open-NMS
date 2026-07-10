@@ -2,7 +2,8 @@ import { apiClient } from './client';
 import type { Device, DeviceFilter, GpsSearchParams } from './devices.types';
 
 export async function fetchDevices(filter: DeviceFilter = {}): Promise<Device[]> {
-  const res = await apiClient.get<Device[]>('/devices', { params: filter });
+  // Default limit=500 — the Java inventory service defaults to 100 which hides newly added devices
+  const res = await apiClient.get<Device[]>('/devices', { params: { limit: 500, ...filter } });
   return res.data;
 }
 

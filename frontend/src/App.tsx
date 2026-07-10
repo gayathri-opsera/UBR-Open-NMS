@@ -30,12 +30,13 @@ function LoadingFallback(): React.ReactElement {
 
 export default function App(): React.ReactElement {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ThemeProvider>
         <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Navigate to="/v2/dashboard" replace />} />
+          <Route path="/dashboard" element={<Navigate to="/v2/dashboard" replace />} />
           {/* V2 UI — new VisualForge shell mounted at /v2/* */}
           <Route path="/v2/*" element={<V2App />} />
           <Route

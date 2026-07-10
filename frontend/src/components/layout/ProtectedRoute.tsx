@@ -32,7 +32,7 @@ export function ProtectedRoute({ children, allowedRoles }: Props): React.ReactEl
   if (allowedRoles && user) {
     const userRoleLower = user.role.toLowerCase();
     const allowed = allowedRoles.some((r) => r.toLowerCase() === userRoleLower);
-    if (!allowed) return <Navigate to="/dashboard" replace />;
+    if (!allowed) return <Navigate to="/v2/dashboard" replace />;
   }
 
   return <>{children}</>;

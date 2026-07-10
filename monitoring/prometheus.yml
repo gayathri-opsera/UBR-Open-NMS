@@ -110,3 +110,8 @@ scrape_configs:
     static_configs:
       - targets: ["syslog-forwarder:9104"]
     metrics_path: /metrics
+
+  - job_name: mobinet-sync
+    static_configs:
+      - targets: ["mobinet-sync:9105"]
+    metrics_path: /metrics

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState } from 'react';
 import { V2Sidebar } from './V2Sidebar';
 import { V2Header } from './V2Header';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 interface ShellContextValue {
   sidebarCollapsed: boolean;
@@ -17,6 +18,11 @@ export function V2AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('vf_sidebar_collapsed') === '1'; } catch { return false; }
   });
+  const { theme } = useTheme();
+  // Keep html attribute in sync with context theme
+  React.useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   const toggleSidebar = () => {
     setCollapsed((c) => {
@@ -42,7 +48,7 @@ export function V2AppShell({ children }: { children: React.ReactNode }) {
             flexShrink: 0,
             height: '100vh',
             background: 'var(--vf-sidebar-bg)',
-            borderRight: '1px solid var(--vf-border-subtle)',
+            borderRight: '1px solid var(--vf-nav-border, var(--vf-border-subtle))',
             transition: `width var(--vf-transition-normal)`,
             overflow: 'hidden',
             display: 'flex',

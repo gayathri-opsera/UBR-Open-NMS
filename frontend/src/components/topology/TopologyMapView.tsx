@@ -30,8 +30,10 @@ export function TopologyMapView({ nodes, highlightedId, onNodeClick, onError }: 
       style={{ width: '100%', height: '100%', borderRadius: 8 }}
     >
       <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; OpenStreetMap contributors'
+        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+        subdomains="abcd"
+        maxZoom={19}
         eventHandlers={{ tileerror: () => onError?.() }}
       />
       {geoNodes.map((node) => (
@@ -48,13 +50,12 @@ export function TopologyMapView({ nodes, highlightedId, onNodeClick, onError }: 
           eventHandlers={{ click: () => onNodeClick(node) }}
         >
           <Tooltip>
-            <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
-              <strong>{node.deviceType} — {node.deviceId}</strong><br />
-              Serial: {node.serialNumber}<br />
+            <div style={{ fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6 }}>
+              <strong>{node.deviceType} — {node.serialNumber || node.deviceId}</strong><br />
               IP: {node.ipAddress}<br />
-              RSSI: {node.rssi ?? '—'} dBm<br />
-              SNR: {node.snr ?? '—'} dB<br />
-              Health: {node.health}
+              RSSI: {node.rssi ?? '—'} dBm | SNR: {node.snr ?? '—'} dB<br />
+              Health: <strong>{node.health}</strong><br />
+              <span style={{ color: '#60a5fa', fontSize: 11 }}>🔗 Click to open device detail</span>
             </div>
           </Tooltip>
         </CircleMarker>

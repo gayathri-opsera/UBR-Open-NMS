@@ -16,12 +16,8 @@ export default defineConfig({
       // The Host header tells nginx which virtual host (ingress rule) to use,
       // bypassing the DNS lookup that fails outside the Opsera VPC.
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:3100',
         changeOrigin: true,
-        // Override Origin so api-gateway CORS allows the request
-        headers: {
-          Origin: 'https://ubr-nms-frontend-dev.agent.opsera.dev',
-        },
       },
     },
   },

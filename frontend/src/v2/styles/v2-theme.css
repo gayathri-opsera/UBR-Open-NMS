@@ -53,13 +53,13 @@ html[data-theme="dark"] {
   --vf-elevated:        #112240;   /* modals, dropdowns — elevated surface      */
   --vf-overlay:         #0d1b2acc; /* translucent overlay (80% surface)        */
   --vf-input-bg:        #0f1e30;   /* form inputs, selects                      */
-  --vf-sidebar-bg:      #060e1b;   /* collapsible navigation sidebar            */
+  --vf-sidebar-bg:      #091525;   /* collapsible navigation sidebar            */
 
   /* ── Text Colors ─────────────────────────────────────────────────────────── */
-  --vf-text-primary:    #e2e8f0;   /* headings, labels, high-emphasis text     */
-  --vf-text-secondary:  #94a3b8;   /* supporting text, metadata                */
-  --vf-text-muted:      #64748b;   /* placeholder, hint, disabled text         */
-  --vf-text-dim:        #475569;   /* lowest hierarchy text                    */
+  --vf-text-primary:    #ffffff;   /* headings, labels, high-emphasis text     */
+  --vf-text-secondary:  #cbd5e1;   /* supporting text, metadata                */
+  --vf-text-muted:      #94a3b8;   /* placeholder, hint, disabled text         */
+  --vf-text-dim:        #64748b;   /* lowest hierarchy text                    */
   --vf-text-inverse:    #07111f;   /* text on accent/light backgrounds         */
 
   /* ── Border Colors ───────────────────────────────────────────────────────── */
@@ -93,9 +93,17 @@ html[data-theme="dark"] {
   --vf-sev-clear-bg:    #02200c;
 
   /* ── Application Shell Tokens ────────────────────────────────────────────── */
-  --vf-shell-active-bg: rgba(77,158,255,0.15);  /* active nav item bg           */
-  --vf-shell-hover-bg:  rgba(255,255,255,0.06); /* nav item hover bg            */
-  --vf-shell-active-indicator: #4d9eff;         /* left bar on active nav item  */
+  --vf-shell-active-bg: rgba(77,158,255,0.18);  /* active nav item bg           */
+  --vf-shell-hover-bg:  rgba(255,255,255,0.08); /* nav item hover bg            */
+  --vf-shell-active-indicator: #60b0ff;         /* left bar on active nav item  */
+
+  /* sidebar always dark in dark mode — light nav text                          */
+  --vf-nav-text:        rgba(255,255,255,0.62); /* inactive nav label           */
+  --vf-nav-text-active: #ffffff;                /* active nav label             */
+  --vf-nav-icon:        rgba(255,255,255,0.45); /* inactive nav icon            */
+  --vf-nav-icon-active: #60b0ff;                /* active nav icon              */
+  --vf-nav-group-label: rgba(255,255,255,0.30); /* section group label          */
+  --vf-nav-border:      rgba(255,255,255,0.06); /* sidebar right border         */
 
   /* ── Semantic State Colors ───────────────────────────────────────────────── */
   --vf-success:         #22c55e;
@@ -150,13 +158,13 @@ html[data-theme="dark"] {
   --vf-type-h4-tracking:      0em;
 
   /* Body — primary reading text                                               */
-  --vf-type-body-size:        0.875rem;   /* 14px */
-  --vf-type-body-line:        1.6;
+  --vf-type-body-size:        0.9375rem;  /* 15px — bumped for readability     */
+  --vf-type-body-line:        1.65;
   --vf-type-body-weight:      400;
   --vf-type-body-tracking:    0em;
 
   /* Caption — labels, badges, metadata                                        */
-  --vf-type-caption-size:     0.75rem;    /* 12px */
+  --vf-type-caption-size:     0.8125rem;  /* 13px — bumped from 12px           */
   --vf-type-caption-line:     1.5;
   --vf-type-caption-weight:   400;
   --vf-type-caption-tracking: 0.01em;
@@ -211,37 +219,40 @@ html[data-theme="dark"] {
 html[data-theme="light"] {
 
   /* ── Canvas / Surface / Background ──────────────────────────────────────── */
-  --vf-canvas:          #f0f4f8;
-  --vf-surface:         #ffffff;
-  --vf-elevated:        #f8fafc;
-  --vf-overlay:         #ffffffcc;
-  --vf-input-bg:        #ffffff;
-  --vf-sidebar-bg:      #1b3270;
+  --vf-canvas:          #f5f6fa;   /* very-light neutral page wash               */
+  --vf-surface:         #ffffff;   /* cards, panels                              */
+  --vf-elevated:        #ffffff;   /* modals, dropdowns                          */
+  --vf-overlay:         #ffffffee;
+  --vf-input-bg:        #f9fafb;
+  --vf-sidebar-bg:      #ffffff;   /* clean white sidebar                        */
 
   /* ── Text Colors ─────────────────────────────────────────────────────────── */
-  --vf-text-primary:    #0f172a;
-  --vf-text-secondary:  #475569;
-  --vf-text-muted:      #64748b;
-  --vf-text-dim:        #94a3b8;
+  --vf-text-primary:    #0a0f1e;   /* near-black — maximum contrast              */
+  --vf-text-secondary:  #1e293b;   /* slate-800 — clearly readable               */
+  --vf-text-muted:      #475569;   /* slate-600 — visible gray, not washed out   */
+  --vf-text-dim:        #64748b;   /* slate-500 — subtler labels                 */
   --vf-text-inverse:    #ffffff;
 
   /* ── Border Colors ───────────────────────────────────────────────────────── */
-  --vf-border-subtle:   #e8ecf1;
-  --vf-border-default:  #dde1e7;
-  --vf-border-strong:   #b0b7c3;
+  --vf-border-subtle:   #e2e8f0;   /* hairlines, dividers                        */
+  --vf-border-default:  #cbd5e1;   /* card outlines, inputs                      */
+  --vf-border-strong:   #94a3b8;   /* focus rings, active states                 */
 
-  /* ── Accent / Interactive Colors ─────────────────────────────────────────── */
-  --vf-accent:          #1967d2;
-  --vf-accent-hover:    #1557b8;
-  --vf-accent-subtle:   rgba(25,103,210,0.10);
-  --vf-accent-bg:       #e8f0fe;
-  --vf-accent-muted:    #4285f4;
+  /* ── Card border — theme-aware token used in JS inline styles ────────────── */
+  --vf-card-border:     1px solid #e2e8f0;
+
+  /* ── Accent / Interactive Colors — indigo/purple like Opsera reference ────── */
+  --vf-accent:          #4f46e5;
+  --vf-accent-hover:    #4338ca;
+  --vf-accent-subtle:   rgba(79,70,229,0.08);
+  --vf-accent-bg:       #eef2ff;
+  --vf-accent-muted:    #6366f1;
 
   /* ── Status Colors ───────────────────────────────────────────────────────── */
   --vf-status-online:   #16a34a;
   --vf-status-offline:  #dc2626;
   --vf-status-degraded: #d97706;
-  --vf-status-unknown:  #6b7280;
+  --vf-status-unknown:  #64748b;
 
   /* ── Alarm Severity Colors ───────────────────────────────────────────────── */
   --vf-sev-critical:    #dc2626;
@@ -256,9 +267,17 @@ html[data-theme="light"] {
   --vf-sev-clear-bg:    #f0fdf4;
 
   /* ── Application Shell Tokens ────────────────────────────────────────────── */
-  --vf-shell-active-bg:        rgba(25,103,210,0.12);
-  --vf-shell-hover-bg:         rgba(0,0,0,0.05);
-  --vf-shell-active-indicator: #1967d2;
+  --vf-shell-active-bg:        #eef2ff;      /* soft indigo tint for active row  */
+  --vf-shell-hover-bg:         #f5f7ff;      /* very subtle hover                */
+  --vf-shell-active-indicator: #4f46e5;      /* left bar on active nav item      */
+
+  /* sidebar WHITE — dark nav text, indigo active                               */
+  --vf-nav-text:        #1e293b;   /* slate-800 — near black, clearly readable   */
+  --vf-nav-text-active: #4338ca;   /* indigo-700 — bold active                   */
+  --vf-nav-icon:        #475569;   /* slate-600 — visible icons                  */
+  --vf-nav-icon-active: #4338ca;   /* indigo-700                                 */
+  --vf-nav-group-label: #64748b;   /* slate-500 — clear section labels           */
+  --vf-nav-border:      #e2e8f0;   /* slate-200                                  */
 
   /* ── Semantic State Colors ───────────────────────────────────────────────── */
   --vf-success:        #16a34a;
@@ -274,18 +293,18 @@ html[data-theme="light"] {
   --vf-info-subtle:    rgba(2,132,199,0.10);
   --vf-info-bg:        #f0f9ff;
 
-  /* ── Elevation / Shadow (lighter on white) ───────────────────────────────── */
+  /* ── Elevation / Shadow ──────────────────────────────────────────────────── */
   --vf-shadow-none:   none;
-  --vf-shadow-low:    0 1px 3px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06);
-  --vf-shadow-medium: 0 4px 12px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.08);
-  --vf-shadow-high:   0 12px 32px rgba(0,0,0,0.16), 0 4px 8px rgba(0,0,0,0.10);
+  --vf-shadow-low:    0 1px 3px rgba(15,23,42,0.07), 0 1px 2px rgba(15,23,42,0.04);
+  --vf-shadow-medium: 0 4px 16px rgba(15,23,42,0.09), 0 2px 4px rgba(15,23,42,0.05);
+  --vf-shadow-high:   0 12px 32px rgba(15,23,42,0.12), 0 4px 8px rgba(15,23,42,0.07);
 
   /* ── Scrollbar ───────────────────────────────────────────────────────────── */
-  --vf-scrollbar-track: #f0f4f8;
-  --vf-scrollbar-thumb: #c1c9d4;
+  --vf-scrollbar-track: #f1f5f9;
+  --vf-scrollbar-thumb: #cbd5e1;
 
   /* ── Focus Ring ──────────────────────────────────────────────────────────── */
-  --vf-focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px #1967d2;
+  --vf-focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px #4f46e5;
 }
 
 
@@ -317,4 +336,150 @@ html[data-theme="light"] {
   outline: none;
   box-shadow: var(--vf-focus-ring);
   border-radius: var(--vf-radius-sm);
+}
+
+/* ── Global text enforcement — both themes ───────────────────────────────────
+   Ensures all body text, headings, tables, inputs inherit correct colours
+   from CSS vars, catching any leftover hardcoded inline styles.             */
+
+/* Root text cascade */
+.vf-root, .vf-page, .vf-content,
+html[data-theme="dark"] .vf-root,
+html[data-theme="dark"] .vf-page,
+html[data-theme="dark"] .vf-content {
+  color: var(--vf-text-primary);
+}
+
+/* Headings */
+h1, h2, h3, h4, .vf-page-title {
+  color: var(--vf-text-primary);
+  font-weight: 700;
+}
+
+/* Override any stale inline !important color on headings */
+html[data-theme="dark"] h1,
+html[data-theme="dark"] h2,
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4,
+html[data-theme="dark"] .vf-page-title {
+  color: #ffffff;
+}
+html[data-theme="light"] h1,
+html[data-theme="light"] h2,
+html[data-theme="light"] h3,
+html[data-theme="light"] h4,
+html[data-theme="light"] .vf-page-title {
+  color: #111827;
+}
+
+/* Tables */
+td, th {
+  color: var(--vf-text-primary);
+  font-size: var(--vf-type-body-size);
+}
+
+/* Metric values */
+.vf-metric-value { color: var(--vf-text-primary); font-weight: 700; }
+
+/* Inputs */
+input:not([type="checkbox"]):not([type="radio"]),
+select, textarea {
+  color: var(--vf-text-primary);
+  font-size: var(--vf-type-body-size);
+}
+
+/* Recharts */
+.recharts-text,
+.recharts-cartesian-axis-tick-value,
+.recharts-legend-item-text {
+  fill: var(--vf-text-secondary) !important;
+  font-size: 12px;
+}
+
+/* ── Card border token for dark mode ─────────────────────────────────────── */
+:root,
+html[data-theme="dark"] {
+  --vf-card-border: 1px solid rgba(77,158,255,0.10);
+}
+
+/* Light mode — page background */
+html[data-theme="light"] .vf-page {
+  background: var(--vf-canvas);
+}
+
+/* Light mode — FORCE sidebar white regardless of variable cascade order */
+html[data-theme="light"] aside[aria-label="Navigation"] {
+  background: #ffffff !important;
+  border-right: 1px solid #e2e8f0 !important;
+  box-shadow: 2px 0 12px rgba(15,23,42,0.06);
+}
+
+/* Light mode — header */
+html[data-theme="light"] header {
+  background: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 4px rgba(15,23,42,0.06);
+}
+
+/* Light mode — nav group labels are visible slate */
+html[data-theme="light"] aside[aria-label="Navigation"] nav {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+/* Light mode — main canvas */
+html[data-theme="light"] main {
+  background: #f5f6fa;
+}
+
+/* Dark mode sidebar subtle glow edge */
+html[data-theme="dark"] aside[aria-label="Navigation"] {
+  box-shadow: 1px 0 0 rgba(77,158,255,0.08);
+}
+
+/* ── Light mode — force dark text on all readable elements ───────────────── */
+
+/* Headings and body text */
+html[data-theme="light"] h1,
+html[data-theme="light"] h2,
+html[data-theme="light"] h3,
+html[data-theme="light"] h4,
+html[data-theme="light"] .vf-page-title,
+html[data-theme="light"] p,
+html[data-theme="light"] span:not([style*="color"]),
+html[data-theme="light"] label,
+html[data-theme="light"] td,
+html[data-theme="light"] th {
+  color: #0a0f1e;
+}
+
+/* Header breadcrumb links */
+html[data-theme="light"] header a,
+html[data-theme="light"] header span,
+html[data-theme="light"] header nav span {
+  color: #1e293b !important;
+}
+html[data-theme="light"] header a:not([aria-current]) {
+  color: #475569 !important;
+}
+
+/* Sidebar nav items */
+html[data-theme="light"] aside[aria-label="Navigation"] a {
+  color: var(--vf-nav-text) !important;
+}
+html[data-theme="light"] aside[aria-label="Navigation"] a[aria-current="page"] {
+  color: var(--vf-nav-text-active) !important;
+}
+
+/* Recharts labels — dark for contrast on white */
+html[data-theme="light"] .recharts-text,
+html[data-theme="light"] .recharts-cartesian-axis-tick-value,
+html[data-theme="light"] .recharts-legend-item-text {
+  fill: #334155 !important;
+}
+
+/* Card / panel titles */
+html[data-theme="light"] .vf-surface,
+html[data-theme="light"] [class*="card"] {
+  color: #0a0f1e;
 }

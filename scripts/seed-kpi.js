@@ -5,31 +5,46 @@
  */
 const { MongoClient } = require('mongodb');
 
-const MONGO_URL = process.env.MONGO_URI || 'mongodb://localhost:27017/ubr_nms';
+// Target the same DB the KPI query-service uses
+const MONGO_URL = process.env.MONGO_URI || 'mongodb://mongo:27017/ubrnms_kpi';
 
-// Devices from the inventory seed
-const DEVICES = [
-  { id: 'dev-bts-dn-001', type: 'BTS',  netId: 'net-dn-001',  orgId: 'org-delhi-001'  },
-  { id: 'dev-cpe-dn-001', type: 'CPE',  netId: 'net-dn-001',  orgId: 'org-delhi-001'  },
-  { id: 'dev-cpe-dn-002', type: 'CPE',  netId: 'net-dn-001',  orgId: 'org-delhi-001'  },
-  { id: 'dev-cpe-dn-003', type: 'CPE',  netId: 'net-dn-001',  orgId: 'org-delhi-001'  },
-  { id: 'dev-idu-dn-001', type: 'IDU',  netId: 'net-dn-001',  orgId: 'org-delhi-001'  },
-  { id: 'dev-bts-mb-001', type: 'BTS',  netId: 'net-mb-001',  orgId: 'org-mumbai-001' },
-  { id: 'dev-cpe-mb-001', type: 'CPE',  netId: 'net-mb-001',  orgId: 'org-mumbai-001' },
-  { id: 'dev-cpe-mb-002', type: 'CPE',  netId: 'net-mb-001',  orgId: 'org-mumbai-001' },
+// Core devices from the original seed — these already have KPI bucket docs with empty metrics
+const CORE_DEVICES = [
+  { id: 'dev-bts-dn-001', type: 'BTS', netId: 'net-delhi-north-001', orgId: 'org-airtel-delhi-001' },
+  { id: 'dev-bts-ds-001', type: 'BTS', netId: 'net-delhi-south-001', orgId: 'org-airtel-delhi-001' },
+  { id: 'dev-bts-mw-001', type: 'BTS', netId: 'net-mumbai-west-001', orgId: 'org-airtel-mumbai-001' },
+  { id: 'dev-cpe-dn-001', type: 'CPE', netId: 'net-delhi-north-001', orgId: 'org-airtel-delhi-001' },
+  { id: 'dev-cpe-dn-002', type: 'CPE', netId: 'net-delhi-north-001', orgId: 'org-airtel-delhi-001' },
+  { id: 'dev-cpe-dn-003', type: 'CPE', netId: 'net-delhi-north-001', orgId: 'org-airtel-delhi-001' },
+  { id: 'dev-cpe-ds-001', type: 'CPE', netId: 'net-delhi-south-001', orgId: 'org-airtel-delhi-001' },
+  { id: 'dev-cpe-mw-001', type: 'CPE', netId: 'net-mumbai-west-001', orgId: 'org-airtel-mumbai-001' },
+  { id: 'dev-cpe-mw-002', type: 'CPE', netId: 'net-mumbai-west-001', orgId: 'org-airtel-mumbai-001' },
+  { id: 'dev-idu-dn-001', type: 'IDU', netId: 'net-delhi-north-001', orgId: 'org-airtel-delhi-001' },
+  { id: 'dev-idu-mw-001', type: 'IDU', netId: 'net-mumbai-west-001', orgId: 'org-airtel-mumbai-001' },
 ];
 
-// Expanded device list from seed-devices-expanded.js
+// Site devices from seed-160-devices.js
+const SITES = ['S001','S002','S003','S004','S005','S006','S007','S008','S009','S010','S011','S012'];
+const NETS  = [
+  'net-delhi-north-001','net-delhi-south-001','net-mumbai-west-001','net-mumbai-west-001',
+  'net-pune-central-001','net-chennai-north-001','net-chennai-north-001','net-kolkata-east-001',
+  'net-delhi-north-001','net-delhi-south-001','net-mumbai-west-001','net-mumbai-west-001',
+];
+const ORGS  = [
+  'org-airtel-delhi-001','org-airtel-delhi-001','org-airtel-mumbai-001','org-airtel-mumbai-001',
+  'org-jio-pune-001','org-bsnl-chennai-001','org-bsnl-chennai-001','org-vi-kolkata-001',
+  'org-airtel-delhi-001','org-airtel-delhi-001','org-airtel-mumbai-001','org-airtel-mumbai-001',
+];
 const SITE_DEVICES = [];
-for (let i = 1; i <= 8; i++) {
-  const pfx = `SITE${String(i).padStart(2,'0')}`;
-  SITE_DEVICES.push({ id: `dev-bts-${pfx.toLowerCase()}-001`, type: 'BTS', netId: `net-${pfx.toLowerCase()}-001`, orgId: 'org-delhi-001' });
-  for (let j = 1; j <= 8; j++) {
-    SITE_DEVICES.push({ id: `dev-cpe-${pfx.toLowerCase()}-${String(j).padStart(3,'0')}`, type: 'CPE', netId: `net-${pfx.toLowerCase()}-001`, orgId: 'org-delhi-001' });
+SITES.forEach((code, si) => {
+  SITE_DEVICES.push({ id: `dev-bts-${code}-001`, type: 'BTS', netId: NETS[si], orgId: ORGS[si] });
+  SITE_DEVICES.push({ id: `dev-idu-${code}-001`, type: 'IDU', netId: NETS[si], orgId: ORGS[si] });
+  for (let c = 1; c <= 10; c++) {
+    SITE_DEVICES.push({ id: `dev-cpe-${code}-${String(c).padStart(3,'0')}`, type: 'CPE', netId: NETS[si], orgId: ORGS[si] });
   }
-}
+});
 
-const ALL_DEVICES = [...DEVICES, ...SITE_DEVICES];
+const ALL_DEVICES = [...CORE_DEVICES, ...SITE_DEVICES];
 
 // Metric ranges per device type
 const METRIC_RANGES = {
@@ -95,9 +110,9 @@ function makeMetrics(deviceType, hourOffset) {
 }
 
 async function main() {
-  const client = new MongoClient(MONGO_URL.replace(/\/[^/]+$/, '/ubr_nms'));
+  const client = new MongoClient(MONGO_URL.replace(/\/[^/]+$/, '/ubrnms_kpi'));
   await client.connect();
-  const db = client.db('ubr_nms');
+  const db = client.db('ubrnms_kpi');
   const col = db.collection('kpi_warm');
 
   // Clear existing synthetic data

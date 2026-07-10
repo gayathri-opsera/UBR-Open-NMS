@@ -334,7 +334,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.btsDN, id: IDS.btsDN, deviceType: 'BTS',
         serialNumber: 'SN-BTS-DN-001', macAddress: 'AA:BB:CC:DD:E1:01',
-        ipAddress: '10.10.1.1', model: 'Senao ENH1750EXT',
+        ipAddress: '10.10.1.1', model: 'A60',
         firmwareVersion: 'v3.4.1', softwareVersion: 'NMS-Agent-2.1',
         status: 'ONLINE', uptimeSeconds: 864000,
         latitude: 28.6139, longitude: 77.2090, elevation: 18.5, azimuth: 90, tilt: 3,
@@ -351,7 +351,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.btsDS, id: IDS.btsDS, deviceType: 'BTS',
         serialNumber: 'SN-BTS-DS-001', macAddress: 'AA:BB:CC:DD:E1:02',
-        ipAddress: '10.10.2.1', model: 'Senao ENH1750EXT',
+        ipAddress: '10.10.2.1', model: 'A60',
         firmwareVersion: 'v3.4.1', softwareVersion: 'NMS-Agent-2.1',
         status: 'ONLINE', uptimeSeconds: 432000,
         latitude: 28.5355, longitude: 77.3910, elevation: 21.0, azimuth: 270, tilt: 5,
@@ -368,7 +368,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.btsMW, id: IDS.btsMW, deviceType: 'BTS',
         serialNumber: 'SN-BTS-MW-001', macAddress: 'AA:BB:CC:DD:E1:03',
-        ipAddress: '10.30.1.1', model: 'Senao ENH1750EXT-AC',
+        ipAddress: '10.30.1.1', model: 'A60',
         firmwareVersion: 'v3.5.0', softwareVersion: 'NMS-Agent-2.2',
         status: 'ONLINE', uptimeSeconds: 1728000,
         latitude: 19.0760, longitude: 72.8777, elevation: 25.0, azimuth: 180, tilt: 2,
@@ -386,7 +386,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.cpeDN1, id: IDS.cpeDN1, deviceType: 'CPE',
         serialNumber: 'SN-CPE-DN-001', macAddress: 'BB:CC:DD:EE:FF:01',
-        ipAddress: '10.10.1.101', model: 'Senao EAP300',
+        ipAddress: '10.10.1.101', model: 'A61',
         firmwareVersion: 'v2.3.0', softwareVersion: 'NMS-Agent-1.8',
         status: 'ONLINE', uptimeSeconds: 259200,
         latitude: 28.6210, longitude: 77.2110, elevation: 2.0,
@@ -399,7 +399,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.cpeDN2, id: IDS.cpeDN2, deviceType: 'CPE',
         serialNumber: 'SN-CPE-DN-002', macAddress: 'BB:CC:DD:EE:FF:02',
-        ipAddress: '10.10.1.102', model: 'Senao EAP300',
+        ipAddress: '10.10.1.102', model: 'A61',
         firmwareVersion: 'v2.3.0', softwareVersion: 'NMS-Agent-1.8',
         status: 'ONLINE', uptimeSeconds: 172800,
         latitude: 28.6230, longitude: 77.2080, elevation: 1.5,
@@ -411,7 +411,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.cpeDN3, id: IDS.cpeDN3, deviceType: 'CPE',
         serialNumber: 'SN-CPE-DN-003', macAddress: 'BB:CC:DD:EE:FF:03',
-        ipAddress: '10.10.1.103', model: 'Senao EAP300',
+        ipAddress: '10.10.1.103', model: 'A61',
         firmwareVersion: 'v2.1.0', softwareVersion: 'NMS-Agent-1.6',
         status: 'OFFLINE', uptimeSeconds: 0,
         latitude: 28.6190, longitude: 77.2140, elevation: 3.0,
@@ -424,7 +424,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.cpeDS1, id: IDS.cpeDS1, deviceType: 'CPE',
         serialNumber: 'SN-CPE-DS-001', macAddress: 'BB:CC:DD:EE:FF:04',
-        ipAddress: '10.10.2.101', model: 'Senao EAP300-AC',
+        ipAddress: '10.10.2.101', model: 'A61',
         firmwareVersion: 'v2.3.0', softwareVersion: 'NMS-Agent-1.8',
         status: 'ONLINE', uptimeSeconds: 518400,
         latitude: 28.5400, longitude: 77.3950, elevation: 1.0,
@@ -436,7 +436,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.cpeDS2, id: IDS.cpeDS2, deviceType: 'CPE',
         serialNumber: 'SN-CPE-DS-002', macAddress: 'BB:CC:DD:EE:FF:05',
-        ipAddress: '10.10.2.102', model: 'Senao EAP300',
+        ipAddress: '10.10.2.102', model: 'A61',
         firmwareVersion: 'v2.3.0', softwareVersion: 'NMS-Agent-1.8',
         status: 'PROVISIONING', uptimeSeconds: 0,
         latitude: 28.5380, longitude: 77.3920, elevation: 2.5,
@@ -449,7 +449,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.cpeMW1, id: IDS.cpeMW1, deviceType: 'CPE',
         serialNumber: 'SN-CPE-MW-001', macAddress: 'BB:CC:DD:EE:FF:06',
-        ipAddress: '10.30.1.101', model: 'Senao EAP300-AC',
+        ipAddress: '10.30.1.101', model: 'A61',
         firmwareVersion: 'v2.3.0', softwareVersion: 'NMS-Agent-1.8',
         status: 'ONLINE', uptimeSeconds: 691200,
         latitude: 19.0810, longitude: 72.8820, elevation: 3.0,
@@ -461,7 +461,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.cpeMW2, id: IDS.cpeMW2, deviceType: 'CPE',
         serialNumber: 'SN-CPE-MW-002', macAddress: 'BB:CC:DD:EE:FF:07',
-        ipAddress: '10.30.1.102', model: 'Senao EAP300-AC',
+        ipAddress: '10.30.1.102', model: 'A61',
         firmwareVersion: 'v2.3.0', softwareVersion: 'NMS-Agent-1.8',
         status: 'ONLINE', uptimeSeconds: 345600,
         latitude: 19.0740, longitude: 72.8750, elevation: 4.5,
@@ -473,7 +473,7 @@ async function seedInventory(db, reset) {
       {
         _id: IDS.cpeMW3, id: IDS.cpeMW3, deviceType: 'CPE',
         serialNumber: 'SN-CPE-MW-003', macAddress: 'BB:CC:DD:EE:FF:08',
-        ipAddress: '10.30.1.103', model: 'Senao EAP300',
+        ipAddress: '10.30.1.103', model: 'A61',
         firmwareVersion: 'v2.2.0', softwareVersion: 'NMS-Agent-1.7',
         status: 'ONLINE', uptimeSeconds: 129600,
         latitude: 19.0790, longitude: 72.8800, elevation: 2.0,

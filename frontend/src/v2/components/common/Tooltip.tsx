@@ -1,4 +1,11 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+
+let _idCounter = 0;
+function useUniqueId(prefix: string) {
+  const id = useRef<string | null>(null);
+  if (!id.current) { id.current = `${prefix}-${++_idCounter}`; }
+  return id.current;
+}
 
 export interface TooltipProps {
   content: React.ReactNode;
@@ -11,9 +18,8 @@ export function Tooltip({ content, children, placement = 'top', delay = 300 }: T
   const [visible, setVisible] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLElement>(null);
-  const timerId = useRef<ReturnType<typeof setTimeout>>();
-  const id = useId();
-  const tooltipId = `vf-tooltip-${id}`;
+  const timerId = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const tooltipId = useUniqueId('vf-tooltip');
 
   const show = () => {
     timerId.current = setTimeout(() => {
@@ -45,14 +51,17 @@ export function Tooltip({ content, children, placement = 'top', delay = 300 }: T
 
   return (
     <>
-      {React.cloneElement(children, {
-        ref: triggerRef,
-        onMouseEnter: show,
-        onMouseLeave: hide,
-        onFocus: show,
-        onBlur: hide,
-        'aria-describedby': visible ? tooltipId : undefined,
-      })}
+      <span
+        ref={triggerRef as React.RefObject<HTMLSpanElement>}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        aria-describedby={visible ? tooltipId : undefined}
+        style={{ display: 'contents' }}
+      >
+        {children}
+      </span>
       {visible && (
         <div
           id={tooltipId}

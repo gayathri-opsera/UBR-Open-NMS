@@ -49,7 +49,10 @@ function requireRole(allowedRoles) {
         error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' },
       });
     }
-    if (!roles.includes(req.user.role)) {
+    // Normalise to lowercase so 'Admin', 'admin', 'ADMIN' all match
+    const normalizedUserRole = (req.user.role || '').toLowerCase();
+    const normalizedAllowed  = roles.map((r) => r.toLowerCase());
+    if (!normalizedAllowed.includes(normalizedUserRole)) {
       logger.warn('RBAC denied', { userId: req.user.userId, role: req.user.role, required: roles, path: req.path });
       return res.status(403).json({
         status: 'error',

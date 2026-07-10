@@ -1,5 +1,6 @@
 import { apiClient } from './client';
 import type { AuthTokens, UserInfo } from '../auth/tokens';
+import { getRefreshToken } from '../auth/tokens';
 
 interface LoginResponseData {
   accessToken: string;
@@ -32,9 +33,10 @@ export async function login(username: string, password: string): Promise<{ token
 
 export async function logout(): Promise<void> {
   try {
-    await apiClient.post('/auth/logout');
+    const refreshToken = getRefreshToken();
+    await apiClient.post('/auth/logout', refreshToken ? { refreshToken } : {});
   } catch {
-    // best-effort
+    // best-effort — clear local tokens regardless
   }
 }
 

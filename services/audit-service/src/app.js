@@ -41,6 +41,17 @@ app.use((req, res, next) => {
   next();
 });
 
+// Populate req.user from headers forwarded by the API gateway
+// (gateway verifies JWT and adds x-user-id / x-user-role before proxying)
+app.use((req, _res, next) => {
+  const userId   = req.headers['x-user-id'];
+  const userRole = req.headers['x-user-role'];
+  if (userId || userRole) {
+    req.user = { sub: userId || '', role: (userRole || '').toLowerCase() };
+  }
+  next();
+});
+
 // Liveness probe
 app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
 app.get('/metrics', metricsEndpoint);

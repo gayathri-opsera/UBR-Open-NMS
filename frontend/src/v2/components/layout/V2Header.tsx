@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useTheme } from '../../../contexts/ThemeContext';
@@ -85,7 +85,7 @@ export function V2Header() {
               <li key={crumb.path} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 {i > 0 && (
                   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path d="M4 2l4 4-4 4" stroke="var(--vf-text-dim)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M4 2l4 4-4 4" stroke="var(--vf-text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 )}
                 {isLast ? (
@@ -93,7 +93,7 @@ export function V2Header() {
                     aria-current="page"
                     style={{
                       fontSize: 'var(--vf-type-body-size)',
-                      fontWeight: 600,
+                      fontWeight: 700,
                       color: 'var(--vf-text-primary)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -107,9 +107,10 @@ export function V2Header() {
                     to={crumb.path}
                     style={{
                       fontSize: 'var(--vf-type-caption-size)',
-                      color: 'var(--vf-text-muted)',
+                      color: 'var(--vf-text-secondary)',
                       textDecoration: 'none',
                       whiteSpace: 'nowrap',
+                      fontWeight: 500,
                     }}
                   >
                     {crumb.label}
@@ -130,9 +131,9 @@ export function V2Header() {
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
           style={{
             background: 'transparent',
-            border: '1px solid var(--vf-border-subtle)',
+            border: '1px solid var(--vf-border-default)',
             borderRadius: 'var(--vf-radius-sm)',
-            color: 'var(--vf-text-muted)',
+            color: 'var(--vf-text-secondary)',
             cursor: 'pointer',
             padding: 6,
             display: 'flex',
@@ -152,9 +153,9 @@ export function V2Header() {
           style={{
             position: 'relative',
             background: 'transparent',
-            border: '1px solid var(--vf-border-subtle)',
+            border: '1px solid var(--vf-border-default)',
             borderRadius: 'var(--vf-radius-sm)',
-            color: 'var(--vf-text-muted)',
+            color: 'var(--vf-text-secondary)',
             cursor: 'pointer',
             padding: 6,
             display: 'flex',

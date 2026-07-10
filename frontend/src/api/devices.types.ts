@@ -37,6 +37,7 @@ export interface DeviceFilter {
   search?: string;
   deviceType?: DeviceType;
   status?: DeviceStatus;
+  firmware?: string;
   organizationId?: string;
   hierarchyId?: string;
   networkId?: string;

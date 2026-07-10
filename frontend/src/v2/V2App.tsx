@@ -4,25 +4,30 @@ import { useAuth } from '../contexts/AuthContext';
 import { V2AppShell } from './components/layout/V2AppShell';
 import { LoadingState } from './components/common/States';
 import { ErrorBoundary } from './components/common/States';
+import { ToastProvider } from './components/common/Toast';
 import type { Role } from '../auth/tokens';
 
 import './styles/v2-theme.css';
 import './styles/v2-animations.css';
 import './styles/v2-responsive.css';
+import './styles/v2-premium.css';
 
 // ── Lazy-loaded V2 pages ──────────────────────────────────────────────────────
 
+const V2CustomDashboardPage = lazy(() => import('./pages/V2CustomDashboardPage'));
 const V2DashboardPage     = lazy(() => import('./pages/V2DashboardPage'));
 const V2DevicesPage       = lazy(() => import('./pages/V2DevicesPage'));
+const V2DeviceDetailPage  = lazy(() => import('./pages/V2DeviceDetailPage'));
 const V2AlarmsPage        = lazy(() => import('./pages/V2AlarmsPage'));
 const V2TopologyPage      = lazy(() => import('./pages/V2TopologyPage'));
 const V2KpiPage           = lazy(() => import('./pages/V2KpiPage'));
 const V2ConfigPage        = lazy(() => import('./pages/V2ConfigPage'));
-const V2DiscoveryPage     = lazy(() => import('./pages/V2DiscoveryPage'));
+const V2HierarchyPage     = lazy(() => import('./pages/V2HierarchyPage'));
 const V2TroubleshootPage  = lazy(() => import('./pages/V2TroubleshootPage'));
 const V2ReportsPage       = lazy(() => import('./pages/V2ReportsPage'));
 const V2NotificationsPage = lazy(() => import('./pages/V2NotificationsPage'));
 const V2AdminPage         = lazy(() => import('./pages/V2AdminPage'));
+const V2GroupsPage        = lazy(() => import('./pages/V2GroupsPage'));
 const V2NotFoundPage      = lazy(() => import('./pages/V2NotFoundPage'));
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
@@ -56,63 +61,68 @@ function V2Fallback() {
 
 export function V2App() {
   return (
-    <V2ProtectedRoute>
-      <V2AppShell>
-        <ErrorBoundary>
-          <Suspense fallback={<V2Fallback />}>
-            <Routes>
-              <Route index element={<Navigate to="/v2/dashboard" replace />} />
-              <Route path="dashboard"    element={<V2DashboardPage />} />
-              <Route path="devices/*"    element={<V2DevicesPage />} />
-              <Route path="alarms"       element={<V2AlarmsPage />} />
-              <Route path="topology"     element={<V2TopologyPage />} />
-              <Route path="kpi"          element={<V2KpiPage />} />
-              <Route
-                path="config"
-                element={
-                  <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
-                    <V2ConfigPage />
-                  </V2ProtectedRoute>
-                }
-              />
-              <Route
-                path="discovery"
-                element={
-                  <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
-                    <V2DiscoveryPage />
-                  </V2ProtectedRoute>
-                }
-              />
-              <Route
-                path="troubleshoot"
-                element={
-                  <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
-                    <V2TroubleshootPage />
-                  </V2ProtectedRoute>
-                }
-              />
-              <Route path="reports"       element={<V2ReportsPage />} />
-              <Route
-                path="notifications"
-                element={
-                  <V2ProtectedRoute allowedRoles={['Admin']}>
-                    <V2NotificationsPage />
-                  </V2ProtectedRoute>
-                }
-              />
-              <Route
-                path="admin"
-                element={
-                  <V2ProtectedRoute allowedRoles={['Admin']}>
-                    <V2AdminPage />
-                  </V2ProtectedRoute>
-                }
-              />
-              <Route path="*" element={<V2NotFoundPage />} />
-            </Routes>
-          </Suspense>
-        </ErrorBoundary>
-      </V2AppShell>
-    </V2ProtectedRoute>
+    <ToastProvider>
+      <V2ProtectedRoute>
+        <V2AppShell>
+          <ErrorBoundary>
+            <Suspense fallback={<V2Fallback />}>
+              <Routes>
+                <Route index element={<Navigate to="/v2/dashboard" replace />} />
+                <Route path="dashboard"       element={<V2DashboardPage />} />
+                <Route path="dashboards"      element={<V2CustomDashboardPage />} />
+                <Route path="devices"         element={<V2DevicesPage />} />
+                <Route path="devices/:id"     element={<V2DeviceDetailPage />} />
+                <Route path="alarms"          element={<V2AlarmsPage />} />
+                <Route path="topology"        element={<V2TopologyPage />} />
+                <Route path="kpi"             element={<V2KpiPage />} />
+                <Route
+                  path="config"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2ConfigPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="hierarchy"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2HierarchyPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="troubleshoot"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2TroubleshootPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                <Route path="reports"       element={<V2ReportsPage />} />
+                <Route path="groups"        element={<V2GroupsPage />} />
+                <Route
+                  path="notifications"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin']}>
+                      <V2NotificationsPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="admin"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin']}>
+                      <V2AdminPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                <Route path="*" element={<V2NotFoundPage />} />
+              </Routes>
+            </Suspense>
+          </ErrorBoundary>
+        </V2AppShell>
+      </V2ProtectedRoute>
+    </ToastProvider>
   );
 }

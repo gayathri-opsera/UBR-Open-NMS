@@ -1,18 +1,531 @@
-import React from 'react';
-import { EmptyState } from '../components/common/States';
+/**
+ * Inventory (Device Management) — NMS-IV-01 to IV-05
+ *
+ * Role-based CRUD:
+ *  Admin    — Add, Edit, Delete devices
+ *  Operator — View only (no Add/Edit/Delete buttons shown)
+ *  Viewer   — View only
+ */
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  fetchDevices, createDevice, updateDevice, deleteDevice, downloadDeviceExport,
+} from '../../api/devices.api';
+import type { Device, DeviceFilter, DeviceType, DeviceStatus } from '../../api/devices.types';
+import { AdvancedTable, type ColumnDef } from '../components/common/AdvancedTable';
+import { Badge } from '../components/common/Badge';
+import { Button } from '../components/common/Button';
+import { Input } from '../components/common/Input';
+import { Select } from '../components/common/Select';
+import { MetricCard } from '../components/common/MetricCard';
+import { Modal } from '../components/common/Modal';
+import { useToast } from '../components/common/Toast';
+import { useAuth } from '../../contexts/AuthContext';
+import { logger } from '../utils/logger';
 
-const PAGE_TITLE = 'V2DevicesPage'.replace('V2', '').replace('Page', '');
+// ── Constants ────────────────────────────────────────────────────────────────
+const TYPE_OPTIONS = [
+  { value: '', label: 'All types' },
+  { value: 'BTS', label: 'BTS' },
+  { value: 'CPE', label: 'CPE' },
+  { value: 'IDU', label: 'IDU' },
+];
+const STATUS_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  { value: 'ONLINE', label: 'Online' },
+  { value: 'OFFLINE', label: 'Offline' },
+  { value: 'PROVISIONING', label: 'Provisioning' },
+  { value: 'UNKNOWN', label: 'Unknown' },
+];
 
+function statusVariant(s: DeviceStatus): 'online' | 'offline' | 'warning' | 'unknown' {
+  return s === 'ONLINE' ? 'online' : s === 'OFFLINE' ? 'offline' : s === 'PROVISIONING' ? 'warning' : 'unknown';
+}
+
+const FIELD = {
+  width: '100%', padding: '8px 10px', borderRadius: 6,
+  border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-surface)',
+  color: 'var(--vf-text-primary)', fontSize: 13, boxSizing: 'border-box' as const,
+};
+const FL = ({ children }: { children: React.ReactNode }) => (
+  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 5 }}>{children}</div>
+);
+
+// ── Device Form (Add / Edit) ──────────────────────────────────────────────────
+interface DeviceFormData {
+  serialNumber: string; deviceType: DeviceType; status: DeviceStatus;
+  ipAddress: string; macAddress: string; model: string; manufacturer: string;
+  firmwareVersion: string; latitude: string; longitude: string;
+}
+
+const BLANK_FORM: DeviceFormData = {
+  serialNumber: '', deviceType: 'BTS', status: 'PROVISIONING',
+  ipAddress: '', macAddress: '', model: 'A60', manufacturer: 'Senao',
+  firmwareVersion: '', latitude: '', longitude: '',
+};
+
+function DeviceFormModal({
+  open, onClose, initial, onSave,
+}: {
+  open: boolean;
+  onClose: () => void;
+  initial?: Device | null;
+  onSave: (data: DeviceFormData) => Promise<void>;
+}) {
+  const [form, setForm] = useState<DeviceFormData>(BLANK_FORM);
+  const [saving, setSaving] = useState(false);
+  const { addToast } = useToast();
+
+  useEffect(() => {
+    if (open) {
+      setForm(initial ? {
+        serialNumber: initial.serialNumber ?? '',
+        deviceType:   initial.deviceType ?? 'BTS',
+        status:       initial.status ?? 'PROVISIONING',
+        ipAddress:    initial.ipAddress ?? '',
+        macAddress:   initial.macAddress ?? '',
+        model:        initial.model ?? 'A60',
+        manufacturer: initial.manufacturer ?? 'Senao',
+        firmwareVersion: initial.firmwareVersion ?? '',
+        latitude:     String(initial.latitude ?? ''),
+        longitude:    String(initial.longitude ?? ''),
+      } : { ...BLANK_FORM });
+    }
+  }, [open, initial]);
+
+  const set = (k: keyof DeviceFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleSave = async () => {
+    if (!form.serialNumber.trim()) { addToast('Serial number is required', 'warning'); return; }
+    if (!form.ipAddress.trim()) { addToast('IP address is required', 'warning'); return; }
+    setSaving(true);
+    try { await onSave(form); onClose(); }
+    catch { /* parent shows toast */ }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title={initial ? 'Edit Device' : 'Add Device'} size="lg">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <FL>Serial Number *</FL>
+            <input value={form.serialNumber} onChange={set('serialNumber')} placeholder="BTS-A60-000001" style={FIELD} />
+          </div>
+          <div>
+            <FL>Device Type *</FL>
+            <select value={form.deviceType} onChange={set('deviceType')} style={FIELD}>
+              <option value="BTS">BTS</option>
+              <option value="CPE">CPE</option>
+              <option value="IDU">IDU</option>
+            </select>
+          </div>
+          <div>
+            <FL>IP Address *</FL>
+            <input value={form.ipAddress} onChange={set('ipAddress')} placeholder="10.10.1.1" style={FIELD} />
+          </div>
+          <div>
+            <FL>MAC Address</FL>
+            <input value={form.macAddress} onChange={set('macAddress')} placeholder="AA:BB:CC:DD:EE:FF" style={FIELD} />
+          </div>
+          <div>
+            <FL>Model</FL>
+            <select value={form.model} onChange={set('model')} style={FIELD}>
+              <option value="A60">A60 (BTS)</option>
+              <option value="A61">A61 (CPE)</option>
+              <option value="A60-IDU">A60-IDU</option>
+            </select>
+          </div>
+          <div>
+            <FL>Manufacturer</FL>
+            <input value={form.manufacturer} onChange={set('manufacturer')} placeholder="Senao" style={FIELD} />
+          </div>
+          <div>
+            <FL>Firmware Version</FL>
+            <input value={form.firmwareVersion} onChange={set('firmwareVersion')} placeholder="v3.5.0" style={FIELD} />
+          </div>
+          <div>
+            <FL>Initial Status</FL>
+            <select value={form.status} onChange={set('status')} style={FIELD}>
+              <option value="PROVISIONING">PROVISIONING</option>
+              <option value="ONLINE">ONLINE</option>
+              <option value="OFFLINE">OFFLINE</option>
+              <option value="UNKNOWN">UNKNOWN</option>
+            </select>
+          </div>
+          <div>
+            <FL>Latitude (GPS)</FL>
+            <input type="number" value={form.latitude} onChange={set('latitude')} placeholder="28.6139" style={FIELD} />
+          </div>
+          <div>
+            <FL>Longitude (GPS)</FL>
+            <input type="number" value={form.longitude} onChange={set('longitude')} placeholder="77.2090" style={FIELD} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={saving} onClick={handleSave}>
+            {initial ? 'Save Changes' : 'Add Device'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Delete Confirmation ───────────────────────────────────────────────────────
+function DeleteConfirmModal({ device, onClose, onDelete }: { device: Device | null; onClose: () => void; onDelete: () => Promise<void> }) {
+  const [deleting, setDeleting] = useState(false);
+  if (!device) return null;
+  return (
+    <Modal open={!!device} onClose={onClose} title="Delete Device">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <p style={{ fontSize: 13, color: 'var(--vf-text-secondary)', margin: 0 }}>
+          Remove <strong style={{ fontFamily: 'var(--vf-font-mono)' }}>{device.serialNumber}</strong> from inventory? This action cannot be undone.
+        </p>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="danger" loading={deleting} onClick={async () => { setDeleting(true); await onDelete(); setDeleting(false); }}>
+            Delete
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function V2DevicesPage() {
+  const navigate    = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { addToast } = useToast();
+  const { user }    = useAuth();
+  const isAdmin     = user?.role === 'Admin';
+
+  const [devices, setDevices]       = useState<Device[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [filter, setFilter]         = useState<DeviceFilter>(() => {
+    const init: DeviceFilter = {};
+    const status     = searchParams.get('status') as DeviceStatus | null;
+    const deviceType = searchParams.get('deviceType') as DeviceType | null;
+    const firmware   = searchParams.get('firmware');
+    if (status) init.status = status;
+    if (deviceType) init.deviceType = deviceType;
+    if (firmware) init.firmware = firmware;
+    return init;
+  });
+  const [search, setSearch]         = useState(searchParams.get('search') ?? '');
+  const [showGpsSearch, setShowGpsSearch] = useState(false);
+  const [gpsLat, setGpsLat]         = useState('');
+  const [gpsLng, setGpsLng]         = useState('');
+  const [gpsRadius, setGpsRadius]   = useState('1');
+
+  // CRUD state
+  const [showAddModal, setShowAddModal]   = useState(false);
+  const [editDevice, setEditDevice]       = useState<Device | null>(null);
+  const [deleteDevice_, setDeleteDevice_] = useState<Device | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await fetchDevices(filter);
+      setDevices(data);
+    } catch (e) {
+      logger.error('Failed to fetch devices', e);
+      addToast('Failed to load inventory', 'error');
+    } finally { setLoading(false); }
+  }, [filter, addToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // ── CRUD handlers ─────────────────────────────────────────────────────────
+  const handleAdd = async (form: DeviceFormData) => {
+    try {
+      const created = await createDevice({
+        serialNumber:    form.serialNumber,
+        deviceType:      form.deviceType,
+        status:          form.status,
+        ipAddress:       form.ipAddress,
+        macAddress:      form.macAddress || undefined,
+        model:           form.model,
+        manufacturer:    form.manufacturer,
+        firmwareVersion: form.firmwareVersion || undefined,
+        latitude:        form.latitude ? parseFloat(form.latitude) : undefined,
+        longitude:       form.longitude ? parseFloat(form.longitude) : undefined,
+      } as Omit<Device, 'id'>);
+      setDevices((prev) => [created, ...prev]);
+      addToast(`Device ${created.serialNumber} added`, 'success');
+    } catch (e) {
+      logger.error('Create device failed', e);
+      addToast('Failed to add device', 'error');
+      throw e;
+    }
+  };
+
+  const handleEdit = async (form: DeviceFormData) => {
+    if (!editDevice) return;
+    try {
+      const updated = await updateDevice(editDevice.id, {
+        serialNumber:    form.serialNumber,
+        deviceType:      form.deviceType,
+        status:          form.status,
+        ipAddress:       form.ipAddress,
+        macAddress:      form.macAddress || undefined,
+        model:           form.model,
+        manufacturer:    form.manufacturer,
+        firmwareVersion: form.firmwareVersion || undefined,
+        latitude:        form.latitude ? parseFloat(form.latitude) : undefined,
+        longitude:       form.longitude ? parseFloat(form.longitude) : undefined,
+      });
+      setDevices((prev) => prev.map((d) => d.id === editDevice.id ? updated : d));
+      addToast(`Device ${updated.serialNumber} updated`, 'success');
+    } catch (e) {
+      logger.error('Update device failed', e);
+      addToast('Failed to update device', 'error');
+      throw e;
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteDevice_) return;
+    try {
+      await deleteDevice(deleteDevice_.id);
+      setDevices((prev) => prev.filter((d) => d.id !== deleteDevice_.id));
+      addToast(`Device ${deleteDevice_.serialNumber} removed`, 'success');
+      setDeleteDevice_(null);
+    } catch (e) {
+      logger.error('Delete device failed', e);
+      addToast('Failed to delete device', 'error');
+    }
+  };
+
+  // ── Table columns ─────────────────────────────────────────────────────────
+  const columns: ColumnDef<Device>[] = [
+    {
+      key: 'serialNumber', header: 'Serial', sortable: true,
+      render: (d) => (
+        <span style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 12, color: 'var(--vf-accent)', cursor: 'pointer' }}
+          onClick={(e) => { e.stopPropagation(); navigate(`/v2/devices/${d.id}`); }}>
+          {d.serialNumber}
+        </span>
+      ),
+    },
+    { key: 'deviceType', header: 'Type', sortable: true, render: (d) => <Badge variant="default">{d.deviceType}</Badge>, width: 80 },
+    {
+      key: 'status', header: 'Status', sortable: true,
+      render: (d) => <Badge variant={statusVariant(d.status)} dot>{d.status}</Badge>, width: 120,
+    },
+    { key: 'ipAddress', header: 'IP', sortable: true, render: (d) => <span style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 12 }}>{d.ipAddress}</span> },
+    { key: 'manufacturer', header: 'Manufacturer', sortable: true },
+    { key: 'model', header: 'Model', sortable: true },
+    { key: 'firmwareVersion', header: 'Firmware', sortable: true },
+    {
+      key: 'location', header: 'GPS',
+      render: (d) => d.location?.coordinates?.[1] != null
+        ? <span style={{ fontSize: 12, color: 'var(--vf-text-secondary)' }}>{d.location.coordinates[1].toFixed(4)}, {d.location.coordinates[0].toFixed(4)}</span>
+        : <span style={{ color: 'var(--vf-text-dim)' }}>—</span>,
+    },
+    {
+      key: 'pendingCommandCount', header: 'Pending', sortable: true,
+      render: (d) => d.pendingCommandCount
+        ? <Badge variant="warning">⏳ {d.pendingCommandCount}</Badge>
+        : <span style={{ color: 'var(--vf-text-dim)' }}>—</span>,
+      width: 80,
+    },
+    {
+      key: 'tags', header: 'Tags',
+      render: (d) => (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {(d.tags ?? []).slice(0, 3).map((t) => (
+            <Badge key={`${t.key}:${t.value}`} variant="default">{t.key}:{t.value}</Badge>
+          ))}
+          {(d.tags?.length ?? 0) > 3 && <Badge variant="default">+{(d.tags?.length ?? 0) - 3}</Badge>}
+        </div>
+      ),
+    },
+    // Actions column — Admin only
+    ...(isAdmin ? [{
+      key: '_actions' as keyof Device,
+      header: 'Actions',
+      width: 120,
+      render: (d: Device) => (
+        <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setEditDevice(d)}
+            style={{ background: 'var(--vf-elevated)', border: 'var(--vf-card-border)', color: 'var(--vf-text-secondary)', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+            Edit
+          </button>
+          <button
+            onClick={() => setDeleteDevice_(d)}
+            style={{ background: 'none', border: '1px solid var(--vf-danger)', color: 'var(--vf-danger)', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+            Delete
+          </button>
+        </div>
+      ),
+    }] : []),
+  ];
+
+  const online  = devices.filter((d) => d.status === 'ONLINE').length;
+  const offline = devices.filter((d) => d.status === 'OFFLINE').length;
+  const btsCount = devices.filter((d) => d.deviceType === 'BTS').length;
+  const cpeCount = devices.filter((d) => d.deviceType === 'CPE').length;
+
+  const handleExport = async (fmt: 'csv' | 'xls') => {
+    try {
+      try { await downloadDeviceExport(filter, fmt); }
+      catch {
+        if (fmt === 'csv') {
+          const header = 'Serial,Type,Model,Status,IP,MAC,Firmware,Latitude,Longitude\n';
+          const rows = devices.map((d) =>
+            `${d.serialNumber},${d.deviceType},${d.model},${d.status},${d.ipAddress},${d.macAddress ?? ''},${d.firmwareVersion ?? ''},${d.latitude ?? ''},${d.longitude ?? ''}`
+          ).join('\n');
+          const blob = new Blob([header + rows], { type: 'text/csv' });
+          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'inventory.csv'; a.click();
+        }
+      }
+      addToast(`Inventory exported as ${fmt.toUpperCase()}`, 'success');
+    } catch { addToast('Export failed', 'error'); }
+  };
+
+  const handleGpsSearch = () => {
+    const lat = parseFloat(gpsLat); const lng = parseFloat(gpsLng); const r = parseFloat(gpsRadius);
+    if (isNaN(lat) || isNaN(lng)) { addToast('Enter valid lat/lng coordinates', 'error'); return; }
+    const R = 6371;
+    const inRadius = devices.filter((d) => {
+      if (!d.latitude || !d.longitude) return false;
+      const dLat = ((d.latitude - lat) * Math.PI) / 180;
+      const dLng = ((d.longitude - lng) * Math.PI) / 180;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat * Math.PI) / 180) * Math.cos((d.latitude * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) <= r;
+    });
+    setSearch(''); setFilter({});
+    setDevices(inRadius);
+    addToast(`${inRadius.length} devices within ${r} km`, 'success');
+    setShowGpsSearch(false);
+  };
+
+  const tableData = filter.firmware ? devices.filter((d) => d.firmwareVersion === filter.firmware) : devices;
+
   return (
     <div className="vf-page">
       <div className="vf-page-header">
-        <h1 className="vf-page-title">{PAGE_TITLE}</h1>
+        <div>
+          <h1 className="vf-page-title">Inventory</h1>
+          {!isAdmin && (
+            <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 2, display: 'block' }}>
+              View only — contact an Admin to add or modify devices
+            </span>
+          )}
+        </div>
+        <div className="vf-page-actions">
+          {isAdmin && (
+            <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
+              + Add Device
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => setShowGpsSearch(true)}>📍 GPS Search</Button>
+          <Button variant="ghost" size="sm" onClick={() => handleExport('csv')}>CSV</Button>
+          <Button variant="ghost" size="sm" onClick={() => handleExport('xls')}>XLS</Button>
+          <Button variant="ghost" size="sm" onClick={load}>Refresh</Button>
+        </div>
       </div>
-      <EmptyState
-        icon={<span aria-hidden="true">🚧</span>}
-        title="${PAGE_TITLE} coming soon"
-        description="This V2 page is being implemented. Connect the existing V1 components or build new ones here."
+
+      {/* Role badge */}
+      {isAdmin && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ background: 'var(--vf-success-bg)', border: '1px solid var(--vf-success)', color: 'var(--vf-success)', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4 }}>
+            ADMIN — Full CRUD enabled
+          </span>
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="vf-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+        <MetricCard label="Total"   value={devices.length} loading={loading} />
+        <MetricCard label="Online"  value={online}         variant="success" loading={loading} />
+        <MetricCard label="Offline" value={offline}        variant={offline > 0 ? 'danger' : 'default'} loading={loading} />
+        <MetricCard label="BTS"     value={btsCount}       loading={loading} />
+        <MetricCard label="CPE"     value={cpeCount}       loading={loading} />
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Input placeholder="Search by serial, IP, model…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 280 }} />
+        <Select options={TYPE_OPTIONS} value={filter.deviceType ?? ''} onChange={(e) => setFilter((f) => ({ ...f, deviceType: (e.target.value as DeviceType) || undefined }))} style={{ width: 140 }} />
+        <Select options={STATUS_OPTIONS} value={filter.status ?? ''} onChange={(e) => setFilter((f) => ({ ...f, status: (e.target.value as DeviceStatus) || undefined }))} style={{ width: 160 }} />
+        <Button variant="ghost" size="sm" onClick={() => { setFilter({}); setSearch(''); }}>Clear</Button>
+      </div>
+
+      {/* Drilldown banner */}
+      {(filter.status || filter.deviceType || filter.firmware) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'var(--vf-accent-subtle)', border: '1px solid var(--vf-accent)', borderRadius: 8, fontSize: 12 }}>
+          <span style={{ color: 'var(--vf-accent)', fontWeight: 700 }}>Drilldown filter active:</span>
+          {filter.status     && <span style={{ background: 'var(--vf-elevated)', padding: '2px 8px', borderRadius: 4 }}>Status: {filter.status}</span>}
+          {filter.deviceType && <span style={{ background: 'var(--vf-elevated)', padding: '2px 8px', borderRadius: 4 }}>Type: {filter.deviceType}</span>}
+          {filter.firmware   && <span style={{ background: 'var(--vf-elevated)', padding: '2px 8px', borderRadius: 4 }}>Firmware: {filter.firmware}</span>}
+          <button onClick={() => setFilter({})} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vf-accent)', fontSize: 12, fontWeight: 600 }}>✕ Clear</button>
+        </div>
+      )}
+
+      {/* Table */}
+      <AdvancedTable
+        columns={columns}
+        data={tableData}
+        rowKey={(d) => d.id}
+        onRowClick={(d) => navigate(`/v2/devices/${d.id}`)}
+        loading={loading}
+        globalFilter={search}
+        filterFields={['serialNumber', 'ipAddress', 'manufacturer', 'model', 'deviceType', 'status']}
+        emptyMessage="No devices found — try adjusting filters"
+        maxHeight="calc(100vh - 420px)"
+      />
+
+      {/* GPS Search Modal */}
+      <Modal open={showGpsSearch} onClose={() => setShowGpsSearch(false)} title="GPS Location Search">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ fontSize: 13, color: 'var(--vf-text-muted)', margin: 0 }}>Find all devices within a radius (NMS-IV-04).</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <FL>Latitude</FL>
+              <input value={gpsLat} onChange={(e) => setGpsLat(e.target.value)} placeholder="28.4595" type="number" style={FIELD} />
+            </div>
+            <div>
+              <FL>Longitude</FL>
+              <input value={gpsLng} onChange={(e) => setGpsLng(e.target.value)} placeholder="77.0266" type="number" style={FIELD} />
+            </div>
+          </div>
+          <div>
+            <FL>Radius (km)</FL>
+            <input value={gpsRadius} onChange={(e) => setGpsRadius(e.target.value)} type="number" min="0.1" max="100" step="0.5" style={{ ...FIELD, width: 120 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="primary" onClick={handleGpsSearch}>Search</Button>
+            <Button variant="ghost" onClick={() => { setShowGpsSearch(false); load(); }}>Reset</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Add Device Modal */}
+      <DeviceFormModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSave={handleAdd}
+      />
+
+      {/* Edit Device Modal */}
+      <DeviceFormModal
+        open={!!editDevice}
+        onClose={() => setEditDevice(null)}
+        initial={editDevice}
+        onSave={handleEdit}
+      />
+
+      {/* Delete Confirmation */}
+      <DeleteConfirmModal
+        device={deleteDevice_}
+        onClose={() => setDeleteDevice_(null)}
+        onDelete={handleDelete}
       />
     </div>
   );

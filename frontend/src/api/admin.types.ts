@@ -45,6 +45,56 @@ export interface SystemHealth {
   checkedAt: string;
 }
 
+export interface AuditEntry {
+  id: string;
+  timestamp: string;
+  actor: string;
+  action: string;
+  resource: string;
+  resourceId?: string;
+  outcome: 'SUCCESS' | 'FAILURE';
+  ipAddress?: string;
+  detail?: string;
+}
+
+export interface BackupRecord {
+  id: string;
+  name: string;
+  createdAt: string;
+  sizeBytes: number;
+  status: 'COMPLETED' | 'RUNNING' | 'FAILED';
+  type: 'FULL' | 'INCREMENTAL';
+}
+
+export interface NorthboundConfig {
+  netcool:  { enabled: boolean; host: string; port: number; username?: string };
+  mycom:    { enabled: boolean; host: string; port: number; apiKey?: string };
+  mobinet:  { enabled: boolean; url: string; apiKey?: string };
+  syslog:   { enabled: boolean; host: string; port: number; protocol: 'UDP' | 'TCP' };
+  niam:     { enabled: boolean; ldapUrl: string; baseDn: string; bindDn?: string };
+}
+
+export interface RedundancySite {
+  name: string;
+  role: 'PRIMARY' | 'STANDBY';
+  ipAddress: string;
+  status: 'ACTIVE' | 'STANDBY' | 'FAILED' | 'UNKNOWN';
+  syncStatus: 'IN_SYNC' | 'LAGGING' | 'UNKNOWN';
+  lastSyncAt?: string;
+  cpuPct?: number;
+  memPct?: number;
+}
+
+export interface RedundancyStatus {
+  sites: RedundancySite[];
+  vipAddress: string;
+  heartbeatIntervalSec: number;
+  failoverThresholdMissed: number;
+  maxFailoverTimeSec: number;
+  dbReplication: string;
+  dataLossTolerance: string;
+}
+
 export interface HierarchyOrg {
   id?: string;
   name: string;

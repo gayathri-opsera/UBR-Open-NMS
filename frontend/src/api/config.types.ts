@@ -21,6 +21,7 @@ export interface ConfigTemplate {
   id?: string;
   name: string;
   description?: string;
+  deviceType?: 'BTS' | 'CPE' | 'IDU';
   isDefault: boolean;
   parameters: Record<ConfigParamKey, string | number | boolean>;
   createdAt?: string;
