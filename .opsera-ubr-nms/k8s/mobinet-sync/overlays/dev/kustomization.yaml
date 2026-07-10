@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_MOBINET_SYNC_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-mobinet-sync
-  newTag: dev-361f2305-20260708025527
+  newTag: dev-d1573382-20260710045625
 
 labels:
 - pairs:
