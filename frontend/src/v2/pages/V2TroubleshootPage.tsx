@@ -96,7 +96,7 @@ function LogsTab() {
     if (!deviceId) { addToast('Select a device first', 'warning'); return; }
     setLoading(true);
     try {
-      const result = await extractDeviceLogs({ deviceId, lines, level: level as LogEntry['level'] | undefined });
+      const result = await extractDeviceLogs({ deviceId, lines, level: (level || undefined) as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | undefined });
       setLogs(result);
       addToast(`${result.length} log entries retrieved`, 'success');
     } catch (e) { logger.error('Log extraction failed', e); addToast('Failed to extract logs', 'error'); }
@@ -315,7 +315,7 @@ function SpectrumTab() {
           </div>
           {/* Live subscribe */}
           {!live ? (
-            <Button variant="success" onClick={startLive} disabled={!deviceId}>
+            <Button variant="primary" onClick={startLive} disabled={!deviceId}>
               <span style={{ marginRight: 6 }}>●</span> Subscribe (Live)
             </Button>
           ) : (
