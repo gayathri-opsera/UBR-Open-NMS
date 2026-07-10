@@ -17,6 +17,19 @@ export const CONFIG_PARAMS = {
 export type ConfigCategory = keyof typeof CONFIG_PARAMS;
 export type ConfigParamKey = string;
 
+/** Admin-defined custom field attached to a template schema */
+export interface CustomFieldEntry {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'select' | 'boolean';
+  section: string;
+  options?: string[];
+  min?: number;
+  max?: number;
+  unit?: string;
+  placeholder?: string;
+}
+
 export interface ConfigTemplate {
   id?: string;
   name: string;
@@ -24,6 +37,10 @@ export interface ConfigTemplate {
   deviceType?: 'BTS' | 'CPE' | 'IDU';
   isDefault: boolean;
   parameters: Record<ConfigParamKey, string | number | boolean>;
+  /** Admin-added custom field definitions saved with this template */
+  customFields?: CustomFieldEntry[];
+  /** Keys of built-in fields hidden by admin for this template */
+  hiddenFields?: string[];
   createdAt?: string;
   updatedAt?: string;
 }

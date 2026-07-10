@@ -13,7 +13,7 @@ import {
   pushConfig, bulkPush, getJobStatus, getVersionHistory,
   pushFirmware, bulkFirmware,
 } from '../../api/config.api';
-import type { ConfigTemplate, ConfigJob, ConfigVersion, PushResult } from '../../api/config.types';
+import type { ConfigTemplate, ConfigJob, ConfigVersion, PushResult, CustomFieldEntry } from '../../api/config.types';
 import { validateTemplate } from '../../api/config.types';
 import { fetchDevices } from '../../api/devices.api';
 import type { Device } from '../../api/devices.types';
@@ -194,7 +194,262 @@ const IDU_SECTIONS: SectionDef[] = [
 function getSections(deviceType?: string): SectionDef[] {
   if (deviceType === 'CPE') return CPE_SECTIONS;
   if (deviceType === 'IDU') return IDU_SECTIONS;
-  return BTS_SECTIONS; // default BTS
+  return BTS_SECTIONS;
+}
+
+/** Returns sections with custom fields merged in and hidden fields removed. */
+function getEffectiveSections(template: ConfigTemplate): SectionDef[] {
+  const base = getSections(template.deviceType);
+  const hidden = new Set(template.hiddenFields ?? []);
+  const customFields = template.customFields ?? [];
+
+  // Group custom fields by section title
+  const customBySection: Record<string, FieldDef[]> = {};
+  customFields.forEach((cf) => {
+    if (!customBySection[cf.section]) customBySection[cf.section] = [];
+    customBySection[cf.section].push({
+      key: cf.key, label: cf.label, type: cf.type,
+      options: cf.options, min: cf.min, max: cf.max, unit: cf.unit, placeholder: cf.placeholder,
+    });
+  });
+
+  const result: SectionDef[] = base.map((sec) => ({
+    ...sec,
+    fields: [
+      ...sec.fields.filter((f) => !hidden.has(f.key)),
+      ...(customBySection[sec.title] ?? []),
+    ],
+  }));
+
+  // Add brand-new custom sections not in base
+  Object.entries(customBySection).forEach(([title, fields]) => {
+    if (!base.find((s) => s.title === title)) {
+      result.push({ title, icon: '⚙', fields });
+    }
+  });
+
+  return result.filter((s) => s.fields.length > 0);
+}
+
+// ── Field Schema Editor (admin customises which fields appear) ──────────────
+const BLANK_FIELD: Omit<CustomFieldEntry, 'section'> = {
+  key: '', label: '', type: 'text', unit: '', placeholder: '', options: [], min: undefined, max: undefined,
+};
+
+function labelToKey(label: string): string {
+  return label.trim().replace(/[^a-zA-Z0-9 ]/g, '').split(' ').map((w, i) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
+}
+
+interface FieldSchemaEditorProps {
+  template: ConfigTemplate;
+  onChange: (patch: Partial<ConfigTemplate>) => void;
+}
+
+function FieldSchemaEditor({ template, onChange }: FieldSchemaEditorProps) {
+  const base = getSections(template.deviceType);
+  const hidden = new Set(template.hiddenFields ?? []);
+  const customFields = template.customFields ?? [];
+  const [addingToSection, setAddingToSection] = useState<string | null>(null);
+  const [newSection, setNewSection] = useState('');
+  const [addingSec, setAddingSec] = useState(false);
+  const [draft, setDraft] = useState<Omit<CustomFieldEntry, 'section'>>({ ...BLANK_FIELD });
+
+  // All section titles (base + custom)
+  const customSections = [...new Set(customFields.map((c) => c.section))].filter((s) => !base.find((b) => b.title === s));
+  const allSectionTitles = [...base.map((s) => s.title), ...customSections];
+
+  const toggleHide = (key: string) => {
+    const next = hidden.has(key) ? [...hidden].filter((k) => k !== key) : [...hidden, key];
+    onChange({ hiddenFields: next });
+  };
+
+  const removeCustomField = (key: string) => {
+    onChange({ customFields: customFields.filter((c) => c.key !== key) });
+  };
+
+  const confirmAddField = (section: string) => {
+    if (!draft.label.trim()) return;
+    const key = draft.key.trim() || labelToKey(draft.label);
+    if (!key) return;
+    const existing = [...base.flatMap((s) => s.fields.map((f) => f.key)), ...customFields.map((c) => c.key)];
+    if (existing.includes(key)) { alert(`Key "${key}" already exists.`); return; }
+    const entry: CustomFieldEntry = {
+      key, label: draft.label, type: draft.type, section,
+      ...(draft.unit ? { unit: draft.unit } : {}),
+      ...(draft.placeholder ? { placeholder: draft.placeholder } : {}),
+      ...(draft.type === 'select' && draft.options?.length ? { options: draft.options } : {}),
+      ...(draft.type === 'number' && draft.min !== undefined ? { min: draft.min } : {}),
+      ...(draft.type === 'number' && draft.max !== undefined ? { max: draft.max } : {}),
+    };
+    onChange({ customFields: [...customFields, entry] });
+    setDraft({ ...BLANK_FIELD });
+    setAddingToSection(null);
+  };
+
+  const BOX: React.CSSProperties = {
+    background: 'var(--vf-elevated)', borderRadius: 10, marginBottom: 10,
+    border: '1px solid var(--vf-border-subtle)', overflow: 'hidden',
+  };
+  const ROW: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '6px 12px', fontSize: 12, borderBottom: '1px solid var(--vf-border-subtle)',
+    gap: 8,
+  };
+  const CHIP: React.CSSProperties = {
+    fontSize: 10, padding: '2px 7px', borderRadius: 5, fontWeight: 600,
+    background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.3)',
+  };
+  const GHOST_BTN: React.CSSProperties = {
+    background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px',
+    borderRadius: 4, fontSize: 11, color: 'var(--vf-text-muted)',
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+        Toggle visibility of built-in fields or add your own. Changes are saved with the template.
+      </div>
+
+      {allSectionTitles.map((sectionTitle) => {
+        const baseFields = base.find((s) => s.title === sectionTitle)?.fields ?? [];
+        const sectionCustom = customFields.filter((c) => c.section === sectionTitle);
+        const isAddingHere = addingToSection === sectionTitle;
+
+        return (
+          <div key={sectionTitle} style={BOX}>
+            {/* Section header */}
+            <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--vf-border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vf-text-muted)' }}>{sectionTitle}</span>
+              <span style={{ fontSize: 10, color: 'var(--vf-text-muted)' }}>{baseFields.filter((f) => !hidden.has(f.key)).length + sectionCustom.length} visible</span>
+            </div>
+
+            {/* Built-in fields */}
+            {baseFields.map((f) => (
+              <div key={f.key} style={{ ...ROW, opacity: hidden.has(f.key) ? 0.45 : 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <span style={{ fontSize: 12, color: 'var(--vf-text-primary)', fontWeight: 500 }}>{f.label}</span>
+                  <span style={{ ...CHIP, background: 'rgba(255,255,255,0.06)', color: 'var(--vf-text-muted)', border: '1px solid var(--vf-border-subtle)' }}>{f.type}</span>
+                  {f.unit && <span style={{ fontSize: 10, color: 'var(--vf-text-muted)' }}>{f.unit}</span>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 10, color: 'var(--vf-text-muted)', fontFamily: 'monospace' }}>{f.key}</span>
+                  <button style={{ ...GHOST_BTN, color: hidden.has(f.key) ? '#60a5fa' : '#ef4444', fontSize: 13 }}
+                    title={hidden.has(f.key) ? 'Show field' : 'Hide field'}
+                    onClick={() => toggleHide(f.key)}>
+                    {hidden.has(f.key) ? '👁' : '🚫'}
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {/* Custom fields */}
+            {sectionCustom.map((cf) => (
+              <div key={cf.key} style={{ ...ROW, background: 'rgba(59,130,246,0.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <span style={{ fontSize: 12, color: 'var(--vf-text-primary)', fontWeight: 500 }}>{cf.label}</span>
+                  <span style={CHIP}>{cf.type}</span>
+                  {cf.unit && <span style={{ fontSize: 10, color: 'var(--vf-text-muted)' }}>{cf.unit}</span>}
+                  <span style={{ fontSize: 10, background: '#22c55e22', color: '#22c55e', padding: '1px 5px', borderRadius: 4, border: '1px solid #22c55e44' }}>custom</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 10, color: 'var(--vf-text-muted)', fontFamily: 'monospace' }}>{cf.key}</span>
+                  <button style={{ ...GHOST_BTN, color: '#ef4444' }} title="Remove custom field" onClick={() => removeCustomField(cf.key)}>✕</button>
+                </div>
+              </div>
+            ))}
+
+            {/* Add field inline form */}
+            {isAddingHere ? (
+              <div style={{ padding: '12px 12px', background: 'rgba(59,130,246,0.06)', borderTop: '1px solid var(--vf-border-subtle)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--vf-text-muted)', display: 'block', marginBottom: 3 }}>Label *</label>
+                    <input value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value, key: labelToKey(e.target.value) }))}
+                      placeholder="e.g. RSSI Threshold" style={{ ...INLINE_INPUT, fontSize: 12 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--vf-text-muted)', display: 'block', marginBottom: 3 }}>Key (auto)</label>
+                    <input value={draft.key} onChange={(e) => setDraft((d) => ({ ...d, key: e.target.value }))}
+                      placeholder="rssiThreshold" style={{ ...INLINE_INPUT, fontSize: 12, fontFamily: 'monospace' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--vf-text-muted)', display: 'block', marginBottom: 3 }}>Type</label>
+                    <select value={draft.type} onChange={(e) => setDraft((d) => ({ ...d, type: e.target.value as CustomFieldEntry['type'] }))} style={{ ...INLINE_INPUT, fontSize: 12, width: 100 }}>
+                      <option value="text">Text</option>
+                      <option value="number">Number</option>
+                      <option value="select">Select</option>
+                      <option value="boolean">Toggle</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--vf-text-muted)', display: 'block', marginBottom: 3 }}>Unit</label>
+                    <input value={draft.unit ?? ''} onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))} placeholder="dBm / Mbps…" style={{ ...INLINE_INPUT, fontSize: 12 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--vf-text-muted)', display: 'block', marginBottom: 3 }}>Placeholder</label>
+                    <input value={draft.placeholder ?? ''} onChange={(e) => setDraft((d) => ({ ...d, placeholder: e.target.value }))} placeholder="default hint" style={{ ...INLINE_INPUT, fontSize: 12 }} />
+                  </div>
+                  {draft.type === 'number' && (
+                    <>
+                      <div>
+                        <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--vf-text-muted)', display: 'block', marginBottom: 3 }}>Min</label>
+                        <input type="number" value={draft.min ?? ''} onChange={(e) => setDraft((d) => ({ ...d, min: e.target.value ? Number(e.target.value) : undefined }))} style={{ ...INLINE_INPUT, fontSize: 12 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--vf-text-muted)', display: 'block', marginBottom: 3 }}>Max</label>
+                        <input type="number" value={draft.max ?? ''} onChange={(e) => setDraft((d) => ({ ...d, max: e.target.value ? Number(e.target.value) : undefined }))} style={{ ...INLINE_INPUT, fontSize: 12 }} />
+                      </div>
+                    </>
+                  )}
+                  {draft.type === 'select' && (
+                    <div style={{ gridColumn: 'span 2' }}>
+                      <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--vf-text-muted)', display: 'block', marginBottom: 3 }}>Options (comma-separated)</label>
+                      <input value={(draft.options ?? []).join(',')} onChange={(e) => setDraft((d) => ({ ...d, options: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) }))} placeholder="Option1, Option2, Option3" style={{ ...INLINE_INPUT, fontSize: 12 }} />
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button onClick={() => { setAddingToSection(null); setDraft({ ...BLANK_FIELD }); }} style={{ ...GHOST_BTN, color: 'var(--vf-text-secondary)', fontSize: 12, padding: '4px 10px' }}>Cancel</button>
+                  <button onClick={() => confirmAddField(sectionTitle)} disabled={!draft.label.trim()}
+                    style={{ background: 'var(--vf-accent)', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', padding: '4px 12px', fontSize: 12, fontWeight: 600, opacity: draft.label.trim() ? 1 : 0.4 }}>
+                    Add Field
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '6px 12px', borderTop: baseFields.length + sectionCustom.length > 0 ? '1px solid var(--vf-border-subtle)' : undefined }}>
+                <button onClick={() => { setAddingToSection(sectionTitle); setDraft({ ...BLANK_FIELD }); }}
+                  style={{ ...GHOST_BTN, color: 'var(--vf-accent)', fontSize: 12, padding: '4px 8px' }}>
+                  + Add Field to {sectionTitle}
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Add new section */}
+      {addingSec ? (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+          <input value={newSection} onChange={(e) => setNewSection(e.target.value)} placeholder="Section name (e.g. Security)"
+            style={{ ...INLINE_INPUT, fontSize: 12, flex: 1 }} onKeyDown={(e) => { if (e.key === 'Enter' && newSection.trim()) { setAddingToSection(newSection.trim()); setNewSection(''); setAddingSec(false); } }} />
+          <button onClick={() => { if (newSection.trim()) { setAddingToSection(newSection.trim()); setNewSection(''); setAddingSec(false); } }}
+            style={{ background: 'var(--vf-accent)', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', padding: '6px 14px', fontSize: 12, fontWeight: 600 }}>
+            Create
+          </button>
+          <button onClick={() => { setAddingSec(false); setNewSection(''); }}
+            style={{ ...GHOST_BTN, fontSize: 13 }}>✕</button>
+        </div>
+      ) : (
+        <button onClick={() => setAddingSec(true)}
+          style={{ background: 'none', border: '1px dashed var(--vf-border-subtle)', color: 'var(--vf-text-muted)', borderRadius: 8, cursor: 'pointer', padding: '8px 16px', fontSize: 12, width: '100%', marginTop: 4 }}>
+          + Add New Section
+        </button>
+      )}
+    </div>
+  );
 }
 
 // ── Template Preview Panel ────────────────────────────────────────────────────
@@ -374,7 +629,7 @@ function ParamField({ def, value, onChange }: {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 1. Templates tab — split-view master-detail (no modal)
 // ═══════════════════════════════════════════════════════════════════════════════
-const BLANK: ConfigTemplate = { name: '', description: '', deviceType: 'BTS', isDefault: false, parameters: {} };
+const BLANK: ConfigTemplate = { name: '', description: '', deviceType: 'BTS', isDefault: false, parameters: {}, customFields: [], hiddenFields: [] };
 
 function TemplatesTab() {
   const { addToast } = useToast();
@@ -383,6 +638,7 @@ function TemplatesTab() {
   const [editing, setEditing]     = useState<ConfigTemplate | null>(null);
   const [saving, setSaving]       = useState(false);
   const [dirty, setDirty]         = useState(false);
+  const [customizeMode, setCustomizeMode] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -441,7 +697,12 @@ function TemplatesTab() {
     setDirty(true);
   };
 
-  const sections = getSections(editing?.deviceType);
+  const patchSchema = (patch: Partial<ConfigTemplate>) => {
+    setEditing((e) => e ? { ...e, ...patch } : e);
+    setDirty(true);
+  };
+
+  const sections = editing ? getEffectiveSections(editing) : getSections(undefined);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 0, minHeight: 600, border: '1px solid var(--vf-border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
@@ -498,13 +759,24 @@ function TemplatesTab() {
         ) : (
           <>
             {/* Editor header */}
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--vf-border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--vf-border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, flexWrap: 'wrap', gap: 8 }}>
               <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--vf-text-primary)' }}>
                 {editing.id ? `Editing: ${editing.name}` : 'New Template'}
                 {dirty && <span style={{ fontSize: 11, color: '#f59e0b', marginLeft: 8 }}>● Unsaved</span>}
               </span>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button variant="ghost" size="sm" onClick={() => { setEditing(null); setDirty(false); }}>Discard</Button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  onClick={() => setCustomizeMode((m) => !m)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    background: customizeMode ? 'rgba(59,130,246,0.15)' : 'var(--vf-elevated)',
+                    border: `1px solid ${customizeMode ? 'rgba(59,130,246,0.5)' : 'var(--vf-border-subtle)'}`,
+                    color: customizeMode ? '#60a5fa' : 'var(--vf-text-secondary)',
+                    borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}>
+                  ⚙ {customizeMode ? 'Exit Field Editor' : 'Customize Fields'}
+                </button>
+                <Button variant="ghost" size="sm" onClick={() => { setEditing(null); setDirty(false); setCustomizeMode(false); }}>Discard</Button>
                 <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
                   {saving ? 'Saving…' : editing.id ? 'Update Template' : 'Save Template'}
                 </Button>
@@ -542,9 +814,21 @@ function TemplatesTab() {
 
               <hr style={{ border: 'none', borderTop: '1px solid var(--vf-border-subtle)', margin: 0 }} />
 
+              {/* ── Field Schema Editor (admin mode) ── */}
+              {customizeMode && (
+                <div style={{ background: 'var(--vf-elevated)', borderRadius: 10, padding: '14px 16px', border: '1px solid rgba(59,130,246,0.3)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#60a5fa' }}>⚙ Field Schema Editor</span>
+                    <span style={{ fontSize: 11, color: 'var(--vf-text-muted)' }}>— 🚫 hides a field · ✕ deletes a custom field · 👁 restores a hidden field</span>
+                  </div>
+                  <FieldSchemaEditor template={editing} onChange={patchSchema} />
+                </div>
+              )}
+
               {/* ── Device-type-specific parameter sections ── */}
-              {sections.map((section) => {
+              {!customizeMode && sections.map((section) => {
                 const visibleFields = section.fields.filter((f) => !f.showIf || f.showIf(editing.parameters));
+                if (visibleFields.length === 0) return null;
                 return (
                   <div key={section.title} style={{ background: 'var(--vf-elevated)', borderRadius: 10, overflow: 'hidden' }}>
                     <div style={{
@@ -573,7 +857,7 @@ function TemplatesTab() {
               })}
 
               {/* ── Params summary ── */}
-              {Object.keys(editing.parameters).filter((k) => editing.parameters[k] !== '' && editing.parameters[k] !== false).length > 0 && (
+              {!customizeMode && Object.keys(editing.parameters).filter((k) => editing.parameters[k] !== '' && editing.parameters[k] !== false).length > 0 && (
                 <div style={{ background: 'var(--vf-elevated)', borderRadius: 8, padding: '12px 16px' }}>
                   <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 10 }}>
                     Configured Parameters ({Object.keys(editing.parameters).filter((k) => editing.parameters[k] !== '' && editing.parameters[k] !== false).length})

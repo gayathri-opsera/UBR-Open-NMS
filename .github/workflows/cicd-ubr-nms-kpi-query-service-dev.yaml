@@ -219,16 +219,16 @@ jobs:
           fi
           git add -A
           git commit -m "chore: update kpi-query-service image to ${{ needs.build-image.outputs.image-tag }} [skip ci]"
-          for i in 1 2 3 4 5; do
+          for i in 1 2 3 4 5 6 7 8 9 10; do
             if git push origin HEAD; then
               echo "✅ Pushed manifests"
               exit 0
             fi
-            echo "Push failed, retrying ($i/5)..."
+            echo "Push failed, retrying ($i/10)..."
             # Pull remote changes and re-apply our commit on top
             git fetch origin main
             git rebase origin/main || { git rebase --abort; git reset --soft origin/main; git add -A; git commit --amend --no-edit; }
-            SLEEP_TIME=$((5 * i))
+            SLEEP_TIME=$(( 5 * i + RANDOM % 20 ))
             echo "  Waiting ${SLEEP_TIME}s before retry..."
             sleep $SLEEP_TIME
           done

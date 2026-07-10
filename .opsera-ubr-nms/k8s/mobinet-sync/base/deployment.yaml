@@ -32,6 +32,8 @@ spec:
           env:
             - name: KAFKA_BROKERS
               value: "kafka.opsera-ubr-nms-dev.svc.cluster.local:9092"
+            - name: MOBINET_KAFKA_BROKERS
+              value: "kafka.opsera-ubr-nms-dev.svc.cluster.local:9092"
             - name: KAFKA_ENABLED
               value: "true"
             - name: ENV
