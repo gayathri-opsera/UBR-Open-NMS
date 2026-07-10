@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_HEALTH_MONITOR_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-health-monitor
-  newTag: dev-d1573382-20260710045628
+  newTag: dev-de0265ae-20260710053430
 
 labels:
 - pairs:
