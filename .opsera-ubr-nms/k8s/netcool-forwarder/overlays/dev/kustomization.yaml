@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_NETCOOL_FORWARDER_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-netcool-forwarder
-  newTag: dev-d1573382-20260710045628
+  newTag: dev-abedd7ba-20260710054915
 
 labels:
 - pairs:
