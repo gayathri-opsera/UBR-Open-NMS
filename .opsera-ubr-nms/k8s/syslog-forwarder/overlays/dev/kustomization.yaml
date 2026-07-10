@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_SYSLOG_FORWARDER_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-syslog-forwarder
-  newTag: dev-d1573382-20260710045622
+  newTag: dev-920dd1a0-20260710054922
 
 labels:
 - pairs:
