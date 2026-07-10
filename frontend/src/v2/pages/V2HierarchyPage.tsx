@@ -226,7 +226,7 @@ export default function V2HierarchyPage() {
             <Button variant="primary" size="sm" onClick={openCreateOrg}>+ Add</Button>
           </div>
           <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 120 }}>
-            {loadingOrgs ? <LoadingState label="Loading…" compact /> : orgs.length === 0 ? (
+            {loadingOrgs ? <LoadingState label="Loading…" size="sm" /> : orgs.length === 0 ? (
               <EmptyState title="No organizations" compact action={<Button size="sm" onClick={openCreateOrg}>Create first</Button>} />
             ) : orgs.map((org) => (
               <OrgCard key={org.id} org={org} selected={selectedOrg?.id === org.id}
@@ -248,7 +248,7 @@ export default function V2HierarchyPage() {
           <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 120 }}>
             {!selectedOrg ? (
               <div style={{ padding: 16, textAlign: 'center', color: 'var(--vf-text-dim)', fontSize: 13 }}>Select an organization</div>
-            ) : loadingHiers ? <LoadingState label="Loading…" compact /> : hierarchies.length === 0 ? (
+            ) : loadingHiers ? <LoadingState label="Loading…" size="sm" /> : hierarchies.length === 0 ? (
               <EmptyState title="No hierarchies" compact />
             ) : hierarchies.map((h) => (
               <div key={h.id} onClick={() => setSelectedHier(h)}
@@ -279,7 +279,7 @@ export default function V2HierarchyPage() {
           <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 120 }}>
             {!selectedHier ? (
               <div style={{ padding: 16, textAlign: 'center', color: 'var(--vf-text-dim)', fontSize: 13 }}>Select a hierarchy view</div>
-            ) : loadingNets ? <LoadingState label="Loading…" compact /> : networks.length === 0 ? (
+            ) : loadingNets ? <LoadingState label="Loading…" size="sm" /> : networks.length === 0 ? (
               <EmptyState title="No networks" compact />
             ) : networks.map((n) => (
               <div key={n.id} style={{ background: 'var(--vf-elevated)', border: '1px solid rgba(77,158,255,0.06)', borderRadius: 8, padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

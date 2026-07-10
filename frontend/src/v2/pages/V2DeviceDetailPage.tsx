@@ -450,8 +450,8 @@ function GpsTab({ device }: { device: Device }) {
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <MetricCard label="Latitude"  value={lat.toFixed(6)} />
         <MetricCard label="Longitude" value={lng.toFixed(6)} />
-        {(device as Record<string, unknown>).azimuth != null && <MetricCard label="Azimuth" value={`${(device as Record<string, unknown>).azimuth}°`} />}
-        {(device as Record<string, unknown>).tilt != null    && <MetricCard label="Tilt"    value={`${(device as Record<string, unknown>).tilt}°`} />}
+        {(device.birthCertificate?.azimuth) != null && <MetricCard label="Azimuth" value={`${device.birthCertificate?.azimuth}°`} />}
+        {(device.birthCertificate?.tilt) != null    && <MetricCard label="Tilt"    value={`${device.birthCertificate?.tilt}°`} />}
       </div>
       <a href={mapUrl} target="_blank" rel="noopener noreferrer"
         style={{ color: 'var(--vf-accent)', fontSize: 13, textDecoration: 'none' }}>
@@ -602,7 +602,7 @@ function LogsTab({ device, addToast }: { device: Device; addToast: AddToast }) {
   const run = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await extractDeviceLogs({ deviceId: device.deviceId, lines, level: level as LogEntry['level'] | undefined });
+      const result = await extractDeviceLogs({ deviceId: device.deviceId, lines, level: (level || undefined) as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | undefined });
       setLogs(result);
       if (result.length) addToast(`${result.length} log entries retrieved`, 'success');
     } catch (e) { logger.error('Log extraction failed', e); addToast('Failed to extract logs', 'error'); }

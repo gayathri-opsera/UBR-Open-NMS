@@ -195,7 +195,7 @@ function DevicePickerModal({ open, group, onClose, onSave, saving }: DevicePicke
                     onChange={() => toggle(d.id)}
                     style={{ accentColor: '#3b82f6', width: 14, height: 14 }}
                   />
-                  <Badge variant={d.deviceType === 'BTS' ? 'primary' : d.deviceType === 'CPE' ? 'success' : 'warning'}>{d.deviceType}</Badge>
+                  <Badge variant={d.deviceType === 'BTS' ? 'accent' : d.deviceType === 'CPE' ? 'success' : 'warning'}>{d.deviceType}</Badge>
                   <span style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 12 }}>{d.serialNumber}</span>
                   <span style={{ color: 'var(--vf-text-muted)', fontSize: 12 }}>{d.ipAddress}</span>
                   <span style={{ marginLeft: 'auto', color: d.status === 'ONLINE' ? '#22c55e' : '#ef4444', fontSize: 11 }}>{d.status}</span>

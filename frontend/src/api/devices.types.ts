@@ -23,6 +23,9 @@ export interface Device {
   firmwareVersion: string;
   status: DeviceStatus;
   location?: GpsLocation;
+  /** Flat lat/lng fields used by some API responses and the GPS search/export UI */
+  latitude?: number;
+  longitude?: number;
   networkId?: string;
   organizationId?: string;
   hierarchyId?: string;
@@ -42,6 +45,8 @@ export interface DeviceFilter {
   hierarchyId?: string;
   networkId?: string;
   tags?: string[];
+  /** Maximum number of results to return */
+  limit?: number;
 }
 
 export interface GpsSearchParams {

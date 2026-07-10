@@ -39,6 +39,7 @@ export function getMockKpiData(deviceId: string, params: KpiParam[], timeRange: 
     connectedClients:   { base: 12, variance: 5 },
     txPower:            { base: 20, variance: 3 },
     retryRate:          { base: 2, variance: 3 },
+    temperature:        { base: 42, variance: 8 },
   };
 
   return params.map((p) => generateSeries(deviceId, p, timeRange, config[p].base, config[p].variance));

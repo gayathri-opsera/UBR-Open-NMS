@@ -159,7 +159,7 @@ function DeviceStatusTab() {
   const exportCsv = () => {
     const header = 'Serial,Type,Model,Status,IP,Firmware,Circle\n';
     const rows = devices.map((d) =>
-      `${d.serialNumber},${d.deviceType},${d.model},${d.status},${d.ipAddress},${d.firmwareVersion ?? ''},${(d as Record<string, unknown>).circle ?? ''}`
+      `${d.serialNumber},${d.deviceType},${d.model},${d.status},${d.ipAddress},${d.firmwareVersion ?? ''},${(d as unknown as Record<string, unknown>).circle ?? ''}`
     ).join('\n');
     downloadCsv('device-status-report.csv', header + rows);
   };

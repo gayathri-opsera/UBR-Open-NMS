@@ -42,8 +42,8 @@ function relTime(iso?: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function typeBadgeVariant(t: DeviceType): 'primary' | 'success' | 'warning' {
-  if (t === 'BTS') return 'primary';
+function typeBadgeVariant(t: DeviceType): 'accent' | 'success' | 'warning' {
+  if (t === 'BTS') return 'accent';
   if (t === 'CPE') return 'success';
   return 'warning';
 }

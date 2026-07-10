@@ -105,7 +105,7 @@ export async function fetchAuditLog(params?: { limit?: number; actor?: string; a
     if (Array.isArray(data)) return data;
     if (data && 'logs' in data && Array.isArray(data.logs)) {
       // Normalize field names: the audit service uses result/sourceIp/serviceSource
-      return data.logs.map((e: Record<string, unknown>) => ({
+      return (data.logs as Record<string, unknown>[]).map((e) => ({
         id:         String(e._id ?? e.id ?? ''),
         timestamp:  String(e.timestamp ?? e.createdAt ?? ''),
         actor:      String(e.actor ?? ''),

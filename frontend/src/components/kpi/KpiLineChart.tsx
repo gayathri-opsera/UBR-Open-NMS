@@ -24,6 +24,7 @@ const PARAM_LABEL: Record<KpiParam, string> = {
   connectedClients: 'Connected Clients',
   txPower: 'Tx Power (dBm)',
   retryRate: 'Retry Rate (%)',
+  temperature: 'Temperature (°C)',
 };
 
 function formatTs(ts: string): string {
