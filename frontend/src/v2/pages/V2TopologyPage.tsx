@@ -568,8 +568,6 @@ function IndiaMapView({ nodes, edges, onNodeClick, gpsResult, mapHeight }: {
 
         {/* BTS→CPE and CPE→IDU connection lines (NMS-TP-05) */}
         {edges.map((e) => {
-          const srcIdx = nodes.indexOf(nodes.find((n) => n.id === e.sourceDeviceId || n.deviceId === e.sourceDeviceId)!);
-          const tgtIdx = nodes.indexOf(nodes.find((n) => n.id === e.targetDeviceId || n.deviceId === e.targetDeviceId)!);
           const src = enriched.find((x) => x.node.id === e.sourceDeviceId || x.node.deviceId === e.sourceDeviceId);
           const tgt = enriched.find((x) => x.node.id === e.targetDeviceId || x.node.deviceId === e.targetDeviceId);
           if (!src || !tgt) return null;
@@ -706,7 +704,7 @@ function TopologyGraphView({ nodes, edges, onNodeClick, mapHeight }: {
     const simNodes: any[] = nodes.map((n) => ({
       id: n.id, type: n.deviceType,
       name: n.deviceName ?? n.serialNumber?.slice(-6) ?? n.id,
-      health: n.health, lq: n.linkQuality, _node: n,
+      health: n.health, lq: (n as any).linkQuality ?? 'GOOD', _node: n,
       x: W / 2 + (Math.random() - 0.5) * 400,
       y: H / 2 + (Math.random() - 0.5) * 300,
     }));
