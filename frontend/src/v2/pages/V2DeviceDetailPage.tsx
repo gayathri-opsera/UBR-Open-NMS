@@ -54,7 +54,8 @@ export default function V2DeviceDetailPage() {
     if (!id) return;
     fetchDevices()
       .then((devices) => {
-        const d = devices.find((x) => x.id === id || x.deviceId === id);
+        // Also match by serialNumber so topology (which navigates with serial) links correctly
+        const d = devices.find((x) => x.id === id || x.deviceId === id || x.serialNumber === id);
         setDevice(d ?? null);
       })
       .catch((e) => logger.error('Device fetch failed', e))

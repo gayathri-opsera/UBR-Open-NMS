@@ -1,5 +1,8 @@
 import { apiClient } from './client';
-import type { TopologyGraph, TopologyNode, TopologyEdge, NodeHealth } from './topology.types';
+import type {
+  TopologyGraph, TopologyNode, TopologyEdge, NodeHealth,
+  DeviceSummary, LinkHealth, DeviceEvent,
+} from './topology.types';
 
 type RawNode = Omit<TopologyNode, 'deviceType' | 'health' | 'location'> & {
   type: string;
@@ -7,9 +10,15 @@ type RawNode = Omit<TopologyNode, 'deviceType' | 'health' | 'location'> & {
   latitude?: number;
   longitude?: number;
   linkHealth?: string;
+  // extended fields included in graph response
+  a1Rssi?: number;
+  a2Rssi?: number;
+  ethernetSpeed?: string;
+  duplex?: string;
+  deviceName?: string;
 };
 
-type RawEdge = Omit<TopologyEdge, 'id'> & { id?: string };
+type RawEdge = Omit<TopologyEdge, 'id'> & { id?: string; linkQuality?: string };
 
 type RawGraph = {
   nodes: RawNode[];
@@ -36,6 +45,7 @@ function normalizeEdge(raw: RawEdge, idx: number): TopologyEdge {
     sourceDeviceId: raw.sourceDeviceId,
     targetDeviceId: raw.targetDeviceId,
     linkType: raw.linkType,
+    linkQuality: raw.linkQuality as TopologyEdge['linkQuality'],
     health: raw.health,
   };
 }
@@ -60,6 +70,35 @@ export async function fetchDeviceConnections(deviceId: string): Promise<Topology
   return res.data.map(normalizeNode);
 }
 
+/** Extended hover data: A1/A2 RSSI, speed/duplex (NMS-TP-06) */
+export async function fetchDeviceSummary(deviceId: string): Promise<DeviceSummary> {
+  const res = await apiClient.get<DeviceSummary>(`/topology/device/${deviceId}/summary`);
+  return res.data;
+}
+
+/** Link health metrics (NMS-TP-08) */
+export async function fetchDeviceLinkHealth(deviceId: string): Promise<LinkHealth> {
+  const res = await apiClient.get<LinkHealth>(`/topology/device/${deviceId}/link-health`);
+  return res.data;
+}
+
+/**
+ * Event history for a device (NMS-TP-08).
+ * from/to are ISO timestamps. Max window: 1 week.
+ */
+export async function fetchDeviceEvents(
+  deviceId: string,
+  from?: string,
+  to?: string,
+): Promise<DeviceEvent[]> {
+  const params: Record<string, string> = {};
+  if (from) params.from = from;
+  if (to)   params.to   = to;
+  const res = await apiClient.get<DeviceEvent[]>(`/topology/device/${deviceId}/events`, { params });
+  return res.data;
+}
+
+/** GPS radius search — returns devices within radiusKm (NMS-TP-02) */
 export async function searchTopology(params: {
   search?: string;
   lat?: number;

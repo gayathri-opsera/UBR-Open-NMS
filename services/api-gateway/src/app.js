@@ -17,6 +17,7 @@ const groupsStub      = require('./routes/groups.stub');
 const configStub      = require('./routes/config.stub');
 const diagnosticsStub = require('./routes/diagnostics.stub');
 const kpiStub         = require('./routes/kpi.stub');
+const topologyStub    = require('./routes/topology.stub');
 
 function createApp(redisClient) {
   const app = express();
@@ -48,6 +49,8 @@ function createApp(redisClient) {
   app.use('/api/v1/diagnostics',   diagnosticsStub);
   // KPI stub — kpi-query-service and kpi-aggregation-service are not yet deployed
   app.use('/api/v1/kpi',           kpiStub);
+  // Topology stub — adds /summary, /link-health, /events, /connections, /search endpoints
+  app.use('/api/v1/topology',      topologyStub);
 
   // System health stub — health-monitor service may not be running in local dev
   app.get('/api/v1/system/health', (_req, res) => {

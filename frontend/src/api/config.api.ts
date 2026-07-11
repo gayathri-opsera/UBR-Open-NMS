@@ -79,20 +79,12 @@ export async function fetchMissingData(networkId?: string): Promise<MissingDataR
 
 /** Config-service returns flat fields; collect them into a `parameters` map */
 function normalizeTemplate(raw: Record<string, unknown>): ConfigTemplate {
-  const PARAM_FIELDS = new Set([
-    'ssid24','ssid5','wpaKey','channel24','channel5','txPower24','txPower5',
-    'channelBandwidth','beaconInterval','dtimPeriod',
-    'managementIpType','staticIp','staticSubnet','staticGateway',
-    'speedDuplex','portUpDown','wifiRestart','deviceReboot',
-    'firmwareVersion','firmwareUrl','autoUpgrade',
-    'vlanId','qosProfile','snmpCommunity','ntpServer',
-    'password24','password5',
-  ]);
-  const META_FIELDS = new Set(['id','name','description','deviceType','isDefault','createdBy','createdAt','updatedAt']);
+  const META_FIELDS = new Set(['id','name','description','deviceType','isDefault','createdBy','createdAt','updatedAt','customFields','hiddenFields']);
   const parameters: Record<string, string | number | boolean> = {};
 
   for (const [k, v] of Object.entries(raw)) {
-    if (!META_FIELDS.has(k) && PARAM_FIELDS.has(k) && v !== null && v !== undefined) {
+    // Skip meta fields and nulls; anything else goes into parameters
+    if (!META_FIELDS.has(k) && v !== null && v !== undefined && typeof v !== 'object') {
       parameters[k] = v as string | number | boolean;
     }
   }
@@ -103,17 +95,28 @@ function normalizeTemplate(raw: Record<string, unknown>): ConfigTemplate {
   }
 
   return {
-    id:          raw.id as string | undefined,
-    name:        (raw.name as string) ?? '',
-    description: raw.description as string | undefined,
-    isDefault:   Boolean(raw.isDefault),
+    id:           raw.id as string | undefined,
+    name:         (raw.name as string) ?? '',
+    description:  raw.description as string | undefined,
+    deviceType:   (raw.deviceType as 'BTS' | 'CPE' | 'IDU' | undefined) ?? 'BTS',
+    isDefault:    Boolean(raw.isDefault),
     parameters,
-    createdAt:   raw.createdAt as string | undefined,
-    updatedAt:   raw.updatedAt as string | undefined,
+    customFields: (raw.customFields as ConfigTemplate['customFields']) ?? [],
+    hiddenFields: (raw.hiddenFields as string[]) ?? [],
+    createdAt:    raw.createdAt as string | undefined,
+    updatedAt:    raw.updatedAt as string | undefined,
   };
 }
 
 /** Flatten a ConfigTemplate back to the shape the config-service accepts */
 function flattenTemplate(t: ConfigTemplate): Record<string, unknown> {
-  return { ...t.parameters, name: t.name, description: t.description, isDefault: t.isDefault };
+  return {
+    ...t.parameters,
+    name: t.name,
+    description: t.description,
+    deviceType: t.deviceType,
+    isDefault: t.isDefault,
+    customFields: t.customFields ?? [],
+    hiddenFields: t.hiddenFields ?? [],
+  };
 }

@@ -65,6 +65,15 @@ type SectionDef = { title: string; icon: string; fields: FieldDef[] };
 
 const BTS_SECTIONS: SectionDef[] = [
   {
+    title: 'Wireless (SSID)', icon: '📶',
+    fields: [
+      { key: 'ssid5',    label: 'SSID (5 GHz)',         type: 'text',   placeholder: 'Airtel_UBR_5G' },
+      { key: 'wpaKey5',  label: 'WPA Key (5 GHz)',      type: 'text',   placeholder: 'passphrase (8–63 chars)' },
+      { key: 'ssid24',   label: 'SSID (2.4 GHz)',       type: 'text',   placeholder: 'Airtel_UBR_2G' },
+      { key: 'wpaKey24', label: 'WPA Key (2.4 GHz)',    type: 'text',   placeholder: 'passphrase (8–63 chars)' },
+    ],
+  },
+  {
     title: 'Radio (RF)', icon: '📡',
     fields: [
       { key: 'txPowerDbm',          label: 'TX Power',             type: 'number', min: 0,  max: 30,   unit: 'dBm', placeholder: '23' },
@@ -74,6 +83,14 @@ const BTS_SECTIONS: SectionDef[] = [
       { key: 'dtimPeriod',          label: 'DTIM Period',          type: 'number', min: 1,   max: 10,   placeholder: '1' },
       { key: 'shortGuardInterval',  label: 'Short Guard Interval', type: 'boolean' },
       { key: 'bandSteering',        label: 'Band Steering',        type: 'boolean' },
+    ],
+  },
+  {
+    title: 'Ethernet', icon: '🔌',
+    fields: [
+      { key: 'ethernetSpeed', label: 'Speed / Duplex', type: 'select', options: ['Auto','100Mbps Half','100Mbps Full','1000Mbps Full'] },
+      { key: 'ethernetPort0', label: 'Port 0 (eth0) Enabled', type: 'boolean' },
+      { key: 'ethernetPort1', label: 'Port 1 (eth1) Enabled', type: 'boolean' },
     ],
   },
   {
@@ -126,6 +143,22 @@ const BTS_SECTIONS: SectionDef[] = [
 
 const CPE_SECTIONS: SectionDef[] = [
   {
+    title: 'Wireless (SSID)', icon: '📶',
+    fields: [
+      { key: 'ssid5',    label: 'SSID (5 GHz)',      type: 'text', placeholder: 'Airtel_UBR_5G' },
+      { key: 'wpaKey5',  label: 'WPA Key (5 GHz)',   type: 'text', placeholder: 'passphrase (8–63 chars)' },
+      { key: 'ssid24',   label: 'SSID (2.4 GHz)',    type: 'text', placeholder: 'Airtel_UBR_2G' },
+      { key: 'wpaKey24', label: 'WPA Key (2.4 GHz)', type: 'text', placeholder: 'passphrase (8–63 chars)' },
+    ],
+  },
+  {
+    title: 'Ethernet', icon: '🔌',
+    fields: [
+      { key: 'ethernetSpeed', label: 'Speed / Duplex',          type: 'select', options: ['Auto','100Mbps Half','100Mbps Full','1000Mbps Full'] },
+      { key: 'ethernetPort0', label: 'Port 0 (eth0) Enabled',   type: 'boolean' },
+    ],
+  },
+  {
     title: 'Network (IP)', icon: '🌐',
     fields: [
       { key: 'ipMode',    label: 'IP Mode',    type: 'select', options: ['DHCP','Static','SLAAC'] },
@@ -141,7 +174,11 @@ const CPE_SECTIONS: SectionDef[] = [
   {
     title: 'VLAN', icon: '🔀',
     fields: [
-      { key: 'vlanId',      label: 'VLAN ID',      type: 'number', min: 1, max: 4094, placeholder: '100' },
+      { key: 'vlanMode',    label: 'VLAN Mode',     type: 'select', options: ['None','Single','Double'] },
+      { key: 'vlanId',      label: 'VLAN ID',       type: 'number', min: 1, max: 4094, placeholder: '100',
+        showIf: (p) => p.vlanMode === 'Single' || p.vlanMode === 'Double' },
+      { key: 'outerVlanId', label: 'Outer VLAN ID', type: 'number', min: 1, max: 4094, placeholder: '200',
+        showIf: (p) => p.vlanMode === 'Double' },
       { key: 'vlanPriority',label: 'VLAN Priority', type: 'number', min: 0, max: 7,   placeholder: '0' },
     ],
   },
@@ -454,10 +491,12 @@ function FieldSchemaEditor({ template, onChange }: FieldSchemaEditorProps) {
 
 // ── Template Preview Panel ────────────────────────────────────────────────────
 function TemplatePreview({ template }: { template: ConfigTemplate }) {
-  const sections = getSections(template.deviceType);
+  // Use effective sections (base + custom fields merged) so custom fields
+  // appear under their named section with friendly labels, not under "Other"
+  const sections = getEffectiveSections(template);
   const params = template.parameters;
 
-  // Build a key→{label, unit, section} lookup from sections
+  // Build a key→{label, unit, section} lookup from ALL effective sections
   const fieldMeta: Record<string, { label: string; unit?: string; section: string }> = {};
   sections.forEach((sec) => {
     sec.fields.forEach((f) => {
@@ -469,7 +508,7 @@ function TemplatePreview({ template }: { template: ConfigTemplate }) {
   const grouped: Record<string, { key: string; label: string; value: string | number | boolean; unit?: string }[]> = {};
   let uncategorised: { key: string; value: string | number | boolean }[] = [];
 
-  Object.entries(params).forEach(([k, v]) => {
+  Object.entries(params ?? {}).forEach(([k, v]) => {
     if (v === '' || v === null || v === undefined) return;
     const meta = fieldMeta[k];
     if (meta) {
@@ -523,7 +562,7 @@ function TemplatePreview({ template }: { template: ConfigTemplate }) {
             </span>
           )}
           <span style={{ background: 'var(--vf-elevated)', border: 'var(--vf-card-border)', color: 'var(--vf-text-muted)', padding: '2px 8px', borderRadius: 6, fontSize: 10 }}>
-            {Object.keys(params).filter((k) => params[k] !== '' && params[k] !== null).length} params
+            {Object.keys(params ?? {}).filter((k) => params[k] !== '' && params[k] !== null && params[k] !== undefined).length} params
           </span>
         </div>
       </div>
@@ -736,7 +775,7 @@ function TemplatesTab() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: typeColor[t.deviceType ?? 'BTS'] + '22', color: typeColor[t.deviceType ?? 'BTS'] }}>{t.deviceType ?? 'BTS'}</span>
                       {t.isDefault && <span style={{ fontSize: 10, color: '#22c55e' }}>● Default</span>}
-                      <span style={{ fontSize: 10, color: 'var(--vf-text-muted)' }}>{Object.keys(t.parameters).length}p</span>
+                      <span style={{ fontSize: 10, color: 'var(--vf-text-muted)' }}>{Object.keys(t.parameters ?? {}).length}p</span>
                     </div>
                   </div>
                   <button onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
@@ -857,13 +896,13 @@ function TemplatesTab() {
               })}
 
               {/* ── Params summary ── */}
-              {!customizeMode && Object.keys(editing.parameters).filter((k) => editing.parameters[k] !== '' && editing.parameters[k] !== false).length > 0 && (
+              {!customizeMode && Object.keys(editing.parameters ?? {}).filter((k) => editing.parameters[k] !== '' && editing.parameters[k] !== false).length > 0 && (
                 <div style={{ background: 'var(--vf-elevated)', borderRadius: 8, padding: '12px 16px' }}>
                   <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 10 }}>
-                    Configured Parameters ({Object.keys(editing.parameters).filter((k) => editing.parameters[k] !== '' && editing.parameters[k] !== false).length})
+                    Configured Parameters ({Object.keys(editing.parameters ?? {}).filter((k) => editing.parameters[k] !== '' && editing.parameters[k] !== false).length})
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {Object.entries(editing.parameters)
+                    {Object.entries(editing.parameters ?? {})
                       .filter(([, v]) => v !== '' && v !== false)
                       .map(([k, v]) => (
                         <div key={k} style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: 6, padding: '3px 8px', fontSize: 11 }}>
@@ -915,6 +954,19 @@ function PushConfigTab() {
         const job = await bulkPush(filter, selectedTemplate);
         setResult(job);
         addToast(`Bulk push started — ${job.totalDevices} devices`, 'success');
+        // Poll for live progress every 1 s until COMPLETED / FAILED
+        const poll = async (jobId: string) => {
+          try {
+            const updated = await getJobStatus(jobId);
+            setResult(updated);
+            if (updated.status === 'RUNNING' || updated.status === 'QUEUED') {
+              setTimeout(() => poll(jobId), 1000);
+            }
+          } catch { /* ignore poll errors */ }
+        };
+        if (job.jobId && (job.status === 'RUNNING' || job.status === 'QUEUED')) {
+          setTimeout(() => poll(job.jobId), 1000);
+        }
       } else {
         if (!selectedDevice) { addToast('Select a device', 'warning'); setPushing(false); return; }
         const res = await pushConfig(selectedDevice, selectedTemplate);
@@ -943,7 +995,7 @@ function PushConfigTab() {
     ...devices.map((d) => ({ value: d.id, label: `${d.serialNumber} — ${d.ipAddress} (${d.deviceType})` })),
   ];
 
-  const isPushResult = (r: PushResult | ConfigJob): r is PushResult => 'commandId' in r || ('status' in r && ['PUSHED','QUEUED','REJECTED','DEVICE_OFFLINE'].includes((r as PushResult).status));
+  const isPushResult = (r: PushResult | ConfigJob): r is PushResult => 'commandId' in r || ('totalDevices' in r === false && ['PUSHED','REJECTED','DEVICE_OFFLINE'].includes((r as PushResult).status));
 
   return (
     <>
@@ -1023,7 +1075,7 @@ function PushConfigTab() {
                   <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>by {v.actor} · {new Date(v.appliedAt).toLocaleString()}</span>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {Object.entries(v.newValues).map(([k, val]) => (
+                  {Object.entries(v.newValues ?? {}).map(([k, val]) => (
                     <div key={k} style={{ fontSize: 11, background: 'var(--vf-surface)', padding: '3px 8px', borderRadius: 4 }}>
                       <span style={{ color: 'var(--vf-text-muted)' }}>{k}:</span> <span style={{ fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-accent)' }}>{val}</span>
                     </div>
@@ -1090,7 +1142,7 @@ function FirmwareTab() {
   ];
 
   const isPushResult = (r: PushResult | ConfigJob): r is PushResult =>
-    'commandId' in r || ['PUSHED','QUEUED','REJECTED','DEVICE_OFFLINE'].includes((r as PushResult).status);
+    'commandId' in r || ('totalDevices' in r === false && ['PUSHED','REJECTED','DEVICE_OFFLINE'].includes((r as PushResult).status));
 
   return (
     <>
