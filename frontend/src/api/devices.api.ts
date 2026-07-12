@@ -2,9 +2,23 @@ import { apiClient } from './client';
 import type { Device, DeviceFilter, GpsSearchParams } from './devices.types';
 
 export async function fetchDevices(filter: DeviceFilter = {}): Promise<Device[]> {
-  // Default limit=500 — the Java inventory service defaults to 100 which hides newly added devices
-  const res = await apiClient.get<Device[]>('/devices', { params: { limit: 500, ...filter } });
-  return res.data;
+  // The Java inventory service caps each page at 100 — paginate to collect all devices
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 20; // safety cap — up to 2,000 devices
+  const all: Device[] = [];
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const res = await apiClient.get<Device[]>('/devices', {
+      params: { limit: PAGE_SIZE, page, ...filter },
+    });
+    const batch: Device[] = Array.isArray(res.data) ? res.data
+      : (res.data as unknown as { devices?: Device[]; data?: Device[]; items?: Device[]; content?: Device[] })
+          .devices ?? (res.data as unknown as { data?: Device[] }).data
+          ?? (res.data as unknown as { items?: Device[] }).items ?? [];
+    all.push(...batch);
+    if (batch.length < PAGE_SIZE) break; // last page reached
+  }
+  return all;
 }
 
 export async function fetchDevice(id: string): Promise<Device> {
