@@ -24,6 +24,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { logger } from '../utils/logger';
 
 // ── Constants ────────────────────────────────────────────────────────────────
+// Model is strictly derived from device type — no other models allowed
+const TYPE_MODEL_MAP: Record<string, string> = { BTS: 'A60', CPE: 'A61', IDU: 'IDU' };
+
 const TYPE_OPTIONS = [
   { value: '', label: 'All types' },
   { value: 'BTS', label: 'BTS' },
@@ -93,8 +96,15 @@ function DeviceFormModal({
     }
   }, [open, initial]);
 
-  const set = (k: keyof DeviceFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k: keyof DeviceFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const val = e.target.value;
+    setForm((f) => {
+      const updated = { ...f, [k]: val };
+      // Auto-derive model from device type — BTS→A60, CPE→A61, IDU→IDU
+      if (k === 'deviceType') updated.model = TYPE_MODEL_MAP[val] ?? val;
+      return updated;
+    });
+  };
 
   const handleSave = async () => {
     if (!form.serialNumber.trim()) { addToast('Serial number is required', 'warning'); return; }
@@ -110,16 +120,33 @@ function DeviceFormModal({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
-            <FL>Serial Number *</FL>
-            <input value={form.serialNumber} onChange={set('serialNumber')} placeholder="BTS-A60-000001" style={FIELD} />
-          </div>
-          <div>
             <FL>Device Type *</FL>
             <select value={form.deviceType} onChange={set('deviceType')} style={FIELD}>
-              <option value="BTS">BTS</option>
-              <option value="CPE">CPE</option>
-              <option value="IDU">IDU</option>
+              <option value="BTS">BTS — Model A60</option>
+              <option value="CPE">CPE — Model A61</option>
+              <option value="IDU">IDU — Model IDU</option>
             </select>
+          </div>
+          <div>
+            <FL>Model (auto)</FL>
+            <input
+              readOnly
+              value={form.model}
+              style={{ ...FIELD, background: 'var(--vf-surface-raised)', color: 'var(--vf-text-muted)', cursor: 'not-allowed' }}
+            />
+          </div>
+          <div>
+            <FL>Serial Number *</FL>
+            <input
+              value={form.serialNumber}
+              onChange={set('serialNumber')}
+              placeholder={
+                form.deviceType === 'BTS' ? 'BTS-A60-000001' :
+                form.deviceType === 'CPE' ? 'CPE-A61-000001' :
+                'IDU-000001'
+              }
+              style={FIELD}
+            />
           </div>
           <div>
             <FL>IP Address *</FL>
@@ -128,14 +155,6 @@ function DeviceFormModal({
           <div>
             <FL>MAC Address</FL>
             <input value={form.macAddress} onChange={set('macAddress')} placeholder="AA:BB:CC:DD:EE:FF" style={FIELD} />
-          </div>
-          <div>
-            <FL>Model</FL>
-            <select value={form.model} onChange={set('model')} style={FIELD}>
-              <option value="A60">A60 (BTS)</option>
-              <option value="A61">A61 (CPE)</option>
-              <option value="A60-IDU">A60-IDU</option>
-            </select>
           </div>
           <div>
             <FL>Manufacturer</FL>

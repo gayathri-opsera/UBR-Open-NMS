@@ -361,7 +361,7 @@ export default function DevicesPage(): React.ReactElement {
               </div>
               <div>
                 <label style={label}>Model</label>
-                <input style={input} value={addForm.model} onChange={(e) => setAddForm((f) => ({ ...f, model: e.target.value }))} placeholder="ENS620EXT" />
+                <input style={input} value={addForm.model} onChange={(e) => setAddForm((f) => ({ ...f, model: e.target.value }))} placeholder="A60 / A61 / IDU" />
               </div>
               <div>
                 <label style={label}>Firmware Version</label>

@@ -8,7 +8,7 @@ const STATUSES     = ['ONLINE','ONLINE','ONLINE','ONLINE','ONLINE','ONLINE','ONL
 const FW_VERSIONS  = ['v3.5.0','v3.5.0','v3.4.1','v3.4.1','v3.3.0','v2.3.0','v2.2.0'];
 const BTS_MODELS   = ['A60'];
 const CPE_MODELS   = ['A61'];
-const IDU_MODELS   = ['A60-IDU'];
+const IDU_MODELS   = ['IDU'];
 
 const ORGS = [
   'org-airtel-delhi-001', 'org-airtel-mumbai-001',

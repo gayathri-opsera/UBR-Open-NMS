@@ -37,7 +37,7 @@ function randomIp(base: string, i: number): string {
 function generateMockDevices(ipRange: string, count: number): DiscoveredDevice[] {
   const base = ipRange.split('/')[0].split('.').slice(0, 3).join('.');
   const types: ('BTS' | 'CPE' | 'IDU')[] = ['BTS', 'CPE', 'CPE', 'CPE', 'IDU', 'CPE', 'BTS', 'CPE'];
-  const models = { BTS: ['ENH700EXT', 'ENH500EXT'], CPE: ['ENS620EXT', 'ENS500EXT'], IDU: ['CB-350AC'] };
+  const models = { BTS: ['A60'], CPE: ['A61'], IDU: ['IDU'] };
   return Array.from({ length: count }, (_, i) => {
     const t = types[i % types.length];
     return {
