@@ -408,7 +408,7 @@ jobs:
         run: |
           APP_ARGOCD="opsera-ubr-nms-auth-service-dev"
           kubectl patch app "$APP_ARGOCD" -n argocd --type merge \
-            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"main","prune":true}}}'
+            -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"'${GITHUB_REF_NAME}'","prune":true}}}'
           echo "✅ Sync triggered"
 
       - name: Wait for Sync Completion

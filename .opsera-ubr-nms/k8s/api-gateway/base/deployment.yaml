@@ -32,6 +32,8 @@ spec:
           env:
             - name: PORT
               value: "3000"
+            - name: MONGO_URI
+              value: "mongodb://mongodb.opsera-ubr-nms-dev.svc.cluster.local:27017/ubrnms_config"
             - name: REDIS_HOST
               value: "redis.opsera-ubr-nms-dev.svc.cluster.local"
             - name: REDIS_PORT

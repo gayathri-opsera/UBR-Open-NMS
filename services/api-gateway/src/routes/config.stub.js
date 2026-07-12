@@ -10,7 +10,9 @@ const mongoose = require('mongoose');
 const router   = express.Router();
 
 // ── MongoDB connection (eager, at module load) ────────────────────────────────
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://mongo:27017/ubrnms';
+const MONGO_URI = process.env.MONGO_URI
+  || process.env.MONGO_URL
+  || 'mongodb://mongodb:27017/ubrnms_config';
 const COLLECTION = 'config_templates';
 
 let _col = null; // resolved once DB is ready
@@ -118,14 +120,16 @@ function buildJobResponse(job) {
   };
 }
 
-// ── Templates (MongoDB-backed) ────────────────────────────────────────────────
+// ── Templates (MongoDB-backed, in-memory fallback if DB unreachable) ──────────
 router.get('/templates', async (_req, res) => {
   try {
     const col = await getCol();
     const docs = await col.find({}).toArray();
     res.json(docs.map(toApi));
   } catch (e) {
-    res.status(500).json({ code: 'DB_ERROR', message: e.message });
+    console.error('[config-stub] /templates DB error — returning seed data:', e.message);
+    // Fallback: return the seed templates so the UI never shows a blank/error state
+    res.json(SEED_TEMPLATES.map(toApi));
   }
 });
 
