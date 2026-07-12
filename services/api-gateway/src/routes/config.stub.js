@@ -10,7 +10,10 @@ const mongoose = require('mongoose');
 const router   = express.Router();
 
 // ── MongoDB connection (eager, at module load) ────────────────────────────────
-const MONGO_URI = process.env.MONGO_URI
+// Use MONGO_URI_CONFIG if available (points to ubrnms_config DB);
+// fall back to MONGO_URI (which may point to ubr_nms for the devices stub).
+const MONGO_URI = process.env.MONGO_URI_CONFIG
+  || process.env.MONGO_URI
   || process.env.MONGO_URL
   || 'mongodb://mongodb:27017/ubrnms_config';
 const COLLECTION = 'config_templates';

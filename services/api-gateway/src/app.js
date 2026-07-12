@@ -18,6 +18,7 @@ const configStub      = require('./routes/config.stub');
 const diagnosticsStub = require('./routes/diagnostics.stub');
 const kpiStub         = require('./routes/kpi.stub');
 const topologyStub    = require('./routes/topology.stub');
+const devicesStub     = require('./routes/devices.stub');
 
 function createApp(redisClient) {
   const app = express();
@@ -51,6 +52,12 @@ function createApp(redisClient) {
   app.use('/api/v1/kpi',           kpiStub);
   // Topology stub — adds /summary, /link-health, /events, /connections, /search endpoints
   app.use('/api/v1/topology',      topologyStub);
+  // Device write stub — POST/PUT/DELETE bypass Java inventory (Kafka-dependent writes fail)
+  // GET requests fall through to the Java inventory service proxy below
+  app.post('/api/v1/devices',          devicesStub);
+  app.put('/api/v1/devices/:id',       devicesStub);
+  app.delete('/api/v1/devices/:id',    devicesStub);
+  app.put('/api/v1/devices/:id/tags',  devicesStub);
 
   // System health stub — health-monitor service may not be running in local dev
   app.get('/api/v1/system/health', (_req, res) => {
