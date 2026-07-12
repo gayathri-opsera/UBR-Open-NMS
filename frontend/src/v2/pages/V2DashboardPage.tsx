@@ -10,6 +10,18 @@ import type { Device } from '../../api/devices.types';
 import type { Alarm } from '../../api/alarms.types';
 import { logger } from '../utils/logger';
 
+// ── Model normalisation — map any legacy Senao model name to A60/A61/IDU ─────
+const LEGACY_MODEL_MAP: Record<string, string> = {
+  'Senao ENH1750EXT': 'A60', 'Senao ENH1750EXT-AC': 'A60',
+  'ENS500EXT': 'A60', 'ENS620EXT': 'A60', 'ENH700EXT': 'A60',
+  'Senao EAP300': 'A61', 'Senao EAP300-AC': 'A61', 'CB-350AC': 'A61',
+  'Senao IDU-5000': 'IDU', 'Senao IDU-5000-AC': 'IDU',
+};
+function normaliseModel(d: Device): Device {
+  const mapped = LEGACY_MODEL_MAP[d.model ?? ''];
+  return mapped ? { ...d, model: mapped } : d;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type DashboardMode = 'ALL' | 'BTS' | 'CPE' | 'IDU';
 type TabId = 1 | 2 | 3;
@@ -218,7 +230,7 @@ export default function V2DashboardPage() {
     Promise.all([
       fetchDevices({}).catch(() => [] as Device[]),
       fetchAlarms({}).catch(() => [] as Alarm[]),
-    ]).then(([d, a]) => { setDevices(d); setAlarms(a); })
+    ]).then(([d, a]) => { setDevices(d.map(normaliseModel)); setAlarms(a); })
       .catch((e) => { logger.error('Dashboard fetch', e); setError('Unable to load dashboard data.'); })
       .finally(() => setLoading(false));
   }, []);
@@ -227,7 +239,9 @@ export default function V2DashboardPage() {
 
   // Derived data
   const circles   = useMemo(() => [...new Set(devices.flatMap((d) => (d.tags ?? []).filter((t) => t.key === 'circle' && !!t.value).map((t) => t.value)))].filter(Boolean), [devices]);
-  const models    = useMemo(() => [...new Set(devices.map((d) => d.model).filter(Boolean))], [devices]);
+  // Only allowed models — filter out any legacy Senao model names from the backend
+  const ALLOWED_MODELS = ['A60', 'A61', 'IDU'];
+  const models    = useMemo(() => ALLOWED_MODELS.filter((m) => devices.some((d) => d.model === m)), [devices]);
   const firmwares = useMemo(() => [...new Set(devices.map((d) => d.firmwareVersion).filter(Boolean))], [devices]);
 
   const filtered = useMemo(() => devices.filter((d) => {

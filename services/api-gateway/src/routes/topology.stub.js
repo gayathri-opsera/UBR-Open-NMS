@@ -36,20 +36,33 @@ function fmtUptime(sec) {
   return `${d}d ${h}h ${m}m`;
 }
 
-// ── Fetch real devices from inventory (no auth needed on internal network) ───
+// ── Fetch ALL devices from inventory, paginating through all pages ────────────
 async function getInventoryDevices(bustCache = false) {
   const now = Date.now();
   if (!bustCache && _devCache && now - _cacheAt < CACHE_TTL) return _devCache;
 
-  const resp = await fetch(`${INVENTORY_URL}/api/v1/devices?limit=500`);
-  if (!resp.ok) throw new Error(`Inventory HTTP ${resp.status}`);
+  const PAGE_SIZE = 100;          // inventory service default max per page
+  const MAX_PAGES = 20;           // safety cap — allows up to 2,000 devices
+  let all  = [];
+  let page = 0;
+  let more = true;
 
-  const body = await resp.json();
-  const list = Array.isArray(body) ? body : (body.devices ?? body.data ?? body.items ?? []);
+  while (more && page < MAX_PAGES) {
+    const resp = await fetch(
+      `${INVENTORY_URL}/api/v1/devices?limit=${PAGE_SIZE}&page=${page}`
+    );
+    if (!resp.ok) throw new Error(`Inventory HTTP ${resp.status}`);
+    const body = await resp.json();
+    const batch = Array.isArray(body) ? body : (body.devices ?? body.data ?? body.items ?? []);
+    all.push(...batch);
+    // Stop when we got fewer records than the page size (last page)
+    more = batch.length === PAGE_SIZE;
+    page++;
+  }
 
-  _devCache = list;
+  _devCache = all;
   _cacheAt  = now;
-  return list;
+  return all;
 }
 
 // ── Map an inventory device to a topology node ────────────────────────────────
