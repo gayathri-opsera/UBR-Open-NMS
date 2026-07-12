@@ -49,7 +49,12 @@ export async function createUser(user: Partial<NmsUser> & { password: string }):
     permissions: {},
   };
   const res = await apiClient.post('/users', body);
-  return unwrap<NmsUser>(res.data);
+  const raw = unwrap<NmsUser>(res.data);
+  // Normalize MongoDB _id → id so table row renders without a page refresh
+  if (!raw.id && (raw as unknown as { _id: string })._id) {
+    (raw as unknown as { id: string }).id = (raw as unknown as { _id: string })._id;
+  }
+  return raw;
 }
 
 export async function updateUser(id: string, patch: Partial<NmsUser>): Promise<NmsUser> {

@@ -1072,6 +1072,7 @@ export default function V2TopologyPage() {
 
   const [graph, setGraph]               = useState<TopologyGraph | null>(null);
   const [loading, setLoading]           = useState(true);
+  const [refreshKey, setRefreshKey]     = useState(0);
   const [view, setView]                 = useState<View>('map');
   const [healthFilter, setHealthFilter] = useState<HealthFilter>('');
   const [typeFilter, setTypeFilter]     = useState('');
@@ -1079,12 +1080,22 @@ export default function V2TopologyPage() {
   const [selectedNode, setSelectedNode] = useState<TopologyNode | null>(null);
   const [gpsResult, setGpsResult]       = useState<GpsResult | undefined>(undefined);
 
+  const [isBustCache, setIsBustCache] = useState(false);
+
+  const handleRefresh = useCallback(() => {
+    setLoading(true);
+    setGraph(null);
+    setIsBustCache(true);
+    setRefreshKey((k) => k + 1);
+  }, []);
+
   useEffect(() => {
-    fetchTopology()
-      .then(setGraph)
+    fetchTopology(undefined, isBustCache)
+      .then((g) => { setGraph(g); setIsBustCache(false); addToast(`Topology refreshed — ${g.nodes?.length ?? 0} devices`, 'success'); })
       .catch((e) => { logger.error('Topology fetch failed', e); addToast('Failed to load topology data', 'error'); })
       .finally(() => setLoading(false));
-  }, [addToast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addToast, refreshKey]);
 
   const nodes = graph?.nodes ?? [];
   const edges = graph?.edges ?? [];
@@ -1128,6 +1139,9 @@ export default function V2TopologyPage() {
               {v === 'map' ? '🗺 Map' : v === 'graph' ? '⬡ Graph' : '☰ List'}
             </Button>
           ))}
+          <Button variant="ghost" size="sm" onClick={handleRefresh} loading={loading} title="Refresh topology data from inventory">
+            ↻ Refresh
+          </Button>
         </div>
       </div>
 

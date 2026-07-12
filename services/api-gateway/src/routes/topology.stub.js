@@ -37,9 +37,9 @@ function fmtUptime(sec) {
 }
 
 // ── Fetch real devices from inventory (no auth needed on internal network) ───
-async function getInventoryDevices() {
+async function getInventoryDevices(bustCache = false) {
   const now = Date.now();
-  if (_devCache && now - _cacheAt < CACHE_TTL) return _devCache;
+  if (!bustCache && _devCache && now - _cacheAt < CACHE_TTL) return _devCache;
 
   const resp = await fetch(`${INVENTORY_URL}/api/v1/devices?limit=500`);
   if (!resp.ok) throw new Error(`Inventory HTTP ${resp.status}`);
@@ -246,8 +246,8 @@ function haversine(la1, ln1, la2, ln2) {
 }
 
 // ── Shared: load + build ──────────────────────────────────────────────────────
-async function loadGraph() {
-  const raw   = await getInventoryDevices();
+async function loadGraph(bustCache = false) {
+  const raw   = await getInventoryDevices(bustCache);
   const nodes = raw.map(toNode);
   const edges = buildEdges(nodes);
   return { nodes, edges };
@@ -256,7 +256,9 @@ async function loadGraph() {
 // ── GET /api/v1/topology ──────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const { nodes, edges } = await loadGraph();
+    // _t param signals a manual refresh — bypass the 30s cache
+    const bustCache = !!req.query._t;
+    const { nodes, edges } = await loadGraph(bustCache);
     const { networkId } = req.query;
     let rN = nodes, rE = edges;
     if (networkId) {

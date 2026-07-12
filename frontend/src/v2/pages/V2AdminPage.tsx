@@ -176,6 +176,9 @@ function UsersTab() {
 
   const handleSave = async () => {
     if (!formState.username || !formState.role) { addToast('Username and role are required', 'warning'); return; }
+    if (!formState.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formState.email)) {
+      addToast('A valid email address is required', 'warning'); return;
+    }
     if (!editUser) {
       if (!formState.password) { addToast('Password required for new user', 'warning'); return; }
       if (!isPasswordValid(formState.password)) {

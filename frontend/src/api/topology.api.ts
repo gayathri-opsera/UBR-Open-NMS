@@ -59,8 +59,10 @@ function normalizeGraph(raw: RawGraph): TopologyGraph {
   };
 }
 
-export async function fetchTopology(networkId?: string): Promise<TopologyGraph> {
-  const params = networkId ? { networkId } : {};
+export async function fetchTopology(networkId?: string, bustCache = false): Promise<TopologyGraph> {
+  const params: Record<string, string> = {};
+  if (networkId) params.networkId = networkId;
+  if (bustCache) params._t = String(Date.now()); // bypass 30s stub cache
   const res = await apiClient.get<RawGraph>('/topology', { params });
   return normalizeGraph(res.data);
 }
