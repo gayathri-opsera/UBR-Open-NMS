@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_CONFIG_SERVICE_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-config-service
-  newTag: dev-4fb94371-20260712194146
+  newTag: dev-c4e5a9fb-20260712222940
 
 labels:
 - pairs:
