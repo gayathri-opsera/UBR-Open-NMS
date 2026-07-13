@@ -82,23 +82,15 @@ function createApp(redisClient) {
     });
   });
 
-  // Config-history per device — inventory service doesn't have this route
-  app.get('/api/v1/devices/:deviceId/config-history', (req, res) => {
+  // Config-history per device — delegates to config.stub persistent history
+  app.get('/api/v1/devices/:deviceId/config-history', (req, res, next) => {
     const { deviceId } = req.params;
     if (!deviceId || deviceId === 'undefined') {
       return res.status(400).json({ code: 'BAD_REQUEST', message: 'deviceId is required' });
     }
-    const now = Date.now();
-    const versions = Array.from({ length: 5 }, (_, i) => ({
-      id:         `cv-${deviceId}-${i + 1}`,
-      deviceId,
-      templateId: i === 0 ? 'tpl-default' : `tpl-${i}`,
-      templateName: i === 0 ? 'Default BTS Config' : `Config v${5 - i}`,
-      appliedAt:  new Date(now - i * 86_400_000 * 3).toISOString(),
-      appliedBy:  i % 2 === 0 ? 'admin' : 'operator',
-      status:     i === 0 ? 'ACTIVE' : 'SUPERSEDED',
-    }));
-    res.json(versions);
+    // Rewrite path so the config stub's /history/:deviceId handler picks it up
+    req.url = `/history/${deviceId}`;
+    configStub(req, res, next);
   });
 
   // ── Audit fallback stub — serves sample data when the real service has no entries ──

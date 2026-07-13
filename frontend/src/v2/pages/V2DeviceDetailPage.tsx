@@ -680,38 +680,115 @@ function LogsTab({ device, addToast }: { device: Device; addToast: AddToast }) {
 }
 
 // ── Config History Tab ────────────────────────────────────────────────────────
+
+/** Human-readable labels for common pushed parameter keys */
+const PARAM_LABELS: Record<string, string> = {
+  ipMode: 'IP Mode', staticIp: 'Static IP', staticSubnet: 'Subnet', staticGateway: 'Gateway',
+  dnsServer: 'DNS Server', speedDuplex: 'Speed/Duplex', portUpDown: 'Port State', portId: 'Port',
+  wifiRestart: 'WiFi Restart', deviceReboot: 'Device Reboot',
+  qosProfile: 'QoS Profile', ulBandwidthLimit: 'UL Limit (Mbps)', dlBandwidthLimit: 'DL Limit (Mbps)',
+  vlanId: 'VLAN ID', vlanPriority: 'Priority', vlanMode: 'VLAN Mode', outerVlanId: 'Outer VLAN',
+  firmwareVersion: 'Firmware Version', firmwareUrl: 'Firmware URL',
+  ssid: 'SSID', channel: 'Channel', txPower: 'TX Power (dBm)', encryption: 'Encryption',
+  ddrsStatus: 'DDRS', spatialStream: 'Spatial Stream',
+  templateId: 'Template',
+};
+
 function ConfigHistoryTab({ device }: { device: Device }) {
   const [history, setHistory] = useState<Awaited<ReturnType<typeof getVersionHistory>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]   = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!device.deviceId) { setLoading(false); return; }
-    getVersionHistory(device.deviceId)
-      .then(setHistory)
+  const deviceId = device.deviceId || device.serialNumber || device.id;
+
+  const load = useCallback(() => {
+    if (!deviceId) { setLoading(false); return; }
+    setLoading(true);
+    getVersionHistory(deviceId)
+      .then((h) => setHistory(Array.isArray(h) ? h : []))
       .catch(() => setHistory([]))
       .finally(() => setLoading(false));
-  }, [device.deviceId]);
+  }, [deviceId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const statusColor = (s?: string) =>
+    s === 'PUSHED' || s === 'ACTIVE' ? 'var(--vf-success)' :
+    s === 'FAILED' ? 'var(--vf-danger)' :
+    'var(--vf-text-muted)';
 
   if (loading) return <div style={{ paddingTop: 24 }}><LoadingState label="Loading config history…" /></div>;
-  if (!history.length) return <div style={{ paddingTop: 24 }}><EmptyState title="No config history" description="No configuration changes have been recorded for this device." /></div>;
 
   return (
     <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {history.map((v, i) => (
-        <div key={v.id ?? i} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 8, padding: '12px 16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Badge variant="default">v{v.versionNumber}</Badge>
-            <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>by {v.actor} · {new Date(v.appliedAt).toLocaleString()}</span>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {Object.entries(v.newValues).map(([k, val]) => (
-              <div key={k} style={{ fontSize: 11, background: 'var(--vf-elevated)', padding: '3px 8px', borderRadius: 4 }}>
-                <span style={{ color: 'var(--vf-text-muted)' }}>{k}:</span> <span style={{ fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-accent)' }}>{val}</span>
+      {/* Header row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>
+          {history.length} push record{history.length !== 1 ? 's' : ''} for {deviceId}
+        </span>
+        <button onClick={load}
+          style={{ background: 'none', border: '1px solid var(--vf-border-subtle)', borderRadius: 5, padding: '4px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--vf-text-secondary)' }}>
+          ↻ Refresh
+        </button>
+      </div>
+
+      {history.length === 0 ? (
+        <EmptyState
+          title="No config history yet"
+          description="Push a config from any tab (Network, Wireless, QoS, etc.) and it will appear here in real time." />
+      ) : (
+        history.map((v, i) => {
+          const key = v.id ?? String(i);
+          const isOpen = expanded === key;
+          const params = Object.entries(v.newValues ?? {}).filter(([, val]) => val !== '' && val !== 'undefined');
+          return (
+            <div key={key} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+              {/* Summary row */}
+              <div
+                onClick={() => setExpanded(isOpen ? null : key)}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer', userSelect: 'none' }}>
+                <span style={{ background: 'var(--vf-elevated)', borderRadius: 4, padding: '2px 8px', fontFamily: 'var(--vf-font-mono)', fontSize: 11, fontWeight: 700 }}>
+                  #{v.versionNumber ?? (history.length - i)}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--vf-text-primary)', flex: 1 }}>
+                  {(v as { templateId?: string }).templateId === 'inline' || !(v as { templateId?: string }).templateId
+                    ? `Manual push — ${params.length} param${params.length !== 1 ? 's' : ''}`
+                    : `Template: ${(v as { templateId?: string }).templateId}`}
+                </span>
+                <span style={{ fontSize: 11, color: statusColor((v as { status?: string }).status), fontWeight: 700 }}>
+                  {(v as { status?: string }).status ?? 'PUSHED'}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', minWidth: 140, textAlign: 'right' }}>
+                  {v.actor} · {new Date(v.appliedAt).toLocaleString()}
+                </span>
+                <span style={{ color: 'var(--vf-text-dim)', fontSize: 14 }}>{isOpen ? '▾' : '▸'}</span>
               </div>
-            ))}
-          </div>
-        </div>
-      ))}
+
+              {/* Expanded parameters */}
+              {isOpen && (
+                <div style={{ borderTop: '1px solid var(--vf-border-subtle)', padding: '14px 16px', background: 'var(--vf-elevated)' }}>
+                  {params.length === 0 ? (
+                    <span style={{ color: 'var(--vf-text-dim)', fontSize: 12 }}>No parameter data recorded for this push.</span>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+                      {params.map(([k, val]) => (
+                        <div key={k} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 6, padding: '8px 12px' }}>
+                          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 4 }}>
+                            {PARAM_LABELS[k] ?? k}
+                          </div>
+                          <div style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--vf-accent)', wordBreak: 'break-all' }}>
+                            {val === 'true' ? '✓ enabled' : val === 'false' ? '✗ disabled' : val}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }

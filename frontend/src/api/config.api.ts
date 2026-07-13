@@ -56,8 +56,14 @@ export async function bulkFirmware(deviceIds: string[], firmwareVersion: string,
 }
 
 export async function pushDeviceParam(deviceId: string, params: Record<string, string | number | boolean>): Promise<PushResult> {
-  const res = await apiClient.post<PushResult>(`/config/push/${deviceId}`, params, {
-    params: { templateId: 'inline', actor: 'nms-operator' },
+  // Resolve actor from stored auth profile so history shows the real username
+  let actor = 'operator';
+  try {
+    const raw = localStorage.getItem('nms_user') || localStorage.getItem('user') || localStorage.getItem('auth_user');
+    if (raw) { const u = JSON.parse(raw); actor = u.username || u.email || u.name || actor; }
+  } catch { /* ignore */ }
+  const res = await apiClient.post<PushResult>(`/config/push/${deviceId}`, { ...params, actor }, {
+    params: { templateId: 'inline' },
   });
   return res.data;
 }

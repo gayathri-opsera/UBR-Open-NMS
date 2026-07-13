@@ -99,6 +99,41 @@ function toApi(doc) {
 const jobs      = {};
 let   nextJobId = 1;
 
+// ── Persistent push history (MongoDB-backed) ──────────────────────────────────
+const HISTORY_COLLECTION = 'config_push_history';
+let _histCol = null;
+
+async function getHistCol() {
+  if (_histCol) return _histCol;
+  if (mongoose.connection.readyState === 1) {
+    _histCol = mongoose.connection.db.collection(HISTORY_COLLECTION);
+    return _histCol;
+  }
+  // reuse the connection opened by getCol()
+  await getCol(); // ensure main connection is ready
+  _histCol = mongoose.connection.db.collection(HISTORY_COLLECTION);
+  return _histCol;
+}
+
+/** Persist a push event to MongoDB so history survives server restarts */
+async function recordPush(deviceId, params, actor, templateId, status) {
+  try {
+    const col = await getHistCol();
+    await col.insertOne({
+      _id:        `ph-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      deviceId,
+      actor:      actor || 'operator',
+      templateId: templateId || 'inline',
+      params:     params || {},
+      status:     status || 'PUSHED',
+      pushedAt:   new Date(),
+    });
+  } catch (e) {
+    // Non-fatal — history is best-effort
+    console.warn('[config-stub] Could not persist push history:', e.message);
+  }
+}
+
 // ── Helper: build ConfigJob response shape ────────────────────────────────────
 function buildJobResponse(job) {
   const devices        = job.devices || [];
@@ -188,23 +223,76 @@ router.delete('/templates/:id', async (req, res) => {
 // ── Push (single device) ─────────────────────────────────────────────────────
 router.post('/push/:deviceId', (req, res) => {
   const { deviceId } = req.params;
-  const { templateId, firmware, firmwareVersion } = req.body || req.query || {};
+  const queryParams  = req.query || {};
+  const bodyParams   = req.body  || {};
+
+  // templateId / firmware flags can come from body OR query string
+  const templateId     = bodyParams.templateId     || queryParams.templateId     || 'inline';
+  const firmware       = bodyParams.firmware       || queryParams.firmware;
+  const firmwareVersion = bodyParams.firmwareVersion || queryParams.firmwareVersion;
+  const actor          = bodyParams.actor          || queryParams.actor || (req.user?.username) || 'operator';
+
+  // Collect the actual config parameters from the body (everything except meta fields)
+  const META = new Set(['templateId', 'firmware', 'firmwareVersion', 'actor']);
+  const pushParams = {};
+  for (const [k, v] of Object.entries(bodyParams)) {
+    if (!META.has(k) && v !== null && v !== undefined) pushParams[k] = v;
+  }
+  if (firmware) pushParams.firmwareVersion = firmwareVersion;
+
   const jobId = `job-${nextJobId++}`;
   jobs[jobId] = {
     jobId, deviceId, templateId, firmwareVersion,
     status: 'RUNNING', startedAt: new Date().toISOString(), completedAt: null,
     devices: [{ deviceId, status: 'QUEUED' }],
   };
+
+  // Persist push event to MongoDB (non-blocking)
+  recordPush(deviceId, pushParams, actor, templateId, 'PUSHED');
+
   setTimeout(() => {
     jobs[jobId].status = 'COMPLETED';
     jobs[jobId].completedAt = new Date().toISOString();
     jobs[jobId].devices[0].status = 'SUCCESS';
   }, 2000);
+
   res.json({
     status: 'PUSHED',
     message: firmware ? 'Firmware upgrade queued' : 'Config push accepted — applying to device',
     commandId: jobId,
   });
+});
+
+// ── Config push history (per device) ─────────────────────────────────────────
+router.get('/history/:deviceId', async (req, res) => {
+  const { deviceId } = req.params;
+  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+  try {
+    const col = await getHistCol();
+    const docs = await col
+      .find({ deviceId })
+      .sort({ pushedAt: -1 })
+      .limit(limit)
+      .toArray();
+
+    // Map to the ConfigVersion shape expected by the frontend
+    const versions = docs.map((doc, i) => ({
+      id:            String(doc._id),
+      deviceId:      doc.deviceId,
+      versionNumber: docs.length - i,
+      actor:         doc.actor,
+      appliedAt:     doc.pushedAt instanceof Date ? doc.pushedAt.toISOString() : doc.pushedAt,
+      templateId:    doc.templateId,
+      status:        doc.status,
+      newValues:     Object.fromEntries(
+        Object.entries(doc.params || {}).map(([k, v]) => [k, String(v)])
+      ),
+    }));
+    res.json(versions);
+  } catch (e) {
+    console.error('[config-stub] History query failed:', e.message);
+    res.status(500).json({ code: 'DB_ERROR', message: e.message });
+  }
 });
 
 // ── Bulk push ─────────────────────────────────────────────────────────────────
