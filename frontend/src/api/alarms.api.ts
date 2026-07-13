@@ -4,10 +4,20 @@ import type { Alarm, AlarmFilter, AlarmTypeStat, TopAlarm } from './alarms.types
 export async function fetchAlarms(filter: AlarmFilter = {}): Promise<Alarm[]> {
   const res = await apiClient.get<Alarm[]>('/alarms', { params: filter });
   // Normalize backend field names → Alarm interface
-  // Backend uses raisedAt; our interface uses timestamp
-  return (res.data ?? []).map((a: Alarm & { raisedAt?: string }) => ({
-    ...a,
-    timestamp: a.timestamp || a.raisedAt || '',
+  return (res.data ?? []).map((raw: Alarm & {
+    raisedAt?: string;
+    alarmDescription?: string;
+    description?: string;
+    message?: string;
+    deviceName?: string;
+    serialNumber?: string;
+  }) => ({
+    ...raw,
+    timestamp:    raw.timestamp    || raw.raisedAt || '',
+    // Prefer a human-readable message from any of these backend fields
+    message:      raw.message      || raw.alarmDescription || raw.description || '',
+    deviceName:   raw.deviceName   || raw.serialNumber || '',
+    serialNumber: raw.serialNumber || '',
   }));
 }
 

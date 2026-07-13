@@ -6,12 +6,16 @@ export interface Alarm {
   alarmId: string;
   deviceId: string;
   deviceType: string;
+  deviceName?: string;      // human-readable name from inventory (may not always be present)
+  serialNumber?: string;    // device serial number (BTS-A60-XXXXXX / CPE-A61-XXXXXX)
   alarmName: string;
   alarmType: string;
+  message?: string;         // human-readable alarm description from backend
+  description?: string;     // alternate field name used by some backends
   severity: Severity;
   state: AlarmState;
-  timestamp: string;       // ISO string — normalised from raisedAt by fetchAlarms
-  raisedAt?: string;       // raw backend field (kept for reference)
+  timestamp: string;        // ISO string — normalised from raisedAt by fetchAlarms
+  raisedAt?: string;        // raw backend field (kept for reference)
   clearedAt?: string;
   duration?: string;
   acknowledgedBy?: string;

@@ -757,25 +757,56 @@ export default function V2DashboardPage() {
                   : [...activeAlarms]
                       .sort((a, b) => new Date(b.timestamp || b.raisedAt || 0).getTime() - new Date(a.timestamp || a.raisedAt || 0).getTime())
                       .slice(0, 8)
-                      .map((a) => (
-                    <FeedRow
-                      key={a.id}
-                      accent={a.severity === 'CRITICAL' ? '#ef4444' : a.severity === 'MAJOR' ? '#fb923c' : '#f59e0b'}
-                      onClick={() => {
-                        // Drilldown: go to alarms filtered by severity + device, same as pie chart
-                        const p = new URLSearchParams({ severity: a.severity });
-                        if (a.deviceId) p.set('deviceId', a.deviceId);
-                        navigate(`/v2/alarms?${p.toString()}`);
-                      }}
-                    >
-                      <span>{a.severity === 'CRITICAL' ? '⛔' : a.severity === 'MAJOR' ? '🔴' : '🟠'}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ color: 'var(--vf-text-primary)', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.alarmName}</div>
-                        <div style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontFamily: 'var(--vf-font-mono)' }}>{a.deviceId}</div>
-                      </div>
-                      <time style={{ color: 'var(--vf-text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>{rel(a.timestamp)}</time>
-                    </FeedRow>
-                  ))}
+                      .map((a) => {
+                        // Resolve the best available device identifier for display
+                        const isSystemAlarm = !a.deviceId || a.deviceId === 'unknown' || a.deviceId === '';
+                        const deviceLabel   = isSystemAlarm
+                          ? 'System / NMS'
+                          : (a.serialNumber || a.deviceName || a.deviceId);
+
+                        // Human-readable description: use message if backend provides it,
+                        // otherwise fall back to alarmName (which may just be "service down")
+                        const displayText = a.message || a.alarmName;
+
+                        return (
+                          <FeedRow
+                            key={a.id}
+                            accent={a.severity === 'CRITICAL' ? '#ef4444' : a.severity === 'MAJOR' ? '#fb923c' : '#f59e0b'}
+                            onClick={() => {
+                              if (isSystemAlarm) {
+                                // System alarms → alarms page filtered by type
+                                navigate(`/v2/alarms?alarmType=${encodeURIComponent(a.alarmType || '')}`);
+                              } else {
+                                // Device alarm → navigate to device detail page
+                                const devId = a.serialNumber || a.deviceId;
+                                navigate(`/v2/devices/${devId}`);
+                              }
+                            }}
+                          >
+                            <span>{a.severity === 'CRITICAL' ? '⛔' : a.severity === 'MAJOR' ? '🔴' : '🟠'}</span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ color: 'var(--vf-text-primary)', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {displayText}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                                {isSystemAlarm
+                                  ? <span style={{ color: 'var(--vf-text-dim)', fontSize: 10, fontStyle: 'italic' }}>System / NMS</span>
+                                  : <span style={{ color: '#60a5fa', fontSize: 10, fontFamily: 'var(--vf-font-mono)', cursor: 'pointer', textDecoration: 'underline' }}
+                                      onClick={(e) => { e.stopPropagation(); navigate(`/v2/devices/${a.serialNumber || a.deviceId}`); }}>
+                                      {deviceLabel}
+                                    </span>
+                                }
+                                {a.alarmType && a.alarmType !== a.alarmName && (
+                                  <span style={{ background: 'var(--vf-elevated)', border: '1px solid var(--vf-border-subtle)', color: 'var(--vf-text-dim)', fontSize: 9, padding: '0 4px', borderRadius: 3 }}>
+                                    {a.alarmType}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <time style={{ color: 'var(--vf-text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>{rel(a.timestamp)}</time>
+                          </FeedRow>
+                        );
+                      })}
               </FeedCard>
             );
             else if (id === 'offline-devices') content = (
