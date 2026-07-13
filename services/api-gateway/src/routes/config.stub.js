@@ -267,18 +267,43 @@ router.post('/push/:deviceId', (req, res) => {
 });
 
 // ── Config push history (per device) ─────────────────────────────────────────
+// Resolves all device aliases (serialNumber, Java id, MongoDB _id) so history
+// recorded under any identifier is returned regardless of which ID the frontend uses.
 router.get('/history/:deviceId', async (req, res) => {
   const { deviceId } = req.params;
   const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
   try {
+    // Build a set of all known aliases for this device
+    const aliases = new Set([deviceId]);
+    try {
+      const invCol = await getInvCol();
+      // Look up in inventory by any possible identifier
+      const inv = await invCol.findOne({
+        $or: [
+          { serialNumber: deviceId },
+          { deviceId:    deviceId },
+          { id:          deviceId },
+          { _id:         deviceId },
+        ],
+      });
+      if (inv) {
+        if (inv.serialNumber) aliases.add(inv.serialNumber);
+        if (inv.deviceId)     aliases.add(inv.deviceId);
+        if (inv.id)           aliases.add(inv.id);
+        if (inv._id)          aliases.add(String(inv._id));
+      }
+    } catch (e) {
+      // Non-fatal — fall back to exact-match only
+      console.warn('[config-stub] Alias resolution failed:', e.message);
+    }
+
     const col = await getHistCol();
     const docs = await col
-      .find({ deviceId })
+      .find({ deviceId: { $in: Array.from(aliases) } })
       .sort({ pushedAt: -1 })
       .limit(limit)
       .toArray();
 
-    // Map to the ConfigVersion shape expected by the frontend
     const versions = docs.map((doc, i) => ({
       id:            String(doc._id),
       deviceId:      doc.deviceId,
