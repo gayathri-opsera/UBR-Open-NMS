@@ -21,7 +21,6 @@ import type {
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { Select } from '../components/common/Select';
-import { MetricCard } from '../components/common/MetricCard';
 import { LoadingState, EmptyState } from '../components/common/States';
 import { useToast } from '../components/common/Toast';
 import { logger } from '../utils/logger';
