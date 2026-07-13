@@ -52,8 +52,9 @@ function createApp(redisClient) {
   app.use('/api/v1/kpi',           kpiStub);
   // Topology stub — adds /summary, /link-health, /events, /connections, /search endpoints
   app.use('/api/v1/topology',      topologyStub);
-  // Device write stub — POST/PUT/DELETE bypass Java inventory (Kafka-dependent writes fail)
-  // GET requests fall through to the Java inventory service proxy below
+  // Device stub — GET merges Java inventory (BTS/CPE) with MongoDB IDU devices;
+  // POST/PUT/DELETE bypass Java inventory (Kafka-dependent writes fail there).
+  app.get('/api/v1/devices',           devicesStub);
   app.post('/api/v1/devices',          devicesStub);
   app.put('/api/v1/devices/:id',       devicesStub);
   app.delete('/api/v1/devices/:id',    devicesStub);
