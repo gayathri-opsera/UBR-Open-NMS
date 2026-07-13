@@ -298,48 +298,89 @@ router.get('/history/:deviceId', async (req, res) => {
   }
 });
 
+// ── Inventory collection helper (for bulk-push real device resolution) ────────
+// Inventory lives in ubrnms_inventory — derive from existing MONGO_URI by
+// swapping the database name (the host/port are shared across all services).
+function buildInvUri() {
+  const base = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongodb:27017/ubrnms';
+  return base.replace(/\/[^/?]+(\?|$)/, '/ubrnms_inventory$1');
+}
+let _invConn = null;
+let _invCol  = null;
+async function getInvCol() {
+  if (_invCol) return _invCol;
+  if (!_invConn) {
+    _invConn = await mongoose.createConnection(buildInvUri(), { serverSelectionTimeoutMS: 5000 }).asPromise();
+  }
+  _invCol = _invConn.db.collection('devices');
+  return _invCol;
+}
+
 // ── Bulk push ─────────────────────────────────────────────────────────────────
-router.post('/bulk-push', (req, res) => {
+router.post('/bulk-push', async (req, res) => {
   const { templateId, filter, deviceIds } = req.body || {};
   const jobId = `job-${nextJobId++}`;
 
-  let deviceCount = 0;
-  if (Array.isArray(deviceIds) && deviceIds.length > 0) {
-    deviceCount = deviceIds.length;
-  } else if (filter && filter.deviceType) {
-    const counts = { BTS: 120, CPE: 350, IDU: 40 };
-    deviceCount = counts[filter.deviceType] || 120;
-  } else {
-    deviceCount = 510;
+  let devices = [];
+
+  try {
+    if (Array.isArray(deviceIds) && deviceIds.length > 0) {
+      // Explicit list of device IDs provided by caller
+      devices = deviceIds.map((id) => ({ deviceId: id, status: 'QUEUED' }));
+    } else {
+      // Query real inventory for matching devices
+      const col = await getInvCol();
+      const query = {};
+      if (filter?.deviceType) {
+        // Java inventory stores type as deviceType or model prefix; match both conventions
+        const typeUpper = filter.deviceType.toUpperCase();
+        query.$or = [
+          { deviceType: { $regex: typeUpper, $options: 'i' } },
+          { model:      { $regex: typeUpper === 'BTS' ? 'A60' : typeUpper === 'CPE' ? 'A61' : typeUpper, $options: 'i' } },
+        ];
+      }
+      const docs = await col
+        .find(query, { projection: { serialNumber: 1, deviceId: 1, _id: 1 } })
+        .limit(500)
+        .toArray();
+
+      devices = docs.map((d) => ({
+        deviceId: d.serialNumber || d.deviceId || String(d._id),
+        status: 'QUEUED',
+      }));
+    }
+  } catch (err) {
+    console.warn('[config-stub] Inventory query for bulk-push failed, falling back to empty list:', err.message);
+    devices = [];
   }
 
-  const devices = Array.from({ length: deviceCount }, (_, i) => ({
-    deviceId: `dev-${String(i + 1).padStart(4, '0')}`,
-    status: 'QUEUED',
-  }));
+  const deviceCount = devices.length;
 
   jobs[jobId] = {
-    jobId, templateId, filter, status: 'RUNNING',
-    startedAt: new Date().toISOString(), completedAt: null, devices,
+    jobId, templateId, filter, status: deviceCount === 0 ? 'COMPLETED' : 'RUNNING',
+    startedAt: new Date().toISOString(), completedAt: deviceCount === 0 ? new Date().toISOString() : null,
+    devices,
   };
 
-  let completed = 0;
-  const interval = setInterval(() => {
-    const batch = Math.min(Math.ceil(deviceCount / 8), deviceCount - completed);
-    for (let i = completed; i < completed + batch; i++) {
-      if (jobs[jobId] && jobs[jobId].devices[i]) {
-        jobs[jobId].devices[i].status = Math.random() > 0.05 ? 'SUCCESS' : 'FAILED';
+  if (deviceCount > 0) {
+    let completed = 0;
+    const interval = setInterval(() => {
+      const batch = Math.min(Math.ceil(deviceCount / 8), deviceCount - completed);
+      for (let i = completed; i < completed + batch; i++) {
+        if (jobs[jobId] && jobs[jobId].devices[i]) {
+          jobs[jobId].devices[i].status = Math.random() > 0.05 ? 'SUCCESS' : 'FAILED';
+        }
       }
-    }
-    completed += batch;
-    if (completed >= deviceCount) {
-      clearInterval(interval);
-      if (jobs[jobId]) {
-        jobs[jobId].status = 'COMPLETED';
-        jobs[jobId].completedAt = new Date().toISOString();
+      completed += batch;
+      if (completed >= deviceCount) {
+        clearInterval(interval);
+        if (jobs[jobId]) {
+          jobs[jobId].status = 'COMPLETED';
+          jobs[jobId].completedAt = new Date().toISOString();
+        }
       }
-    }
-  }, 500);
+    }, 500);
+  }
 
   res.json(buildJobResponse(jobs[jobId]));
 });
