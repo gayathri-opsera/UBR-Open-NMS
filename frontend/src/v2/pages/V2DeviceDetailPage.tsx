@@ -215,18 +215,18 @@ export default function V2DeviceDetailPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 16 }}>
               <div className="vf-kpi-grid">
-                {kpiData.map((series) => {
+                {kpiData.map((series, ki) => {
                   const last = series.data[series.data.length - 1];
                   return (
-                    <MetricCard key={series.param} label={series.param} value={last ? last.avg.toFixed(1) : '—'} />
+                    <MetricCard key={`kpi-${ki}-${series.param}`} label={series.param} value={last ? last.avg.toFixed(1) : '—'} />
                   );
                 })}
               </div>
               {kpiData.length > 0 && (
                 <Card title="24h KPI Trends">
                   <div className="vf-grid vf-grid--2">
-                    {kpiData.slice(0, 6).map((series) => (
-                      <KpiMiniChart key={series.param} series={series} />
+                    {kpiData.slice(0, 6).map((series, ki) => (
+                      <KpiMiniChart key={`mini-${ki}-${series.param}`} series={series} />
                     ))}
                   </div>
                 </Card>
@@ -530,8 +530,8 @@ function BirthCertTab({ device, addToast }: { device: Device; addToast: AddToast
         <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '18px 20px' }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 14 }}>Birth Certificate</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
-            {Object.entries(cert).map(([k, v]) => (
-              <div key={k}>
+            {Object.entries(cert).map(([k, v], ci) => (
+              <div key={`cert-${ci}-${k}`}>
                 <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{CERT_LABELS[k] ?? k}</div>
                 <div style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 14, fontWeight: 600, color: 'var(--vf-accent)' }}>{String(v)}</div>
               </div>
@@ -739,9 +739,25 @@ function ConfigHistoryTab({ device }: { device: Device }) {
       </div>
 
       {history.length === 0 ? (
-        <EmptyState
-          title="No config history yet"
-          description="Push a config from any tab (Network, Wireless, QoS, etc.) and it will appear here in real time." />
+        <div style={{ paddingTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+          <div style={{ fontSize: 32 }}>📋</div>
+          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--vf-text-primary)' }}>No config history yet</div>
+          <div style={{ fontSize: 13, color: 'var(--vf-text-muted)', textAlign: 'center', maxWidth: 460 }}>
+            Every time you push a config from any of the tabs below, it will appear here in real time.
+          </div>
+          <div style={{ background: 'var(--vf-elevated)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '16px 24px', marginTop: 8, width: '100%', maxWidth: 480 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--vf-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>To see history</div>
+            {['1. Go to any config tab (Network, Wireless, QoS, VLAN, Ethernet)',
+              '2. Change a value (e.g. set IP Mode → DHCP, add a DNS server)',
+              '3. Click Apply — a toast will confirm success',
+              '4. Return here and click ↻ Refresh'].map((step, si) => (
+              <div key={si} style={{ display: 'flex', gap: 10, marginBottom: 8, fontSize: 13, color: 'var(--vf-text-secondary)' }}>
+                <span style={{ color: 'var(--vf-accent)', fontWeight: 700, flexShrink: 0 }}>{si + 1}.</span>
+                <span>{step.replace(/^\d+\. /, '')}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       ) : (
         history.map((v, i) => {
           const key = v.id ?? String(i);
@@ -777,8 +793,8 @@ function ConfigHistoryTab({ device }: { device: Device }) {
                     <span style={{ color: 'var(--vf-text-dim)', fontSize: 12 }}>No parameter data recorded for this push.</span>
                   ) : (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                      {params.map(([k, val]) => (
-                        <div key={k} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 6, padding: '8px 12px' }}>
+                      {params.map(([k, val], pi) => (
+                        <div key={`param-${pi}-${k}`} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 6, padding: '8px 12px' }}>
                           <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 4 }}>
                             {PARAM_LABELS[k] ?? k}
                           </div>
