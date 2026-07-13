@@ -307,9 +307,10 @@ router.get('/history/:deviceId', async (req, res) => {
   try {
     // Build a set of all known aliases for this device
     const aliases = new Set([deviceId]);
+
+    // 1. Try MongoDB inventory (for manually-created / IDU devices)
     try {
       const invCol = await getInvCol();
-      // Look up in inventory by any possible identifier
       const inv = await invCol.findOne({
         $or: [
           { serialNumber: deviceId },
@@ -325,8 +326,21 @@ router.get('/history/:deviceId', async (req, res) => {
         if (inv._id)          aliases.add(String(inv._id));
       }
     } catch (e) {
-      // Non-fatal — fall back to exact-match only
-      console.warn('[config-stub] Alias resolution failed:', e.message);
+      console.warn('[config-stub] MongoDB alias resolution failed:', e.message);
+    }
+
+    // 2. Also try Java inventory service (authoritative for BTS/CPE devices)
+    // Java may return { id, serialNumber, deviceId } — all should be treated as aliases.
+    try {
+      const javaDevice = await fetchJavaDevice(deviceId);
+      if (javaDevice) {
+        if (javaDevice.serialNumber) aliases.add(javaDevice.serialNumber);
+        if (javaDevice.deviceId)     aliases.add(javaDevice.deviceId);
+        if (javaDevice.id)           aliases.add(String(javaDevice.id));
+        if (javaDevice.name)         aliases.add(javaDevice.name);
+      }
+    } catch (e) {
+      console.warn('[config-stub] Java inventory alias resolution failed:', e.message);
     }
 
     const col = await getHistCol();
@@ -373,10 +387,26 @@ async function getInvCol() {
   return _invCol;
 }
 
+// ── Java inventory — single device fetch (used for alias resolution) ──────────
+function fetchJavaDevice(id) {
+  return new Promise((resolve) => {
+    const url = `${INVENTORY_URL}/api/v1/devices/${encodeURIComponent(id)}`;
+    http.get(url, { timeout: 5000 }, (res) => {
+      let raw = '';
+      res.on('data', (c) => raw += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(raw)); } catch { resolve(null); }
+      });
+    }).on('error', () => resolve(null)).on('timeout', () => resolve(null));
+  });
+}
+
 // ── Bulk push ─────────────────────────────────────────────────────────────────
 router.post('/bulk-push', async (req, res) => {
   const { templateId, filter, deviceIds } = req.body || {};
   const jobId = `job-${nextJobId++}`;
+  // Capture actor before async processing so it is available in the interval closure
+  const actor = req.body?.actor || req.user?.username || 'operator';
 
   let devices = [];
 
@@ -441,7 +471,18 @@ router.post('/bulk-push', async (req, res) => {
       const batch = Math.min(Math.ceil(deviceCount / 8), deviceCount - completed);
       for (let i = completed; i < completed + batch; i++) {
         if (jobs[jobId] && jobs[jobId].devices[i]) {
-          jobs[jobId].devices[i].status = Math.random() > 0.05 ? 'SUCCESS' : 'FAILED';
+          const devStatus = Math.random() > 0.05 ? 'SUCCESS' : 'FAILED';
+          jobs[jobId].devices[i].status = devStatus;
+          // Persist to history so Config History tab shows this push
+          if (devStatus === 'SUCCESS') {
+            recordPush(
+              jobs[jobId].devices[i].deviceId,
+              { templateId, bulkJob: jobId },
+              actor,
+              templateId,
+              'PUSHED',
+            );
+          }
         }
       }
       completed += batch;
