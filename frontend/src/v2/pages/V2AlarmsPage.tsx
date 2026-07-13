@@ -224,7 +224,11 @@ export default function V2AlarmsPage() {
                   </td>
                   <td style={{ padding: '9px 12px', color: 'var(--vf-text-primary)', fontWeight: 500 }}>{alarm.alarmType}</td>
                   <td style={{ padding: '9px 12px', color: 'var(--vf-text-secondary)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alarm.alarmName}</td>
-                  <td style={{ padding: '9px 12px', color: 'var(--vf-text-secondary)', fontFamily: 'var(--vf-font-mono)', fontSize: 12 }}>{alarm.deviceId}</td>
+                  <td style={{ padding: '9px 12px', fontFamily: 'var(--vf-font-mono)', fontSize: 12 }}>
+                    {(!alarm.deviceId || alarm.deviceId === 'unknown')
+                      ? <span style={{ color: 'var(--vf-text-muted)', fontStyle: 'italic' }}>System / NMS</span>
+                      : <span style={{ color: 'var(--vf-text-secondary)' }}>{alarm.deviceId}</span>}
+                  </td>
                   <td style={{ padding: '9px 12px' }}>
                     <Badge variant={alarm.state === 'ACTIVE' ? 'danger' : alarm.state === 'ACKNOWLEDGED' ? 'warning' : 'success'}>
                       {alarm.state}
