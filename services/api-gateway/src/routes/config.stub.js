@@ -6,8 +6,40 @@
  * Mounted at /api/v1/config in app.js.
  */
 const express  = require('express');
+const http     = require('http');
 const mongoose = require('mongoose');
 const router   = express.Router();
+
+// ── Java inventory fetch (used by bulk-push to get authoritative device list) ─
+const INVENTORY_URL = process.env.INVENTORY_SERVICE_URL || 'http://nms-inventory:8082';
+
+function fetchJavaPage(deviceType, page, limit) {
+  return new Promise((resolve) => {
+    const qs = `limit=${limit}&page=${page}${deviceType ? `&deviceType=${deviceType}` : ''}`;
+    const url = `${INVENTORY_URL}/api/v1/devices?${qs}`;
+    http.get(url, { timeout: 8000 }, (res) => {
+      let raw = '';
+      res.on('data', (c) => raw += c);
+      res.on('end', () => {
+        try {
+          const d = JSON.parse(raw);
+          resolve(Array.isArray(d) ? d : (d.content || d.data || d.devices || []));
+        } catch { resolve([]); }
+      });
+    }).on('error', () => resolve([])).on('timeout', () => resolve([]));
+  });
+}
+
+async function fetchAllFromJava(deviceType) {
+  const PAGE = 100;
+  const all = [];
+  for (let page = 0; page < 20; page++) {
+    const batch = await fetchJavaPage(deviceType, page, PAGE);
+    all.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return all;
+}
 
 // ── MongoDB connection (eager, at module load) ────────────────────────────────
 // Use MONGO_URI_CONFIG if available (points to ubrnms_config DB);
@@ -353,29 +385,45 @@ router.post('/bulk-push', async (req, res) => {
       // Explicit list of device IDs provided by caller
       devices = deviceIds.map((id) => ({ deviceId: id, status: 'QUEUED' }));
     } else {
-      // Query real inventory for matching devices
-      const col = await getInvCol();
-      const query = {};
-      if (filter?.deviceType) {
-        // Java inventory stores type as deviceType or model prefix; match both conventions
-        const typeUpper = filter.deviceType.toUpperCase();
-        query.$or = [
-          { deviceType: { $regex: typeUpper, $options: 'i' } },
-          { model:      { $regex: typeUpper === 'BTS' ? 'A60' : typeUpper === 'CPE' ? 'A61' : typeUpper, $options: 'i' } },
-        ];
-      }
-      const docs = await col
-        .find(query, { projection: { serialNumber: 1, deviceId: 1, _id: 1 } })
-        .limit(500)
-        .toArray();
+      const typeUpper = (filter?.deviceType || '').toUpperCase();
 
-      devices = docs.map((d) => ({
-        deviceId: d.serialNumber || d.deviceId || String(d._id),
-        status: 'QUEUED',
-      }));
+      if (typeUpper === 'IDU') {
+        // IDU devices are not in Java inventory — use MongoDB
+        try {
+          const col = await getInvCol();
+          const docs = await col
+            .find({ deviceType: { $regex: 'IDU', $options: 'i' } }, { projection: { serialNumber: 1, deviceId: 1, _id: 1 } })
+            .limit(500).toArray();
+          devices = docs.map((d) => ({ deviceId: d.serialNumber || d.deviceId || String(d._id), status: 'QUEUED' }));
+        } catch (err) {
+          console.warn('[config-stub] IDU MongoDB query failed:', err.message);
+        }
+      } else {
+        // BTS / CPE / all — call Java inventory (authoritative, matches what the UI shows)
+        try {
+          const javaDevs = await fetchAllFromJava(typeUpper || null);
+          devices = javaDevs.map((d) => ({
+            deviceId: d.serialNumber || d.deviceId || d.id || String(d._id),
+            status: 'QUEUED',
+          }));
+
+          // If no filter, also append IDU from MongoDB
+          if (!typeUpper) {
+            try {
+              const col = await getInvCol();
+              const iduDocs = await col
+                .find({ deviceType: { $regex: 'IDU', $options: 'i' } }, { projection: { serialNumber: 1, deviceId: 1, _id: 1 } })
+                .limit(500).toArray();
+              iduDocs.forEach((d) => devices.push({ deviceId: d.serialNumber || d.deviceId || String(d._id), status: 'QUEUED' }));
+            } catch { /* IDU append is best-effort */ }
+          }
+        } catch (err) {
+          console.warn('[config-stub] Java inventory fetch for bulk-push failed:', err.message);
+        }
+      }
     }
   } catch (err) {
-    console.warn('[config-stub] Inventory query for bulk-push failed, falling back to empty list:', err.message);
+    console.warn('[config-stub] Bulk-push device resolution failed:', err.message);
     devices = [];
   }
 
