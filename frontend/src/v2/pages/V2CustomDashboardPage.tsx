@@ -634,25 +634,41 @@ function DashboardView({ dash, stats, onBack, onUpdate, onSave }: {
 }
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
+// Dashboards are stored in MongoDB via the API so they are available on every
+// browser and device.  localStorage is used only as a fast read-through cache
+// so the UI never flickers while the fetch resolves.
 
-// v2 = bumped to evict auto-seeded "NOC Overview"/"BTS Performance" defaults
 const STORAGE_KEY = 'v2_custom_dashboards_v2';
 
-function loadDashboards(): Dashboard[] {
+/** Sync the local cache so the dashboard tab bar (V2DashboardPage) stays fresh */
+function cacheLocally(dashboards: Dashboard[]): void {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dashboards)); } catch { /* ignore */ }
+}
+
+/** Load from cache for immediate render while the API fetch is in-flight */
+function loadFromCache(): Dashboard[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Dashboard[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch { /* ignore */ }
   return DEFAULT_DASHBOARDS;
 }
 
-function saveDashboards(dashboards: Dashboard[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(dashboards));
-  } catch { /* ignore quota errors */ }
+/** Map an API response document → Dashboard shape (id may come as _id or id) */
+function fromApi(d: Record<string, unknown>): Dashboard {
+  return {
+    id:          String(d.id ?? d._id ?? ''),
+    name:        String(d.name ?? ''),
+    description: String(d.description ?? ''),
+    scope:       (d.scope as Dashboard['scope']) ?? 'BOTH',
+    widgets:     (d.widgets as Dashboard['widgets']) ?? [],
+    isDefault:   Boolean(d.isDefault),
+    updatedAt:   String(d.updatedAt ?? new Date().toISOString()),
+    filters:     (d.filters as Dashboard['filters']) ?? {},
+  };
 }
 
 // ── Main Page: Dashboard Management Table ─────────────────────────────────────
@@ -662,10 +678,11 @@ export default function V2CustomDashboardPage(): React.ReactElement {
   const [searchParams] = useSearchParams();
 
   // ?d=2 → legacy slot (Dashboard 2/3); ?view={id} → direct custom dashboard open
-  const dashSlot  = Number(searchParams.get('d')) || null;
+  const dashSlot   = Number(searchParams.get('d')) || null;
   const viewDashId = searchParams.get('view') || null;
 
-  const [dashboards, setDashboards]         = useState<Dashboard[]>(loadDashboards);
+  // Initialise from cache for instant render; API fetch will overwrite shortly
+  const [dashboards, setDashboards]         = useState<Dashboard[]>(loadFromCache);
   const [activeDashId, setActiveDashId]     = useState<string | null>(null);
   const [showCreateDialog, setShowCreate]   = useState(false);
   const [editDash, setEditDash]             = useState<Dashboard | null>(null);
@@ -675,8 +692,23 @@ export default function V2CustomDashboardPage(): React.ReactElement {
   const [circleFilter, setCircleFilter]     = useState('');
   const [networkFilter, setNetworkFilter]   = useState('');
   const [firmwareFilter, setFirmwareFilter] = useState('');
-  const hasFetched = useRef(false);
-  const slotHandled = useRef(false);
+  const hasFetched    = useRef(false);
+  const slotHandled   = useRef(false);
+  const apiFetched    = useRef(false);
+
+  // ── Fetch dashboards from API on mount ──────────────────────────────────────
+  useEffect(() => {
+    if (apiFetched.current) return;
+    apiFetched.current = true;
+    apiClient.get('/dashboards').then((res) => {
+      const list = (Array.isArray(res.data) ? res.data : []) as Record<string, unknown>[];
+      const mapped = list.map(fromApi);
+      setDashboards(mapped);
+      cacheLocally(mapped);
+    }).catch(() => {
+      // API unavailable — keep cache; do not clear dashboards
+    });
+  }, []);
 
   // ?view={id} — direct open from dashboard tab bar
   useEffect(() => {
@@ -694,25 +726,30 @@ export default function V2CustomDashboardPage(): React.ReactElement {
     if (match) {
       setActiveDashId(match.id);
     } else {
-      const newDash: Dashboard = {
-        id: `dash-slot-${dashSlot}-${Date.now()}`,
+      const payload = {
         name: slotName,
         description: `Auto-created for ${slotName} tab. Click + Add Widget to populate.`,
-        scope: 'BOTH',
-        isDefault: false,
-        updatedAt: new Date().toISOString(),
-        filters: {},
+        scope: 'BOTH' as DashboardScope,
         widgets: [],
+        isDefault: false,
+        filters: {},
       };
-      const next = [...dashboards, newDash];
-      setDashboards(next);
-      saveDashboards(next);
-      setActiveDashId(newDash.id);
+      apiClient.post('/dashboards', payload).then((res) => {
+        const newDash = fromApi(res.data as Record<string, unknown>);
+        const next = [...dashboards, newDash];
+        setDashboards(next);
+        cacheLocally(next);
+        setActiveDashId(newDash.id);
+      }).catch(() => {
+        // Fallback: local-only
+        const newDash: Dashboard = { id: `dash-slot-${dashSlot}-${Date.now()}`, ...payload, updatedAt: new Date().toISOString() };
+        const next = [...dashboards, newDash];
+        setDashboards(next);
+        cacheLocally(next);
+        setActiveDashId(newDash.id);
+      });
     }
   }, [dashSlot, dashboards]);
-  useEffect(() => {
-    saveDashboards(dashboards);
-  }, [dashboards]);
 
   useEffect(() => {
     if (hasFetched.current) return;
@@ -759,46 +796,69 @@ export default function V2CustomDashboardPage(): React.ReactElement {
   };
 
   const handleCreate = (data: { name: string; description: string; scope: DashboardScope }) => {
-    const id = `dash-${Date.now()}`;
-    const next = [...dashboards, { id, ...data, widgets: [], isDefault: false, updatedAt: new Date().toISOString(), filters: {} }];
-    setDashboards(next);
-    saveDashboards(next);
-    setActiveDashId(id);
-    setShowCreate(false);
-    showToast(`✓ Dashboard "${data.name}" created`);
+    apiClient.post('/dashboards', { ...data, widgets: [], isDefault: false, filters: {} })
+      .then((res) => {
+        const newDash = fromApi(res.data as Record<string, unknown>);
+        const next = [...dashboards, newDash];
+        setDashboards(next);
+        cacheLocally(next);
+        setActiveDashId(newDash.id);
+        setShowCreate(false);
+        showToast(`✓ Dashboard "${data.name}" created`);
+      })
+      .catch(() => showToast('✗ Failed to create dashboard'));
   };
 
   const handleEdit = (data: { name: string; description: string; scope: DashboardScope }) => {
     if (!editDash) return;
-    const next = dashboards.map((d) => d.id === editDash.id ? { ...d, ...data, updatedAt: new Date().toISOString() } : d);
-    setDashboards(next);
-    saveDashboards(next);
-    setEditDash(null);
-    showToast(`✓ Dashboard "${data.name}" saved`);
+    apiClient.put(`/dashboards/${editDash.id}`, data)
+      .then((res) => {
+        const updated = fromApi(res.data as Record<string, unknown>);
+        const next = dashboards.map((d) => d.id === editDash.id ? updated : d);
+        setDashboards(next);
+        cacheLocally(next);
+        setEditDash(null);
+        showToast(`✓ Dashboard "${data.name}" saved`);
+      })
+      .catch(() => showToast('✗ Failed to save dashboard'));
   };
 
   const handleSetDefault = (id: string) => {
-    const next = dashboards.map((d) => ({ ...d, isDefault: d.id === id }));
-    setDashboards(next);
-    saveDashboards(next);
     const name = dashboards.find((d) => d.id === id)?.name ?? '';
-    showToast(`✓ "${name}" set as default`);
+    apiClient.put(`/dashboards/${id}`, { isDefault: true })
+      .then(() => {
+        const next = dashboards.map((d) => ({ ...d, isDefault: d.id === id }));
+        setDashboards(next);
+        cacheLocally(next);
+        showToast(`✓ "${name}" set as default`);
+      })
+      .catch(() => showToast('✗ Failed to set default'));
   };
 
   const handleDelete = (id: string) => {
     const name = dashboards.find((d) => d.id === id)?.name ?? '';
-    const next = dashboards.filter((d) => d.id !== id);
-    setDashboards(next);
-    saveDashboards(next);
-    if (activeDashId === id) setActiveDashId(null);
-    setConfirmDelete(null);
-    showToast(`✓ Dashboard "${name}" deleted`);
+    apiClient.delete(`/dashboards/${id}`)
+      .then(() => {
+        const next = dashboards.filter((d) => d.id !== id);
+        setDashboards(next);
+        cacheLocally(next);
+        if (activeDashId === id) setActiveDashId(null);
+        setConfirmDelete(null);
+        showToast(`✓ Dashboard "${name}" deleted`);
+      })
+      .catch(() => showToast('✗ Failed to delete dashboard'));
   };
 
   const handleUpdateDash = (updated: Dashboard) => {
+    // Optimistic local update; persist widgets/scope change to DB
     const next = dashboards.map((d) => d.id === updated.id ? { ...updated, updatedAt: new Date().toISOString() } : d);
     setDashboards(next);
-    saveDashboards(next);
+    cacheLocally(next);
+    apiClient.put(`/dashboards/${updated.id}`, {
+      widgets: updated.widgets,
+      scope:   updated.scope,
+      filters: updated.filters,
+    }).catch(() => { /* best-effort — local state already updated */ });
   };
 
   const hasFilters = circleFilter || networkFilter || firmwareFilter;
@@ -849,8 +909,14 @@ export default function V2CustomDashboardPage(): React.ReactElement {
           onBack={() => setActiveDashId(null)}
           onUpdate={handleUpdateDash}
           onSave={() => {
-            saveDashboards(dashboards);
-            showToast(`✓ "${activeDash.name}" saved`);
+            apiClient.put(`/dashboards/${activeDash.id}`, {
+              widgets: activeDash.widgets,
+              scope:   activeDash.scope,
+              filters: activeDash.filters,
+            }).then(() => {
+              cacheLocally(dashboards);
+              showToast(`✓ "${activeDash.name}" saved`);
+            }).catch(() => showToast('✗ Save failed'));
           }}
         />
       </div>

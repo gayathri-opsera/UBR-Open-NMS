@@ -19,6 +19,7 @@ const diagnosticsStub = require('./routes/diagnostics.stub');
 const kpiStub         = require('./routes/kpi.stub');
 const topologyStub    = require('./routes/topology.stub');
 const devicesStub     = require('./routes/devices.stub');
+const dashboardsStub  = require('./routes/dashboards.stub');
 
 function createApp(redisClient) {
   const app = express();
@@ -44,6 +45,8 @@ function createApp(redisClient) {
   app.use('/api/v1/admin',         adminStub);
   app.use('/api/v1/organizations', hierarchyStub);
   app.use('/api/v1/groups',        groupsStub);
+  // Custom dashboards — persisted to MongoDB so they survive browser/device changes
+  app.use('/api/v1/dashboards',    dashboardsStub);
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);
   // Diagnostics stub — Java diagnostics-service returns 503 in local dev

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { apiClient } from '../../api/client';
 import { useNavigate } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer,
@@ -129,12 +130,12 @@ function rel(iso: string | undefined | null) {
 // ── Custom dashboard stub type (mirrors V2CustomDashboardPage) ────────────────
 interface CustomDashboardStub { id: string; name: string; }
 
-function loadCustomDashboards(): CustomDashboardStub[] {
+function loadCustomDashboardsFromCache(): CustomDashboardStub[] {
   try {
     const raw = localStorage.getItem('v2_custom_dashboards_v2');
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map((d) => ({ id: d.id, name: d.name }));
+      if (Array.isArray(parsed)) return parsed.map((d: Record<string, unknown>) => ({ id: String(d.id ?? d._id ?? ''), name: String(d.name ?? '') }));
     }
   } catch { /* ignore */ }
   return [];
@@ -154,8 +155,8 @@ export default function V2DashboardPage() {
   const [tab2, setTab2] = useState<TabState>(() => loadTabState(2));
   const [tab3, setTab3] = useState<TabState>(() => loadTabState(3));
 
-  // Custom dashboards — read from localStorage (same store as V2CustomDashboardPage)
-  const [customDashboards, setCustomDashboards] = useState<CustomDashboardStub[]>(loadCustomDashboards);
+  // Custom dashboards — loaded from API (DB-backed); cache pre-fills for instant render
+  const [customDashboards, setCustomDashboards] = useState<CustomDashboardStub[]>(loadCustomDashboardsFromCache);
 
   // Shared data
   const [devices, setDevices]   = useState<Device[]>([]);
@@ -221,12 +222,25 @@ export default function V2DashboardPage() {
     try { localStorage.setItem('vf_active_dash_tab', String(id)); } catch { /* ignore */ }
   };
 
-  // Refresh custom dashboard list when page gains focus (user may have added one)
-  useEffect(() => {
-    const refresh = () => setCustomDashboards(loadCustomDashboards());
-    window.addEventListener('focus', refresh);
-    return () => window.removeEventListener('focus', refresh);
+  // Fetch custom dashboards from API on mount and on window focus
+  const refreshCustomDashboards = useCallback(() => {
+    apiClient.get('/dashboards').then((res) => {
+      const list = (Array.isArray(res.data) ? res.data : []) as Record<string, unknown>[];
+      const stubs = list.map((d) => ({ id: String(d.id ?? d._id ?? ''), name: String(d.name ?? '') }));
+      setCustomDashboards(stubs);
+      // Keep cache in sync so instant-render stays fresh
+      try { localStorage.setItem('v2_custom_dashboards_v2', JSON.stringify(list)); } catch { /* ignore */ }
+    }).catch(() => {
+      // API down — fall back to cache
+      setCustomDashboards(loadCustomDashboardsFromCache());
+    });
   }, []);
+
+  useEffect(() => {
+    refreshCustomDashboards();
+    window.addEventListener('focus', refreshCustomDashboards);
+    return () => window.removeEventListener('focus', refreshCustomDashboards);
+  }, [refreshCustomDashboards]);
 
   // Data loading
   const load = useCallback(() => {
