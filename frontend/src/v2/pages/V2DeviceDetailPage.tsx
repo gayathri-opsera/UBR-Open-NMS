@@ -69,11 +69,15 @@ export default function V2DeviceDetailPage() {
   const [editForm, setEditForm] = useState<Partial<Device>>({});
   const [editSaving, setEditSaving] = useState(false);
 
+  // Canonical device identifier — falls back through all possible ID fields.
+  // device.deviceId is often undefined for Java-service devices that only return 'id'.
+  const devId: string = device?.deviceId || device?.serialNumber || device?.id || id || '';
+
   useEffect(() => {
     if (!id) return;
     fetchDevices()
       .then((devices) => {
-        // Also match by serialNumber so topology (which navigates with serial) links correctly
+        // Match by any identifier so topology (which navigates with serial) links correctly
         const d = devices.find((x) => x.id === id || x.deviceId === id || x.serialNumber === id);
         setDevice(d ?? null);
       })
@@ -82,15 +86,15 @@ export default function V2DeviceDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    if (!device || tab !== 'summary') return;
+    if (!device || !devId || tab !== 'summary') return;
     setKpiLoading(true);
     const to = new Date().toISOString();
     const from = new Date(Date.now() - timeRangeToMs('24h')).toISOString();
-    fetchDeviceKpi(device.deviceId, [...KPI_PARAMS], timeRangeToGranularity('24h'), from, to)
+    fetchDeviceKpi(devId, [...KPI_PARAMS], timeRangeToGranularity('24h'), from, to)
       .then(setKpiData)
       .catch((e) => logger.warn('KPI fetch failed', { error: e }))
       .finally(() => setKpiLoading(false));
-  }, [device, tab]);
+  }, [device, tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openEdit = () => {
     setEditForm({
@@ -110,7 +114,7 @@ export default function V2DeviceDetailPage() {
     if (!device) return;
     setEditSaving(true);
     try {
-      const updated = await updateDevice(device.deviceId || device.id, editForm);
+      const updated = await updateDevice(devId, editForm);
       setDevice((prev) => prev ? { ...prev, ...updated } : prev);
       addToast('Device updated', 'success');
       setEditOpen(false);
@@ -234,7 +238,7 @@ export default function V2DeviceDetailPage() {
             </div>
           )}
         </TabPanel>
-        <TabPanel id="wireless">  <WirelessConfigTab deviceId={device.deviceId} /></TabPanel>
+        <TabPanel id="wireless">  <WirelessConfigTab deviceId={devId} /></TabPanel>
         <TabPanel id="network">   <NetworkConfigTab device={device} addToast={addToast} /></TabPanel>
         <TabPanel id="ethernet">  <EthernetConfigTab device={device} addToast={addToast} /></TabPanel>
         <TabPanel id="qos">       <QoSConfigTab device={device} addToast={addToast} /></TabPanel>
@@ -273,6 +277,7 @@ function PushButton({ onClick, loading, label = 'Apply' }: { onClick: () => void
 
 // ── Network Config Tab ────────────────────────────────────────────────────────
 function NetworkConfigTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [ipMode, setIpMode] = useState<string>('DHCP');
   const [ip, setIp]         = useState('');
   const [mask, setMask]     = useState('');
@@ -283,7 +288,7 @@ function NetworkConfigTab({ device, addToast }: { device: Device; addToast: AddT
   const apply = async () => {
     setSaving(true);
     try {
-      await pushDeviceParam(device.deviceId, { ipMode, staticIp: ip, staticSubnet: mask, staticGateway: gw, dnsServer: dns });
+      await pushDeviceParam(devId, { ipMode, staticIp: ip, staticSubnet: mask, staticGateway: gw, dnsServer: dns });
       addToast('Network config pushed', 'success');
     } catch (e) { logger.error('Network push failed', e); addToast('Failed to push network config', 'error'); }
     finally { setSaving(false); }
@@ -321,6 +326,7 @@ function NetworkConfigTab({ device, addToast }: { device: Device; addToast: AddT
 
 // ── Ethernet Config Tab ───────────────────────────────────────────────────────
 function EthernetConfigTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [speed, setSpeed]     = useState('auto');
   const [portUp, setPortUp]   = useState(true);
   const [port, setPort]       = useState('eth0');
@@ -329,7 +335,7 @@ function EthernetConfigTab({ device, addToast }: { device: Device; addToast: Add
   const apply = async () => {
     setSaving(true);
     try {
-      await pushDeviceParam(device.deviceId, { speedDuplex: speed, portUpDown: portUp ? 'up' : 'down', portId: port });
+      await pushDeviceParam(devId, { speedDuplex: speed, portUpDown: portUp ? 'up' : 'down', portId: port });
       addToast('Ethernet config pushed', 'success');
     } catch (e) { logger.error('Ethernet push failed', e); addToast('Failed to push ethernet config', 'error'); }
     finally { setSaving(false); }
@@ -367,12 +373,12 @@ function EthernetConfigTab({ device, addToast }: { device: Device; addToast: Add
         <div style={{ display: 'flex', gap: 8 }}>
           <PushButton onClick={apply} loading={saving} />
           <Button variant="ghost" size="sm" onClick={async () => {
-            try { await pushDeviceParam(device.deviceId, { wifiRestart: true }); addToast('WiFi restart triggered', 'success'); }
+            try { await pushDeviceParam(devId, { wifiRestart: true }); addToast('WiFi restart triggered', 'success'); }
             catch { addToast('Failed to trigger WiFi restart', 'error'); }
           }}>WiFi Restart</Button>
           <Button variant="ghost" size="sm" onClick={async () => {
             if (!window.confirm('Reboot this device?')) return;
-            try { await pushDeviceParam(device.deviceId, { deviceReboot: true }); addToast('Device reboot triggered', 'success'); }
+            try { await pushDeviceParam(devId, { deviceReboot: true }); addToast('Device reboot triggered', 'success'); }
             catch { addToast('Failed to trigger reboot', 'error'); }
           }}>Reboot Device</Button>
         </div>
@@ -383,6 +389,7 @@ function EthernetConfigTab({ device, addToast }: { device: Device; addToast: Add
 
 // ── QoS Config Tab ────────────────────────────────────────────────────────────
 function QoSConfigTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [profile, setProfile]   = useState('default');
   const [ulLimit, setUlLimit]   = useState('');
   const [dlLimit, setDlLimit]   = useState('');
@@ -391,7 +398,7 @@ function QoSConfigTab({ device, addToast }: { device: Device; addToast: AddToast
   const apply = async () => {
     setSaving(true);
     try {
-      await pushDeviceParam(device.deviceId, { qosProfile: profile, ulBandwidthLimit: ulLimit ? Number(ulLimit) : 0, dlBandwidthLimit: dlLimit ? Number(dlLimit) : 0 });
+      await pushDeviceParam(devId, { qosProfile: profile, ulBandwidthLimit: ulLimit ? Number(ulLimit) : 0, dlBandwidthLimit: dlLimit ? Number(dlLimit) : 0 });
       addToast('QoS config pushed', 'success');
     } catch (e) { logger.error('QoS push failed', e); addToast('Failed to push QoS config', 'error'); }
     finally { setSaving(false); }
@@ -421,6 +428,7 @@ function QoSConfigTab({ device, addToast }: { device: Device; addToast: AddToast
 
 // ── VLAN Config Tab ───────────────────────────────────────────────────────────
 function VlanConfigTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [vlanId, setVlanId]       = useState('');
   const [vlanMode, setVlanMode]   = useState<'single' | 'double'>('single');
   const [outerVlan, setOuterVlan] = useState('');
@@ -431,7 +439,7 @@ function VlanConfigTab({ device, addToast }: { device: Device; addToast: AddToas
     if (vlanId && (Number(vlanId) < 1 || Number(vlanId) > 4094)) { addToast('VLAN ID must be 1–4094', 'error'); return; }
     setSaving(true);
     try {
-      await pushDeviceParam(device.deviceId, { vlanId: Number(vlanId), vlanPriority: Number(priority), vlanMode, outerVlanId: vlanMode === 'double' ? Number(outerVlan) : 0 });
+      await pushDeviceParam(devId, { vlanId: Number(vlanId), vlanPriority: Number(priority), vlanMode, outerVlanId: vlanMode === 'double' ? Number(outerVlan) : 0 });
       addToast('VLAN config pushed', 'success');
     } catch (e) { logger.error('VLAN push failed', e); addToast('Failed to push VLAN config', 'error'); }
     finally { setSaving(false); }
@@ -622,6 +630,7 @@ function TagsTab({ device, addToast, onDeviceUpdate }: { device: Device; addToas
 
 // ── Logs Tab ──────────────────────────────────────────────────────────────────
 function LogsTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [logs, setLogs]     = useState<LogEntry[]>([]);
   const [level, setLevel]   = useState('');
   const [lines, setLines]   = useState(200);
@@ -630,12 +639,12 @@ function LogsTab({ device, addToast }: { device: Device; addToast: AddToast }) {
   const run = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await extractDeviceLogs({ deviceId: device.deviceId, lines, level: (level || undefined) as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | undefined });
+      const result = await extractDeviceLogs({ deviceId: devId, lines, level: (level || undefined) as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | undefined });
       setLogs(result);
       if (result.length) addToast(`${result.length} log entries retrieved`, 'success');
     } catch (e) { logger.error('Log extraction failed', e); addToast('Failed to extract logs', 'error'); }
     finally { setLoading(false); }
-  }, [device.deviceId, level, lines, addToast]);
+  }, [devId, level, lines, addToast]);
 
   const levelColor: Record<string, string> = { ERROR: '#f87171', WARN: '#fbbf24', INFO: '#60a5fa', DEBUG: 'var(--vf-text-muted)' };
 

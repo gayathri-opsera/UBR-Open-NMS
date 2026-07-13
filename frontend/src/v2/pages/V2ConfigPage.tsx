@@ -969,7 +969,8 @@ function PushConfigTab() {
         }
       } else {
         if (!selectedDevice) { addToast('Select a device', 'warning'); setPushing(false); return; }
-        const res = await pushConfig(selectedDevice, selectedTemplate);
+        const tpl = templates.find((t) => t.id === selectedTemplate);
+        const res = await pushConfig(selectedDevice, selectedTemplate, tpl?.parameters);
         setResult(res);
         addToast(`Config pushed: ${res.status}`, res.status === 'PUSHED' ? 'success' : 'warning');
       }
@@ -992,7 +993,7 @@ function PushConfigTab() {
   ];
   const deviceOptions = [
     { value: '', label: 'Select device…' },
-    ...devices.map((d) => ({ value: d.id, label: `${d.serialNumber} — ${d.ipAddress} (${d.deviceType})` })),
+    ...devices.map((d) => ({ value: d.serialNumber || d.deviceId || d.id, label: `${d.serialNumber} — ${d.ipAddress} (${d.deviceType})` })),
   ];
 
   const isPushResult = (r: PushResult | ConfigJob): r is PushResult => 'commandId' in r || ('totalDevices' in r === false && ['PUSHED','REJECTED','DEVICE_OFFLINE'].includes((r as PushResult).status));

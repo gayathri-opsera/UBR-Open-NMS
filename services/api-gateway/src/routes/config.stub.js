@@ -223,6 +223,9 @@ router.delete('/templates/:id', async (req, res) => {
 // ── Push (single device) ─────────────────────────────────────────────────────
 router.post('/push/:deviceId', (req, res) => {
   const { deviceId } = req.params;
+  if (!deviceId || deviceId === 'undefined' || deviceId === 'null') {
+    return res.status(400).json({ code: 'BAD_REQUEST', message: 'deviceId is required and must not be "undefined"' });
+  }
   const queryParams  = req.query || {};
   const bodyParams   = req.body  || {};
 

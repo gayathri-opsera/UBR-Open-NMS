@@ -21,8 +21,20 @@ export async function deleteTemplate(id: string): Promise<void> {
   await apiClient.delete(`/config/templates/${id}`);
 }
 
-export async function pushConfig(deviceId: string, templateId: string): Promise<PushResult> {
-  const res = await apiClient.post<PushResult>(`/config/push/${deviceId}`, { templateId });
+export async function pushConfig(
+  deviceId: string,
+  templateId: string,
+  params?: Record<string, string | number | boolean>,
+): Promise<PushResult> {
+  let actor = 'operator';
+  try {
+    const raw = localStorage.getItem('nms_user') || localStorage.getItem('user') || localStorage.getItem('auth_user');
+    if (raw) { const u = JSON.parse(raw); actor = u.username || u.email || u.name || actor; }
+  } catch { /* ignore */ }
+  const res = await apiClient.post<PushResult>(
+    `/config/push/${deviceId}`,
+    { templateId, actor, ...(params ?? {}) },
+  );
   return res.data;
 }
 
