@@ -35,6 +35,24 @@ const TABS = [
   { id: 'history',   label: 'Config History' },
 ];
 
+/** Normalise tag objects from any backend format to { key, value } pairs. */
+function normaliseTags(raw: unknown): Array<{ key: string; value: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((t) => {
+    if (typeof t === 'string') {
+      const [k, ...rest] = t.split(':');
+      return { key: k ?? t, value: rest.join(':') };
+    }
+    if (t && typeof t === 'object') {
+      const obj = t as Record<string, string>;
+      if ('key' in obj) return { key: String(obj.key), value: String(obj.value ?? '') };
+      const [k, v] = Object.entries(obj)[0] ?? ['tag', ''];
+      return { key: k, value: String(v) };
+    }
+    return { key: String(t), value: '' };
+  });
+}
+
 export default function V2DeviceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -132,9 +150,9 @@ export default function V2DeviceDetailPage() {
         <span><strong style={{ color: 'var(--vf-text-muted)' }}>MAC:</strong> <span style={{ fontFamily: 'var(--vf-font-mono)' }}>{device.macAddress}</span></span>
         <span><strong style={{ color: 'var(--vf-text-muted)' }}>Model:</strong> {device.manufacturer} {device.model}</span>
         {device.networkId && <span><strong style={{ color: 'var(--vf-text-muted)' }}>Network:</strong> {device.networkId}</span>}
-        {device.tags?.length ? (
-          <span style={{ display: 'flex', gap: 4 }}>
-            {device.tags.map((t) => <Badge key={`${t.key}:${t.value}`} variant="default">{t.key}:{t.value}</Badge>)}
+        {normaliseTags(device.tags).length > 0 ? (
+          <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {normaliseTags(device.tags).map((t) => <Badge key={`${t.key}:${t.value}`} variant="default">{t.key}{t.value ? `:${t.value}` : ''}</Badge>)}
           </span>
         ) : null}
       </div>
@@ -441,16 +459,19 @@ function VlanConfigTab({ device, addToast }: { device: Device; addToast: AddToas
 
 // ── GPS Tab ───────────────────────────────────────────────────────────────────
 function GpsTab({ device }: { device: Device }) {
-  if (!device.location) {
+  // Resolve coordinates from multiple possible sources
+  const lat = device.latitude ?? device.location?.coordinates?.[1];
+  const lng = device.longitude ?? device.location?.coordinates?.[0];
+
+  if (lat == null || lng == null) {
     return <div style={{ paddingTop: 24 }}><EmptyState title="No GPS data" description="This device has no GPS coordinates on record." /></div>;
   }
-  const [lng, lat] = device.location.coordinates;
   const mapUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}`;
   return (
     <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <MetricCard label="Latitude"  value={lat.toFixed(6)} />
-        <MetricCard label="Longitude" value={lng.toFixed(6)} />
+        <MetricCard label="Latitude"  value={Number(lat).toFixed(6)} />
+        <MetricCard label="Longitude" value={Number(lng).toFixed(6)} />
         {(device.birthCertificate?.azimuth) != null && <MetricCard label="Azimuth" value={`${device.birthCertificate?.azimuth}°`} />}
         {(device.birthCertificate?.tilt) != null    && <MetricCard label="Tilt"    value={`${device.birthCertificate?.tilt}°`} />}
       </div>
@@ -518,7 +539,7 @@ function BirthCertTab({ device, addToast }: { device: Device; addToast: AddToast
 
 // ── Tags Tab (NMS-IV-06) ──────────────────────────────────────────────────────
 function TagsTab({ device, addToast, onDeviceUpdate }: { device: Device; addToast: AddToast; onDeviceUpdate: (d: Device) => void }) {
-  const [tags, setTags]       = useState<Array<{ key: string; value: string }>>([...(device.tags ?? [])]);
+  const [tags, setTags]       = useState<Array<{ key: string; value: string }>>(() => normaliseTags(device.tags));
   const [newKey, setNewKey]   = useState('');
   const [newVal, setNewVal]   = useState('');
   const [saving, setSaving]   = useState(false);

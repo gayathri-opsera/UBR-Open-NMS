@@ -1,6 +1,18 @@
 import { apiClient } from './client';
 import type { Device, DeviceFilter, GpsSearchParams } from './devices.types';
 
+/** Safely extract a Device array from any paginated response shape. */
+function extractBatch(data: unknown): Device[] {
+  if (Array.isArray(data)) return data as Device[];
+  if (data && typeof data === 'object') {
+    const d = data as Record<string, unknown>;
+    for (const key of ['devices', 'data', 'items', 'content', 'results']) {
+      if (Array.isArray(d[key])) return d[key] as Device[];
+    }
+  }
+  return [];
+}
+
 export async function fetchDevices(filter: DeviceFilter = {}): Promise<Device[]> {
   // The Java inventory service caps each page at 100 — paginate to collect all devices
   const PAGE_SIZE = 100;
@@ -8,13 +20,10 @@ export async function fetchDevices(filter: DeviceFilter = {}): Promise<Device[]>
   const all: Device[] = [];
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await apiClient.get<Device[]>('/devices', {
+    const res = await apiClient.get('/devices', {
       params: { limit: PAGE_SIZE, page, ...filter },
     });
-    const batch: Device[] = Array.isArray(res.data) ? res.data
-      : (res.data as unknown as { devices?: Device[]; data?: Device[]; items?: Device[]; content?: Device[] })
-          .devices ?? (res.data as unknown as { data?: Device[] }).data
-          ?? (res.data as unknown as { items?: Device[] }).items ?? [];
+    const batch = extractBatch(res.data);
     all.push(...batch);
     if (batch.length < PAGE_SIZE) break; // last page reached
   }
