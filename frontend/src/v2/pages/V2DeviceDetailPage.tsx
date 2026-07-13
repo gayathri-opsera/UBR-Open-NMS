@@ -4,6 +4,7 @@ import { fetchDevices, updateDevice } from '../../api/devices.api';
 import { fetchDeviceKpi } from '../../api/kpi.api';
 import { timeRangeToGranularity, timeRangeToMs, KPI_PARAMS } from '../../api/kpi.types';
 import { pushDeviceParam, getVersionHistory } from '../../api/config.api';
+import { apiClient } from '../../api/client';
 import { extractDeviceLogs } from '../../api/diagnostics.api';
 import type { LogEntry } from '../../api/diagnostics.api';
 import type { Device } from '../../api/devices.types';
@@ -152,7 +153,9 @@ export default function V2DeviceDetailPage() {
         {device.networkId && <span><strong style={{ color: 'var(--vf-text-muted)' }}>Network:</strong> {device.networkId}</span>}
         {normaliseTags(device.tags).length > 0 ? (
           <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {normaliseTags(device.tags).map((t) => <Badge key={`${t.key}:${t.value}`} variant="default">{t.key}{t.value ? `:${t.value}` : ''}</Badge>)}
+            {normaliseTags(device.tags).map((t, i) => (
+              <Badge key={`tag-${i}-${t.key}`} variant="default">{t.key}{t.value ? `:${t.value}` : ''}</Badge>
+            ))}
           </span>
         ) : null}
       </div>
@@ -487,13 +490,16 @@ function GpsTab({ device }: { device: Device }) {
 function BirthCertTab({ device, addToast }: { device: Device; addToast: AddToast }) {
   const [cert, setCert]       = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
-  const apiClient = { post: async (url: string, body: unknown) => { const r = await fetch(`/api/v1${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('nms_token') ?? ''}` }, body: JSON.stringify(body) }); if (!r.ok) throw new Error(r.statusText); return r.json(); } };
 
   const capture = async () => {
     setLoading(true);
     try {
-      const res = await apiClient.post('/nms/bts-capture-birth-certificate', { sno: device.serialNumber });
-      setCert(res.birthCertificate ?? res);
+      // Use the shared apiClient so the Bearer token is attached automatically
+      const res = await apiClient.post<{ birthCertificate?: Record<string, unknown> }>(
+        '/nms/bts-capture-birth-certificate',
+        { sno: device.serialNumber }
+      );
+      setCert(res.data.birthCertificate ?? (res.data as unknown as Record<string, unknown>));
       addToast('Birth certificate captured', 'success');
     } catch (e) { logger.error('Birth cert failed', e); addToast('Failed to capture birth certificate', 'error'); }
     finally { setLoading(false); }
