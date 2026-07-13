@@ -136,6 +136,7 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
       {subTab === 'properties' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Input
+            id={`${bandKey}-ssid`}
             label="SSID"
             value={config.ssid}
             onChange={set('ssid')}
@@ -145,6 +146,7 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
             error={errors.ssid}
           />
           <Select
+            id={`${bandKey}-channel`}
             label="Configured Channel"
             options={channelOpts}
             value={config.channel}
@@ -152,6 +154,7 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
             disabled={readOnly}
           />
           <Select
+            id={`${bandKey}-encryption`}
             label="Encryption"
             options={ENCRYPTION_OPTIONS}
             value={config.encryption}
@@ -160,6 +163,7 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
           />
           <div style={{ position: 'relative' }}>
             <Input
+              id={`${bandKey}-key`}
               label="Key / Passphrase"
               type={showKey ? 'text' : 'password'}
               value={config.key}
@@ -184,11 +188,12 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
 
       {subTab === 'ddrs' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Select label="DDRS Status" options={DDRS_OPTIONS} value={config.ddrsStatus} onChange={set('ddrsStatus')} disabled={readOnly} />
-          <Select label="Spatial Stream" options={STREAM_OPTIONS} value={config.spatialStream} onChange={set('spatialStream')} disabled={readOnly} />
-          <Select label="Max Data Rate — Single Stream" options={MCS_OPTIONS} value={config.maxRateSingle} onChange={set('maxRateSingle')} disabled={readOnly} />
-          <Select label="Max Data Rate — Dual Stream" options={MCS_OPTIONS} value={config.maxRateDual} onChange={set('maxRateDual')} disabled={readOnly} />
+          <Select id={`${bandKey}-ddrs-status`}   label="DDRS Status"                       options={DDRS_OPTIONS}   value={config.ddrsStatus}    onChange={set('ddrsStatus')}    disabled={readOnly} />
+          <Select id={`${bandKey}-spatial-stream`} label="Spatial Stream"                    options={STREAM_OPTIONS} value={config.spatialStream}  onChange={set('spatialStream')} disabled={readOnly} />
+          <Select id={`${bandKey}-rate-single`}    label="Max Data Rate — Single Stream"     options={MCS_OPTIONS}    value={config.maxRateSingle}  onChange={set('maxRateSingle')} disabled={readOnly} />
+          <Select id={`${bandKey}-rate-dual`}      label="Max Data Rate — Dual Stream"       options={MCS_OPTIONS}    value={config.maxRateDual}    onChange={set('maxRateDual')}   disabled={readOnly} />
           <Input
+            id={`${bandKey}-tx-power`}
             label="Transmit Power (1–26 dBm)"
             type="number"
             value={config.txPower}
@@ -199,6 +204,7 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
             error={errors.txPower}
           />
           <Input
+            id={`${bandKey}-max-eirp`}
             label="Maximum EIRP (0–100 dBm)"
             type="number"
             value={config.maxEirp}
@@ -209,6 +215,7 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
             error={errors.maxEirp}
           />
           <Input
+            id={`${bandKey}-antenna-gain`}
             label="Connectorized Antenna Gain (dBi)"
             value={config.antennaGain}
             onChange={() => {/* read-only display */}}
@@ -221,6 +228,7 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
       {subTab === 'dcs' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Input
+            id={`${bandKey}-dcs-interval`}
             label="Scan Interval (seconds)"
             type="number"
             value={config.dcsScanInterval}
@@ -231,6 +239,7 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
             hint="How often DCS re-scans for better channels"
           />
           <Input
+            id={`${bandKey}-dcs-threshold`}
             label="DCS Threshold (dBm)"
             type="number"
             value={config.dcsThreshold}
@@ -241,6 +250,7 @@ function BandPanel({ label, bandKey, config, onChange, readOnly, subTab, onPushR
             hint="Signal level that triggers channel change"
           />
           <Input
+            id={`${bandKey}-dcs-channels`}
             label="Channel List"
             value={config.dcsChannelList}
             onChange={set('dcsChannelList')}
