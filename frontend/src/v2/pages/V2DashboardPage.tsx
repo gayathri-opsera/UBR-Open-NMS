@@ -114,9 +114,13 @@ const MODE_BG: Record<DashboardMode, string> = {
   IDU: 'linear-gradient(135deg, #3b0764 0%, #a142f4 100%)',
 };
 
-function rel(iso: string) {
-  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return `${s}s ago`;
+function rel(iso: string | undefined | null) {
+  if (!iso) return '—';
+  const ms = new Date(iso).getTime();
+  if (isNaN(ms)) return '—';
+  const s = Math.floor((Date.now() - ms) / 1000);
+  if (s < 0)    return 'just now';
+  if (s < 60)   return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
@@ -660,34 +664,99 @@ export default function V2DashboardPage() {
                   </ResponsiveContainer>}
               </PCard>
             );
-            else if (id === 'device-type-bar') content = mode === 'ALL' ? (
-              <PCard title="Device Type Breakdown" sub="BTS / CPE / IDU — click to filter" accent="#60a5fa">
-                {deviceTypeBarData.length === 0 ? <NoData /> :
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={deviceTypeBarData} margin={{ top: 8, right: 16 }}
-                      style={{ cursor: 'pointer' }}
-                      onClick={(e: unknown) => { const p = (e as { activePayload?: { payload?: { name?: string } }[] })?.activePayload?.[0]?.payload?.name; if (p) navigate(devUrl({ deviceType: p })); }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(77,158,255,0.06)" vertical={false} />
-                      <XAxis dataKey="name" stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 12, fill: 'var(--vf-text-secondary)' }} axisLine={false} />
-                      <YAxis stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-muted)' }} axisLine={false} tickLine={false} />
-                      <RTooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(77,158,255,0.05)' }} formatter={(val, name) => [`${val} devices`, name]} />
-                      <Bar dataKey="count" radius={[6, 6, 0, 0]}>
-                        {deviceTypeBarData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>}
-              </PCard>
-            ) : null;
+            else if (id === 'device-type-bar') {
+              // ALL → Device Type Breakdown; BTS → Channel Distribution; CPE → RSSI; IDU → placeholder
+              if (mode === 'ALL') {
+                content = (
+                  <PCard title="Device Type Breakdown" sub="BTS / CPE / IDU — click to filter" accent="#60a5fa">
+                    {deviceTypeBarData.length === 0 ? <NoData /> :
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={deviceTypeBarData} margin={{ top: 8, right: 16 }}
+                          style={{ cursor: 'pointer' }}
+                          onClick={(e: unknown) => { const p = (e as { activePayload?: { payload?: { name?: string } }[] })?.activePayload?.[0]?.payload?.name; if (p) navigate(devUrl({ deviceType: p })); }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(77,158,255,0.06)" vertical={false} />
+                          <XAxis dataKey="name" stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 12, fill: 'var(--vf-text-secondary)' }} axisLine={false} />
+                          <YAxis stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-muted)' }} axisLine={false} tickLine={false} />
+                          <RTooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(77,158,255,0.05)' }} formatter={(val, name) => [`${val} devices`, name]} />
+                          <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                            {deviceTypeBarData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>}
+                  </PCard>
+                );
+              } else if (mode === 'BTS') {
+                content = (
+                  <PCard title="BTS Channel Distribution" sub="Operating channel spread" accent="#60a5fa">
+                    {btsChannelData.length === 0 ? <NoData msg="No channel data" /> :
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={btsChannelData} margin={{ top: 8, right: 8 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(77,158,255,0.06)" vertical={false} />
+                          <XAxis dataKey="channel" stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-secondary)' }} axisLine={false} />
+                          <YAxis stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-muted)' }} axisLine={false} tickLine={false} />
+                          <RTooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(77,158,255,0.05)' }} />
+                          <Bar dataKey="count" fill="#60a5fa" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>}
+                  </PCard>
+                );
+              } else if (mode === 'CPE') {
+                content = (
+                  <PCard title="CPE RSSI Distribution" sub="Signal quality buckets" accent="#a78bfa">
+                    {rssiData.every((r) => r.count === 0) ? <NoData msg="No RSSI data" /> :
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={rssiData} margin={{ top: 8, right: 8 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(77,158,255,0.06)" vertical={false} />
+                          <XAxis dataKey="range" stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 10, fill: 'var(--vf-text-secondary)' }} axisLine={false} />
+                          <YAxis stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-muted)' }} axisLine={false} tickLine={false} />
+                          <RTooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(77,158,255,0.05)' }} />
+                          <Bar dataKey="count" fill="#a78bfa" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>}
+                  </PCard>
+                );
+              } else {
+                // IDU mode — show device type breakdown (always useful context)
+                content = (
+                  <PCard title="Device Type Breakdown" sub="Fleet composition" accent="#22d3ee">
+                    {deviceTypeBarData.length === 0 ? <NoData /> :
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={deviceTypeBarData} margin={{ top: 8, right: 16 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(77,158,255,0.06)" vertical={false} />
+                          <XAxis dataKey="name" stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 12, fill: 'var(--vf-text-secondary)' }} axisLine={false} />
+                          <YAxis stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-muted)' }} axisLine={false} tickLine={false} />
+                          <RTooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(77,158,255,0.05)' }} formatter={(val, name) => [`${val} devices`, name]} />
+                          <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                            {deviceTypeBarData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>}
+                  </PCard>
+                );
+              }
+            }
             else if (id === 'recent-alarms') content = (
               <FeedCard title="Recent Active Alarms" count={activeAlarms.length} accent="#ef4444"
                 action={<a href="/v2/alarms" style={{ color: '#60a5fa', fontSize: 12, textDecoration: 'none', fontWeight: 600 }}>View all →</a>}>
                 {activeAlarms.length === 0
                   ? <EmptyFeed icon="✅" title="No active alarms" sub="Network is healthy" />
-                  : [...activeAlarms].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 8).map((a) => (
-                    <FeedRow key={a.id} accent={a.severity === 'CRITICAL' ? '#ef4444' : a.severity === 'MAJOR' ? '#fb923c' : '#f59e0b'}>
+                  : [...activeAlarms]
+                      .sort((a, b) => new Date(b.timestamp || b.raisedAt || 0).getTime() - new Date(a.timestamp || a.raisedAt || 0).getTime())
+                      .slice(0, 8)
+                      .map((a) => (
+                    <FeedRow
+                      key={a.id}
+                      accent={a.severity === 'CRITICAL' ? '#ef4444' : a.severity === 'MAJOR' ? '#fb923c' : '#f59e0b'}
+                      onClick={() => {
+                        // Drilldown: go to alarms filtered by severity + device, same as pie chart
+                        const p = new URLSearchParams({ severity: a.severity });
+                        if (a.deviceId) p.set('deviceId', a.deviceId);
+                        navigate(`/v2/alarms?${p.toString()}`);
+                      }}
+                    >
                       <span>{a.severity === 'CRITICAL' ? '⛔' : a.severity === 'MAJOR' ? '🔴' : '🟠'}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ color: '#ffffff', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.alarmName}</div>
+                        <div style={{ color: 'var(--vf-text-primary)', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.alarmName}</div>
                         <div style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontFamily: 'var(--vf-font-mono)' }}>{a.deviceId}</div>
                       </div>
                       <time style={{ color: 'var(--vf-text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>{rel(a.timestamp)}</time>
@@ -701,10 +770,20 @@ export default function V2DashboardPage() {
                 {filtered.filter((d) => d.status === 'OFFLINE').length === 0
                   ? <EmptyFeed icon="🟢" title="All devices online" sub="No unreachable devices" />
                   : filtered.filter((d) => d.status === 'OFFLINE').slice(0, 8).map((d) => (
-                    <FeedRow key={d.id || d.serialNumber} accent="#ef4444">
+                    <FeedRow
+                      key={d.id || d.serialNumber}
+                      accent="#ef4444"
+                      onClick={() => {
+                        // Drilldown: go to inventory filtered to this specific device
+                        const p = new URLSearchParams({ status: 'OFFLINE' });
+                        if (mode !== 'ALL') p.set('deviceType', mode);
+                        if (d.serialNumber) p.set('search', d.serialNumber);
+                        navigate(`/v2/devices?${p.toString()}`);
+                      }}
+                    >
                       <span style={{ color: '#ef4444' }}>●</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ color: '#ffffff', fontSize: 12, fontWeight: 600 }}>
+                        <div style={{ color: 'var(--vf-text-primary)', fontSize: 12, fontWeight: 600 }}>
                           {d.deviceType === 'BTS' ? '🗼 ' : d.deviceType === 'IDU' ? '🔌 ' : '📡 '}{d.serialNumber}
                         </div>
                         <div style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontFamily: 'var(--vf-font-mono)' }}>{d.ipAddress}</div>
@@ -732,33 +811,6 @@ export default function V2DashboardPage() {
             );
           })}
 
-          {/* BTS / CPE mode-specific extras fill remaining grid slots */}
-          {mode === 'BTS' && btsChannelData.length > 0 && (
-            <PCard title="BTS Channel Distribution" sub="Operating channel spread" accent="#60a5fa">
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={btsChannelData} margin={{ top: 8, right: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(77,158,255,0.06)" vertical={false} />
-                  <XAxis dataKey="channel" stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-secondary)' }} axisLine={false} />
-                  <YAxis stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-muted)' }} axisLine={false} tickLine={false} />
-                  <RTooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(77,158,255,0.05)' }} />
-                  <Bar dataKey="count" fill="#60a5fa" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </PCard>
-          )}
-          {mode === 'CPE' && cpeDevices.length > 0 && (
-            <PCard title="CPE RSSI Distribution" sub="Signal quality buckets" accent="#a78bfa">
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={rssiData} margin={{ top: 8, right: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(77,158,255,0.06)" vertical={false} />
-                  <XAxis dataKey="range" stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 10, fill: 'var(--vf-text-secondary)' }} axisLine={false} />
-                  <YAxis stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-muted)' }} axisLine={false} tickLine={false} />
-                  <RTooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(77,158,255,0.05)' }} />
-                  <Bar dataKey="count" fill="#a78bfa" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </PCard>
-          )}
         </div>
 
       </div>
@@ -848,9 +900,25 @@ function FeedCard({ title, count, accent, action, children }: { title: string; c
   );
 }
 
-function FeedRow({ children, accent }: { children: React.ReactNode; accent: string }) {
+function FeedRow({ children, accent, onClick }: { children: React.ReactNode; accent: string; onClick?: () => void }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--vf-border-subtle)', borderLeft: `3px solid ${accent}66`, paddingLeft: 10, marginLeft: -10 }}>
+    <div
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); } : undefined}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '7px 0', paddingLeft: 10,
+        borderBottom: '1px solid var(--vf-border-subtle)',
+        borderLeft: `3px solid ${accent}66`,
+        marginLeft: -10,
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'background 0.1s',
+      }}
+      onMouseEnter={onClick ? (e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--vf-elevated)'; } : undefined}
+      onMouseLeave={onClick ? (e) => { (e.currentTarget as HTMLDivElement).style.background = ''; } : undefined}
+    >
       {children}
     </div>
   );

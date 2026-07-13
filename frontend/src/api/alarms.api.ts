@@ -3,7 +3,12 @@ import type { Alarm, AlarmFilter, AlarmTypeStat, TopAlarm } from './alarms.types
 
 export async function fetchAlarms(filter: AlarmFilter = {}): Promise<Alarm[]> {
   const res = await apiClient.get<Alarm[]>('/alarms', { params: filter });
-  return res.data;
+  // Normalize backend field names → Alarm interface
+  // Backend uses raisedAt; our interface uses timestamp
+  return (res.data ?? []).map((a: Alarm & { raisedAt?: string }) => ({
+    ...a,
+    timestamp: a.timestamp || a.raisedAt || '',
+  }));
 }
 
 export async function acknowledgeAlarm(id: string, actor = 'nms-operator'): Promise<Alarm> {

@@ -59,7 +59,10 @@ export default function V2AlarmsPage() {
     if (state) init.state = state;
     return init;
   });
-  const [search, setSearch] = useState(searchParams.get('search') ?? '');
+  // Prefer explicit 'search' param, fall back to deviceId for alarm drilldown from dashboard
+  const [search, setSearch] = useState(
+    searchParams.get('search') ?? searchParams.get('deviceId') ?? ''
+  );
   const [acking, setAcking] = useState<Set<string>>(new Set());
   const [thresholds, setThresholds] = useState<AlarmThreshold[]>([]);
   const [showThresholds, setShowThresholds] = useState(false);

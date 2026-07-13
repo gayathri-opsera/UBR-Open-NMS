@@ -51,6 +51,14 @@ const SEV_COLOR: Record<string, string> = {
 
 type View = 'map' | 'graph' | 'list';
 type HealthFilter = '' | NodeHealth;
+type TypeMode = 'ALL' | 'BTS' | 'CPE' | 'IDU';
+
+const TYPE_MODE_BG: Record<TypeMode, string> = {
+  ALL: 'linear-gradient(135deg, #1e3a5f 0%, #1967D2 100%)',
+  BTS: 'linear-gradient(135deg, #14532d 0%, #0f9d58 100%)',
+  CPE: 'linear-gradient(135deg, #78350f 0%, #f4b400 100%)',
+  IDU: 'linear-gradient(135deg, #3b0764 0%, #a142f4 100%)',
+};
 type PanelTab = 'info' | 'connected' | 'history';
 type EventRange = '24h' | '3d' | '7d';
 const EVENT_RANGE_MS: Record<EventRange, number> = {
@@ -1020,6 +1028,44 @@ function TopologyGraphView({ nodes, edges, onNodeClick, mapHeight }: {
 
 }
 
+// ── Topology KPI tile (mirrors Dashboard KpiTile, clickable for drilldown) ────
+function TopoKpiTile({ icon, label, value, total, color, onClick }: {
+  icon: string; label: string; value: number; total?: number;
+  color: string; onClick?: () => void;
+}) {
+  const pct = total && total > 0 ? ` (${Math.round((value / total) * 100)}%)` : '';
+  return (
+    <button
+      onClick={onClick}
+      disabled={!onClick}
+      style={{
+        textAlign: 'left', width: '100%',
+        cursor: onClick ? 'pointer' : 'default',
+        background: 'var(--vf-surface)',
+        border: 'var(--vf-card-border)',
+        borderRadius: 12, padding: '14px 16px',
+        position: 'relative', overflow: 'hidden',
+        transition: 'transform 0.15s, box-shadow 0.15s',
+        boxShadow: 'var(--vf-shadow-low)',
+        opacity: 1,
+      }}
+      onMouseEnter={onClick ? (e) => { const b = e.currentTarget as HTMLButtonElement; b.style.transform = 'translateY(-2px)'; b.style.boxShadow = '0 6px 20px rgba(0,0,0,0.15)'; } : undefined}
+      onMouseLeave={onClick ? (e) => { const b = e.currentTarget as HTMLButtonElement; b.style.transform = ''; b.style.boxShadow = 'var(--vf-shadow-low)'; } : undefined}
+    >
+      {/* colored top accent bar */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${color}, ${color}55)`, borderRadius: '12px 12px 0 0' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10 }}>
+        <span aria-hidden="true" style={{ fontSize: 13 }}>{icon}</span>
+        <span style={{ color: 'var(--vf-text-muted)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
+      </div>
+      <div style={{ color, fontSize: 30, fontWeight: 800, fontFamily: 'var(--vf-font-mono)', lineHeight: 1, letterSpacing: '-0.02em' }}>
+        {value.toLocaleString()}
+        {pct && <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--vf-text-muted)', marginLeft: 6 }}>{pct}</span>}
+      </div>
+    </button>
+  );
+}
+
 // ── List view ──────────────────────────────────────────────────────────────────
 function TopologyListView({ nodes, onNodeClick, mapHeight }: {
   nodes: TopologyNode[];
@@ -1075,8 +1121,11 @@ export default function V2TopologyPage() {
   const [refreshKey, setRefreshKey]     = useState(0);
   const [view, setView]                 = useState<View>('map');
   const [healthFilter, setHealthFilter] = useState<HealthFilter>('');
-  const [typeFilter, setTypeFilter]     = useState('');
+  const [typeMode,  setTypeMode]        = useState<TypeMode>('ALL');
   const [search, setSearch]             = useState('');
+
+  // typeFilter is always derived from typeMode (ALL → '')
+  const typeFilter = typeMode === 'ALL' ? '' : typeMode;
   const [selectedNode, setSelectedNode] = useState<TopologyNode | null>(null);
   const [gpsResult, setGpsResult]       = useState<GpsResult | undefined>(undefined);
 
@@ -1115,6 +1164,17 @@ export default function V2TopologyPage() {
   const faulty   = nodes.filter((n) => n.health === 'FAULTY').length;
   const withGps  = nodes.filter((n) => !!n.location).length;
 
+  // Mode-specific breakdowns (mirrors Dashboard KPIs)
+  const btsNodes = nodes.filter((n) => n.deviceType === 'BTS');
+  const cpeNodes = nodes.filter((n) => n.deviceType === 'CPE');
+  const iduNodes = nodes.filter((n) => n.deviceType === 'IDU');
+  const btsOnline  = btsNodes.filter((n) => n.health === 'HEALTHY').length;
+  const btsFaulty  = btsNodes.filter((n) => n.health === 'FAULTY' || n.health === 'DEGRADED').length;
+  const cpeOnline  = cpeNodes.filter((n) => n.health === 'HEALTHY').length;
+  const cpeOffline = cpeNodes.filter((n) => n.health === 'FAULTY').length;
+  const iduOnline  = iduNodes.filter((n) => n.health === 'HEALTHY').length;
+  const avgCpesPerBts = btsNodes.length > 0 ? Math.round(cpeNodes.length / btsNodes.length) : 0;
+
   const handleNodeClick  = useCallback((n: TopologyNode) => { setSelectedNode(n); }, []);
   // Navigate to device detail. The topology stub now returns real inventory IDs, so we
   // prefer deviceId. Serial number is kept as a fallback for robustness.
@@ -1145,14 +1205,64 @@ export default function V2TopologyPage() {
         </div>
       </div>
 
-      {/* KPI summary */}
-      <div className="vf-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
-        <MetricCard label="Total Nodes"  value={nodes.length} loading={loading} />
-        <MetricCard label="Links"        value={edges.length} loading={loading} />
-        <MetricCard label="Healthy"      value={healthy}      variant="success" loading={loading} />
-        <MetricCard label="Degraded"     value={degraded}     variant={degraded > 0 ? 'warning' : 'default'} loading={loading} />
-        <MetricCard label="Faulty"       value={faulty}       variant={faulty   > 0 ? 'danger'  : 'default'} loading={loading} />
-        <MetricCard label="GPS Located"  value={withGps}      variant={withGps < nodes.length ? 'warning' : 'success'} loading={loading} />
+      {/* ── Device-type mode chips ─────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {(['ALL', 'BTS', 'CPE', 'IDU'] as TypeMode[]).map((m) => (
+          <button key={m} onClick={() => setTypeMode(m)}
+            style={{
+              padding: '6px 18px', borderRadius: 20, cursor: 'pointer',
+              fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
+              background: typeMode === m ? TYPE_MODE_BG[m] : 'var(--vf-elevated)',
+              color: typeMode === m ? '#fff' : 'var(--vf-text-secondary)',
+              boxShadow: typeMode === m ? '0 2px 10px rgba(0,0,0,0.18)' : 'none',
+              border: typeMode === m ? '1px solid transparent' : '1px solid var(--vf-border-subtle)',
+              transition: 'all 0.15s',
+            }}>
+            {m}
+          </button>
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--vf-text-muted)' }}>
+          {typeMode === 'ALL' ? 'All Devices' : `${typeMode} View`}
+          <span style={{ marginLeft: 8, background: 'var(--vf-accent-subtle)', border: '1px solid var(--vf-accent)', color: 'var(--vf-accent)', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700, fontFamily: 'monospace' }}>
+            {filteredNodes.length} / {nodes.length}
+          </span>
+        </span>
+      </div>
+
+      {/* ── KPI tiles — mode-aware (mirrors Dashboard) ────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+        {typeMode === 'ALL' && (<>
+          <TopoKpiTile icon="🌐" label="Total Nodes"  value={nodes.length}  color="#94a3b8" onClick={() => { setTypeMode('ALL'); setHealthFilter(''); }} />
+          <TopoKpiTile icon="🔗" label="Links"        value={edges.length}  color="#60a5fa" />
+          <TopoKpiTile icon="✅" label="Healthy"      value={healthy}       color="#22c55e" onClick={() => { setTypeMode('ALL'); setHealthFilter('HEALTHY'); }} />
+          <TopoKpiTile icon="⚠️" label="Degraded"    value={degraded}      color={degraded > 0 ? '#f59e0b' : '#22c55e'} onClick={() => { setTypeMode('ALL'); setHealthFilter('DEGRADED'); }} />
+          <TopoKpiTile icon="⛔" label="Faulty"       value={faulty}        color={faulty > 0 ? '#ef4444' : '#22c55e'}   onClick={() => { setTypeMode('ALL'); setHealthFilter('FAULTY'); }} />
+          <TopoKpiTile icon="📍" label="GPS Located"  value={withGps}       color={withGps < nodes.length ? '#f59e0b' : '#22c55e'} total={nodes.length} />
+        </>)}
+        {typeMode === 'BTS' && (<>
+          <TopoKpiTile icon="🗼" label="BTS Total"    value={btsNodes.length}  color="#60a5fa" onClick={() => setHealthFilter('')} />
+          <TopoKpiTile icon="🟢" label="BTS Online"   value={btsOnline}        color="#22c55e" total={btsNodes.length} onClick={() => setHealthFilter('HEALTHY')} />
+          <TopoKpiTile icon="⚠"  label="BTS Faulty"  value={btsFaulty}        color={btsFaulty > 0 ? '#ef4444' : '#22c55e'} onClick={() => setHealthFilter('FAULTY')} />
+          <TopoKpiTile icon="📡" label="Avg CPEs/BTS" value={avgCpesPerBts}   color="#a78bfa" />
+          <TopoKpiTile icon="🔗" label="Links"        value={edges.length}    color="#60a5fa" />
+          <TopoKpiTile icon="📍" label="GPS Located"  value={btsNodes.filter((n) => !!n.location).length} color="#22c55e" total={btsNodes.length} />
+        </>)}
+        {typeMode === 'CPE' && (<>
+          <TopoKpiTile icon="📡" label="CPE Total"   value={cpeNodes.length}  color="#a78bfa" onClick={() => setHealthFilter('')} />
+          <TopoKpiTile icon="🟢" label="CPE Online"  value={cpeOnline}        color="#22c55e" total={cpeNodes.length} onClick={() => setHealthFilter('HEALTHY')} />
+          <TopoKpiTile icon="🔴" label="CPE Offline" value={cpeOffline}       color={cpeOffline > 0 ? '#ef4444' : '#22c55e'} onClick={() => setHealthFilter('FAULTY')} />
+          <TopoKpiTile icon="🔌" label="IDU Total"   value={iduNodes.length}  color="#22d3ee" onClick={() => setTypeMode('IDU')} />
+          <TopoKpiTile icon="🔗" label="Links"       value={edges.length}     color="#60a5fa" />
+          <TopoKpiTile icon="📡" label="Avg CPEs/BTS" value={avgCpesPerBts}  color="#f59e0b" />
+        </>)}
+        {typeMode === 'IDU' && (<>
+          <TopoKpiTile icon="🔌" label="IDU Total"   value={iduNodes.length}  color="#22d3ee" onClick={() => setHealthFilter('')} />
+          <TopoKpiTile icon="🟢" label="IDU Online"  value={iduOnline}        color="#22c55e" total={iduNodes.length} onClick={() => setHealthFilter('HEALTHY')} />
+          <TopoKpiTile icon="⛔" label="IDU Faulty"  value={iduNodes.filter((n) => n.health === 'FAULTY').length} color="#ef4444" onClick={() => setHealthFilter('FAULTY')} />
+          <TopoKpiTile icon="🗼" label="BTS Total"   value={btsNodes.length}  color="#60a5fa" onClick={() => setTypeMode('BTS')} />
+          <TopoKpiTile icon="📡" label="CPE Total"   value={cpeNodes.length}  color="#a78bfa" onClick={() => setTypeMode('CPE')} />
+          <TopoKpiTile icon="📍" label="GPS Located"  value={withGps}         color="#22c55e" total={nodes.length} />
+        </>)}
       </div>
 
       {/* GPS radius search — map only (NMS-TP-02) */}
@@ -1165,7 +1275,7 @@ export default function V2TopologyPage() {
         />
       )}
 
-      {/* Text / health / type filters */}
+      {/* Text / health filters */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ position: 'relative' }}>
           <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--vf-text-muted)', fontSize: 13 }}>🔍</span>
@@ -1185,16 +1295,7 @@ export default function V2TopologyPage() {
           onChange={(e) => setHealthFilter(e.target.value as HealthFilter)}
           style={{ width: 140 }}
         />
-        <Select
-          options={[{ value: '', label: 'All types' }, { value: 'BTS', label: 'BTS' }, { value: 'CPE', label: 'CPE' }, { value: 'IDU', label: 'IDU' }]}
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          style={{ width: 130 }}
-        />
-        <Button variant="ghost" size="sm" onClick={() => { setHealthFilter(''); setTypeFilter(''); setSearch(''); }}>Clear</Button>
-        {filteredNodes.length !== nodes.length && (
-          <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>Showing {filteredNodes.length} of {nodes.length}</span>
-        )}
+        <Button variant="ghost" size="sm" onClick={() => { setHealthFilter(''); setTypeMode('ALL'); setSearch(''); }}>Clear</Button>
       </div>
 
       {/* Main area */}

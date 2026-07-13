@@ -10,7 +10,8 @@ export interface Alarm {
   alarmType: string;
   severity: Severity;
   state: AlarmState;
-  timestamp: string;       // ISO string
+  timestamp: string;       // ISO string — normalised from raisedAt by fetchAlarms
+  raisedAt?: string;       // raw backend field (kept for reference)
   clearedAt?: string;
   duration?: string;
   acknowledgedBy?: string;

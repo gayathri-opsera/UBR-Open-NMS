@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   fetchUsers, createUser, updateUser, deleteUser, resetPassword,
   fetchSessions, terminateSession, fetchSystemHealth,
@@ -150,6 +151,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 function UsersTab() {
   const { addToast } = useToast();
+  const { user: currentUser } = useAuth();
   const [users, setUsers]         = useState<NmsUser[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
@@ -157,6 +159,7 @@ function UsersTab() {
   const [showCreate, setShowCreate] = useState(false);
   const [showDelete, setShowDelete] = useState<NmsUser | null>(null);
   const [showPwd, setShowPwd]     = useState<NmsUser | null>(null);
+  const [toggling, setToggling]   = useState<string | null>(null);
   const [formState, setFormState] = useState<UserFormState>(EMPTY_FORM);
   const [newPwd, setNewPwd]       = useState('');
   const [saving, setSaving]       = useState(false);
@@ -218,6 +221,17 @@ function UsersTab() {
     finally { setShowPwd(null); setNewPwd(''); }
   };
 
+  const handleToggleActive = async (u: NmsUser) => {
+    const nowActive = (u.isActive ?? u.enabled) !== false;
+    setToggling(u.id);
+    try {
+      const updated = await updateUser(u.id, { isActive: !nowActive } as Partial<NmsUser>);
+      setUsers((prev) => prev.map((x) => x.id === u.id ? { ...x, ...updated, isActive: !nowActive } : x));
+      addToast(`User "${u.username}" ${nowActive ? 'disabled' : 'enabled'}`, 'success');
+    } catch { addToast('Failed to update user status', 'error'); }
+    finally { setToggling(null); }
+  };
+
   const visible = users.filter((u) => {
     if (!search) return true;
     const q = search.toLowerCase();
@@ -274,9 +288,21 @@ function UsersTab() {
                     </Badge>
                   </td>
                   <td style={{ padding: '9px 12px' }}>
-                    <div style={{ display: 'flex', gap: 4 }}>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       <Button variant="ghost" size="sm" onClick={() => openEdit(u)}>Edit</Button>
                       <Button variant="ghost" size="sm" onClick={() => { setShowPwd(u); setNewPwd(''); }}>Reset Pwd</Button>
+                      {/* Disable / Enable — hidden for current logged-in user to prevent self-lockout */}
+                      {u.username !== currentUser?.username && (
+                        <Button
+                          variant={(u.isActive ?? u.enabled) !== false ? 'warning' : 'success'}
+                          size="sm"
+                          loading={toggling === u.id}
+                          onClick={() => handleToggleActive(u)}
+                          title={(u.isActive ?? u.enabled) !== false ? 'Disable this user account' : 'Re-enable this user account'}
+                        >
+                          {(u.isActive ?? u.enabled) !== false ? 'Disable' : 'Enable'}
+                        </Button>
+                      )}
                       <Button variant="danger" size="sm" onClick={() => setShowDelete(u)}>Delete</Button>
                     </div>
                   </td>
