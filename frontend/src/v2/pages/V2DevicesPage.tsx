@@ -140,10 +140,9 @@ function DeviceFormModal({
 
   const deviceCoords = (d: Device): [number, number] | null => {
     // Supports both {latitude, longitude} and GeoJSON {location.coordinates:[lng,lat]}
-    const la = (d as Record<string, unknown>).latitude as number | undefined
-             ?? d.location?.coordinates?.[1];
-    const lo = (d as Record<string, unknown>).longitude as number | undefined
-             ?? d.location?.coordinates?.[0];
+    const raw = d as unknown as Record<string, unknown>;
+    const la = (raw.latitude as number | undefined) ?? d.location?.coordinates?.[1];
+    const lo = (raw.longitude as number | undefined) ?? d.location?.coordinates?.[0];
     return (la != null && lo != null) ? [la, lo] : null;
   };
 
