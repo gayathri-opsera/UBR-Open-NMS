@@ -129,9 +129,6 @@ export function LoginPage(): React.ReactElement {
           </button>
         </form>
 
-        <p style={{ color: '#a0aec0', fontSize: 12, marginTop: 20, textAlign: 'center' }}>
-          Default: <span style={{ color: '#1967D2', fontWeight: 600 }}>admin</span> / Admin@NMS2024!
-        </p>
       </div>
     </div>
   );
