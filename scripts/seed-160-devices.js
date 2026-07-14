@@ -112,7 +112,16 @@ for (let s = 0; s < SITES.length; s++) {
   }
   devIdx++;
 
+  // CPE coordinates are picked within 1KM of BTS (max offset 0.004° ≈ 0.63km diagonal)
+  const CPE_MAX_OFFSET = 0.004;
+
   // ── IDU (1 per site) ─────────────────────────────────────────────────────────
+  // IDU shares exact coordinates with the first CPE it is co-located with.
+  // We pre-compute the first CPE's coordinates here so IDU can copy them.
+  const firstCpeLat = site.lat + rnd(-CPE_MAX_OFFSET, CPE_MAX_OFFSET);
+  const firstCpeLon = site.lon + rnd(-CPE_MAX_OFFSET, CPE_MAX_OFFSET);
+  const firstCpeSn  = `CPE-A61-${String(s * 20 + 1).padStart(6, '0')}`;
+
   const iduId = `dev-idu-${site.code}-001`;
   if (!existingIds.has(iduId)) {
     devices.insertOne({
@@ -122,9 +131,11 @@ for (let s = 0; s < SITES.length; s++) {
       firmwareVersion: btsFw, softwareVersion: 'NMS-Agent-2.0',
       status: Math.random() > 0.1 ? 'ONLINE' : 'OFFLINE',
       uptimeSeconds: Math.floor(Math.random() * 1296000),
-      latitude: site.lat + rnd(-0.005, 0.005),
-      longitude: site.lon + rnd(-0.005, 0.005),
+      // IDU must share exact coordinates with its co-located CPE (rule: CPE ↔ IDU same lat/lon)
+      latitude: firstCpeLat,
+      longitude: firstCpeLon,
       connectedBtsSerial: btsSn,
+      linkedCpeSerial: firstCpeSn,
       tags: [{ key: 'site', value: site.code }, { key: 'circle', value: site.name.split(' ')[0] }],
       organizationId: site.org, networkId: site.net,
       lastSeenAt: minsAgo(Math.floor(Math.random() * 30)),
@@ -135,6 +146,7 @@ for (let s = 0; s < SITES.length; s++) {
   devIdx++;
 
   // ── CPEs (12-18 per site) ────────────────────────────────────────────────────
+  // All CPEs placed within 1KM of their BTS (max offset 0.004° ≈ 0.63km diagonal)
   const numCpe = 12 + Math.floor(Math.random() * 7);
   for (let c = 0; c < numCpe; c++) {
     const cpeId  = `dev-cpe-${site.code}-${String(c+1).padStart(3,'0')}`;
@@ -147,14 +159,18 @@ for (let s = 0; s < SITES.length; s++) {
     const cpeModel = pick(CPE_MODELS);
     const cpeIp  = status === 'OFFLINE' ? null : ip(site.ipPfx, c + 10);
 
+    // First CPE uses the pre-computed coordinates (IDU is co-located with it)
+    const cpeLat = c === 0 ? firstCpeLat : site.lat + rnd(-CPE_MAX_OFFSET, CPE_MAX_OFFSET);
+    const cpeLon = c === 0 ? firstCpeLon : site.lon + rnd(-CPE_MAX_OFFSET, CPE_MAX_OFFSET);
+
     devices.insertOne({
       _id: cpeId, id: cpeId, deviceType: 'CPE',
       serialNumber: cpeSn, macAddress: mac(devIdx),
       ipAddress: cpeIp, model: cpeModel,
       firmwareVersion: fw, softwareVersion: 'NMS-Agent-1.9',
       status, uptimeSeconds: status === 'ONLINE' ? Math.floor(Math.random() * 604800) : 0,
-      latitude: site.lat + rnd(-0.04, 0.04),
-      longitude: site.lon + rnd(-0.04, 0.04),
+      latitude: cpeLat,
+      longitude: cpeLon,
       connectedBtsSerial: btsSn,
       tags: [
         { key: 'customer', value: cust },

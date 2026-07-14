@@ -483,14 +483,17 @@ async function seedInventory(db, reset) {
         createdAt: daysAgo(60), updatedAt: hoursAgo(5),
       },
       // ── IDU ───────────────────────────────────────────────────────────────
+      // IDU coordinates must exactly match the co-located CPE (topology rule: same lat/lon)
       {
         _id: IDS.iduDN, id: IDS.iduDN, deviceType: 'IDU',
         serialNumber: 'SN-IDU-DN-001', macAddress: 'CC:DD:EE:FF:00:01',
         ipAddress: '10.10.1.200', model: 'Senao IDU-5000',
         firmwareVersion: 'v1.9.2', softwareVersion: 'NMS-Agent-2.0',
         status: 'ONLINE', uptimeSeconds: 1209600,
-        latitude: 28.6139, longitude: 77.2095, elevation: 20.0, azimuth: 270, tilt: 0,
+        // Matches SN-CPE-DN-001 exactly
+        latitude: 28.6210, longitude: 77.2110, elevation: 20.0, azimuth: 270, tilt: 0,
         connectedBtsSerial: 'SN-BTS-DN-001',
+        linkedCpeSerial: 'SN-CPE-DN-001',
         tags: [{ key: 'site', value: 'SITE-DELHI-NORTH-01' }, { key: 'link-type', value: 'backhaul' }],
         organizationId: IDS.orgDelhi, networkId: IDS.netDN,
         birthCertificateId: IDS.bcIduDN,
@@ -502,8 +505,10 @@ async function seedInventory(db, reset) {
         ipAddress: '10.10.2.200', model: 'Senao IDU-5000',
         firmwareVersion: 'v1.8.5', softwareVersion: 'NMS-Agent-1.9',
         status: 'OFFLINE', uptimeSeconds: 0,
-        latitude: 28.5355, longitude: 77.3915, elevation: 22.0, azimuth: 90, tilt: 0,
-        connectedBtsSerial: null,
+        // Matches SN-CPE-DS-001 exactly
+        latitude: 28.5400, longitude: 77.3950, elevation: 22.0, azimuth: 90, tilt: 0,
+        connectedBtsSerial: 'SN-BTS-DS-001',
+        linkedCpeSerial: 'SN-CPE-DS-001',
         tags: [{ key: 'site', value: 'SITE-DELHI-SOUTH-01' }, { key: 'link-type', value: 'backhaul' }, { key: 'issue', value: 'device-unreachable' }],
         organizationId: IDS.orgDelhi, networkId: IDS.netDS,
         createdAt: daysAgo(95), updatedAt: hoursAgo(8),
@@ -514,8 +519,10 @@ async function seedInventory(db, reset) {
         ipAddress: '10.30.1.200', model: 'Senao IDU-5000-AC',
         firmwareVersion: 'v1.9.2', softwareVersion: 'NMS-Agent-2.0',
         status: 'ONLINE', uptimeSeconds: 2592000,
-        latitude: 19.0760, longitude: 72.8785, elevation: 28.0, azimuth: 0, tilt: 0,
+        // Matches SN-CPE-MW-001 exactly
+        latitude: 19.0810, longitude: 72.8820, elevation: 28.0, azimuth: 0, tilt: 0,
         connectedBtsSerial: 'SN-BTS-MW-001',
+        linkedCpeSerial: 'SN-CPE-MW-001',
         tags: [{ key: 'site', value: 'SITE-MUMBAI-WEST-01' }, { key: 'link-type', value: 'backhaul' }],
         organizationId: IDS.orgMumbai, networkId: IDS.netMW,
         createdAt: daysAgo(90), updatedAt: minsAgo(3),

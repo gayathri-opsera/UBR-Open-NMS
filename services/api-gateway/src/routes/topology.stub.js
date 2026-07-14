@@ -90,6 +90,7 @@ function toNode(d, idx, parentNode) {
                      || (d.serialNumber ? `${type} ${d.serialNumber.slice(-3)}` : `${type} ${101 + idx}`),
     serialNumber:    d.serialNumber || `${type}-${String(100000 + idx).padStart(6, '0')}`,
     _connectedBtsSerial: d.connectedBtsSerial || null,
+    _linkedCpeSerial:    d.linkedCpeSerial    || null,
     type,
     status:          health,
     ipAddress:       d.ipAddress  || '0.0.0.0',
@@ -112,37 +113,55 @@ function toNode(d, idx, parentNode) {
     linkQuality:     toLinkQuality(health),
     connectedCpeSerials:  d.connectedCpeSerials  || [],
     connectedIduSerials:  d.connectedIduSerials  || [],
-    // inter-city backbone links (BTS↔BTS)
-    _cascadedBtsSerials:  d.cascadedBtsSerials   || [],
   };
 }
 
-// ── Wire BTS→CPE and BTS→IDU; fix child GPS to sit near their parent BTS ─────
+// ── Wire BTS→CPE and CPE→IDU; enforce GPS rules ───────────────────────────────
 function buildEdges(nodes) {
-  // Index BTS by serialNumber and by id for O(1) look-ups
-  const btsBySerial = {};
-  const nodesById   = {};
+  // Index all nodes by serialNumber and by id for O(1) look-ups
+  const bySerial  = {};
+  const nodesById = {};
   nodes.forEach((n) => {
     nodesById[n.id] = n;
-    if (n.type === 'BTS') btsBySerial[n.serialNumber] = n;
+    if (n.serialNumber) bySerial[n.serialNumber] = n;
   });
+  const btsBySerial = {};
+  nodes.forEach((n) => { if (n.type === 'BTS') btsBySerial[n.serialNumber] = n; });
 
-  // Assign parentDeviceId on CPE and IDU via connectedBtsSerial
+  // 1. Wire CPE → its parent BTS via connectedBtsSerial
   nodes.forEach((n) => {
-    if ((n.type === 'CPE' || n.type === 'IDU') && n._connectedBtsSerial) {
+    if (n.type === 'CPE' && n._connectedBtsSerial) {
       const parent = btsBySerial[n._connectedBtsSerial];
       if (parent) n.parentDeviceId = parent.id;
     }
   });
 
-  // Fallback: assign remaining CPE/IDU round-robin to available BTS
+  // 2. Wire IDU → its linked CPE (never directly to BTS)
+  const allCpes = nodes.filter((n) => n.type === 'CPE');
+  nodes.forEach((n) => {
+    if (n.type !== 'IDU') return;
+    // Priority 1: explicit linkedCpeSerial
+    if (n._linkedCpeSerial) {
+      const cpe = bySerial[n._linkedCpeSerial];
+      if (cpe) { n.parentDeviceId = cpe.id; return; }
+    }
+    // Priority 2: any CPE under the same BTS
+    if (n._connectedBtsSerial) {
+      const sibling = allCpes.find((x) => x._connectedBtsSerial === n._connectedBtsSerial);
+      if (sibling) { n.parentDeviceId = sibling.id; return; }
+    }
+    // Priority 3: nearest CPE by round-robin (never BTS)
+    if (allCpes.length) n.parentDeviceId = allCpes[Math.abs(n.id.charCodeAt(0)) % allCpes.length].id;
+  });
+
+  // 3. Round-robin fallback for CPEs still without a parent BTS
   const bts = nodes.filter((n) => n.type === 'BTS');
-  nodes.filter((n) => (n.type === 'CPE' || n.type === 'IDU') && !n.parentDeviceId)
+  nodes.filter((n) => n.type === 'CPE' && !n.parentDeviceId)
        .forEach((n, i) => {
          if (bts.length) n.parentDeviceId = bts[i % bts.length].id;
        });
 
-  // Second-pass GPS fix: if a CPE/IDU coordinate is still invalid, place it near its parent
+  // 4. GPS fix: if CPE/IDU coordinate is missing or outside India, place near parent
   nodes.forEach((n, i) => {
     if ((n.type === 'CPE' || n.type === 'IDU') && !isInsideIndia(n.latitude, n.longitude)) {
       const parent = n.parentDeviceId ? nodesById[n.parentDeviceId] : null;
@@ -152,26 +171,26 @@ function buildEdges(nodes) {
     }
   });
 
-  // BTS ↔ BTS inter-city backbone edges (deduplicated)
-  const btsPairs = new Set();
-  const backboneEdges = [];
+  // 5. 1 km enforcement: CPE must be within 1 km of its parent BTS
+  nodes.forEach((n, i) => {
+    if (n.type !== 'CPE' || !n.parentDeviceId) return;
+    const parent = nodesById[n.parentDeviceId];
+    if (!parent || !isInsideIndia(parent.latitude, parent.longitude)) return;
+    if (haversine(n.latitude, n.longitude, parent.latitude, parent.longitude) > 1.0) {
+      const jitter = () => (((i * 7919 + 1) % 80) - 40) / 10000; // ±0.004° ≈ ±0.44 km
+      n.latitude  = parent.latitude  + jitter();
+      n.longitude = parent.longitude + jitter();
+    }
+  });
+
+  // 6. IDU must share coordinates with its linked CPE
   nodes.forEach((n) => {
-    if (n.type !== 'BTS' || !n._cascadedBtsSerials?.length) return;
-    n._cascadedBtsSerials.forEach((peerSerial) => {
-      const peer = btsBySerial[peerSerial];
-      if (!peer) return;
-      const key = [n.id, peer.id].sort().join('||');
-      if (btsPairs.has(key)) return;
-      btsPairs.add(key);
-      backboneEdges.push({
-        id:             `e-backbone-${key}`,
-        sourceDeviceId: n.id,
-        targetDeviceId: peer.id,
-        linkType:       'BACKBONE',
-        linkQuality:    'GOOD',
-        health:         (n.status === 'HEALTHY' && peer.status === 'HEALTHY') ? 'HEALTHY' : 'DEGRADED',
-      });
-    });
+    if (n.type !== 'IDU' || !n.parentDeviceId) return;
+    const parent = nodesById[n.parentDeviceId];
+    if (!parent || parent.type !== 'CPE') return;
+    // snap IDU to exact CPE position
+    n.latitude  = parent.latitude;
+    n.longitude = parent.longitude;
   });
 
   return [
@@ -183,15 +202,17 @@ function buildEdges(nodes) {
       linkQuality: c.linkQuality,
       health: c.status,
     })),
-    ...nodes.filter((n) => n.type === 'IDU' && n.parentDeviceId).map((d, i) => ({
-      id: `e-idu-${i}`,
-      sourceDeviceId: d.parentDeviceId,
-      targetDeviceId: d.id,
-      linkType: 'WIRED',
-      linkQuality: d.linkQuality,
-      health: d.status,
-    })),
-    ...backboneEdges,
+    // IDU edges: only if parent is a CPE (enforce CPE→IDU, never BTS→IDU)
+    ...nodes
+      .filter((n) => n.type === 'IDU' && n.parentDeviceId && nodesById[n.parentDeviceId]?.type === 'CPE')
+      .map((d, i) => ({
+        id: `e-idu-${i}`,
+        sourceDeviceId: d.parentDeviceId,
+        targetDeviceId: d.id,
+        linkType: 'WIRED',
+        linkQuality: d.linkQuality,
+        health: d.status,
+      })),
   ];
 }
 
@@ -236,15 +257,16 @@ function isInsideIndia(lat, lng) {
 }
 
 /** Return a coordinate inside India for a device that lacks valid GPS data.
- *  BTS get a city anchor.  CPE/IDU get a small jitter around their parent anchor. */
+ *  BTS get a city anchor.  CPE/IDU get a small jitter around their parent anchor
+ *  that is guaranteed to stay within the 1 km BTS-CPE rule (±0.004° ≈ ±0.44 km). */
 function fallbackCoord(device, parentNode, idx) {
   if (parentNode && isInsideIndia(parentNode.latitude, parentNode.longitude)) {
-    // Place CPE/IDU close to their parent BTS
-    const jitter = () => (((idx * 7919 + 1) % 200) - 100) / 5000; // ±0.02° ≈ ±2 km
+    // Deterministic sub-km jitter so CPE always lands within 1 km of BTS
+    const jitter = () => (((idx * 7919 + 1) % 80) - 40) / 10000; // ±0.004° ≈ ±0.44 km
     return { lat: parentNode.latitude + jitter(), lng: parentNode.longitude + jitter() };
   }
   const anchor = INDIA_ANCHORS[idx % INDIA_ANCHORS.length];
-  const spread = () => (((idx * 6271 + 3) % 120) - 60) / 1000; // ±0.06° ≈ ±6 km
+  const spread = () => (((idx * 6271 + 3) % 80) - 40) / 10000; // ±0.004° ≈ ±0.44 km
   return { lat: anchor.lat + spread(), lng: anchor.lng + spread() };
 }
 
@@ -326,10 +348,15 @@ router.get('/device/:deviceId/connections', async (req, res) => {
 
     let connected = [];
     if (d.type === 'BTS') {
-      // Direct children: CPE and IDU with parentDeviceId === this BTS
-      connected = nodes.filter((n) => n.parentDeviceId === d.id);
+      // Direct CPE children of this BTS
+      connected = nodes.filter((n) => n.type === 'CPE' && n.parentDeviceId === d.id);
+    } else if (d.type === 'CPE') {
+      // Parent BTS + any IDUs that are linked to this CPE
+      const parent = d.parentDeviceId ? nodes.find((n) => n.id === d.parentDeviceId) : null;
+      const idus   = nodes.filter((n) => n.type === 'IDU' && n.parentDeviceId === d.id);
+      connected = [...(parent ? [parent] : []), ...idus];
     } else {
-      // Parent + siblings of the same parent
+      // IDU → show parent CPE
       if (d.parentDeviceId) {
         const parent = nodes.find((n) => n.id === d.parentDeviceId);
         if (parent) connected = [parent];

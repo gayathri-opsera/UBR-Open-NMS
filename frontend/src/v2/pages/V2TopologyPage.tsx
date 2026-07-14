@@ -308,8 +308,8 @@ function DevicePanel({ node, onClose, onNavigate, height }: {
         {tab === 'connected' && (
           <>
             <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginBottom: 10 }}>
-              {node.deviceType === 'BTS' ? 'CPEs and IDUs connected to this BTS'
-                : node.deviceType === 'CPE' ? 'Parent BTS and IDUs connected to this CPE'
+              {node.deviceType === 'BTS' ? 'CPEs connected to this BTS'
+                : node.deviceType === 'CPE' ? 'Parent BTS and linked IDUs'
                 : 'Parent CPE for this IDU'}
             </div>
             {loadConn ? <LoadingState label="Loading…" size="sm" /> : connected.length === 0 ? (
@@ -574,29 +574,24 @@ function IndiaMapView({ nodes, edges, onNodeClick, gpsResult, mapHeight }: {
         )}
 
         {/* BTS→CPE and CPE→IDU connection lines (NMS-TP-05) */}
-        {edges.map((e) => {
+        {edges.filter((e) => e.linkType !== 'BACKBONE').map((e) => {
           const src = enriched.find((x) => x.node.id === e.sourceDeviceId || x.node.deviceId === e.sourceDeviceId);
           const tgt = enriched.find((x) => x.node.id === e.targetDeviceId || x.node.deviceId === e.targetDeviceId);
           if (!src || !tgt) return null;
-          // Backbone BTS↔BTS inter-city links get a distinct purple style
-          const isBackbone = e.linkType === 'BACKBONE';
-          const color = isBackbone ? '#a855f7'
-                      : e.linkQuality === 'GOOD'  ? '#22c55e'
+          const color = e.linkQuality === 'GOOD'  ? '#22c55e'
                       : e.linkQuality === 'FAIR'  ? '#f59e0b'
                       : e.linkQuality === 'POOR'  ? '#ef4444'
                       : e.linkQuality === 'DOWN'  ? '#6b7280'
                       : '#334155';
-          const dash  = isBackbone ? '12 6'
-                      : e.linkQuality === 'FAIR'  ? '8 5'
+          const dash  = e.linkQuality === 'FAIR'  ? '8 5'
                       : e.linkQuality === 'POOR'  ? '4 4'
                       : e.linkQuality === 'DOWN'  ? '2 5'
                       : undefined;
-          const weight = isBackbone ? 2.5 : e.linkType === 'WIRELESS' ? 1.5 : 1.5;
           return (
             <Polyline
               key={e.id}
               positions={[[src.lat, src.lng], [tgt.lat, tgt.lng]]}
-              pathOptions={{ color, weight, opacity: isBackbone ? 0.85 : 0.6, dashArray: dash }}
+              pathOptions={{ color, weight: 1.5, opacity: 0.6, dashArray: dash }}
             />
           );
         })}
@@ -624,7 +619,7 @@ function IndiaMapView({ nodes, edges, onNodeClick, gpsResult, mapHeight }: {
         borderRadius: 8, padding: '10px 13px', backdropFilter: 'blur(6px)', pointerEvents: 'none',
       }}>
         <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b', marginBottom: 6 }}>Connection</div>
-        {[['Good', '#22c55e', '——'], ['Too Far', '#f59e0b', '- -'], ['Down', '#ef4444', '···']].map(([l, c, s]) => (
+        {[['Good', '#22c55e', '——'], ['Fair', '#f59e0b', '- -'], ['Down', '#ef4444', '···']].map(([l, c, s]) => (
           <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 3 }}>
             <span style={{ color: c, fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{s}</span>
             <span style={{ color: '#cbd5e1' }}>{l}</span>
@@ -679,16 +674,14 @@ function TopologyGraphView({ nodes, edges, onNodeClick, mapHeight }: {
   const getR   = (t: string) => NODE_R[t]   ?? 6;
   const getCol = (t: string) => NODE_COL[t] ?? '#64748b';
 
-  const edgeBaseCol = (lq?: string, lt?: string) =>
-    lt === 'BACKBONE' ? 'rgba(168,85,247,0.4)'
-    : lq === 'GOOD' ? 'rgba(34,197,94,0.3)'
+  const edgeBaseCol = (lq?: string, _lt?: string) =>
+    lq === 'GOOD' ? 'rgba(34,197,94,0.3)'
     : lq === 'FAIR' ? 'rgba(245,158,11,0.3)'
     : lq === 'POOR' ? 'rgba(239,68,68,0.3)'
     : 'rgba(100,116,139,0.18)';
 
-  const edgeHLCol = (lq?: string, lt?: string) =>
-    lt === 'BACKBONE' ? '#a855f7'
-    : lq === 'GOOD'  ? '#22c55e'
+  const edgeHLCol = (lq?: string, _lt?: string) =>
+    lq === 'GOOD'  ? '#22c55e'
     : lq === 'FAIR'  ? '#f59e0b'
     : lq === 'POOR'  ? '#ef4444'
     : '#64748b';
@@ -777,23 +770,21 @@ function TopologyGraphView({ nodes, edges, onNodeClick, mapHeight }: {
       // ── Edges ──────────────────────────────────────────────────────────────
       state.simEdges.forEach((e: any) => {
         const isConn = !hl || (connected.has(e.source.id) && connected.has(e.target.id));
-        const isBB   = e.lt === 'BACKBONE';
         ctx.beginPath();
         ctx.moveTo(e.source.x, e.source.y);
         ctx.lineTo(e.target.x, e.target.y);
+        ctx.setLineDash([]);
         if (isConn && hl) {
           const c = edgeHLCol(e.lq, e.lt);
-          ctx.strokeStyle = c; ctx.lineWidth = isBB ? 3 : 2;
-          ctx.shadowColor = c; ctx.shadowBlur = isBB ? 20 : 12;
+          ctx.strokeStyle = c; ctx.lineWidth = 2;
+          ctx.shadowColor = c; ctx.shadowBlur = 12;
           ctx.globalAlpha = 1;
-          if (isBB) { ctx.setLineDash([10, 5]); } else { ctx.setLineDash([]); }
         } else if (!hl) {
           ctx.strokeStyle = edgeBaseCol(e.lq, e.lt);
-          ctx.lineWidth = isBB ? 2.5 : 1;
+          ctx.lineWidth = 1;
           ctx.shadowColor = edgeHLCol(e.lq, e.lt);
-          ctx.shadowBlur = isBB ? 12 : 4;
+          ctx.shadowBlur = 4;
           ctx.globalAlpha = 1;
-          if (isBB) { ctx.setLineDash([10, 5]); } else { ctx.setLineDash([]); }
         } else {
           ctx.strokeStyle = 'rgba(255,255,255,0.04)';
           ctx.lineWidth = 0.5; ctx.shadowBlur = 0; ctx.globalAlpha = 1;
@@ -994,9 +985,9 @@ function TopologyGraphView({ nodes, edges, onNodeClick, mapHeight }: {
         ))}
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: 8, paddingTop: 8 }}>
           <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.35)', marginBottom: 6 }}>Link Quality</div>
-          {([['#22c55e', 'GOOD'], ['#f59e0b', 'FAIR'], ['#ef4444', 'POOR'], ['#a855f7', 'BACKBONE']] as const).map(([c, l]) => (
+          {([['#22c55e', 'GOOD'], ['#f59e0b', 'FAIR'], ['#ef4444', 'POOR']] as const).map(([c, l]) => (
             <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <div style={{ width: 18, height: l === 'BACKBONE' ? 3 : 2, background: c, borderRadius: 1, boxShadow: `0 0 4px ${c}`, opacity: l === 'BACKBONE' ? 1 : 0.85 }} />
+              <div style={{ width: 18, height: 2, background: c, borderRadius: 1, boxShadow: `0 0 4px ${c}`, opacity: 0.85 }} />
               <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>{l}</span>
             </div>
           ))}

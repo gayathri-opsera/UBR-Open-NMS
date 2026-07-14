@@ -7,7 +7,7 @@
  *  Viewer   — View only
  */
 import 'leaflet/dist/leaflet.css';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchDevices, createDevice, updateDevice, deleteDevice, downloadDeviceExport,
@@ -23,6 +23,24 @@ import { Modal } from '../components/common/Modal';
 import { useToast } from '../components/common/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { logger } from '../utils/logger';
+
+// ── Geo helpers ───────────────────────────────────────────────────────────────
+/**
+ * Haversine great-circle distance in kilometres.
+ * Used to enforce topology rules:
+ *   - BTS ↔ CPE distance must be < 1 KM (NMS-IV requirement)
+ *   - CPE and its linked IDU must share the same coordinates
+ */
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 // Model is strictly derived from device type — no other models allowed
@@ -69,19 +87,24 @@ const BLANK_FORM: DeviceFormData = {
 };
 
 function DeviceFormModal({
-  open, onClose, initial, onSave,
+  open, onClose, initial, onSave, allDevices = [],
 }: {
   open: boolean;
   onClose: () => void;
   initial?: Device | null;
   onSave: (data: DeviceFormData) => Promise<void>;
+  /** Full device list — used to enforce topology distance rules. */
+  allDevices?: Device[];
 }) {
-  const [form, setForm] = useState<DeviceFormData>(BLANK_FORM);
-  const [saving, setSaving] = useState(false);
+  const [form, setForm]           = useState<DeviceFormData>(BLANK_FORM);
+  const [saving, setSaving]       = useState(false);
+  // IDU: which CPE to copy coordinates from
+  const [linkedCpeId, setLinkedCpeId] = useState('');
   const { addToast } = useToast();
 
   useEffect(() => {
     if (open) {
+      setLinkedCpeId('');
       setForm(initial ? {
         serialNumber: initial.serialNumber ?? '',
         deviceType:   initial.deviceType ?? 'BTS',
@@ -102,23 +125,120 @@ function DeviceFormModal({
     setForm((f) => {
       const updated = { ...f, [k]: val };
       // Auto-derive model from device type — BTS→A60, CPE→A61, IDU→IDU
-      if (k === 'deviceType') updated.model = TYPE_MODEL_MAP[val] ?? val;
+      if (k === 'deviceType') {
+        updated.model = TYPE_MODEL_MAP[val] ?? val;
+        setLinkedCpeId(''); // reset CPE link when type changes
+      }
       return updated;
     });
   };
 
+  // ── Geo rule helpers ────────────────────────────────────────────────────────
+  const lat = form.latitude  ? parseFloat(form.latitude)  : undefined;
+  const lng = form.longitude ? parseFloat(form.longitude) : undefined;
+  const hasCoords = lat != null && lng != null && !isNaN(lat) && !isNaN(lng);
+
+  const deviceCoords = (d: Device): [number, number] | null => {
+    // Supports both {latitude, longitude} and GeoJSON {location.coordinates:[lng,lat]}
+    const la = (d as Record<string, unknown>).latitude as number | undefined
+             ?? d.location?.coordinates?.[1];
+    const lo = (d as Record<string, unknown>).longitude as number | undefined
+             ?? d.location?.coordinates?.[0];
+    return (la != null && lo != null) ? [la, lo] : null;
+  };
+
+  /** Rule 1: CPE must be within 1KM of at least one BTS. */
+  const btsProximityInfo = useMemo(() => {
+    if (form.deviceType !== 'CPE' || !hasCoords) return null;
+    const btsDevices = allDevices.filter((d) => d.deviceType === 'BTS');
+    if (btsDevices.length === 0) return { nearestKm: Infinity, nearestSerial: null };
+    let nearestKm = Infinity;
+    let nearestSerial: string | null = null;
+    for (const bts of btsDevices) {
+      const c = deviceCoords(bts);
+      if (!c) continue;
+      const km = haversineKm(lat!, lng!, c[0], c[1]);
+      if (km < nearestKm) { nearestKm = km; nearestSerial = bts.serialNumber; }
+    }
+    return { nearestKm, nearestSerial };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.deviceType, lat, lng, allDevices]);
+
+  const btsTooFar = btsProximityInfo != null && btsProximityInfo.nearestKm > 1;
+
+  /** Rule 2: IDU must share coordinates with its linked CPE. */
+  const cpeList = useMemo(
+    () => allDevices.filter((d) => d.deviceType === 'CPE'),
+    [allDevices],
+  );
+
+  const cpeCoordsMatch = useMemo(() => {
+    if (form.deviceType !== 'IDU' || !linkedCpeId || !hasCoords) return null;
+    const cpe = cpeList.find((d) => d.id === linkedCpeId || d.serialNumber === linkedCpeId);
+    if (!cpe) return null;
+    const c = deviceCoords(cpe);
+    if (!c) return null;
+    const km = haversineKm(lat!, lng!, c[0], c[1]);
+    return { km, cpeSerial: cpe.serialNumber };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.deviceType, linkedCpeId, lat, lng, cpeList]);
+
+  const iduCoordsMismatch = cpeCoordsMatch != null && cpeCoordsMatch.km > 0.01; // >10 m = mismatch
+
+  /** Copy CPE coordinates to IDU form fields. */
+  const handleCopyCpeCoords = (cpeId: string) => {
+    setLinkedCpeId(cpeId);
+    const cpe = cpeList.find((d) => d.id === cpeId || d.serialNumber === cpeId);
+    if (!cpe) return;
+    const c = deviceCoords(cpe);
+    if (c) setForm((f) => ({ ...f, latitude: c[0].toFixed(6), longitude: c[1].toFixed(6) }));
+  };
+
+  // ── Save with rule enforcement ──────────────────────────────────────────────
   const handleSave = async () => {
     if (!form.serialNumber.trim()) { addToast('Serial number is required', 'warning'); return; }
-    if (!form.ipAddress.trim()) { addToast('IP address is required', 'warning'); return; }
+    if (!form.ipAddress.trim())    { addToast('IP address is required', 'warning'); return; }
+
+    // Block CPE save if coordinates are >1KM from every BTS
+    if (btsTooFar) {
+      addToast(
+        `CPE must be within 1 KM of a BTS. Nearest BTS is ${btsProximityInfo!.nearestKm.toFixed(2)} km away.`,
+        'error',
+      );
+      return;
+    }
+
+    // Block IDU save if coordinates diverge from linked CPE
+    if (iduCoordsMismatch) {
+      addToast(
+        `IDU coordinates must match its CPE (${cpeCoordsMatch!.cpeSerial}). Current offset: ${(cpeCoordsMatch!.km * 1000).toFixed(0)} m.`,
+        'error',
+      );
+      return;
+    }
+
     setSaving(true);
     try { await onSave(form); onClose(); }
     catch { /* parent shows toast */ }
     finally { setSaving(false); }
   };
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <Modal open={open} onClose={onClose} title={initial ? 'Edit Device' : 'Add Device'} size="lg">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+        {/* Topology rule info banner */}
+        <div style={{
+          background: 'var(--vf-surface-raised, rgba(255,255,255,0.04))',
+          border: '1px solid var(--vf-border-subtle)',
+          borderRadius: 6, padding: '8px 12px', fontSize: 12,
+          color: 'var(--vf-text-secondary)',
+        }}>
+          <strong style={{ color: 'var(--vf-text-primary)' }}>Topology rules:</strong>
+          {' '}BTS → CPE distance &lt; 1 KM &nbsp;·&nbsp; CPE and IDU must share the same coordinates
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
             <FL>Device Type *</FL>
@@ -131,20 +251,17 @@ function DeviceFormModal({
           <div>
             <FL>Model (auto)</FL>
             <input
-              readOnly
-              value={form.model}
+              readOnly value={form.model}
               style={{ ...FIELD, background: 'var(--vf-surface-raised)', color: 'var(--vf-text-muted)', cursor: 'not-allowed' }}
             />
           </div>
           <div>
             <FL>Serial Number *</FL>
             <input
-              value={form.serialNumber}
-              onChange={set('serialNumber')}
+              value={form.serialNumber} onChange={set('serialNumber')}
               placeholder={
                 form.deviceType === 'BTS' ? 'BTS-A60-000001' :
-                form.deviceType === 'CPE' ? 'CPE-A61-000001' :
-                'IDU-000001'
+                form.deviceType === 'CPE' ? 'CPE-A61-000001' : 'IDU-000001'
               }
               style={FIELD}
             />
@@ -174,6 +291,34 @@ function DeviceFormModal({
               <option value="UNKNOWN">UNKNOWN</option>
             </select>
           </div>
+
+          {/* IDU: link to CPE for coordinate copy */}
+          {form.deviceType === 'IDU' && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FL>Link to CPE (copies coordinates automatically)</FL>
+              <select
+                value={linkedCpeId}
+                onChange={(e) => handleCopyCpeCoords(e.target.value)}
+                style={FIELD}
+              >
+                <option value="">— Select CPE to sync coordinates —</option>
+                {cpeList.map((cpe) => {
+                  const c = deviceCoords(cpe);
+                  return (
+                    <option key={cpe.id} value={cpe.id}>
+                      {cpe.serialNumber}{c ? ` (${c[0].toFixed(4)}, ${c[1].toFixed(4)})` : ''}
+                    </option>
+                  );
+                })}
+              </select>
+              {linkedCpeId && !iduCoordsMismatch && hasCoords && (
+                <div style={{ marginTop: 5, fontSize: 11, color: '#22c55e' }}>
+                  Coordinates match linked CPE
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <FL>Latitude (GPS)</FL>
             <input type="number" value={form.latitude} onChange={set('latitude')} placeholder="28.6139" style={FIELD} />
@@ -184,11 +329,58 @@ function DeviceFormModal({
           </div>
         </div>
 
+        {/* Rule 1 — CPE proximity warning */}
+        {form.deviceType === 'CPE' && hasCoords && btsProximityInfo && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+            background: btsTooFar ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)',
+            border: `1px solid ${btsTooFar ? '#ef4444' : '#22c55e'}`,
+            borderRadius: 6, padding: '8px 12px', fontSize: 12,
+          }}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>{btsTooFar ? '✗' : '✓'}</span>
+            <div>
+              {btsProximityInfo.nearestSerial
+                ? <>
+                    Nearest BTS: <strong style={{ fontFamily: 'monospace' }}>{btsProximityInfo.nearestSerial}</strong>
+                    {' — '}<strong style={{ color: btsTooFar ? '#ef4444' : '#22c55e' }}>
+                      {btsProximityInfo.nearestKm < 1
+                        ? `${(btsProximityInfo.nearestKm * 1000).toFixed(0)} m away`
+                        : `${btsProximityInfo.nearestKm.toFixed(2)} km away`}
+                    </strong>
+                    {btsTooFar && <span style={{ color: '#ef4444' }}> — must be &lt; 1 KM</span>}
+                  </>
+                : <span style={{ color: '#f59e0b' }}>No BTS devices with coordinates found in inventory</span>
+              }
+            </div>
+          </div>
+        )}
+
+        {/* Rule 2 — IDU coordinate mismatch warning */}
+        {form.deviceType === 'IDU' && linkedCpeId && iduCoordsMismatch && cpeCoordsMatch && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+            background: 'rgba(239,68,68,0.08)', border: '1px solid #ef4444',
+            borderRadius: 6, padding: '8px 12px', fontSize: 12,
+          }}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>✗</span>
+            <div>
+              IDU coordinates differ from CPE <strong style={{ fontFamily: 'monospace' }}>{cpeCoordsMatch.cpeSerial}</strong>
+              {' by '}
+              <strong style={{ color: '#ef4444' }}>
+                {cpeCoordsMatch.km < 1
+                  ? `${(cpeCoordsMatch.km * 1000).toFixed(0)} m`
+                  : `${cpeCoordsMatch.km.toFixed(2)} km`}
+              </strong>
+              . CPE and IDU must share the same coordinates.
+            </div>
+          </div>
+        )}
+
         {/* Map picker */}
         <GpsMapPicker
-          lat={form.latitude ? parseFloat(form.latitude) : undefined}
-          lng={form.longitude ? parseFloat(form.longitude) : undefined}
-          onPick={(lat, lng) => setForm((f) => ({ ...f, latitude: lat.toFixed(6), longitude: lng.toFixed(6) }))}
+          lat={lat}
+          lng={lng}
+          onPick={(pickLat, pickLng) => setForm((f) => ({ ...f, latitude: pickLat.toFixed(6), longitude: pickLng.toFixed(6) }))}
         />
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
@@ -655,6 +847,7 @@ export default function V2DevicesPage() {
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
         onSave={handleAdd}
+        allDevices={devices}
       />
 
       {/* Edit Device Modal */}
@@ -663,6 +856,7 @@ export default function V2DevicesPage() {
         onClose={() => setEditDevice(null)}
         initial={editDevice}
         onSave={handleEdit}
+        allDevices={devices}
       />
 
       {/* Delete Confirmation */}

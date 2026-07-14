@@ -104,6 +104,9 @@ async function main() {
       lastHealthUpdate: minsAgo(Math.floor(Math.random()*15)),
     });
 
+    // CPEs placed within 1KM of BTS (max offset 0.004° ≈ 0.63km diagonal)
+    const CPE_MAX_OFFSET = 0.004;
+
     // ── CPEs ─────────────────────────────────────────────────────────────────
     for (let c = 0; c < numCpe; c++) {
       const cpeId  = `dev-cpe-${sCode}-${pad(c+1)}`;
@@ -116,14 +119,18 @@ async function main() {
       cpeSNs.push(cpeSn);
       cpeIds.push(cpeId);
 
+      // Compute consistent coords used by both device and topology records
+      const cpeLat = site.lat + rnd(-CPE_MAX_OFFSET, CPE_MAX_OFFSET);
+      const cpeLon = site.lon + rnd(-CPE_MAX_OFFSET, CPE_MAX_OFFSET);
+
       newDevices.push({
         _id: cpeId, id: cpeId, deviceType: 'CPE',
         serialNumber: cpeSn, macAddress: mac(devIdx),
         ipAddress: status === 'OFFLINE' ? null : cpeIp,
         model: 'A61', firmwareVersion: fw, softwareVersion: 'NMS-Agent-1.8',
         status, uptimeSeconds: status === 'ONLINE' ? Math.floor(Math.random()*604800) : 0,
-        latitude: site.lat + rnd(-0.03, 0.03),
-        longitude: site.lon + rnd(-0.03, 0.03),
+        latitude: cpeLat,
+        longitude: cpeLon,
         connectedBtsSerial: btsSnr,
         tags: [
           { key: 'customer', value: cust },
@@ -140,8 +147,8 @@ async function main() {
         ipAddress: status === 'OFFLINE' ? null : cpeIp,
         type: 'CPE',
         status: status === 'ONLINE' ? 'HEALTHY' : status === 'OFFLINE' ? 'FAULTY' : 'UNKNOWN',
-        latitude: site.lat + rnd(-0.03, 0.03),
-        longitude: site.lon + rnd(-0.03, 0.03),
+        latitude: cpeLat,
+        longitude: cpeLon,
         parentDeviceId: btsId, childDeviceIds: [],
         cascadeHop: 1, linkHealth: status === 'ONLINE' ? 'HEALTHY' : 'DEGRADED',
         openAlarmCount: status === 'OFFLINE' ? 1 : 0,
