@@ -44,7 +44,7 @@ jobs:
           cache: "npm"
           cache-dependency-path: services/auth-service/package.json
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm install
       - name: Validate no secrets in repo
         uses: gitleaks/gitleaks-action@v2
         env:
@@ -86,7 +86,7 @@ jobs:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: services/auth-service/package.json
-      - run: npm install --ignore-scripts
+      - run: npm install
       - name: Run unit tests with coverage gate
         run: |
           npx jest --testPathPattern='tests/unit' --coverage \
@@ -122,7 +122,7 @@ jobs:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: services/auth-service/package.json
-      - run: npm install --ignore-scripts
+      - run: npm install
       - name: Snyk dependency scan
         uses: snyk/actions/node@master
         continue-on-error: false
