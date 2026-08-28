@@ -578,20 +578,30 @@ function IndiaMapView({ nodes, edges, onNodeClick, gpsResult, mapHeight }: {
           const src = enriched.find((x) => x.node.id === e.sourceDeviceId || x.node.deviceId === e.sourceDeviceId);
           const tgt = enriched.find((x) => x.node.id === e.targetDeviceId || x.node.deviceId === e.targetDeviceId);
           if (!src || !tgt) return null;
-          const color = e.linkQuality === 'GOOD'  ? '#22c55e'
-                      : e.linkQuality === 'FAIR'  ? '#f59e0b'
-                      : e.linkQuality === 'POOR'  ? '#ef4444'
-                      : e.linkQuality === 'DOWN'  ? '#6b7280'
-                      : '#334155';
-          const dash  = e.linkQuality === 'FAIR'  ? '8 5'
-                      : e.linkQuality === 'POOR'  ? '4 4'
-                      : e.linkQuality === 'DOWN'  ? '2 5'
-                      : undefined;
+
+          const isWired = e.linkType === 'WIRED'; // IDU→CPE (Ethernet + PoE)
+
+          const color = isWired
+            ? '#94a3b8'               // steel-gray for wired Ethernet regardless of quality
+            : e.linkQuality === 'GOOD'  ? '#22c55e'
+            : e.linkQuality === 'FAIR'  ? '#f59e0b'
+            : e.linkQuality === 'POOR'  ? '#ef4444'
+            : e.linkQuality === 'DOWN'  ? '#6b7280'
+            : '#334155';
+
+          // WIRELESS (CPE→BTS): dashed to represent radio link; WIRED (IDU→CPE): solid
+          const dash = isWired
+            ? undefined
+            : e.linkQuality === 'FAIR'  ? '8 5'
+            : e.linkQuality === 'POOR'  ? '4 4'
+            : e.linkQuality === 'DOWN'  ? '2 5'
+            : '10 4';  // GOOD wireless = long dashes
+
           return (
             <Polyline
               key={e.id}
               positions={[[src.lat, src.lng], [tgt.lat, tgt.lng]]}
-              pathOptions={{ color, weight: 1.5, opacity: 0.6, dashArray: dash }}
+              pathOptions={{ color, weight: isWired ? 1 : 2, opacity: isWired ? 0.5 : 0.7, dashArray: dash }}
             />
           );
         })}
@@ -674,14 +684,17 @@ function TopologyGraphView({ nodes, edges, onNodeClick, mapHeight }: {
   const getR   = (t: string) => NODE_R[t]   ?? 6;
   const getCol = (t: string) => NODE_COL[t] ?? '#64748b';
 
-  const edgeBaseCol = (lq?: string, _lt?: string) =>
-    lq === 'GOOD' ? 'rgba(34,197,94,0.3)'
-    : lq === 'FAIR' ? 'rgba(245,158,11,0.3)'
-    : lq === 'POOR' ? 'rgba(239,68,68,0.3)'
+  // WIRED (IDU→CPE, Ethernet+PoE): muted steel; WIRELESS (CPE→BTS): quality-coded green/amber/red
+  const edgeBaseCol = (lq?: string, lt?: string) =>
+    lt === 'WIRED' ? 'rgba(148,163,184,0.25)'  // steel-gray, dimmer for wired
+    : lq === 'GOOD'  ? 'rgba(34,197,94,0.3)'
+    : lq === 'FAIR'  ? 'rgba(245,158,11,0.3)'
+    : lq === 'POOR'  ? 'rgba(239,68,68,0.3)'
     : 'rgba(100,116,139,0.18)';
 
-  const edgeHLCol = (lq?: string, _lt?: string) =>
-    lq === 'GOOD'  ? '#22c55e'
+  const edgeHLCol = (lq?: string, lt?: string) =>
+    lt === 'WIRED' ? '#94a3b8'   // steel-gray highlight for wired
+    : lq === 'GOOD'  ? '#22c55e'
     : lq === 'FAIR'  ? '#f59e0b'
     : lq === 'POOR'  ? '#ef4444'
     : '#64748b';
@@ -722,13 +735,21 @@ function TopologyGraphView({ nodes, edges, onNodeClick, mapHeight }: {
     state.simEdges = simEdges;
 
     // ── D3 force simulation ─────────────────────────────────────────────────
+    // forceY tiers enforce the BTS→CPE→IDU top-down hierarchy from the architecture diagram
+    const tierY = (type: string) =>
+      type === 'BTS' ? H * 0.18 : type === 'CPE' ? H * 0.50 : H * 0.82;
+
     const sim = d3.forceSimulation(simNodes)
-      .force('link', d3.forceLink<any, any>(simEdges).id((d) => d.id).distance(55).strength(0.45))
-      .force('charge', d3.forceManyBody().strength(-130))
-      .force('center', d3.forceCenter(W / 2, H / 2).strength(0.04))
-      .force('collide', d3.forceCollide<any>().radius((d) => getR(d.type) + 7))
-      .alphaDecay(0.008)
-      .velocityDecay(0.38);
+      .force('link', d3.forceLink<any, any>(simEdges).id((d) => d.id).distance(60).strength(0.5))
+      .force('charge', d3.forceManyBody().strength(-160))
+      .force('center', d3.forceCenter(W / 2, H / 2).strength(0.02))
+      .force('collide', d3.forceCollide<any>().radius((d) => getR(d.type) + 9))
+      // Hierarchy tiers: BTS top, CPE middle, IDU bottom — mirrors the architecture diagram
+      .force('y', d3.forceY<any>((d) => tierY(d.type)).strength(0.35))
+      // Spread nodes horizontally within their tier
+      .force('x', d3.forceX<any>(W / 2).strength(0.04))
+      .alphaDecay(0.006)
+      .velocityDecay(0.40);
 
     // ── Canvas draw ─────────────────────────────────────────────────────────
     function draw() {
@@ -768,22 +789,25 @@ function TopologyGraphView({ nodes, edges, onNodeClick, mapHeight }: {
       const hl = connected.size > 0;
 
       // ── Edges ──────────────────────────────────────────────────────────────
+      // WIRELESS (CPE→BTS): solid colored line; WIRED (IDU→CPE): short dashes, steel-gray
       state.simEdges.forEach((e: any) => {
-        const isConn = !hl || (connected.has(e.source.id) && connected.has(e.target.id));
+        const isConn  = !hl || (connected.has(e.source.id) && connected.has(e.target.id));
+        const isWired = e.lt === 'WIRED';
         ctx.beginPath();
         ctx.moveTo(e.source.x, e.source.y);
         ctx.lineTo(e.target.x, e.target.y);
-        ctx.setLineDash([]);
+        // Wired = short dashes (Ethernet segment), Wireless = solid
+        ctx.setLineDash(isWired ? [4, 4] : []);
         if (isConn && hl) {
           const c = edgeHLCol(e.lq, e.lt);
-          ctx.strokeStyle = c; ctx.lineWidth = 2;
-          ctx.shadowColor = c; ctx.shadowBlur = 12;
+          ctx.strokeStyle = c; ctx.lineWidth = isWired ? 1 : 2;
+          ctx.shadowColor = c; ctx.shadowBlur = isWired ? 4 : 12;
           ctx.globalAlpha = 1;
         } else if (!hl) {
           ctx.strokeStyle = edgeBaseCol(e.lq, e.lt);
-          ctx.lineWidth = 1;
+          ctx.lineWidth = isWired ? 0.8 : 1;
           ctx.shadowColor = edgeHLCol(e.lq, e.lt);
-          ctx.shadowBlur = 4;
+          ctx.shadowBlur = isWired ? 2 : 4;
           ctx.globalAlpha = 1;
         } else {
           ctx.strokeStyle = 'rgba(255,255,255,0.04)';
@@ -984,6 +1008,15 @@ function TopologyGraphView({ nodes, edges, onNodeClick, mapHeight }: {
           </div>
         ))}
         <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: 8, paddingTop: 8 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.35)', marginBottom: 6 }}>Link Type</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3" stroke="#22c55e" strokeWidth="2" strokeDasharray="0" /></svg>
+            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>Wireless (CPE→BTS)</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <svg width="20" height="6"><line x1="0" y1="3" x2="20" y2="3" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4,3" /></svg>
+            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>Wired/PoE (IDU→CPE)</span>
+          </div>
           <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.35)', marginBottom: 6 }}>Link Quality</div>
           {([['#22c55e', 'GOOD'], ['#f59e0b', 'FAIR'], ['#ef4444', 'POOR']] as const).map(([c, l]) => (
             <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
