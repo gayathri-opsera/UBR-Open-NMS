@@ -24,8 +24,8 @@
     "ldapjs": "^3.0.7",
     "mongoose": "^8.0.3",
     "opossum": "^8.1.0",
-    "otplib": "^12.0.1",
     "qrcode": "^1.5.4",
+    "speakeasy": "^2.0.0",
     "uuid": "^9.0.0",
     "winston": "^3.11.0"
   },
@@ -37,19 +37,13 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "transformIgnorePatterns": [
-      "/node_modules/(?!(otplib|@otplib|@scure)/)"
-    ],
     "projects": [
       {
         "displayName": "unit",
         "testMatch": [
           "<rootDir>/tests/unit/**/*.test.js"
         ],
-        "testEnvironment": "node",
-        "transformIgnorePatterns": [
-          "/node_modules/(?!(otplib|@otplib|@scure)/)"
-        ]
+        "testEnvironment": "node"
       },
       {
         "displayName": "integration",

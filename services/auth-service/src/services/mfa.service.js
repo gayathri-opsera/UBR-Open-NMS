@@ -1,19 +1,12 @@
 'use strict';
 
-// otplib v12 (CJS) exports { authenticator } directly.
-// Defensive import handles both v12 CJS and v13 ESM-compat shapes.
-const otplib = require('otplib');
-const authenticator = otplib.authenticator ?? otplib.default?.authenticator ?? otplib;
+// speakeasy is a pure CJS TOTP library — no ESM dependencies
+const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const { User } = require('../models/user.model');
 const logger = require('../utils/logger');
 
-// TOTP window: accept 1 step before/after to handle clock skew (~30s drift)
-if (authenticator && typeof authenticator === 'object') {
-  authenticator.options = { window: 1 };
-}
-
-const APP_NAME = 'UBR-NMS';
+const APP_NAME_PREFIX = 'UBR-NMS';
 
 /**
  * Generate a new TOTP secret and QR code for a user.
@@ -21,8 +14,9 @@ const APP_NAME = 'UBR-NMS';
  * Returns { qrCodeDataUrl, secret, otpAuthUrl }
  */
 async function setupMfa(userId, username) {
-  const secret = authenticator.generateSecret(20); // 20-byte = 160-bit secret
-  const otpAuthUrl = authenticator.keyuri(username, APP_NAME, secret);
+  const secretObj = speakeasy.generateSecret({ length: 20, name: `${APP_NAME_PREFIX}:${username}`, issuer: APP_NAME_PREFIX });
+  const secret = secretObj.base32;
+  const otpAuthUrl = secretObj.otpauth_url;
   const qrCodeDataUrl = await QRCode.toDataURL(otpAuthUrl);
 
   await User.findByIdAndUpdate(userId, {
@@ -60,7 +54,7 @@ async function enableMfa(userId, code) {
     throw err;
   }
 
-  const isValid = authenticator.verify({ token: code, secret: user.mfaPendingSecret });
+  const isValid = speakeasy.totp.verify({ secret: user.mfaPendingSecret, encoding: 'base32', token: code, window: 1 });
   if (!isValid) {
     const err = new Error('Invalid OTP code. Please check your authenticator app and try again.');
     err.code = 'INVALID_OTP';
@@ -99,7 +93,7 @@ async function verifyOtp(userId, code) {
     throw err;
   }
 
-  const isValid = authenticator.verify({ token: code, secret: user.mfaSecret });
+  const isValid = speakeasy.totp.verify({ secret: user.mfaSecret, encoding: 'base32', token: code, window: 1 });
   if (!isValid) {
     logger.warn('MFA OTP verification failed', { userId });
     const err = new Error('Invalid or expired OTP code.');
@@ -133,7 +127,7 @@ async function disableMfa(userId, code, adminOverride = false) {
 
   // Verify OTP unless admin is resetting for a locked-out user
   if (!adminOverride) {
-    const isValid = authenticator.verify({ token: code, secret: user.mfaSecret });
+    const isValid = speakeasy.totp.verify({ secret: user.mfaSecret, encoding: 'base32', token: code, window: 1 });
     if (!isValid) {
       const err = new Error('Invalid OTP code. Provide a valid code to disable MFA.');
       err.code = 'INVALID_OTP';

@@ -1,15 +1,18 @@
 'use strict';
 
-// ── Mock otplib and qrcode BEFORE requiring mfa.service ───────────────────────
-const mockAuthenticator = {
-  options: {},
-  generateSecret: jest.fn(() => 'MOCKED_SECRET_BASE32'),
-  keyuri: jest.fn((user, app, secret) => `otpauth://totp/${app}:${user}?secret=${secret}`),
-  verify: jest.fn(() => true),
-  generate: jest.fn(() => '123456'),
+// ── Mock speakeasy and qrcode BEFORE requiring mfa.service ────────────────────
+const mockSpeakeasy = {
+  generateSecret: jest.fn(() => ({
+    base32: 'MOCKED_SECRET_BASE32',
+    otpauth_url: 'otpauth://totp/UBR-NMS:testuser?secret=MOCKED_SECRET_BASE32&issuer=UBR-NMS',
+  })),
+  totp: {
+    verify: jest.fn(() => true),
+    generate: jest.fn(() => '123456'),
+  },
 };
 
-jest.mock('otplib', () => ({ authenticator: mockAuthenticator }));
+jest.mock('speakeasy', () => mockSpeakeasy);
 jest.mock('qrcode', () => ({ toDataURL: jest.fn(async () => 'data:image/png;base64,MOCK_QR') }));
 jest.mock('../../src/models/user.model');
 jest.mock('../../src/utils/logger', () => ({
@@ -44,8 +47,9 @@ describe('mfaService.setupMfa', () => {
     expect(result.secret).toBe('MOCKED_SECRET_BASE32');
     expect(result.otpAuthUrl).toContain('otpauth://totp/');
     expect(result.otpAuthUrl).toContain('UBR-NMS');
-    expect(mockAuthenticator.generateSecret).toHaveBeenCalled();
-    expect(mockAuthenticator.keyuri).toHaveBeenCalledWith('testuser', 'UBR-NMS', 'MOCKED_SECRET_BASE32');
+    expect(mockSpeakeasy.generateSecret).toHaveBeenCalledWith(
+      expect.objectContaining({ length: 20, issuer: 'UBR-NMS' })
+    );
     expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
       'user-123',
       expect.objectContaining({ mfaPendingSecret: 'MOCKED_SECRET_BASE32' })
@@ -57,7 +61,7 @@ describe('mfaService.setupMfa', () => {
 describe('mfaService.enableMfa', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAuthenticator.verify.mockReturnValue(true);
+    mockSpeakeasy.totp.verify.mockReturnValue(true);
   });
 
   test('activates MFA when OTP is valid', async () => {
@@ -71,10 +75,7 @@ describe('mfaService.enableMfa', () => {
     const result = await mfaService.enableMfa('user-123', '123456');
 
     expect(result).toBe(true);
-    expect(mockAuthenticator.verify).toHaveBeenCalledWith({
-      token: '123456',
-      secret: 'MOCKED_SECRET_BASE32',
-    });
+    expect(mockSpeakeasy.totp.verify).toHaveBeenCalledWith({ secret: 'MOCKED_SECRET_BASE32', encoding: 'base32', token: '123456', window: 1 });
     expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
       'user-123',
       expect.objectContaining({
@@ -86,7 +87,7 @@ describe('mfaService.enableMfa', () => {
   });
 
   test('throws INVALID_OTP when authenticator.verify returns false', async () => {
-    mockAuthenticator.verify.mockReturnValue(false);
+    mockSpeakeasy.totp.verify.mockReturnValue(false);
     User.findById.mockReturnValue({
       select: jest.fn().mockResolvedValue(
         makeUser({ mfaPendingSecret: 'MOCKED_SECRET_BASE32' })
@@ -137,7 +138,7 @@ describe('mfaService.enableMfa', () => {
 describe('mfaService.verifyOtp', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAuthenticator.verify.mockReturnValue(true);
+    mockSpeakeasy.totp.verify.mockReturnValue(true);
   });
 
   test('returns true for a valid OTP', async () => {
@@ -149,14 +150,11 @@ describe('mfaService.verifyOtp', () => {
 
     const result = await mfaService.verifyOtp('user-123', '123456');
     expect(result).toBe(true);
-    expect(mockAuthenticator.verify).toHaveBeenCalledWith({
-      token: '123456',
-      secret: 'MOCKED_SECRET_BASE32',
-    });
+    expect(mockSpeakeasy.totp.verify).toHaveBeenCalledWith({ secret: 'MOCKED_SECRET_BASE32', encoding: 'base32', token: '123456', window: 1 });
   });
 
   test('throws INVALID_OTP when authenticator.verify returns false', async () => {
-    mockAuthenticator.verify.mockReturnValue(false);
+    mockSpeakeasy.totp.verify.mockReturnValue(false);
     User.findById.mockReturnValue({
       select: jest.fn().mockResolvedValue(
         makeUser({ mfaEnabled: true, mfaSecret: 'MOCKED_SECRET_BASE32' })
@@ -194,7 +192,7 @@ describe('mfaService.verifyOtp', () => {
 describe('mfaService.disableMfa', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAuthenticator.verify.mockReturnValue(true);
+    mockSpeakeasy.totp.verify.mockReturnValue(true);
   });
 
   test('disables MFA when OTP is valid', async () => {
@@ -224,11 +222,11 @@ describe('mfaService.disableMfa', () => {
     const result = await mfaService.disableMfa('user-123', null, true);
     expect(result).toBe(true);
     // authenticator.verify must NOT be called in admin override path
-    expect(mockAuthenticator.verify).not.toHaveBeenCalled();
+    expect(mockSpeakeasy.totp.verify).not.toHaveBeenCalled();
   });
 
   test('throws INVALID_OTP when OTP is wrong and no admin override', async () => {
-    mockAuthenticator.verify.mockReturnValue(false);
+    mockSpeakeasy.totp.verify.mockReturnValue(false);
     User.findById.mockReturnValue({
       select: jest.fn().mockResolvedValue(
         makeUser({ mfaEnabled: true, mfaSecret: 'MOCKED_SECRET_BASE32' })

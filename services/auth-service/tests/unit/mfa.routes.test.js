@@ -4,13 +4,15 @@ const request = require('supertest');
 const express = require('express');
 
 // ── Mocks — declared BEFORE any require() that touches these modules ───────────
-// Mock otplib to avoid ESM transpilation issues in Jest
-jest.mock('otplib', () => ({
-  authenticator: {
-    options: {},
-    generateSecret: jest.fn(() => 'MOCK_SECRET'),
-    keyuri: jest.fn(() => 'otpauth://totp/UBR-NMS:alice?secret=MOCK_SECRET'),
+// Mock speakeasy (pure CJS replacement for otplib)
+jest.mock('speakeasy', () => ({
+  generateSecret: jest.fn(() => ({
+    base32: 'MOCK_SECRET',
+    otpauth_url: 'otpauth://totp/UBR-NMS:alice?secret=MOCK_SECRET&issuer=UBR-NMS',
+  })),
+  totp: {
     verify: jest.fn(() => true),
+    generate: jest.fn(() => '123456'),
   },
 }));
 jest.mock('qrcode', () => ({ toDataURL: jest.fn(async () => 'data:image/png;base64,QR') }));
