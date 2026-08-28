@@ -28,6 +28,7 @@ const V2ReportsPage       = lazy(() => import('./pages/V2ReportsPage'));
 const V2NotificationsPage = lazy(() => import('./pages/V2NotificationsPage'));
 const V2AdminPage         = lazy(() => import('./pages/V2AdminPage'));
 const V2GroupsPage        = lazy(() => import('./pages/V2GroupsPage'));
+const V2ProfilePage       = lazy(() => import('./pages/V2ProfilePage'));
 const V2NotFoundPage      = lazy(() => import('./pages/V2NotFoundPage'));
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
@@ -117,6 +118,7 @@ export function V2App() {
                     </V2ProtectedRoute>
                   }
                 />
+                <Route path="profile" element={<V2ProfilePage />} />
                 <Route path="*" element={<V2NotFoundPage />} />
               </Routes>
             </Suspense>

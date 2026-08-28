@@ -66,9 +66,10 @@ describe('session service — createSession', () => {
   });
 
   test('throws SESSION_LIMIT_EXCEEDED when max concurrent sessions reached', async () => {
-    // Simulate 3 already-active sessions returned on both smembers calls.
-    redis.smembers.mockResolvedValue(['s1', 's2', 's3']);
-    // All 3 sessions have recent activity (not stale).
+    // maxConcurrent defaults to 10 — simulate 10 active sessions
+    const sessions = Array.from({ length: 10 }, (_, i) => `s${i + 1}`);
+    redis.smembers.mockResolvedValue(sessions);
+    // All 10 sessions have recent activity (not stale)
     redis.get.mockImplementation(async (k) => {
       if (k.includes('sa:')) return String(Date.now());
       return null;
@@ -125,8 +126,8 @@ describe('session service — failed attempt tracking', () => {
   });
 
   test('returns locked=true after maxFailedAttempts', async () => {
-    // Mock incr to always return 5 (threshold).
-    redis.incr.mockResolvedValue(5);
+    // maxFailedAttempts defaults to 100 — mock incr to return exactly 100
+    redis.incr.mockResolvedValue(100);
     const result = await sessionService.recordFailedAttempt('alice');
     expect(result.locked).toBe(true);
   });

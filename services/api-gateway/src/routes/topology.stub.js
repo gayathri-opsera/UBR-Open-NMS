@@ -111,8 +111,8 @@ function toNode(d, idx, parentNode) {
     networkId:       d.networkId || d.organizationId || `net-${(idx % 3) + 1}`,
     parentDeviceId:  null,          // filled in during buildEdges()
     linkQuality:     toLinkQuality(health),
+    // BTS only has direct CPE children — IDUs connect via CPE, not directly to BTS
     connectedCpeSerials:  d.connectedCpeSerials  || [],
-    connectedIduSerials:  d.connectedIduSerials  || [],
   };
 }
 

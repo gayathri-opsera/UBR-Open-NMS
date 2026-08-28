@@ -7,6 +7,9 @@ const { User, validatePasswordComplexity } = require('../models/user.model');
 const config = require('../config');
 const logger = require('../utils/logger');
 
+// Lazy-required to avoid circular dep at module load time
+const getMfaService = () => require('./mfa.service');
+
 /**
  * Attempt authentication. LDAP-first, MongoDB-fallback when circuit is open.
  * Returns { accessToken, refreshToken, expiresIn, role } on success.
@@ -86,6 +89,22 @@ async function login(username, password, ip, userAgent) {
 
   // Clear any previous failure count on successful auth.
   await sessionService.clearFailedAttempts(username);
+
+  // ── MFA gate ─────────────────────────────────────────────────────────────────
+  // Fetch fresh user record to check mfaEnabled (not fetched above for LDAP path).
+  const userRecord = await User.findById(userId).select('mfaEnabled username');
+  if (userRecord && userRecord.mfaEnabled) {
+    // Password is correct but MFA is required — issue a short-lived challenge token
+    // instead of the real access token.
+    const mfaToken = jwtService.generateMfaChallengeToken(userId, username, role);
+    logger.info('MFA challenge issued', logger.maskPii({ username, ip }));
+    return {
+      mfaRequired: true,
+      mfaToken,
+      mfaTokenExpiresIn: 300, // 5 minutes
+    };
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
 
   const accessToken = jwtService.generateAccessToken(userId, role);
   const refreshToken = jwtService.generateRefreshToken();

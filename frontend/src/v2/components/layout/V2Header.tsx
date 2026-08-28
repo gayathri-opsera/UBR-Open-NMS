@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useTheme } from '../../../contexts/ThemeContext';
 
@@ -28,6 +28,7 @@ export function V2Header() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const breadcrumbs = buildBreadcrumbs(location.pathname);
@@ -243,6 +244,27 @@ export function V2Header() {
                   {String(user?.role ?? '').toLowerCase()}
                 </div>
               </div>
+              {/* Security Settings */}
+              <button
+                role="menuitem"
+                onClick={() => { setMenuOpen(false); navigate('/v2/profile'); }}
+                style={{
+                  width: '100%', background: 'transparent', border: 'none',
+                  color: 'var(--vf-text-primary)', cursor: 'pointer',
+                  padding: '9px 14px', fontSize: 13, fontWeight: 500,
+                  textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8,
+                  fontFamily: 'var(--vf-font-sans)',
+                  borderBottom: '1px solid var(--vf-border-subtle)',
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"
+                  stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 1L2 3.5v4C2 9.985 4.238 12.32 7 13c2.762-.68 5-3.015 5-5.5v-4L7 1z"/>
+                  <polyline points="5 7 6.5 8.5 9.5 5.5"/>
+                </svg>
+                Security &amp; MFA
+              </button>
+
               <button
                 role="menuitem"
                 onClick={async () => { setMenuOpen(false); await logout(); }}

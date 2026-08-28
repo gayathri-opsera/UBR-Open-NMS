@@ -12,42 +12,51 @@
     "lint": "eslint src tests"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "mongoose": "^8.0.3",
-    "ioredis": "^5.3.2",
-    "ldapjs": "^3.0.7",
-    "jsonwebtoken": "^9.0.2",
     "bcrypt": "^5.1.1",
-    "opossum": "^8.1.0",
-    "uuid": "^9.0.0",
-    "winston": "^3.11.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
     "express-validator": "^7.0.1",
     "helmet": "^7.1.0",
-    "cors": "^2.8.5",
-    "express-rate-limit": "^7.1.5",
-    "dotenv": "^16.3.1"
+    "ioredis": "^5.3.2",
+    "jsonwebtoken": "^9.0.2",
+    "ldapjs": "^3.0.7",
+    "mongoose": "^8.0.3",
+    "opossum": "^8.1.0",
+    "otplib": "^12.0.1",
+    "qrcode": "^1.5.4",
+    "uuid": "^9.0.0",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "supertest": "^6.3.3",
     "mongodb-memory-server": "^9.1.6",
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.3"
   },
   "jest": {
     "testEnvironment": "node",
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(otplib|@otplib|@scure)/)"
+    ],
     "projects": [
       {
         "displayName": "unit",
-        "testMatch": ["<rootDir>/tests/unit/**/*.test.js"],
+        "testMatch": [
+          "<rootDir>/tests/unit/**/*.test.js"
+        ],
         "testEnvironment": "node",
-        "collectCoverage": false
+        "transformIgnorePatterns": [
+          "/node_modules/(?!(otplib|@otplib|@scure)/)"
+        ]
       },
       {
         "displayName": "integration",
-        "testMatch": ["<rootDir>/tests/integration/**/*.test.js"],
-        "testEnvironment": "node",
-        "testTimeout": 30000,
-        "collectCoverage": false
+        "testMatch": [
+          "<rootDir>/tests/integration/**/*.test.js"
+        ],
+        "testEnvironment": "node"
       }
     ],
     "collectCoverageFrom": [

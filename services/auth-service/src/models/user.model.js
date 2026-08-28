@@ -66,6 +66,26 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    // ── TOTP MFA fields ───────────────────────────────────────────────────────
+    mfaEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    mfaSecret: {
+      type: String,
+      default: null,
+      select: false, // never returned by default queries
+    },
+    mfaPendingSecret: {
+      type: String,
+      default: null,
+      select: false, // temporary secret before the user confirms enrollment
+    },
+    mfaEnabledAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -73,6 +93,8 @@ const userSchema = new mongoose.Schema(
       transform(doc, ret) {
         delete ret.passwordHash;
         delete ret.passwordHistory;
+        delete ret.mfaSecret;
+        delete ret.mfaPendingSecret;
         delete ret.__v;
         return ret;
       },

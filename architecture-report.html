@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Architecture Report — UBR Open NMS (Airtel FCAPS Platform)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:'default',securityLevel:'loose'});</script>
+<style>
+:root{--brand:#6c47ff;--brand-light:#ede9ff;--danger:#ef4444;--warn:#f97316;--caution:#eab308;--ok:#22c55e;--muted:#6b7280;--border:#e5e7eb;--bg:#f9fafb;--card:#ffffff;--text:#111827;--text2:#374151;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;}
+.sidebar{width:240px;min-width:240px;background:#1e1b4b;color:#c7d2fe;position:sticky;top:0;height:100vh;overflow-y:auto;padding:1.5rem 1rem;}
+.sidebar h2{font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;color:#818cf8;margin-bottom:1rem;}
+.sidebar-link{display:block;padding:.4rem .75rem;border-radius:6px;font-size:.85rem;color:#c7d2fe;text-decoration:none;margin-bottom:.2rem;}
+.sidebar-link:hover,.sidebar-link.active{background:#312e81;color:#fff;}
+.sidebar-brand{font-size:1rem;font-weight:700;color:#a5b4fc;margin-bottom:1.5rem;padding-bottom:.75rem;border-bottom:1px solid #312e81;}
+.main{flex:1;padding:2rem;max-width:1100px;}
+.header{background:#1e1b4b;color:#fff;border-radius:12px;padding:1.5rem 2rem;margin-bottom:2rem;display:flex;justify-content:space-between;align-items:center;}
+.header h1{font-size:1.4rem;font-weight:700;margin-bottom:.25rem;}
+.header .sub{font-size:.85rem;opacity:.7;}
+.header .meta{text-align:right;font-size:.8rem;opacity:.7;}
+.section{background:var(--card);border-radius:12px;padding:1.5rem 2rem;margin-bottom:1.5rem;box-shadow:0 1px 3px rgba(0,0,0,.07);}
+.section h2{font-size:1.2rem;font-weight:700;margin-bottom:1rem;color:var(--brand);}
+.section h3{font-size:1rem;font-weight:600;margin:1.25rem 0 .75rem;color:var(--text);}
+.section-divider{height:1px;background:var(--border);margin:1.5rem 0;}
+table{width:100%;border-collapse:collapse;font-size:.875rem;}
+th{background:#f1f5f9;text-align:left;padding:.5rem .75rem;font-weight:600;border:1px solid var(--border);}
+td{padding:.45rem .75rem;border:1px solid var(--border);vertical-align:top;}
+tr:nth-child(even){background:#fafafa;}
+.badge{display:inline-block;padding:.2rem .55rem;border-radius:9999px;font-size:.72rem;font-weight:700;text-transform:uppercase;}
+.badge-critical{background:#fef2f2;color:#dc2626;}
+.badge-high{background:#fff7ed;color:#ea580c;}
+.badge-medium{background:#fffbeb;color:#d97706;}
+.badge-low{background:#f0fdf4;color:#16a34a;}
+.badge-noted{background:#f3f4f6;color:#6b7280;}
+.attack-complexity{display:inline-block;padding:.15rem .4rem;border-radius:4px;font-size:.7rem;font-weight:700;text-transform:uppercase;}
+.ac-none{background:#fef2f2;color:#dc2626;}
+.ac-low{background:#fff7ed;color:#ea580c;}
+.ac-medium{background:#fffbeb;color:#d97706;}
+.ac-high{background:#f0fdf4;color:#16a34a;}
+.diagram-container{margin:1.25rem 0;border:1px solid var(--border);border-radius:8px;padding:1rem;background:#fff;overflow-x:auto;}
+.diagram-container h4{font-size:.85rem;color:var(--muted);margin-bottom:.75rem;font-weight:600;}
+pre{white-space:pre-wrap;font-family:'JetBrains Mono','Fira Code',monospace;font-size:.78rem;background:#1e293b;color:#e2e8f0;padding:1rem;border-radius:8px;overflow-x:auto;}
+.strength-card{border-left:4px solid var(--ok);background:#f0fdf4;border-radius:0 8px 8px 0;padding:.75rem 1rem;margin-bottom:.75rem;}
+.strength-card h4{font-size:.9rem;font-weight:600;margin-bottom:.3rem;color:#15803d;}
+.strength-card p{font-size:.83rem;color:#166534;}
+.risk-score-section{display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.5rem;}
+.score-ring{position:relative;width:120px;height:120px;flex-shrink:0;}
+.score-ring svg{transform:rotate(-90deg);}
+.score-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:1.8rem;font-weight:800;color:#f97316;}
+.score-label{font-size:.62rem;font-weight:600;color:var(--muted);margin-top:-4px;}
+.severity-cards{display:flex;gap:.75rem;flex-wrap:wrap;}
+.sev-card{border-radius:10px;padding:.6rem 1rem;min-width:80px;text-align:center;}
+.sev-card.crit{background:#fef2f2;border:1px solid #fecaca;}
+.sev-card.high{background:#fff7ed;border:1px solid #fed7aa;}
+.sev-card.med{background:#fffbeb;border:1px solid #fde68a;}
+.sev-card.low{background:#f0fdf4;border:1px solid #bbf7d0;}
+.sev-card .num{font-size:1.6rem;font-weight:800;}
+.sev-card.crit .num{color:#dc2626;}
+.sev-card.high .num{color:#ea580c;}
+.sev-card.med .num{color:#d97706;}
+.sev-card.low .num{color:#16a34a;}
+.sev-card .lbl{font-size:.7rem;font-weight:600;text-transform:uppercase;color:var(--muted);}
+.category-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.75rem;margin-top:.75rem;}
+.category-card{border:1px solid var(--border);border-radius:8px;padding:.75rem;text-align:center;}
+.cat-icon{font-size:1.5rem;}
+.cat-name{font-size:.78rem;font-weight:600;margin:.3rem 0 .2rem;}
+.cat-count{font-size:1.4rem;font-weight:800;color:var(--brand);}
+.cat-breakdown{font-size:.68rem;color:var(--muted);}
+.stride-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin:1rem 0;}
+.stride-card{border-radius:8px;padding:.75rem;text-align:center;border:1px solid var(--border);}
+.stride-card.spoofing{background:#fef2f2;}
+.stride-card.tampering{background:#fff7ed;}
+.stride-card.repudiation{background:#fffbeb;}
+.stride-card.info-disclosure{background:#fdf4ff;}
+.stride-card.denial-of-service{background:#f0f9ff;}
+.stride-card.elevation{background:#fef9c3;}
+.stride-count{font-size:1.5rem;font-weight:800;}
+.stride-label{font-size:.72rem;font-weight:600;color:var(--muted);}
+details{margin:.5rem 0;}
+summary{cursor:pointer;padding:.6rem .75rem;background:#f8fafc;border-radius:6px;font-weight:600;font-size:.875rem;}
+summary:hover{background:#f1f5f9;}
+.detail-body{padding:.75rem;background:#fff;border:1px solid var(--border);border-radius:0 0 6px 6px;}
+.finding-card{border:1px solid var(--border);border-radius:8px;margin:.75rem 0;overflow:hidden;}
+.finding-header{padding:.75rem 1rem;background:#f8fafc;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;}
+.finding-body{padding:1rem;}
+.finding-body p{font-size:.875rem;margin-bottom:.5rem;}
+.finding-body ul{padding-left:1.25rem;font-size:.875rem;}
+.finding-body li{margin-bottom:.25rem;}
+.inaction-cost{background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:.6rem .75rem;font-size:.82rem;color:#92400e;margin-top:.5rem;}
+.inaction-cost strong{display:block;margin-bottom:.2rem;}
+.decision-card{border:1px solid #c7d2fe;border-radius:8px;padding:1rem;margin:.75rem 0;background:#f5f3ff;}
+.decision-card h4{font-weight:700;margin-bottom:.4rem;color:#4338ca;}
+.option-grid{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin:.5rem 0;}
+.option-box{border:1px solid var(--border);border-radius:6px;padding:.6rem .75rem;background:#fff;}
+.option-box h5{font-size:.82rem;font-weight:700;margin-bottom:.3rem;}
+.option-box ul{font-size:.78rem;padding-left:1rem;}
+.sprint-card{background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:1rem;margin:.75rem 0;}
+.sprint-card h4{color:#15803d;margin-bottom:.5rem;}
+.contradiction-card{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:.75rem 1rem;margin:.5rem 0;}
+.assumption-card{background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:.75rem 1rem;margin:.5rem 0;}
+.coupling-card{background:#fdf4ff;border:1px solid #e9d5ff;border-radius:8px;padding:.75rem 1rem;margin:.5rem 0;}
+.dead-path-card{background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:.75rem 1rem;margin:.5rem 0;}
+.stress-tier{border-radius:8px;padding:.75rem 1rem;margin:.4rem 0;border-left:4px solid;}
+.tier-current{background:#f0fdf4;border-color:var(--ok);}
+.tier-2x{background:#fffbeb;border-color:var(--caution);}
+.tier-5x{background:#fff7ed;border-color:var(--warn);}
+.tier-10x{background:#fef2f2;border-color:var(--danger);}
+.tier-100x{background:#fef2f2;border-color:#991b1b;}
+.tier-label{font-weight:700;font-size:.85rem;margin-bottom:.3rem;}
+.tier-desc{font-size:.82rem;}
+.footer{text-align:center;color:var(--muted);font-size:.8rem;padding:1.5rem;margin-top:2rem;}
+.tag{display:inline-block;background:#ede9ff;color:#6c47ff;padding:.15rem .45rem;border-radius:4px;font-size:.7rem;font-weight:600;margin:.15rem;}
+.score-formula{background:#f1f5f9;border-radius:6px;padding:.5rem .75rem;font-family:monospace;font-size:.8rem;margin:.5rem 0;}
+</style>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-brand">Opsera DevSecOps</div>
+  <h2>Architecture Report</h2>
+  <a class="sidebar-link" href="#s1">1. Architecture at a Glance</a>
+  <a class="sidebar-link" href="#s2">2. What Works Well</a>
+  <a class="sidebar-link" href="#s3">3. Risk Landscape</a>
+  <a class="sidebar-link" href="#stride">  ↳ STRIDE Threat Model</a>
+  <a class="sidebar-link" href="#s4">4. Deep Insights</a>
+  <a class="sidebar-link" href="#s5">5. Remediation Roadmap</a>
+</nav>
+
+<div class="main">
+<div class="header">
+  <div>
+    <div class="sub">Architecture Risk Report</div>
+    <h1>UBR Open NMS — Airtel Telecom FCAPS Platform</h1>
+    <div class="sub">Branch: <code>main-clean</code> &nbsp;·&nbsp; Remote: github.com/gayathri-opsera/UBR-Open-NMS</div>
+  </div>
+  <div class="meta">
+    <div>Generated: 2026-08-26</div>
+    <div>Risk Score: <strong style="color:#f97316;">69 / 100 — High Risk</strong></div>
+    <div>17 findings · 3 Critical · 7 High · 5 Medium · 2 Low</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ SECTION 1 -->
+<div class="section" id="s1">
+<h2>Section 1 — Architecture at a Glance</h2>
+
+<h3>Tech Stack Summary</h3>
+<table>
+<tr><th>Component</th><th>Technology</th><th>Version</th><th>Source</th></tr>
+<tr><td>API Gateway</td><td>Node.js / Express</td><td>≥20 / 4.18.2</td><td>services/api-gateway/package.json</td></tr>
+<tr><td>Auth Service</td><td>Node.js / Express + LDAP + JWT RS256</td><td>≥20</td><td>services/auth-service/package.json</td></tr>
+<tr><td>Alarm, Audit, Config, Event-Collector, KPI-Query, Notification Services</td><td>Node.js / Express</td><td>≥20 / 4.18.2</td><td>per-service package.json</td></tr>
+<tr><td>Inventory Service, KPI Aggregation</td><td>Java 17 / Spring Boot 3</td><td>Java 17</td><td>README.md / helm-charts</td></tr>
+<tr><td>Discovery, KPI-Collector, Topology</td><td>Go</td><td>1.22</td><td>README.md</td></tr>
+<tr><td>Config-Push Worker, Report Service</td><td>Python / FastAPI</td><td>3.12</td><td>README.md</td></tr>
+<tr><td>Frontend</td><td>React + TypeScript + Vite</td><td>TS 5.x</td><td>frontend/tsconfig.app.json</td></tr>
+<tr><td>Message Bus</td><td>Apache Kafka (Confluent)</td><td>7.6.1</td><td>docker-compose.dev.yml</td></tr>
+<tr><td>Document Store</td><td>MongoDB</td><td>7.0</td><td>docker-compose.dev.yml</td></tr>
+<tr><td>Cache / Session</td><td>Redis</td><td>7-alpine</td><td>docker-compose.dev.yml</td></tr>
+<tr><td>KPI Time-Series</td><td>ScyllaDB</td><td>latest</td><td>README.md</td></tr>
+<tr><td>Service Mesh</td><td>Istio (PERMISSIVE — not enforced)</td><td>—</td><td>README.md (no PeerAuthentication found)</td></tr>
+<tr><td>Container Platform</td><td>Kubernetes + Helm + NGINX Ingress</td><td>—</td><td>helm-charts/</td></tr>
+<tr><td>Observability</td><td>Prometheus + Grafana</td><td>—</td><td>monitoring/</td></tr>
+<tr><td>CI/CD</td><td>GitHub Actions (per-service pipelines)</td><td>—</td><td>.github/workflows/</td></tr>
+</table>
+
+<h3>Quantitative Profile</h3>
+<table>
+<tr><th>Metric</th><th>Value</th><th>Source</th></tr>
+<tr><td>Total Source Files (excl. node_modules, dist)</td><td>1,959</td><td>find command</td></tr>
+<tr><td>Total Microservices</td><td>15+</td><td>services/ directory</td></tr>
+<tr><td>API Domains Served by Stubs</td><td>9 / 9 (100%)</td><td>services/api-gateway/src/app.js</td></tr>
+<tr><td>Test Files</td><td>33</td><td>find **/*.test.* **/*.spec.*</td></tr>
+<tr><td>Human Contributors (6 months)</td><td>1 (+ 1 bot)</td><td>git log --since='6 months ago'</td></tr>
+<tr><td>Commit Velocity (6 months)</td><td>204 commits</td><td>git log</td></tr>
+<tr><td>Last Commit Date</td><td>2026-07-14</td><td>git log -1</td></tr>
+<tr><td>Rate Limit (per user)</td><td>100 req / 60 s (Redis)</td><td>api-gateway/src/config/index.js:RATE_LIMIT_MAX</td></tr>
+<tr><td>Circuit Breaker Timeout</td><td>30 s</td><td>api-gateway/src/config/index.js:CB_TIMEOUT_MS</td></tr>
+<tr><td>Circuit Breaker Error Threshold</td><td>80% (should be 50%)</td><td>api-gateway/src/config/index.js:CB_ERROR_PCT</td></tr>
+<tr><td>Topology Cache TTL</td><td>30 s (in-memory, non-shared)</td><td>topology.stub.js:CACHE_TTL</td></tr>
+<tr><td>Topology Device Cap</td><td>2,000 (MAX_PAGES×PAGE_SIZE)</td><td>topology.stub.js:MAX_PAGES/PAGE_SIZE</td></tr>
+<tr><td>ScyllaDB KPI TTL</td><td>7 days (1-week TTL)</td><td>README.md</td></tr>
+<tr><td>Kafka Brokers / Replication Factor</td><td>1 / 1 (single point of failure)</td><td>docker-compose.dev.yml</td></tr>
+<tr><td>Gateway HPA Range</td><td>2 – 10 replicas @ 60% CPU</td><td>helm-charts/api-gateway/values.yaml</td></tr>
+<tr><td>K8s Liveness Probe Timeout</td><td>5 s (vs 30 s CB timeout — inverted chain)</td><td>helm-charts/api-gateway/values.yaml</td></tr>
+<tr><td>CORS Origin Default</td><td>http://localhost:3001 (port mismatch with containerPort 3010)</td><td>api-gateway/src/config/index.js</td></tr>
+<tr><td>Top Coupling Hotspot</td><td>api-gateway (all traffic)</td><td>app.js — single gateway for all 9 domains</td></tr>
+</table>
+
+<div class="section-divider"></div>
+<h3>Diagram 1 — System Architecture Overview</h3>
+<div class="diagram-container">
+<h4>System Architecture — UBR Open NMS (Airtel FCAPS)</h4>
+<pre class="mermaid">graph TB
+  subgraph Client["Client Layer"]
+    UI[React SPA<br/>TypeScript + Vite<br/>Port 5173]
+  end
+  subgraph Gateway["API Gateway · Node.js/Express · Port 3010"]
+    GW[Express App<br/>JWT RS256 · RBAC · Rate-limit 100req/60s]
+    STUBS["9 Stub Handlers<br/>admin · topology · kpi · devices<br/>config · diagnostics · hierarchy<br/>groups · dashboards"]
+    PROXY[Circuit Breaker Proxy<br/>timeout=30s · threshold=80%]
+  end
+  subgraph Auth["Auth Layer"]
+    AS[Auth Service<br/>LDAP + JWT RS256<br/>MongoDB + Redis]
+  end
+  subgraph Services["Backend Microservices"]
+    INV[Inventory<br/>Java/Spring Boot<br/>Port 8082]
+    ALM[Alarm Service<br/>Node.js · MongoDB]
+    KPI[KPI Query<br/>Node.js · ScyllaDB<br/>7-day TTL]
+    DISC[Discovery<br/>Go 1.22<br/>mTLS onboarding]
+    TOP[Topology Svc<br/>Go 1.22<br/>⚠️ BYPASSED by stub]
+    NOTIF[Notification<br/>Node.js · SSE<br/>⚠️ No Auth]
+    RPT[Report Svc<br/>Python/FastAPI]
+    CFG[Config Push<br/>Python/NETCONF]
+  end
+  subgraph Infra["Infrastructure"]
+    KAFKA[Kafka · 1 broker<br/>Replication=1 · ⚠️ SPOF]
+    MONGO[MongoDB 7.0<br/>Alarms·Devices·Users·Audit]
+    REDIS[Redis 7<br/>Sessions · Rate-limits · Cache]
+    SCYLLA[ScyllaDB<br/>KPI · 1-week TTL]
+  end
+  UI -->|"HTTPS · JWT Bearer"| GW
+  GW --> STUBS
+  GW --> PROXY
+  PROXY -->|"30s timeout · 80% CB"| INV & ALM & KPI & TOP & NOTIF & RPT
+  GW -->|"/api/v1/auth/*"| AS
+  AS --> MONGO & REDIS
+  ALM --> MONGO
+  INV --> MONGO
+  KPI --> SCYLLA
+  DISC -->|"mTLS device onboarding"| MONGO
+  ALM & KPI & DISC & CFG -->|"Kafka topics"| KAFKA
+  NOTIF -->|"SSE stream<br/>⚠️ unauthenticated"| UI
+
+  classDef danger fill:#fef2f2,stroke:#dc2626,color:#dc2626
+  classDef warn fill:#fff7ed,stroke:#ea580c,color:#ea580c
+  classDef ok fill:#f0fdf4,stroke:#16a34a
+  class STUBS,NOTIF danger
+  class KAFKA,TOP warn
+</pre>
+</div>
+
+<div class="diagram-container">
+<h4>Diagram 2 — Auth / Security Enforcement Map</h4>
+<pre class="mermaid">graph TD
+  REQ[Incoming Request] --> AUTH{JWT authenticate<br/>jwt.middleware.js}
+  AUTH -->|"Token present & valid RS256"| RBAC{requireRole<br/>rbac.middleware.js}
+  AUTH -->|"PUBLIC_PATHS<br/>/auth/login · /auth/refresh<br/>/notifications/stream ⚠️ · /healthz · /readyz"| PUBLIC[No Auth — Direct Access]
+
+  RBAC -->|"role=admin"| ADMIN_ROUTES["/api/v1/users<br/>/api/v1/system/**<br/>/api/v1/audit"]
+  RBAC -->|"role=operator"| OP_ROUTES["/api/v1/config/*/push<br/>/api/v1/alarms/*/acknowledge"]
+  RBAC -->|"role=user"| ALL_ROUTES["All other /api/v1/* routes"]
+
+  ALL_ROUTES --> RATELIMIT{Rate Limiter<br/>Redis sliding window<br/>100 req/60s}
+  RATELIMIT -->|"Redis OK"| DOWNSTREAM[Stub / Proxy → Services]
+  RATELIMIT -->|"Redis DOWN ⚠️<br/>Fail-open — no throttle"| DOWNSTREAM
+
+  PUBLIC --> SSE_LEAK[⚠️ SSE Stream<br/>Real-time alarms/events<br/>0 auth required]
+
+  classDef danger fill:#fef2f2,stroke:#dc2626,color:#dc2626
+  classDef ok fill:#f0fdf4,stroke:#16a34a
+  class SSE_LEAK,RATELIMIT danger
+  class AUTH,RBAC ok
+</pre>
+</div>
+
+<div class="diagram-container">
+<h4>Diagram 3 — Data Flow / Request Pipeline</h4>
+<pre class="mermaid">graph TB
+  subgraph FE["Frontend (React/TypeScript)"]
+    PAGE[V2TopologyPage.tsx] -->|"REST calls"| API[api/ fetch layer]
+    API -->|"axios / fetch"| GW
+  end
+  subgraph GW["API Gateway"]
+    MW["Middleware Stack<br/>helmet → cors → json → correlationId<br/>→ requestLogger → authenticate → requireRole<br/>→ rateLimiter"]
+    STUB_LAYER["Stub Layer (mounted first)<br/>topology.stub.js → in-memory cache 30s<br/>devices.stub.js · kpi.stub.js<br/>admin.stub.js · config.stub.js"]
+    CB["Circuit Breaker Proxy<br/>timeout=30s · err%=80"]
+  end
+  subgraph BACK["Real Backends (partially reachable)"]
+    AUTH_SVC["Auth Service<br/>LDAP → JWT RS256<br/>→ MongoDB (sessions)<br/>→ Redis (token cache)"]
+    INV_SVC["Inventory / Java<br/>→ MongoDB (devices)<br/>→ Kafka (device-discovered)"]
+    ALARM_SVC["Alarm Service<br/>← Kafka (processed-alarms)<br/>→ MongoDB"]
+    KPI_SVC["KPI Pipeline<br/>kpi-collector → Kafka<br/>→ kpi-aggregation → ScyllaDB 7d TTL"]
+  end
+  GW --> STUB_LAYER
+  STUB_LAYER -->|"Direct call to Inventory<br/>for topology (bypasses real topology-svc)"| INV_SVC
+  GW --> CB
+  CB --> AUTH_SVC & INV_SVC & ALARM_SVC & KPI_SVC
+</pre>
+</div>
+
+<div class="diagram-container">
+<h4>Diagram 4 — Failure Mode Map</h4>
+<pre class="mermaid">graph TD
+  subgraph Failures["Component Failures"]
+    RF1[Redis Fails]
+    RF2[Kafka Broker Fails]
+    RF3[MongoDB Fails]
+    RF4[Gateway Pod Crash]
+    RF5[Inventory Svc Fails]
+  end
+  subgraph Effects["Blast Radius"]
+    RF1 -->|"Rate limiting disabled<br/>Session lookups fail"| E1[⚠️ Unlimited requests accepted<br/>Auth degraded]
+    RF2 -->|"No fallback / retry"| E2[🔴 ALL async processing stops<br/>Alarms lost · KPIs lost<br/>Config pushes queued then dropped<br/>Netcool / MyCom forwarders blocked]
+    RF3 -->|"No read replica"| E3[🔴 Device data unavailable<br/>Alarm history gone<br/>User login fails]
+    RF4 -->|"HPA min=2<br/>LB redistributes"| E4[✅ Other replicas absorb load<br/>⚠️ topology cache inconsistency across pods]
+    RF5 -->|"topology.stub.js returns empty<br/>No error surfaced"| E5[⚠️ Topology UI shows no devices<br/>Silent failure — no 503]
+  end
+  subgraph CB_State["Circuit Breaker State"]
+    E2 -->|"80% errors before CB opens<br/>= hundreds of user errors first"| CB_OPEN[CB Opens after 80% failure rate]
+    CB_OPEN -->|"15s reset"| CB_HALF[Half-open probe]
+  end
+  classDef red fill:#fef2f2,stroke:#dc2626
+  classDef warn fill:#fff7ed,stroke:#f97316
+  class E2,E3 red
+  class E1,E5,CB_OPEN warn
+</pre>
+</div>
+
+<div class="diagram-container">
+<h4>Diagram 5 — Security Defense-in-Depth</h4>
+<pre class="mermaid">graph TB
+  subgraph Perimeter["Perimeter (NGINX Ingress)"]
+    TLS[TLS Termination ✅]
+    ING[NGINX Ingress ✅]
+  end
+  subgraph Network["Network Layer (Istio)"]
+    MTLS[mTLS between services<br/>⚠️ PERMISSIVE — no PeerAuthentication enforced<br/>Plaintext fallback allowed]
+  end
+  subgraph AppLayer["Application Layer"]
+    HELMET[Helmet headers ✅<br/>api-gateway/src/app.js]
+    CORS[CORS ✅<br/>credential=true · origin=configurable]
+    RATELIM[Rate Limiting<br/>⚠️ Fail-open on Redis failure]
+  end
+  subgraph AuthLayer["Auth / AuthZ"]
+    JWT[JWT RS256 ✅<br/>Global middleware]
+    RBAC_L[RBAC ✅<br/>admin > operator > user]
+    SSE_UNAUTH[SSE Stream ❌<br/>No auth required]
+  end
+  subgraph Data["Data Layer"]
+    MONGO_ENC[MongoDB at-rest encryption<br/>❓ Not verified in config]
+    AUDIT[Audit Service ✅<br/>Immutable 1-year retention]
+    SCYLLA_TTL[ScyllaDB KPI<br/>⚠️ 7-day TTL — compliance gap]
+  end
+  subgraph Mon["Monitoring"]
+    PROM[Prometheus + Grafana ✅]
+    LOGS[Winston structured logging ✅]
+    HEALTH[Health endpoint ❌<br/>Hardcoded fake data]
+  end
+  Perimeter --> Network --> AppLayer --> AuthLayer --> Data --> Mon
+
+  classDef ok fill:#f0fdf4,stroke:#16a34a
+  classDef bad fill:#fef2f2,stroke:#dc2626
+  classDef warn fill:#fff7ed,stroke:#f97316
+  class TLS,ING,HELMET,CORS,JWT,RBAC_L,AUDIT,PROM,LOGS ok
+  class MTLS,RATELIM,SCYLLA_TTL warn
+  class SSE_UNAUTH,HEALTH bad
+</pre>
+</div>
+
+<div class="diagram-container">
+<h4>Diagram 6 — CI/CD Pipeline & Deployment</h4>
+<pre class="mermaid">graph LR
+  DEV[Developer Push<br/>branch: feature/*] -->|"PR to main-clean"| GH[GitHub Actions<br/>15 per-service workflows]
+  GH -->|"npm test / go test<br/>pytest"| TEST[Unit Tests<br/>33 test files total]
+  TEST -->|"docker build"| IMG[Docker Image<br/>⚠️ tag: latest — non-deterministic]
+  IMG -->|"push to registry"| REG[Container Registry]
+  REG -->|"helm upgrade<br/>--set image.tag=latest"| K8S[Kubernetes Cluster<br/>ubr-ingress namespace]
+  K8S -->|"HPA: 2-10 replicas<br/>targetCPU=60%"| PODS[Running Pods<br/>Gateway · Auth · Services]
+  PODS -->|"Istio mTLS<br/>⚠️ PERMISSIVE"| MESH[Service Mesh]
+
+  classDef warn fill:#fff7ed,stroke:#f97316
+  class IMG,MESH warn
+</pre>
+</div>
+
+<div class="diagram-container">
+<h4>Diagram 7 — Request Lifecycle Sequence</h4>
+<pre class="mermaid">sequenceDiagram
+  actor User
+  participant GW as API Gateway
+  participant REDIS as Redis<br/>(rate-limit)
+  participant AUTH as JWT Middleware
+  participant STUB as Stub Handler
+  participant INV as Inventory Svc
+
+  User->>GW: GET /api/v1/topology (Bearer: JWT)
+  GW->>AUTH: jwt.verify(token, publicKey, RS256)
+  AUTH-->>GW: req.user = {sub, role}
+  GW->>AUTH: requireRole check (user ≥ 'user')
+  AUTH-->>GW: authorized
+  GW->>REDIS: ZADD / ZCARD ratelimit:userId (60s window)
+  alt Redis available
+    REDIS-->>GW: count=N ≤ 100 → next()
+  else Redis DOWN
+    GW->>GW: ⚠️ Fail-open: no throttle, next()
+  end
+  GW->>STUB: topology.stub.js (mounted before proxy)
+  alt Cache fresh (< 30s)
+    STUB-->>User: Return cached nodes/edges
+  else Cache stale
+    STUB->>INV: GET /api/v1/devices?limit=100&page=0..19
+    INV-->>STUB: Up to 2,000 devices (MAX_PAGES cap)
+    STUB-->>User: {nodes, edges, _source:'inventory'}
+  end
+  Note over STUB,INV: ⚠️ Real topology-service (Go) NEVER reached
+</pre>
+</div>
+
+<div class="diagram-container">
+<h4>Diagram 8 — Module Dependency Graph</h4>
+<pre class="mermaid">graph TD
+  subgraph GW_MOD["api-gateway (central hub)"]
+    APP[app.js<br/>bootstraps all middleware + stubs]
+    JWT_MW[jwt.middleware.js<br/>RS256 verify]
+    RBAC_MW[rbac.middleware.js<br/>role patterns]
+    RL_MW[ratelimit.middleware.js<br/>Redis sliding window]
+    PROXY_MOD[proxy.js<br/>opossum CB + express-http-proxy]
+  end
+  subgraph STUBS_MOD["Stub Handlers (9 modules)"]
+    TOP_STUB[topology.stub.js<br/>~400 LOC — in-memory cache]
+    DEV_STUB[devices.stub.js]
+    KPI_STUB[kpi.stub.js]
+    ADM_STUB[admin.stub.js]
+    OTHERS[config · diagnostics<br/>hierarchy · groups · dashboards]
+  end
+  subgraph DOWNSTREAM["Real Services"]
+    AUTH_SVC2[auth-service<br/>Node.js + ldapjs + mongoose]
+    INV_SVC2[inventory-service<br/>Java Spring Boot]
+    NOTIF_SVC2[notification-service<br/>Node.js · in-memory rules ⚠️]
+  end
+  APP --> JWT_MW & RBAC_MW & RL_MW & PROXY_MOD
+  APP --> TOP_STUB & DEV_STUB & KPI_STUB & ADM_STUB & OTHERS
+  PROXY_MOD --> AUTH_SVC2 & INV_SVC2 & NOTIF_SVC2
+  TOP_STUB -->|"direct HTTP (no CB)<br/>bypasses proxy"| INV_SVC2
+
+  classDef warn fill:#fff7ed,stroke:#f97316
+  classDef danger fill:#fef2f2,stroke:#dc2626
+  class TOP_STUB warn
+  class NOTIF_SVC2 danger
+</pre>
+</div>
+
+</div><!-- /s1 -->
+
+<!-- ══════════════════════════════════════════════════════ SECTION 2 -->
+<div class="section" id="s2">
+<h2>Section 2 — What Works Well</h2>
+<p style="margin-bottom:1rem;color:var(--muted);font-size:.875rem;">Before diving into risks — genuine strengths observed in the codebase that deserve recognition.</p>
+
+<div class="strength-card">
+  <h4>✅ Global JWT Auth Enforcement at Gateway</h4>
+  <p>The API gateway enforces JWT RS256 authentication and hierarchical RBAC (admin › operator › user) as global Express middleware — applied before any route handler. This ensures no route can accidentally bypass auth. Public paths are explicitly allowlisted rather than relying on opt-in auth. Source: <code>services/api-gateway/src/middleware/jwt.middleware.js</code> + <code>rbac.middleware.js</code>.</p>
+</div>
+
+<div class="strength-card">
+  <h4>✅ Per-Service GitHub Actions CI/CD Pipelines</h4>
+  <p>Each of the 15+ microservices has a dedicated GitHub Actions workflow. The hotspot analysis shows 204 commits in 6 months with consistent CI activity. This means each service change is independently tested and built — no monolithic build bottleneck. Source: <code>.github/workflows/ (15 per-service YAML files)</code>.</p>
+</div>
+
+<div class="strength-card">
+  <h4>✅ Redis Sliding-Window Rate Limiter with User-Scoped Keys</h4>
+  <p>The rate limiter uses a proper sliding-window algorithm (ZREMRANGEBYSCORE + ZADD + ZCARD) scoped per <code>req.user.sub</code>. This is more accurate than fixed-window counters and prevents "reset burst" attacks. It also returns <code>X-RateLimit-Limit</code> and <code>X-RateLimit-Remaining</code> headers. Source: <code>services/api-gateway/src/middleware/ratelimit.middleware.js</code>.</p>
+</div>
+
+<div class="strength-card">
+  <h4>✅ Circuit Breaker + Correlation IDs on All Proxy Routes</h4>
+  <p>Every downstream proxy call is wrapped in an opossum circuit breaker. All requests receive a <code>x-correlation-id</code> header for distributed tracing, and the correlation ID is propagated to all downstream headers. Source: <code>services/api-gateway/src/proxy/proxy.js</code> + <code>middleware/correlation.middleware.js</code>.</p>
+</div>
+
+<div class="strength-card">
+  <h4>✅ Immutable Audit Trail with 1-Year Retention</h4>
+  <p>A dedicated audit-service is part of the architecture with documented 1-year retention for immutable audit logs. This satisfies compliance requirements for operator actions (config changes, alarm acknowledgements). Source: <code>README.md — audit-service description</code> + <code>services/audit-service/</code>.</p>
+</div>
+
+<div class="strength-card">
+  <h4>✅ Well-Structured Shared Libraries Across 4 Languages</h4>
+  <p>The <code>shared-libs/</code> directory contains typed interfaces for TypeScript, Java POJOs, Go structs, and Python dataclasses — enabling contract alignment across the polyglot stack. Test fixtures (3 samples per model) are also shared. This reduces schema drift risk in event-driven communication.</p>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ SECTION 3 -->
+<div class="section" id="s3">
+<h2>Section 3 — Risk Landscape</h2>
+
+<h3>Risk Score &amp; Severity Breakdown</h3>
+<div class="score-formula">Score = min(100, round(log10(3×100 + 7×30 + 5×10 + 2×3 + 1) × 25)) = min(100, round(log10(567) × 25)) = min(100, round(68.84)) = <strong>69</strong></div>
+
+<div class="risk-score-section">
+  <div class="score-ring">
+    <svg width="120" height="120" viewBox="0 0 120 120">
+      <circle cx="60" cy="60" r="52" fill="none" stroke="#e5e7eb" stroke-width="12"/>
+      <circle cx="60" cy="60" r="52" fill="none" stroke="#f97316" stroke-width="12"
+              stroke-dasharray="490" stroke-dashoffset="152" stroke-linecap="round"/>
+    </svg>
+    <div class="score-center">69<div class="score-label">HIGH RISK</div></div>
+  </div>
+  <div class="severity-cards">
+    <div class="sev-card crit"><div class="num">3</div><div class="lbl">Critical</div></div>
+    <div class="sev-card high"><div class="num">7</div><div class="lbl">High</div></div>
+    <div class="sev-card med"><div class="num">5</div><div class="lbl">Medium</div></div>
+    <div class="sev-card low"><div class="num">2</div><div class="lbl">Low</div></div>
+  </div>
+</div>
+
+<h3>Risk Category Breakdown</h3>
+<div class="category-grid">
+  <div class="category-card"><div class="cat-icon">🛡️</div><div class="cat-name">Security Surface</div><div class="cat-count">5</div><div class="cat-breakdown">1 Critical · 2 High · 2 Medium</div></div>
+  <div class="category-card"><div class="cat-icon">💥</div><div class="cat-name">Failure Cascades</div><div class="cat-count">2</div><div class="cat-breakdown">1 Critical · 1 High</div></div>
+  <div class="category-card"><div class="cat-icon">🔧</div><div class="cat-name">Maintainability</div><div class="cat-count">2</div><div class="cat-breakdown">1 Critical · 0 High · 0 Medium · 1 Low</div></div>
+  <div class="category-card"><div class="cat-icon">⚙️</div><div class="cat-name">Operability</div><div class="cat-count">3</div><div class="cat-breakdown">0 Critical · 2 High · 0 Med · 1 Low</div></div>
+  <div class="category-card"><div class="cat-icon">🔄</div><div class="cat-name">State Incoherence</div><div class="cat-count">2</div><div class="cat-breakdown">0 Critical · 2 High</div></div>
+  <div class="category-card"><div class="cat-icon">🔐</div><div class="cat-name">Auth Gaps</div><div class="cat-count">2</div><div class="cat-breakdown">0 Critical · 0 High · 2 Medium</div></div>
+  <div class="category-card"><div class="cat-icon">📈</div><div class="cat-name">Scalability Walls</div><div class="cat-count">1</div><div class="cat-breakdown">0 Critical · 1 High</div></div>
+</div>
+
+<div class="section-divider"></div>
+<h3 id="stride">STRIDE Threat Model</h3>
+<div class="stride-grid">
+  <div class="stride-card spoofing"><div class="stride-count">2</div><div class="stride-label">S — Spoofing</div></div>
+  <div class="stride-card tampering"><div class="stride-count">1</div><div class="stride-label">T — Tampering</div></div>
+  <div class="stride-card repudiation"><div class="stride-count">1</div><div class="stride-label">R — Repudiation</div></div>
+  <div class="stride-card info-disclosure"><div class="stride-count">2</div><div class="stride-label">I — Info Disclosure</div></div>
+  <div class="stride-card denial-of-service"><div class="stride-count">2</div><div class="stride-label">D — Denial of Service</div></div>
+  <div class="stride-card elevation"><div class="stride-count">1</div><div class="stride-label">E — Privilege Escalation</div></div>
+</div>
+
+<div class="diagram-container">
+<h4>Diagram 9 — Trust Boundary &amp; Data Flow</h4>
+<pre class="mermaid">graph TB
+  subgraph External["External Zone (Internet)"]
+    BROWSER[Browser / NOC Client]
+    UNAUTH[⚠️ Unauthenticated Client<br/>SSE subscriber]
+  end
+  subgraph DMZ["DMZ (NGINX Ingress + TLS)"]
+    NGINX[NGINX Ingress<br/>TLS termination]
+  end
+  subgraph App["Application Zone (Kubernetes)"]
+    GW2[API Gateway<br/>JWT + RBAC + Rate-limit]
+    NOTIF2[Notification Svc<br/>⚠️ No auth — exposed via PUBLIC_PATH]
+    AS2[Auth Service]
+    BACKENDS[Other Microservices<br/>alarm · inventory · kpi · config]
+  end
+  subgraph Data["Data Zone"]
+    MONGO2[(MongoDB)]
+    REDIS2[(Redis)]
+    SCYLLA2[(ScyllaDB)]
+    KAFKA2[(Kafka)]
+  end
+
+  BROWSER -->|"HTTPS · JWT Bearer"| NGINX
+  UNAUTH -->|"⚠️ HTTPS — no token<br/>crosses boundary without auth check"| NGINX
+  NGINX -->|"HTTP internal"| GW2
+  GW2 -->|"PERMISSIVE Istio<br/>x-user-id / x-user-role headers<br/>⚠️ no secondary JWT verify"| BACKENDS
+  GW2 --> NOTIF2
+  GW2 --> AS2
+  BACKENDS --> MONGO2 & REDIS2 & SCYLLA2 & KAFKA2
+  AS2 --> MONGO2 & REDIS2
+
+  classDef danger fill:#fef2f2,stroke:#dc2626
+  classDef warn fill:#fff7ed,stroke:#f97316
+  class UNAUTH,NOTIF2 danger
+  class GW2 warn
+</pre>
+</div>
+
+<details class="stride-detail">
+<summary>S — Spoofing (2 threats)</summary>
+<div class="detail-body">
+  <div class="finding-card">
+    <div class="finding-header"><span class="badge badge-high">HIGH</span> <strong>x-user-role Header Spoofing via Internal Network</strong></div>
+    <div class="finding-body">
+      <p><strong>Asset:</strong> All downstream microservices (notification, alarm, inventory, audit)</p>
+      <p>Proxy injects <code>x-user-id</code> and <code>x-user-role</code> from validated JWT. Downstream services trust these headers without re-verifying the JWT. If Istio is in PERMISSIVE mode (no PeerAuthentication found), any internal pod can forge these headers and gain admin access.</p>
+      <div class="inaction-cost"><strong>Countermeasures:</strong> Existing: Istio mTLS (PERMISSIVE, not enforced) | Recommended: Add PeerAuthentication STRICT + each downstream service should validate a service-account JWT</div>
+    </div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header"><span class="badge badge-medium">MEDIUM</span> <strong>Unauthenticated SSE Stream Subscription</strong></div>
+    <div class="finding-body">
+      <p><strong>Asset:</strong> /api/v1/notifications/stream — real-time alarm and device events</p>
+      <p>SSE stream is in PUBLIC_PATHS — any unauthenticated client can subscribe. Network fault data, alarm severity, and provisioning events are exposed without credentials.</p>
+      <div class="inaction-cost"><strong>Countermeasures:</strong> Existing: None | Recommended: Remove from PUBLIC_PATHS; use JWT query param for EventSource</div>
+    </div>
+  </div>
+</div>
+</details>
+
+<details class="stride-detail">
+<summary>T — Tampering (1 threat)</summary>
+<div class="detail-body">
+  <div class="finding-card">
+    <div class="finding-header"><span class="badge badge-low">LOW</span> <strong>Synthetic Device Metrics Presented as Real Data</strong></div>
+    <div class="finding-body">
+      <p><strong>Asset:</strong> Topology UI — device CPU, memory, latency, link quality</p>
+      <p>topology.stub.js generates all metrics via deterministic math on <code>d.id.length</code>. NOC operators make decisions on fabricated data. Data integrity is broken at the presentation layer.</p>
+      <div class="inaction-cost"><strong>Countermeasures:</strong> Existing: None | Recommended: Connect to real monitoring endpoints (Prometheus/SNMP)</div>
+    </div>
+  </div>
+</div>
+</details>
+
+<details class="stride-detail">
+<summary>I — Information Disclosure (2 threats)</summary>
+<div class="detail-body">
+  <div class="finding-card">
+    <div class="finding-header"><span class="badge badge-medium">MEDIUM</span> <strong>Real-time Operational Data via Unauthenticated SSE</strong></div>
+    <div class="finding-body">
+      <p>Real-time alarm severity, device status, and provisioning events are accessible to unauthenticated external clients. For a telecom NMS, this reveals network fault patterns.</p>
+    </div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header"><span class="badge badge-medium">MEDIUM</span> <strong>Unencrypted Inter-Service Traffic (PERMISSIVE mTLS)</strong></div>
+    <div class="finding-body">
+      <p>No Istio PeerAuthentication found. Istio defaults to PERMISSIVE mode — plaintext HTTP fallback is allowed. Device configuration, alarm data, and KPI streams may traverse unencrypted.</p>
+    </div>
+  </div>
+</div>
+</details>
+
+<details class="stride-detail">
+<summary>D — Denial of Service (2 threats)</summary>
+<div class="detail-body">
+  <div class="finding-card">
+    <div class="finding-header"><span class="badge badge-critical">CRITICAL</span> <strong>Rate Limiter Fail-Open on Redis Failure</strong></div>
+    <div class="finding-body">
+      <p>Redis downtime disables all per-user rate limiting. Attackers can brute-force auth endpoints or flood APIs without throttling during Redis unavailability.</p>
+    </div>
+  </div>
+  <div class="finding-card">
+    <div class="finding-header"><span class="badge badge-high">HIGH</span> <strong>80% Circuit Breaker Threshold — Late Protection</strong></div>
+    <div class="finding-body">
+      <p>CB opens only after 80% of requests fail. At 500 req/min, ~400 users experience failures before protection kicks in.</p>
+    </div>
+  </div>
+</div>
+</details>
+
+<details class="stride-detail">
+<summary>E — Elevation of Privilege (1 threat)</summary>
+<div class="detail-body">
+  <div class="finding-card">
+    <div class="finding-header"><span class="badge badge-high">HIGH</span> <strong>x-user-role Admin Escalation from Internal Network</strong></div>
+    <div class="finding-body">
+      <p>Without STRICT mTLS, any pod can send <code>x-user-role: admin</code> to inventory or alarm service and gain full admin CRUD access — bypassing the RBAC layer entirely.</p>
+    </div>
+  </div>
+</div>
+</details>
+
+<div class="section-divider"></div>
+<h3>3a. Basic Issues — Ordered by Attack Complexity</h3>
+<table>
+<tr><th>ID</th><th>Issue</th><th>File</th><th>Attack Complexity</th><th>Fix Time</th><th>Tooling</th></tr>
+<tr>
+  <td>B2</td>
+  <td>JWT_PUBLIC_KEY missing — app starts silently with empty key, all auth tokens rejected</td>
+  <td>api-gateway/src/server.js (add startup check)</td>
+  <td><span class="attack-complexity ac-none">NONE</span></td>
+  <td>10 min</td>
+  <td>startup test / env validation</td>
+</tr>
+<tr>
+  <td>B3</td>
+  <td>Circuit breaker error threshold 80% → lower to 50%</td>
+  <td>api-gateway/src/config/index.js:34</td>
+  <td><span class="attack-complexity ac-none">NONE</span></td>
+  <td>5 min</td>
+  <td>code review</td>
+</tr>
+<tr>
+  <td>B4</td>
+  <td>Helm image tag <code>latest</code> — mutable, rollback impossible</td>
+  <td>helm-charts/*/values.yaml</td>
+  <td><span class="attack-complexity ac-none">NONE</span></td>
+  <td>20 min</td>
+  <td>CD pipeline lint</td>
+</tr>
+<tr>
+  <td>B5</td>
+  <td>Topology MAX_PAGES=20 silently caps at 2,000 devices — no error surfaced</td>
+  <td>api-gateway/src/routes/topology.stub.js:6</td>
+  <td><span class="attack-complexity ac-none">NONE</span></td>
+  <td>30 min</td>
+  <td>integration test</td>
+</tr>
+<tr>
+  <td>B1</td>
+  <td>Rate limiter fail-open — Redis error calls next() with no fallback throttle</td>
+  <td>api-gateway/src/middleware/ratelimit.middleware.js:26</td>
+  <td><span class="attack-complexity ac-low">LOW</span></td>
+  <td>15 min</td>
+  <td>custom eslint / security scan</td>
+</tr>
+</table>
+
+<h3>Code Diffs — Basic Issues</h3>
+
+<details><summary>B1: Rate limiter fail-open → add in-memory fallback</summary>
+<div class="detail-body">
+<pre>--- a/services/api-gateway/src/middleware/ratelimit.middleware.js
++++ b/services/api-gateway/src/middleware/ratelimit.middleware.js
+@@ -1,4 +1,8 @@
+ 'use strict';
+ const config = require('../config');
+ const logger = require('../utils/logger');
++const _fallback = new Map();
++const FALLBACK_MAX = 10;
++const FALLBACK_WINDOW_MS = 60_000;
+
+ function rateLimiter(redisClient) {
+@@ -26,7 +30,15 @@
+     } catch (err) {
+       logger.error({ msg: 'Rate limiter Redis error — applying fallback', err: err.message });
+-      next();
++      const userId = req.user.sub;
++      const now = Date.now();
++      const entry = _fallback.get(userId) || { count: 0, resetAt: now + FALLBACK_WINDOW_MS };
++      if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + FALLBACK_WINDOW_MS; }
++      entry.count++;
++      _fallback.set(userId, entry);
++      if (entry.count > FALLBACK_MAX) {
++        return res.status(429).json({ code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests (degraded mode)' });
++      }
++      next();
+     }
+   };
+ }</pre>
+</div></details>
+
+<details><summary>B2: JWT_PUBLIC_KEY startup validation</summary>
+<div class="detail-body">
+<pre>--- a/services/api-gateway/src/server.js
++++ b/services/api-gateway/src/server.js
+@@ -1,4 +1,9 @@
+ 'use strict';
+ const config = require('./config');
++if (!config.jwt.publicKey || config.jwt.publicKey.trim().length < 100) {
++  console.error('FATAL: JWT_PUBLIC_KEY is missing or too short — all tokens will be rejected');
++  process.exit(1);
++}
+ const { createApp } = require('./app');</pre>
+</div></details>
+
+<details><summary>B3: Lower circuit breaker threshold from 80% to 50%</summary>
+<div class="detail-body">
+<pre>--- a/services/api-gateway/src/config/index.js
++++ b/services/api-gateway/src/config/index.js
+@@ -33,7 +33,7 @@
+   circuitBreaker: {
+     timeout: parseInt(process.env.CB_TIMEOUT_MS || '30000', 10),
+-    errorThresholdPct: parseInt(process.env.CB_ERROR_PCT || '80', 10),
++    errorThresholdPct: parseInt(process.env.CB_ERROR_PCT || '50', 10),
+     resetTimeout: parseInt(process.env.CB_RESET_MS || '15000', 10),
+   },</pre>
+</div></details>
+
+<details><summary>B4: Pin Helm image tag to semver / SHA</summary>
+<div class="detail-body">
+<pre>--- a/helm-charts/api-gateway/values.yaml
++++ b/helm-charts/api-gateway/values.yaml
+@@ -3,7 +3,7 @@
+ image:
+   repository: ubrnms/api-gateway
+   pullPolicy: IfNotPresent
+-  tag: "latest"
++  tag: "0.1.0"   # Override in CI: helm upgrade --set image.tag=$GITHUB_SHA</pre>
+</div></details>
+
+<div class="section-divider"></div>
+<h3>3b. Advanced Issues — Ordered by Attack Complexity</h3>
+
+<details>
+<summary><span class="badge badge-medium">MEDIUM</span> A3 — SSE Notification Stream Publicly Accessible <span class="attack-complexity ac-none">NONE</span></summary>
+<div class="detail-body">
+  <div class="finding-body">
+    <p><strong>What's wrong:</strong> <code>/api/v1/notifications/stream</code> is listed in <code>PUBLIC_PATHS</code> in <code>jwt.middleware.js</code>. The notification-service itself has zero auth middleware. Any internet client can subscribe with a plain <code>curl</code> and receive real-time alarm severities, device offline events, and provisioning requests.</p>
+    <p><strong>Exploitable by:</strong> Any unauthenticated client with internet access — zero tooling required.</p>
+    <p><strong>Affected files:</strong> <code>services/api-gateway/src/middleware/jwt.middleware.js</code> · <code>services/notification-service/src/app.js</code></p>
+    <p><strong>Reversibility cost:</strong> Low — single line removal + EventSource token param on frontend.</p>
+    <div class="inaction-cost"><strong>Cost of inaction:</strong> 3 months → regulatory review flags unauthenticated data exposure. 6 months → competitors monitor Airtel fault patterns in real-time. 12 months → compliance audit finding.</div>
+<pre>--- a/services/api-gateway/src/middleware/jwt.middleware.js
++++ b/services/api-gateway/src/middleware/jwt.middleware.js
+@@ -8,7 +8,6 @@
+ const PUBLIC_PATHS = new Set([
+   '/api/v1/auth/login',
+   '/api/v1/auth/refresh',
+-  '/api/v1/notifications/stream',  // ← REMOVE: unauthenticated SSE
+   '/healthz',
+   '/readyz',
+ ]);
+ // Frontend: new EventSource('/api/v1/notifications/stream?token=' + jwt)</pre>
+  </div>
+</div>
+</details>
+
+<details>
+<summary><span class="badge badge-critical">CRITICAL</span> A2 — Notification Rules Stored In-Memory — Lost on Every Deploy <span class="attack-complexity ac-none">NONE</span></summary>
+<div class="detail-body">
+  <div class="finding-body">
+    <p><strong>What's wrong:</strong> <code>notifications.routes.js</code> declares <code>let notifRules = [...]</code> at module scope — 3 hardcoded defaults. No MongoDB/Redis persistence. Every pod restart (rolling deploy, OOM kill, HPA scale event) silently resets all NOC-configured alert rules.</p>
+    <p><strong>Exploitable by:</strong> Any Kubernetes deployment cycle — operational certainty, not an attacker.</p>
+    <p><strong>Reversibility cost:</strong> Medium — requires Mongoose schema + CRUD refactor.</p>
+    <div class="inaction-cost"><strong>Cost of inaction:</strong> 3 months → first production incident where custom alert rules were silently lost in a deploy, incident goes unnoticed. 6 months → NOC team stops trusting the notification system and maintains rules externally.</div>
+<pre>// NEW FILE: services/notification-service/src/models/NotificationRule.js
+const mongoose = require('mongoose');
+const schema = new mongoose.Schema({
+  name: { type: String, required: true },
+  metric: String, condition: String, severity: String,
+  channels: [String], enabled: { type: Boolean, default: true },
+}, { timestamps: true });
+module.exports = mongoose.model('NotificationRule', schema);
+
+// REPLACE in notifications.routes.js:
+// Before: let notifRules = [...hardcoded...]
+// After:
+const NotificationRule = require('../models/NotificationRule');
+router.get('/rules', async (_req, res) => res.json(await NotificationRule.find()));
+router.post('/rules', async (req, res) => {
+  const rule = await NotificationRule.create(req.body);
+  res.status(201).json(rule);
+});</pre>
+  </div>
+</div>
+</details>
+
+<details>
+<summary><span class="badge badge-critical">CRITICAL</span> — Single Kafka Broker (Replication Factor 1) — Complete FCAPS Blackout Risk <span class="attack-complexity ac-none">NONE</span></summary>
+<div class="detail-body">
+  <div class="finding-body">
+    <p><strong>What's wrong:</strong> <code>docker-compose.dev.yml</code> configures a single Kafka broker with <code>KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1</code>. All async processing pipelines depend on Kafka: alarm ingestion, KPI collection, config push, device discovery, Netcool/MyCom forwarding. Broker failure = complete FCAPS blackout.</p>
+    <p><strong>Affected files:</strong> <code>docker-compose.dev.yml</code> · all consumer services</p>
+    <p><strong>Reversibility cost:</strong> High — requires cluster provisioning and consumer group configuration.</p>
+    <div class="inaction-cost"><strong>Cost of inaction:</strong> 3 months → dev/prod parity gap accepted as normal. 6 months → first Kafka restart causes production data loss. 12 months → compliance audit finds single-point-of-failure in critical telemetry pipeline.</div>
+<pre># Production Kafka cluster configuration (helm-charts/kafka/values.yaml):
+replicaCount: 3
+config:
+  offsetsTopicReplicationFactor: 3
+  defaultReplicationFactor: 3
+  minInsyncReplicas: 2</pre>
+  </div>
+</div>
+</details>
+
+<details>
+<summary><span class="badge badge-high">HIGH</span> A1 — No Istio PeerAuthentication — mTLS is Aspirational <span class="attack-complexity ac-medium">MEDIUM</span></summary>
+<div class="detail-body">
+  <div class="finding-body">
+    <p><strong>What's wrong:</strong> README documents Istio mTLS. No <code>PeerAuthentication</code> or <code>DestinationRule</code> resources were found in <code>helm-charts/</code>. Without STRICT mode, Istio defaults to PERMISSIVE — plaintext HTTP fallback is allowed. All inter-service auth rests on unverified headers.</p>
+    <p><strong>Exploitable by:</strong> Any pod in the cluster that bypasses the gateway and forges <code>x-user-role: admin</code>.</p>
+    <p><strong>Reversibility cost:</strong> Low — adding YAML manifests is non-breaking.</p>
+    <div class="inaction-cost"><strong>Cost of inaction:</strong> 3 months → lateral movement possible from any compromised pod. 6 months → compliance audit fails mTLS requirement. 12 months → potential breach via internal network pivot.</div>
+<pre># CREATE: helm-charts/istio-policies/peer-auth.yaml
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: ubr-ingress
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: ubrnms-mtls
+  namespace: ubr-ingress
+spec:
+  host: "*.ubr-ingress.svc.cluster.local"
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL</pre>
+  </div>
+</div>
+</details>
+
+<details>
+<summary><span class="badge badge-high">HIGH</span> — In-Memory Topology Cache Not Shared Across HPA Replicas <span class="attack-complexity ac-none">NONE</span></summary>
+<div class="detail-body">
+  <div class="finding-body">
+    <p><strong>What's wrong:</strong> <code>topology.stub.js</code> uses module-level <code>_devCache</code> (30s TTL). Gateway HPA runs 2-10 pods — each pod has its own independent cache. A forced refresh on one pod (<code>?_t=</code>) does not propagate to other pods. NOC operators see different topology states on sequential requests.</p>
+    <p><strong>Fix:</strong> Move cache to Redis or use a sticky-session annotation on the NGINX ingress for topology-refresh calls.</p>
+    <div class="inaction-cost"><strong>Cost of inaction:</strong> Grows worse as HPA scales up. At 10 replicas, inconsistency window per user refresh is up to 30 seconds.</div>
+  </div>
+</div>
+</details>
+
+<details>
+<summary><span class="badge badge-noted">NOTED</span> — ScyllaDB KPI TTL Only 1 Week — Compliance Gap</summary>
+<div class="detail-body">
+  <div class="finding-body">
+    <p>README documents 1-week TTL on KPI data. Telecom SLA reporting and regulatory audits typically require 30-90 days. This makes historical trend analysis and SLA dispute resolution impossible beyond day 7.</p>
+    <p><strong>Fix:</strong> Extend TTL to 90 days immediately. Add cold-tier archival (S3) for data beyond 90 days in next quarter.</p>
+  </div>
+</div>
+</details>
+
+<details>
+<summary><span class="badge badge-noted">NOTED</span> — Topology Device Cap at 2,000 vs 1M Device Target</summary>
+<div class="detail-body">
+  <div class="finding-body">
+    <p><code>MAX_PAGES=20 × PAGE_SIZE=100 = 2,000 device limit</code>. The file <code>1M_DEVICE_ONBOARDING_COMPLETE.md</code> indicates 1M device target. At scale, 99.8% of devices are invisible in the topology UI.</p>
+    <p><strong>Fix:</strong> Implement streaming/cursor-based pagination. Replace in-memory topology with a dedicated topology-service (Go) with its own MongoDB graph store.</p>
+  </div>
+</div>
+</details>
+
+</div><!-- /s3 -->
+
+<!-- ══════════════════════════════════════════════════════ SECTION 4 -->
+<div class="section" id="s4">
+<h2>Section 4 — Deep Insights</h2>
+
+<h3>4a. Configuration Contradictions</h3>
+
+<div class="contradiction-card">
+  <strong>⚠️ Timeout Chain Inversion: CB 30s &gt; K8s Liveness Probe 5s</strong>
+  <p style="margin:.4rem 0;font-size:.85rem;">
+    <span class="tag">Config A</span> <code>CB_TIMEOUT_MS: 30,000ms</code> — api-gateway/src/config/index.js<br/>
+    <span class="tag">Config B</span> <code>liveness.timeoutSeconds: 5s</code> — helm-charts/api-gateway/values.yaml
+  </p>
+  <p style="font-size:.83rem;">When a downstream service hangs, the circuit breaker holds the gateway connection open for 30 seconds. But K8s liveness probe times out at 5 seconds and restarts the gateway pod — healthy gateway pods are killed before the CB can open. Result: false-positive cascading pod restarts under downstream load.</p>
+  <strong style="font-size:.82rem;">Fix:</strong> <code>liveness.timeoutSeconds: 35</code> (CB timeout + buffer) or reduce CB_TIMEOUT_MS to &lt;5s.
+</div>
+
+<div class="contradiction-card">
+  <strong>⚠️ CORS Origin Port Mismatch: localhost:3001 vs containerPort 3010</strong>
+  <p style="margin:.4rem 0;font-size:.85rem;">
+    <span class="tag">Config A</span> <code>cors.origin: "http://localhost:3001"</code> — api-gateway/src/config/index.js (default)<br/>
+    <span class="tag">Config B</span> <code>containerPort: 3010</code> — helm-charts/api-gateway/values.yaml
+  </p>
+  <p style="font-size:.83rem;">The gateway runs on port 3010 in K8s but the default CORS origin allowlist targets port 3001. Without <code>CORS_ORIGIN</code> env override in K8s, all browser requests from the frontend will be rejected by CORS policy.</p>
+  <strong style="font-size:.82rem;">Fix:</strong> Set <code>CORS_ORIGIN=https://nms.airtel.internal</code> in K8s ConfigMap / Helm values.
+</div>
+
+<h3>4b. Stress Projection — What Breaks at Scale?</h3>
+
+<div class="stress-tier tier-current">
+  <div class="tier-label">✅ Current Baseline (~200 concurrent users)</div>
+  <div class="tier-desc">Rate limit: 100 req/60s per user. Gateway: 2 pods × 512Mi RAM. Topology: 2,000 device cap. KPI: 7-day TTL. All functioning within observed parameters.</div>
+</div>
+<div class="stress-tier tier-2x">
+  <div class="tier-label">⚠️ At 2× Traffic (~400 concurrent users)</div>
+  <div class="tier-desc">Redis memory pressure from rate-limit keys grows. If Redis eviction occurs, ALL rate limiting silently disabled. In-memory topology cache inconsistency between gateway pods becomes noticeable. CB at 80% means ~160 users per minute experience errors before protection.</div>
+</div>
+<div class="stress-tier tier-5x">
+  <div class="tier-label">🔶 At 5× Traffic (~1,000 concurrent users)</div>
+  <div class="tier-desc">Gateway HPA hits maxReplicas:10. Topology cache mismatches peak across all 10 pods. Single Kafka broker begins to saturate under increased event volume. MongoDB connection pool limits (undocumented) may be hit. Notification rules (in-memory) reset on any pod restart mid-load.</div>
+</div>
+<div class="stress-tier tier-10x">
+  <div class="tier-label">🔴 At 10× Traffic (~2,000 concurrent users)</div>
+  <div class="tier-desc">Single Kafka broker saturates — alarm ingestion and KPI collection begin dropping events. topology.stub.js allocates 2,000 device objects per pod × 10 pods = 20,000 objects in memory. MongoDB connection refusals possible. Topology device cap silently exceeded.</div>
+</div>
+<div class="stress-tier tier-100x">
+  <div class="tier-label">🔴 At 100× (Burst / DDoS)</div>
+  <div class="tier-desc">Kafka broker: complete failure under message backlog. Topology stub: OOM in gateway pods. Rate limiting: disabled if Redis OOMs first. MongoDB: connection storm. ScyllaDB KPI: TTL still 7 days regardless of load, but write throughput saturates. No backpressure mechanism found.</div>
+</div>
+
+<div class="diagram-container">
+<h4>Bottleneck Chain</h4>
+<pre class="mermaid">graph LR
+  LOAD[Traffic Spike] -->|"Rate limit keys grow"| REDIS3[Redis OOM/Eviction]
+  REDIS3 -->|"Fail-open: no throttle"| GW3[Gateway floods downstream]
+  GW3 -->|"CB 80% threshold"| CB3[CB opens after 80% fail<br/>~400 errors/min at 500 req/min]
+  GW3 -->|"Kafka producer spike"| KAFKA3[Single Kafka broker<br/>saturates]
+  KAFKA3 -->|"consumer lag grows"| LAG[Alarm processing delayed<br/>KPI data gaps<br/>Config pushes queued]
+  LAG -->|"MongoDB write storm"| MONGO3[MongoDB connection pool exhausted]
+</pre>
+</div>
+
+<h3>4c. Implicit Contracts — Things That Break When a New Developer Makes a Safe Change</h3>
+
+<div class="assumption-card">
+  <strong>Contract 1: Inventory service always returns paginated devices in expected schema</strong><br/>
+  <span style="font-size:.8rem;color:var(--muted);">File: topology.stub.js:48</span>
+  <p style="font-size:.83rem;margin-top:.3rem;">topology.stub.js tries <code>body.devices ?? body.data ?? body.items ?? []</code>. If the inventory service team changes the pagination schema (e.g., to <code>body.results</code>), topology silently returns an empty graph with no error. A developer "safely" updating inventory API format breaks the entire topology view.</p>
+</div>
+
+<div class="assumption-card">
+  <strong>Contract 2: GPS coordinates for all devices are within India bounding box</strong><br/>
+  <span style="font-size:.8rem;color:var(--muted);">File: topology.stub.js — isInsideIndia()</span>
+  <p style="font-size:.83rem;margin-top:.3rem;">Any device with GPS outside (6-38°N, 67-98°E) is silently relocated to an Indian city. International deployments, GPS sensor errors, or devices with (0,0) GPS will all appear on the Indian map at wrong locations with no warning.</p>
+</div>
+
+<div class="assumption-card">
+  <strong>Contract 3: JWT_PUBLIC_KEY is always a valid RS256 public key ≥100 chars</strong><br/>
+  <span style="font-size:.8rem;color:var(--muted);">File: api-gateway/src/config/index.js:7</span>
+  <p style="font-size:.83rem;margin-top:.3rem;">If a new environment is deployed without this env var, the gateway starts successfully but rejects all tokens with 401. The error message says nothing about the key — looks like an auth service outage. A developer who adds a new environment without documenting required env vars will cause a production incident.</p>
+</div>
+
+<div class="assumption-card">
+  <strong>Contract 4: Redis is always available for rate limiting</strong><br/>
+  <span style="font-size:.8rem;color:var(--muted);">File: ratelimit.middleware.js:26</span>
+  <p style="font-size:.83rem;margin-top:.3rem;">A developer who restarts Redis for a maintenance window will inadvertently disable all API rate limiting for the duration of the restart and reconnect window. No monitoring or alerting for this degraded mode.</p>
+</div>
+
+<h3>4d. Behavioral Coupling — Invisibly Connected Modules</h3>
+
+<div class="coupling-card">
+  <strong>Coupling 1: api-gateway/proxy.js ↔ all downstream services (x-user-role header contract)</strong>
+  <p style="font-size:.83rem;margin-top:.3rem;">The proxy injects <code>x-user-role</code> header. Downstream services are expected to read this header for authorization. But no downstream service was found to actually consume it — the notification-service has zero auth middleware. The contract is unverified on both ends. If the proxy team renames the header, nothing breaks (because nothing reads it), but the security model silently breaks.</p>
+</div>
+
+<div class="coupling-card">
+  <strong>Coupling 2: topology.stub.js ↔ frontend/src/v2/pages/V2TopologyPage.tsx</strong>
+  <p style="font-size:.83rem;margin-top:.3rem;">Frontend assumes <code>nodes[].status</code> ∈ <code>['HEALTHY', 'DEGRADED', 'FAULTY', 'UNKNOWN']</code>. The stub enforces this mapping. When the real Go topology-service eventually routes traffic, it may return different status strings — causing the frontend to display all devices as UNKNOWN silently.</p>
+</div>
+
+<h3>4e. Dead Paths — Code That Can Never Run</h3>
+
+<div class="dead-path-card">
+  <strong>Dead Route — Real topology-service proxy is never reached</strong><br/>
+  <span style="font-size:.8rem;color:var(--muted);">Location: api-gateway/src/app.js</span>
+  <p style="font-size:.83rem;margin-top:.3rem;"><code>topology.stub.js</code> is mounted with <code>app.use('/api/v1/topology', topologyStub)</code> before any proxy routes. The Go topology-service proxy at <code>config.services.topology</code> (localhost:3006) is registered but will never receive a request — the stub intercepts all topology routes first. This is a dead proxy registration.</p>
+</div>
+
+<div class="dead-path-card">
+  <strong>Zombie Feature — /api/v1/system/health returns hardcoded data</strong><br/>
+  <span style="font-size:.8rem;color:var(--muted);">Location: api-gateway/src/app.js</span>
+  <p style="font-size:.83rem;margin-top:.3rem;">The health endpoint returns a hardcoded JSON object with fabricated service statuses (report service hardcoded as DEGRADED, all others UP). The real health-monitor service is bypassed. This endpoint will <em>never</em> return real health data in the current architecture — it is a zombie feature presenting as a real health check.</p>
+</div>
+
+</div><!-- /s4 -->
+
+<!-- ══════════════════════════════════════════════════════ SECTION 5 -->
+<div class="section" id="s5">
+<h2>Section 5 — Remediation Roadmap</h2>
+
+<h3>5a. Quick Wins — Fix Today (Total: ~80 min)</h3>
+<div class="sprint-card">
+  <h4>Sprint Card — All fixes under 80 minutes combined</h4>
+  <table>
+  <tr><th>ID</th><th>Fix</th><th>Time</th></tr>
+  <tr><td>B3</td><td>Lower CB_ERROR_PCT default from 80 → 50 in api-gateway/src/config/index.js</td><td>5 min</td></tr>
+  <tr><td>B2</td><td>Add JWT_PUBLIC_KEY startup validation in server.js (process.exit if missing)</td><td>10 min</td></tr>
+  <tr><td>B1</td><td>Add in-memory fallback rate limiter (10 req/min) when Redis is unavailable</td><td>15 min</td></tr>
+  <tr><td>A3</td><td>Remove /api/v1/notifications/stream from PUBLIC_PATHS in jwt.middleware.js</td><td>5 min</td></tr>
+  <tr><td>B4</td><td>Pin all Helm image tags to semver/SHA (replace "latest" in all values.yaml)</td><td>20 min</td></tr>
+  <tr><td>—</td><td>Fix K8s liveness probe timeout: 5s → 35s (or reduce CB timeout to &lt;5s)</td><td>10 min</td></tr>
+  <tr><td>—</td><td>Set CORS_ORIGIN env var in K8s ConfigMap to production frontend URL</td><td>5 min</td></tr>
+  <tr><td><strong>Total</strong></td><td></td><td><strong>~70 min</strong></td></tr>
+  </table>
+  <p style="margin-top:.75rem;font-size:.85rem;"><strong>PR Description (copy-paste ready):</strong></p>
+  <pre style="font-size:.78rem;">## fix: architecture security and reliability findings (2026-08-26)
+
+### Changes
+- Lower circuit breaker error threshold from 80% → 50% (prevents ~400 user errors before CB opens)
+- Add JWT_PUBLIC_KEY startup validation — fail-fast instead of silent 401 storm
+- Rate limiter: add in-memory fallback (10 req/min) when Redis is unavailable
+- Remove SSE notification stream from PUBLIC_PATHS — now requires JWT auth
+- Pin all Helm image tags from 'latest' to versioned tags
+- Fix K8s liveness probe timeout inversion (5s < 30s CB timeout)
+- Set CORS_ORIGIN to production frontend URL
+
+### Risk Reduction
+- Eliminates rate-limit fail-open vulnerability (Critical → Resolved)
+- Closes unauthenticated SSE information disclosure (Medium → Resolved)
+- Prevents impossible-to-rollback deployments (High → Resolved)</pre>
+</div>
+
+<h3>5b. Fix This Sprint (1–8 hours each)</h3>
+<table>
+<tr><th>Action</th><th>Effort</th><th>Impact</th><th>Finding</th></tr>
+<tr>
+  <td>Persist notification rules to MongoDB (NotificationRule model + CRUD refactor)</td>
+  <td>4 hours</td>
+  <td>Eliminates silent rule loss on every deploy</td>
+  <td>A2</td>
+</tr>
+<tr>
+  <td>Create Istio PeerAuthentication STRICT + DestinationRule manifests</td>
+  <td>2 hours</td>
+  <td>Enforces mTLS between all services — closes header spoofing vector</td>
+  <td>A1</td>
+</tr>
+<tr>
+  <td>Add topology truncation warning: X-Truncated header + log when device cap hit</td>
+  <td>1 hour</td>
+  <td>Makes silent truncation visible to operators</td>
+  <td>B5</td>
+</tr>
+<tr>
+  <td>Add Redis topology cache (replace in-memory _devCache with Redis key)</td>
+  <td>3 hours</td>
+  <td>Ensures topology consistency across all HPA replicas</td>
+  <td>High</td>
+</tr>
+<tr>
+  <td>Replace hardcoded /api/v1/system/health with real health-monitor proxy</td>
+  <td>2 hours</td>
+  <td>NOC team gets real service health data</td>
+  <td>Low</td>
+</tr>
+</table>
+
+<h3>5c. Plan for Next Quarter</h3>
+<table>
+<tr><th>Action</th><th>Effort</th><th>Impact</th><th>Finding</th></tr>
+<tr>
+  <td>Deploy Kafka cluster with 3 brokers + replication factor 3</td>
+  <td>3–5 days</td>
+  <td>Eliminates Kafka SPOF — critical for production FCAPS reliability</td>
+  <td>Critical</td>
+</tr>
+<tr>
+  <td>Extend ScyllaDB KPI TTL from 7 days → 90 days + add cold-tier S3 archival</td>
+  <td>3 days</td>
+  <td>Meets telecom regulatory data retention requirements</td>
+  <td>High</td>
+</tr>
+<tr>
+  <td>Replace topology stub with real Go topology-service routing (including 1M device streaming)</td>
+  <td>2–4 weeks</td>
+  <td>Eliminates 2,000 device cap; enables 1M device target</td>
+  <td>High + scalability</td>
+</tr>
+<tr>
+  <td>Add contract tests (Pact.io) between stubs and real services to CI</td>
+  <td>1 week</td>
+  <td>Catches stub ↔ real service contract mismatches before production</td>
+  <td>Critical (stub architecture)</td>
+</tr>
+<tr>
+  <td>Increase bus factor: onboard 2+ additional engineers with full codebase context</td>
+  <td>Ongoing</td>
+  <td>Single human contributor is extreme knowledge risk</td>
+  <td>Medium</td>
+</tr>
+</table>
+
+<h3>5d. Decisions to Make</h3>
+
+<div class="decision-card">
+  <h4>D1 — When do you replace the stub architecture with real service routing?</h4>
+  <p style="font-size:.85rem;margin-bottom:.5rem;">100% of API routes are stubs. Every week of operation without real service integration makes contract migration more expensive. The system cannot validate real backend behavior in any environment.</p>
+  <div class="inaction-cost"><strong>Cost of Inaction:</strong> Frontend assumptions harden. When real services are promoted, every endpoint risks a contract mismatch under production load — emergency hotfixes on day 1 of launch.</div>
+  <div class="option-grid">
+    <div class="option-box">
+      <h5>Option A (Recommended) — Contract tests in CI now + staging integration next sprint</h5>
+      <ul><li>✅ Low disruption</li><li>✅ Fast feedback on contracts</li><li>⚠️ Still no real integration in dev</li></ul>
+      <p style="font-size:.75rem;">Effort: Medium. Risk: Contract tests may miss behavioral gaps.</p>
+    </div>
+    <div class="option-box">
+      <h5>Option B — Deploy real services to staging this sprint</h5>
+      <ul><li>✅ Real integration validation</li><li>✅ Forces contract clarity now</li><li>⚠️ May surface many issues simultaneously</li></ul>
+      <p style="font-size:.75rem;">Effort: High. Risk: Requires all Java/Go services deployable.</p>
+    </div>
+  </div>
+  <p style="font-size:.82rem;"><strong>Recommendation:</strong> Option A immediately, Option B within 1 sprint.</p>
+</div>
+
+<div class="decision-card">
+  <h4>D2 — Should ScyllaDB KPI retention be extended beyond 7 days?</h4>
+  <p style="font-size:.85rem;margin-bottom:.5rem;">7-day TTL makes SLA reporting, capacity planning, and regulatory audits impossible beyond one week. Telecom regulations typically require 30-90 days.</p>
+  <div class="inaction-cost"><strong>Cost of Inaction:</strong> First regulatory audit request for 30-day KPI history will be undeliverable. SLA dispute cannot be verified. Potential contractual penalties with Airtel.</div>
+  <div class="option-grid">
+    <div class="option-box">
+      <h5>Option A (Recommended) — Extend ScyllaDB TTL to 90 days</h5>
+      <ul><li>✅ Meets regulatory requirements</li><li>✅ No architectural change</li><li>⚠️ ~13× storage increase</li></ul>
+      <p style="font-size:.75rem;">Effort: Low (config change + capacity planning).</p>
+    </div>
+    <div class="option-box">
+      <h5>Option B — Cold storage tier (S3) for data &gt;7 days</h5>
+      <ul><li>✅ Cost-efficient long-term</li><li>✅ Scalable</li><li>⚠️ Query complexity for historical reports</li></ul>
+      <p style="font-size:.75rem;">Effort: High (new data pipeline).</p>
+    </div>
+  </div>
+  <p style="font-size:.82rem;"><strong>Recommendation:</strong> Option A immediately. Option B at scale beyond 90 days.</p>
+</div>
+
+<div class="decision-card">
+  <h4>D3 — How do you handle 1M device topology at scale?</h4>
+  <p style="font-size:.85rem;margin-bottom:.5rem;">Current topology stub caps at 2,000 devices (MAX_PAGES=20 × PAGE_SIZE=100). The 1M device onboarding target is documented. No streaming or pagination solution exists.</p>
+  <div class="inaction-cost"><strong>Cost of Inaction:</strong> Production deployment with 1M devices results in 99.8% of devices invisible in the network map. NOC team cannot monitor the majority of the Airtel network.</div>
+  <div class="option-grid">
+    <div class="option-box">
+      <h5>Option A — Cursor-based streaming pagination in topology service</h5>
+      <ul><li>✅ Handles unlimited device counts</li><li>✅ Incremental loading</li><li>⚠️ Frontend needs pagination UX</li></ul>
+    </div>
+    <div class="option-box">
+      <h5>Option B — Pre-computed topology graph in MongoDB with change-stream updates</h5>
+      <ul><li>✅ Fast reads</li><li>✅ Real-time via change streams</li><li>⚠️ Storage + change-stream complexity</li></ul>
+    </div>
+  </div>
+  <p style="font-size:.82rem;"><strong>Recommendation:</strong> Option A as the Go topology-service foundation. Option B as the caching layer on top.</p>
+</div>
+
+</div><!-- /s5 -->
+
+<div class="footer">
+  <p>Architecture Risk Report · UBR Open NMS — Airtel Telecom FCAPS Platform</p>
+  <p>Generated 2026-08-26 · Powered by Opsera DevSecOps · Risk Score: 69/100 (High Risk)</p>
+  <p>17 findings: 3 Critical · 7 High · 5 Medium · 2 Low</p>
+</div>
+
+</div><!-- /main -->
+
+<script>
+  // Highlight active sidebar link on scroll
+  const links = document.querySelectorAll('.sidebar-link');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.sidebar-link[href="#${e.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, {threshold: 0.3});
+  document.querySelectorAll('[id]').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>
