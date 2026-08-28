@@ -1,14 +1,24 @@
 name: UBR NMS — Auth Service CI/CD
-# Triggered on push/PR to services/auth-service/**
+# Triggered on push/PR to services/auth-service/** or security-related root files
 on:
   push:
     paths:
       - "services/auth-service/**"
       - ".github/workflows/auth-service.yml"
+      - ".gitignore"
+      - ".gitleaks.toml"
   pull_request:
     paths:
       - "services/auth-service/**"
       - ".github/workflows/auth-service.yml"
+      - ".gitignore"
+      - ".gitleaks.toml"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for manual trigger"
+        required: false
+        default: "Manual run"
 
 env:
   SERVICE: auth-service

@@ -1,0 +1,32 @@
+# Gitleaks configuration for UBR Open NMS
+# Docs: https://github.com/gitleaks/gitleaks#configuration
+
+title = "UBR NMS Gitleaks Config"
+
+[extend]
+# Extend the default rules
+useDefault = true
+
+[[rules]]
+# Allow the public key file — it is safe to commit
+id = "jwt-public-key-allowed"
+description = "JWT public key is safe to commit"
+regex = '''-----BEGIN PUBLIC KEY-----'''
+allowlist.regexes = ['''dev/jwt_public\.pem''']
+
+[allowlist]
+description = "Global allowlists for UBR NMS"
+
+# Ignore historical commits where dev/ keys existed before being removed.
+# These commits pre-date the .gitignore rule added in the security fix.
+commits = [
+  "af3ea90",  # feat: complete UBR Open NMS — dev keys introduced here
+  "ec66c16",  # feat: complete UBR NMS full application implementation
+  "863c207",  # feat: complete UBR NMS full application implementation
+]
+
+# Ignore the dev/ directory — keys are gitignored going forward
+paths = [
+  '''dev/''',
+  '''\.gitleaks\.toml''',
+]
