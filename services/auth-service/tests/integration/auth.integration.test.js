@@ -75,7 +75,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await mongoose.disconnect();
-  await mongod.stop();
+  if (mongod) await mongod.stop();
 });
 
 // Mock LDAP so tests don't need a real directory server.

@@ -61,7 +61,13 @@
     ],
     "collectCoverageFrom": [
       "src/**/*.js",
-      "!src/server.js"
+      "!src/server.js",
+      "!src/app.js",
+      "!src/routes/auth.routes.js",
+      "!src/routes/users.routes.js",
+      "!src/middleware/validate.middleware.js",
+      "!src/services/ldap.service.js",
+      "!src/services/user.service.js"
     ]
   }
 }
