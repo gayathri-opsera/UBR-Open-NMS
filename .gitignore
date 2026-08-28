@@ -36,3 +36,15 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Dev secrets — NEVER commit private keys or dev env files
+dev/.env.dev
+dev/*.pem
+dev/*.pen
+dev/*.key
+dev/*.p12
+dev/*.pfx
+*.pem
+*.key
+.env.dev
+.env.production
