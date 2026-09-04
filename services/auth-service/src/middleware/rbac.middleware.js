@@ -94,8 +94,9 @@ function checkActionPermission(action, user) {
   if (!user || !action) return false;
   const allowed = ACTION_PERMISSIONS[action];
   if (!allowed) return false; // deny-by-default for unknown actions
-  const normalizedRole = (user.role || '').toLowerCase();
-  return allowed.has(normalizedRole);
+  // Role matching is case-sensitive — roles must be stored lowercase in the JWT.
+  const role = user.role || '';
+  return allowed.has(role);
 }
 
 /**

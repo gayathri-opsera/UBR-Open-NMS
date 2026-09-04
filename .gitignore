@@ -48,3 +48,5 @@ dev/*.pfx
 *.key
 .env.dev
 .env.production
+.forge/hook-version
+.forge/changed-files.log

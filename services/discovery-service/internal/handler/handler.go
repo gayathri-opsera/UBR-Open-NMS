@@ -9,6 +9,7 @@ import (
 
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
+	"github.com/airtel-ubrnms/discovery-service/internal/southbound"
 )
 
 // DiscoveryHandler holds handler dependencies.
@@ -23,10 +24,14 @@ func New(svc *service.DiscoveryService, store *service.DeviceStore) *DiscoveryHa
 }
 
 // CheckIn handles POST /api/v1/discovery/check-in
+// Uses the canonical southbound error catalog (WO-005) so firmware can react
+// deterministically to every failure category.
 func (h *DiscoveryHandler) CheckIn(w http.ResponseWriter, r *http.Request) {
+	corrID := r.Header.Get("X-Correlation-ID")
+
 	var req model.CheckInRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body")
+		southbound.BadRequest(w, "Invalid or malformed request body", corrID)
 		return
 	}
 	if req.Timestamp.IsZero() {
@@ -36,14 +41,16 @@ func (h *DiscoveryHandler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	device, err := h.svc.ProcessCheckIn(&req)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidSignature) {
-			writeError(w, http.StatusUnauthorized, "AUTH_FAILED", "HMAC signature verification failed")
+			// HMAC validation failure: 462, no retry headers, no signature in message
+			southbound.HMACInvalid(w, corrID)
 			return
 		}
 		if errors.Is(err, service.ErrMissingFields) {
-			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+			southbound.BadRequest(w, err.Error(), corrID)
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Check-in processing failed")
+		// Unexpected internal fault: 500, no secrets, no stack traces
+		southbound.InternalError(w, corrID)
 		return
 	}
 
@@ -116,13 +123,15 @@ func (h *DiscoveryHandler) Lookup(w http.ResponseWriter, r *http.Request) {
 
 // TriggerScan handles POST /api/v1/discovery/scan
 func (h *DiscoveryHandler) TriggerScan(w http.ResponseWriter, r *http.Request) {
+	corrID := r.Header.Get("X-Correlation-ID")
+
 	var req model.ScanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid scan request")
+		southbound.BadRequest(w, "Invalid scan request body", corrID)
 		return
 	}
 	if req.IPRange == "" {
-		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "ipRange is required")
+		southbound.BadRequest(w, "ipRange is required", corrID)
 		return
 	}
 	// Scanning is async — return 202 Accepted immediately
@@ -136,9 +145,11 @@ func (h *DiscoveryHandler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, code int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(body)
+	json.NewEncoder(w).Encode(body) //nolint:errcheck
 }
 
+// writeError is kept for backward compatibility with lookup handlers.
+// New handlers should use the southbound package helpers directly.
 func writeError(w http.ResponseWriter, code int, errCode, message string) {
 	writeJSON(w, code, map[string]interface{}{
 		"status": "error",
