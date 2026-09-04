@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/capability-profile.schema.json",
+  "title": "CapabilityProfile",
+  "description": "Maps a device profile to supported operations, protocol priorities, and release-1 eligibility.",
+  "type": "object",
+  "required": ["profileId", "discoveryParadigm", "supportedOperations", "releaseEligible"],
+  "properties": {
+    "profileId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique stable identifier referenced from Device.capabilityProfileId."
+    },
+    "deviceType": {
+      "type": ["string", "null"],
+      "enum": ["BTS", "CPE", "IDU", null],
+      "description": "Device type this profile applies to. Null matches any type within the paradigm."
+    },
+    "discoveryParadigm": {
+      "type": "string",
+      "enum": ["UBR_CALL_HOME", "GENERIC_SNMP", "GENERIC_CLI", "UNKNOWN"],
+      "description": "Discovery paradigm this profile applies to."
+    },
+    "supportedOperations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Operations this profile explicitly supports. Any operation not listed is denied."
+    },
+    "protocolPriorityByOperation": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Ordered list of protocols to try. An empty array blocks delivery."
+      },
+      "description": "Protocol priority ordering per operation."
+    },
+    "releaseEligible": {
+      "type": "boolean",
+      "description": "Whether this profile is eligible for release-1 production use."
+    },
+    "unsupportedReasons": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Human-readable reasons why specific operations are not supported."
+    }
+  }
+}

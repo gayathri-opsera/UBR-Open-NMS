@@ -6,6 +6,8 @@ interface Props {
   devices: Device[];
   onSelect(device: Device): void;
   loading?: boolean;
+  /** Optional per-device capability map: deviceId → list of supported operations */
+  capabilityMap?: Record<string, string[]>;
 }
 
 const STATUS_META: Record<string, { bg: string; color: string; icon: string }> = {
@@ -19,7 +21,7 @@ const TYPE_ICON: Record<DeviceType, string> = { BTS: '🗼', CPE: '📡', IDU: '
 
 type SortKey = 'deviceType' | 'serialNumber' | 'ipAddress' | 'status' | 'firmwareVersion' | 'lastSeenAt';
 
-export function DeviceTable({ devices, onSelect, loading }: Props): React.ReactElement {
+export function DeviceTable({ devices, onSelect, loading, capabilityMap }: Props): React.ReactElement {
   const [sortKey, setSortKey] = useState<SortKey>('status');
   const [sortAsc, setSortAsc] = useState(true);
 
@@ -157,6 +159,16 @@ export function DeviceTable({ devices, onSelect, loading }: Props): React.ReactE
                       title={`${pendingCount} commands queued for delivery`}
                     >
                       ⏳ {pendingCount}
+                    </span>
+                  )}
+                  {/* WO-003: show capability denial badge when config.push is unsupported */}
+                  {capabilityMap && !capabilityMap[device.id]?.includes('config.push') && (
+                    <span
+                      style={{ background: '#1e293b', color: '#94a3b8', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600, marginLeft: pendingCount > 0 ? 4 : 0 }}
+                      aria-label="Config push not supported"
+                      title="Config push not supported for this device's capability profile"
+                    >
+                      ⛔ config
                     </span>
                   )}
                 </td>

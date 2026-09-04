@@ -93,6 +93,38 @@ export async function fetchMissingData(networkId?: string): Promise<MissingDataR
   return res.data;
 }
 
+// ── Capability evaluation (WO-003) ────────────────────────────────────────────
+
+export interface DeviceCapabilityResponse {
+  deviceId: string;
+  capabilityProfileId: string | null;
+  supportedOperations: string[];
+  unsupportedOperations: Record<string, string>;
+  protocolPriorityByOperation: Record<string, string[]>;
+  releaseEligible: boolean;
+  reason: string | null;
+}
+
+export interface BulkEvaluationResult {
+  eligible: string[];
+  ineligible: Array<{ deviceId: string; reason: string }>;
+}
+
+/** Fetch capability profile for a single device. */
+export async function fetchDeviceCapability(deviceId: string): Promise<DeviceCapabilityResponse> {
+  const res = await apiClient.get<DeviceCapabilityResponse>(`/capabilities/devices/${deviceId}`);
+  return res.data;
+}
+
+/** Bulk-evaluate which devices support a given operation. */
+export async function evaluateCapabilities(
+  deviceIds: string[],
+  operation: string,
+): Promise<BulkEvaluationResult> {
+  const res = await apiClient.post<BulkEvaluationResult>('/capabilities/evaluate', { deviceIds, operation });
+  return res.data;
+}
+
 // ── Internal shape normalization ──────────────────────────────────────────────
 
 /** Config-service returns flat fields; collect them into a `parameters` map */

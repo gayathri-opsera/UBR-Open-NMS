@@ -168,6 +168,61 @@ paths:
         "200": { description: Birth certificate, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/BirthCertificate' } } } }
         "404": { $ref: '#/components/responses/NotFound' }
 
+  /capabilities/profiles:
+    get:
+      tags: [capabilities]
+      summary: List all capability profiles
+      operationId: listCapabilityProfiles
+      responses:
+        "200":
+          description: All capability profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CapabilityProfile' }
+
+  /capabilities/devices/{deviceId}:
+    parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [capabilities]
+      summary: Get capability evaluation for a device
+      operationId: getDeviceCapability
+      responses:
+        "200":
+          description: Device capability response
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceCapabilityResponse' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /capabilities/evaluate:
+    post:
+      tags: [capabilities]
+      summary: Bulk operation eligibility check
+      operationId: evaluateCapabilities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceIds, operation]
+              properties:
+                deviceIds: { type: array, items: { type: string } }
+                operation: { type: string }
+      responses:
+        "200":
+          description: Bulk evaluation result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkEvaluationResult' }
+        "400": { $ref: '#/components/responses/ValidationError' }
+
 components:
   securitySchemes:
     BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -238,3 +293,37 @@ components:
             radiusKm:   { type: number, default: 5 }
         offset: { type: integer, default: 0 }
         limit:  { type: integer, default: 50, maximum: 1000 }
+
+    CapabilityProfile:
+      type: object
+      properties:
+        profileId:            { type: string }
+        deviceType:           { type: ["string", "null"] }
+        discoveryParadigm:    { type: string }
+        supportedOperations:  { type: array, items: { type: string } }
+        protocolPriorityByOperation: { type: object, additionalProperties: { type: array, items: { type: string } } }
+        releaseEligible:      { type: boolean }
+        unsupportedReasons:   { type: object, additionalProperties: { type: string } }
+
+    DeviceCapabilityResponse:
+      type: object
+      properties:
+        deviceId:              { type: string }
+        capabilityProfileId:   { type: ["string", "null"] }
+        supportedOperations:   { type: array, items: { type: string } }
+        unsupportedOperations: { type: object, additionalProperties: { type: string } }
+        protocolPriorityByOperation: { type: object, additionalProperties: { type: array, items: { type: string } } }
+        releaseEligible:       { type: boolean }
+        reason:                { type: ["string", "null"] }
+
+    BulkEvaluationResult:
+      type: object
+      properties:
+        eligible:   { type: array, items: { type: string } }
+        ineligible:
+          type: array
+          items:
+            type: object
+            properties:
+              deviceId: { type: string }
+              reason:   { type: string }
