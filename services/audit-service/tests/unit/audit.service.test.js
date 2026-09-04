@@ -4,7 +4,8 @@
 jest.mock('../../src/models/audit-entry.model');
 
 const AuditEntry = require('../../src/models/audit-entry.model');
-const { redact } = require('../../src/models/audit-entry.model');
+// Use the real redact implementation — jest.mock() would auto-mock it otherwise.
+const { redact } = jest.requireActual('../../src/models/audit-entry.model');
 const { ingestEvent, queryLogs, exportLogs } = require('../../src/services/audit.service');
 
 const mockEntry = {
@@ -31,7 +32,7 @@ describe('ingestEvent', () => {
   });
 
   it('throws when required fields are missing', async () => {
-    await expect(ingestEvent({ actor: 'user1' })).rejects.toThrow('Missing required audit event fields');
+    await expect(ingestEvent({ actor: 'user1' })).rejects.toThrow(/Missing required audit event fields/);
   });
 });
 

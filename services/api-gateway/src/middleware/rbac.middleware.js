@@ -7,7 +7,20 @@ const { v4: uuidv4 } = require('uuid');
  * Key: path prefix (or exact match)
  * Value: minimum role required. Roles are hierarchical: admin > operator > user
  */
-const ROLE_HIERARCHY = { admin: 3, operator: 2, user: 1 };
+// Coarse-grained route-level hierarchy.
+// WO-007 specialist roles (network_engineer, noc_operator, compliance, auditor, viewer)
+// map to the "user" tier for route-level access; fine-grained action gates are
+// enforced via checkActionPermission_mw on specific route handlers.
+const ROLE_HIERARCHY = {
+  admin: 3,
+  operator: 2,
+  network_engineer: 2,
+  noc_operator: 1,
+  compliance: 1,
+  auditor: 1,
+  viewer: 1,
+  user: 1,
+};
 
 /**
  * Per-route minimum role requirements.
