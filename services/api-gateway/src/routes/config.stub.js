@@ -13,9 +13,11 @@ const router   = express.Router();
 // ── Java inventory fetch (used by bulk-push to get authoritative device list) ─
 const INVENTORY_URL = process.env.INVENTORY_SERVICE_URL || 'http://nms-inventory:8082';
 
-function fetchJavaPage(deviceType, page, limit) {
+function fetchJavaPage(deviceType, page, limit, sysObjectID) {
   return new Promise((resolve) => {
-    const qs = `limit=${limit}&page=${page}${deviceType ? `&deviceType=${deviceType}` : ''}`;
+    let qs = `limit=${limit}&page=${page}${deviceType ? `&deviceType=${deviceType}` : ''}`;
+    // WO-004: forward sysObjectID filter to inventory service for SNMP device targeting
+    if (sysObjectID) qs += `&sysObjectID=${encodeURIComponent(sysObjectID)}`;
     const url = `${INVENTORY_URL}/api/v1/devices?${qs}`;
     http.get(url, { timeout: 8000 }, (res) => {
       let raw = '';
@@ -30,11 +32,11 @@ function fetchJavaPage(deviceType, page, limit) {
   });
 }
 
-async function fetchAllFromJava(deviceType) {
+async function fetchAllFromJava(deviceType, sysObjectID) {
   const PAGE = 100;
   const all = [];
   for (let page = 0; page < 20; page++) {
-    const batch = await fetchJavaPage(deviceType, page, PAGE);
+    const batch = await fetchJavaPage(deviceType, page, PAGE, sysObjectID);
     all.push(...batch);
     if (batch.length < PAGE) break;
   }
@@ -407,6 +409,8 @@ router.post('/bulk-push', async (req, res) => {
   const jobId = `job-${nextJobId++}`;
   // Capture actor before async processing so it is available in the interval closure
   const actor = req.body?.actor || req.user?.username || 'operator';
+  // WO-004: extract sysObjectID filter for SNMP device targeting
+  const sysObjectIDFilter = filter?.sysObjectID || req.query.sysObjectID || null;
 
   let devices = [];
 
@@ -431,7 +435,7 @@ router.post('/bulk-push', async (req, res) => {
       } else {
         // BTS / CPE / all — call Java inventory (authoritative, matches what the UI shows)
         try {
-          const javaDevs = await fetchAllFromJava(typeUpper || null);
+          const javaDevs = await fetchAllFromJava(typeUpper || null, sysObjectIDFilter);
           devices = javaDevs.map((d) => ({
             deviceId: d.serialNumber || d.deviceId || d.id || String(d._id),
             status: 'QUEUED',

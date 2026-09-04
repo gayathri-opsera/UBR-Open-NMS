@@ -12,7 +12,6 @@ function extractBatch(data: unknown): Device[] {
   }
   return [];
 }
-
 export async function fetchDevices(filter: DeviceFilter = {}): Promise<Device[]> {
   // The Java inventory service caps each page at 100 — paginate to collect all devices
   const PAGE_SIZE = 100;
@@ -28,6 +27,14 @@ export async function fetchDevices(filter: DeviceFilter = {}): Promise<Device[]>
     if (batch.length < PAGE_SIZE) break; // last page reached
   }
   return all;
+}
+
+/**
+ * Fetch devices filtered by SNMP sysObjectID (WO-004).
+ * Returns only generic-discovery devices matching the OID; UBR devices are excluded.
+ */
+export async function fetchDevicesBySysObjectId(sysObjectID: string): Promise<Device[]> {
+  return fetchDevices({ sysObjectID } as DeviceFilter);
 }
 
 export async function fetchDevice(id: string): Promise<Device> {
