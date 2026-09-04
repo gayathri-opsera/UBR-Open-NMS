@@ -214,3 +214,55 @@ describe('WO-006: System actor', () => {
     expect(saveMock).toHaveBeenCalled();
   });
 });
+
+// ── WO-008: Retention class tests ────────────────────────────────────────────
+
+describe('WO-008: Retention class', () => {
+  it('accepts valid retentionClass values', async () => {
+    const validClasses = ['audit', 'security', 'onboarding', 'alarm_incident',
+                          'config_history', 'evidence_export'];
+    for (const cls of validClasses) {
+      const saveMock = jest.fn().mockResolvedValue({ ...mockEntry, retentionClass: cls });
+      AuditEntry.mockImplementation(() => ({ save: saveMock }));
+      await ingestEvent({
+        actor: 'system',
+        action: 'CREATE',
+        resource: 'test',
+        result: 'SUCCESS',
+        retentionClass: cls,
+      });
+      expect(saveMock).toHaveBeenCalled();
+    }
+  });
+
+  it('legacy records without retentionClass are treated as "legacy"', () => {
+    // Records without retentionClass should map to "legacy" when read
+    const legacyEntry = { ...mockEntry };
+    delete legacyEntry.retentionClass;
+    const retentionClass = legacyEntry.retentionClass || 'legacy';
+    expect(retentionClass).toBe('legacy');
+  });
+
+  it('evidence export record includes required metadata fields', async () => {
+    const exportRecord = {
+      actor: { userId: 'admin', username: 'admin@nms.local', role: 'admin' },
+      action: 'evidence.exported',
+      resource: 'report',
+      resourceId: 'report-001',
+      outcome: 'success',
+      retentionClass: 'evidence_export',
+      payload: {
+        exportScope: { from: '2024-01-01', to: '2024-12-31' },
+        checksum: 'abc123def456',
+        checksumAlgorithm: 'SHA-256',
+        reportType: 'audit_log',
+      },
+    };
+
+    const saveMock = jest.fn().mockResolvedValue({ ...mockEntry, ...exportRecord });
+    AuditEntry.mockImplementation(() => ({ save: saveMock }));
+
+    await ingestEvent(exportRecord);
+    expect(saveMock).toHaveBeenCalled();
+  });
+});

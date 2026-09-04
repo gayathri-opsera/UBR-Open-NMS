@@ -3,10 +3,12 @@ package com.ubrnms.shared.models;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 import java.time.Instant;
 
+/**
+ * Shared alarm record model extended with optional retentionClass field (WO-008).
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class AlarmRecord {
@@ -28,6 +30,13 @@ public class AlarmRecord {
     @JsonProperty("raisedAt")         private Instant raisedAt;
     @JsonProperty("clearedAt")        private Instant clearedAt;
     @JsonProperty("ttlExpiry")        private Instant ttlExpiry;
+
+    /**
+     * Retention class for evidence lifecycle management (WO-008).
+     * Maps this alarm record to its applicable retention policy.
+     * Valid values: audit, security, onboarding, alarm_incident, config_history, evidence_export, legacy.
+     */
+    @JsonProperty("retentionClass")   private String retentionClass;
 
     public AlarmRecord() {}
 
@@ -59,4 +68,6 @@ public class AlarmRecord {
     public void setClearedAt(Instant clearedAt) { this.clearedAt = clearedAt; }
     public Instant getTtlExpiry() { return ttlExpiry; }
     public void setTtlExpiry(Instant ttlExpiry) { this.ttlExpiry = ttlExpiry; }
+    public String getRetentionClass() { return retentionClass; }
+    public void setRetentionClass(String retentionClass) { this.retentionClass = retentionClass; }
 }

@@ -1,4 +1,5 @@
 """FastAPI application for Report Service."""
+import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -43,6 +44,80 @@ class ScheduleRequest(BaseModel):
     format: str = "csv"
 
 
+# ── Retention class mapper (WO-008) ───────────────────────────────────────────
+
+RETENTION_CLASS_MAP = {
+    "audit_log": "audit",
+    "alarm":     "alarm_incident",
+    "config":    "config_history",
+    "security":  "security",
+    "onboarding": "onboarding",
+}
+
+
+def get_retention_class(report_type: str) -> str:
+    """Derive retentionClass from report type for evidence export records."""
+    for key, cls in RETENTION_CLASS_MAP.items():
+        if key in report_type.lower():
+            return cls
+    return "audit"  # default
+
+
+def compute_checksum(data: bytes) -> tuple[str, str]:
+    """Compute SHA-256 checksum of export data. Returns (checksum_hex, algorithm)."""
+    try:
+        digest = hashlib.sha256(data).hexdigest()
+        return digest, "SHA-256"
+    except Exception:
+        return "not_applicable", "not_applicable"
+
+
+async def emit_evidence_export_audit(
+    actor: str,
+    report_id: str,
+    report_type: str,
+    export_scope: dict,
+    data: Optional[bytes],
+    retention_class: str,
+) -> None:
+    """Emit an evidence.exported audit record via internal HTTP (fire-and-forget).
+    Includes actor, exportScope, timestamp, checksum/checksumAlgorithm, retentionClass (WO-008).
+    """
+    import os, json
+    from urllib import request as urllib_request
+
+    checksum, checksum_algorithm = compute_checksum(data) if data else ("not_applicable", "not_applicable")
+
+    audit_payload = {
+        "actor": {"userId": actor, "username": actor, "role": "system"},
+        "action": "evidence.exported",
+        "resource": "report",
+        "resourceId": report_id,
+        "outcome": "success",
+        "retentionClass": retention_class,
+        "payload": {
+            "exportScope": export_scope,
+            "reportType": report_type,
+            "checksum": checksum,
+            "checksumAlgorithm": checksum_algorithm,
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "serviceSource": "report-service",
+    }
+
+    try:
+        audit_url = os.environ.get("AUDIT_SERVICE_URL", "http://nms-audit:3007")
+        req = urllib_request.Request(
+            f"{audit_url}/api/v1/audit/events",
+            data=json.dumps(audit_payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib_request.urlopen(req, timeout=3)
+    except Exception as e:
+        logging.warning("Failed to emit evidence export audit event: %s", e)
+
+
 # ── Health ─────────────────────────────────────────────────────────────────────
 
 @app.get("/healthz")
@@ -76,12 +151,22 @@ async def get_report_status(report_id: str):
 
 
 @app.get("/api/v1/reports/{report_id}/download")
-async def download_report(report_id: str):
+async def download_report(report_id: str, actor: str = Query(default="system")):
     result = await svc.get_download(report_id)
     if result is None:
         raise HTTPException(404, "Report not found or not yet complete")
     data, content_type = result
     ext = "xlsx" if "spreadsheet" in content_type else "csv"
+
+    # Fetch report metadata for the evidence export audit record
+    doc = await svc.get_report(report_id)
+    report_type = doc.get("reportType", "unknown") if doc else "unknown"
+    export_scope = doc.get("scope", {}) if doc else {}
+    retention_class = get_retention_class(report_type)
+
+    # Emit evidence export audit event (WO-008): fire-and-forget
+    await emit_evidence_export_audit(actor, report_id, report_type, export_scope, data, retention_class)
+
     return Response(content=data, media_type=content_type,
                     headers={"Content-Disposition": f"attachment; filename=report-{report_id}.{ext}"})
 

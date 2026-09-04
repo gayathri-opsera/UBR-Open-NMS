@@ -47,7 +47,7 @@ router.get('/logs/export', async (req, res) => {
     );
 
     const { Parser } = require('json2csv');
-    const fields = ['actor', 'timestamp', 'action', 'resource', 'resourceId', 'result', 'sourceIp', 'correlationId', 'serviceSource'];
+    const fields = ['actor', 'timestamp', 'action', 'resource', 'resourceId', 'result', 'sourceIp', 'correlationId', 'serviceSource', 'retentionClass'];
     const parser = new Parser({ fields });
     const csv = parser.parse(records);
 
@@ -60,4 +60,62 @@ router.get('/logs/export', async (req, res) => {
   }
 });
 
+/**
+ * Retention policy catalog (WO-008).
+ * Application-level definitions — not infrastructure retention rules.
+ * Accessible to admin, compliance, and auditor roles.
+ */
+const RETENTION_POLICIES = [
+  {
+    retentionClass: 'audit',
+    displayName: 'Audit Log',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['admin_action', 'login', 'logout'],
+  },
+  {
+    retentionClass: 'security',
+    displayName: 'Security Evidence',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['southbound.auth.failure', 'southbound.hmac.failure', 'capability.denied'],
+  },
+  {
+    retentionClass: 'onboarding',
+    displayName: 'Onboarding Record',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['onboarding.attempt', 'onboarding.rejected'],
+  },
+  {
+    retentionClass: 'alarm_incident',
+    displayName: 'Alarm Incident',
+    minimumRetentionDays: 180,
+    applicableRecordTypes: ['alarm_raised', 'alarm_cleared'],
+  },
+  {
+    retentionClass: 'config_history',
+    displayName: 'Configuration History',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['config.push', 'config.rollback'],
+  },
+  {
+    retentionClass: 'evidence_export',
+    displayName: 'Evidence Export',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['evidence.exported'],
+  },
+];
+
+// GET /api/v1/audit/retention-policies — retention policy catalog (WO-008)
+router.get('/retention-policies', (req, res) => {
+  const role = (req.user?.role || '').toLowerCase();
+  const allowed = ['admin', 'compliance', 'auditor'];
+  if (!allowed.includes(role)) {
+    return res.status(403).json({
+      status: 'error',
+      error: { code: 'FORBIDDEN', message: 'Admin, compliance, or auditor role required' },
+    });
+  }
+  res.json({ status: 'ok', data: RETENTION_POLICIES });
+});
+
 module.exports = router;
+module.exports.RETENTION_POLICIES = RETENTION_POLICIES;
