@@ -54,8 +54,10 @@ function checkActionPermission(action, user) {
     // Unknown action: deny-by-default
     return false;
   }
-  const normalizedRole = (user.role || '').toLowerCase();
-  return allowed.has(normalizedRole);
+  // Role matching is case-sensitive: roles must be stored lowercase in the JWT.
+  // Using exact match to catch misconfigured tokens early.
+  const role = user.role || '';
+  return allowed.has(role);
 }
 
 /**
@@ -72,7 +74,7 @@ function checkActionPermission_mw(action, resourceType) {
     if (permitted) return next();
 
     // Emit denied-action audit event (WO-006)
-    const correlationId = req.headers['x-correlation-id'] || uuidv4();
+    const correlationId = (req.headers && req.headers['x-correlation-id']) || uuidv4();
     emitDeniedAuditEvent(action, req.user, resourceType, correlationId, req);
 
     return res.status(403).json({
@@ -101,7 +103,7 @@ function requireRole(req, res, next) {
     if (entry.pattern.test(req.path)) {
       const required = ROLE_HIERARCHY[entry.minRole] || 1;
       if (userRoleLevel < required) {
-        const correlationId = req.headers['x-correlation-id'] || uuidv4();
+        const correlationId = (req.headers && req.headers['x-correlation-id']) || uuidv4();
         emitDeniedAuditEvent(req.path, req.user, req.path, correlationId, req);
         return res.status(403).json({
           code: 'FORBIDDEN',

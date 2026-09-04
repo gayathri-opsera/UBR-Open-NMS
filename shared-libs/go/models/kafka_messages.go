@@ -58,6 +58,24 @@ type MycomKPIExportMessage struct {
 	EthernetPorts []EthernetPort `json:"ethernetPorts,omitempty"`
 }
 
+// SouthboundErrorEvent is published to Kafka when a determinable southbound
+// security or protocol failure is detected (WO-005). It is consumed by the
+// alarm and audit services for security monitoring.
+//
+// IMPORTANT: This struct must NEVER contain HMAC values, certificate bodies,
+// private key material, raw signatures, or any credential secret. Only include
+// sanitized identity and correlation context.
+type SouthboundErrorEvent struct {
+	EventID       string `json:"eventId"`
+	Reason        string `json:"reason"`        // one of the southbound error reason constants
+	Category      string `json:"category"`      // auth_failure | retryable | client_error | server_error
+	DeviceSerial  string `json:"deviceSerial,omitempty"` // sanitized, from request context only
+	DeviceIP      string `json:"deviceIp,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty"`
+	SourceService string `json:"sourceService"` // e.g. "discovery-service"
+	Timestamp     string `json:"timestamp"`     // RFC3339 UTC
+}
+
 // InventorySyncMessage is the message from Mobinet/Telemedia sync.
 type InventorySyncMessage struct {
 	SystemName     string     `json:"systemName,omitempty"`

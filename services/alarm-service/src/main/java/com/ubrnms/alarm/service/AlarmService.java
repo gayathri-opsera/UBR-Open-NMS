@@ -246,4 +246,65 @@ public class AlarmService {
         Object v = m.get(key);
         return v != null ? v.toString() : def;
     }
+
+    /**
+     * Handle southbound security alarm events published by the discovery service (WO-005).
+     *
+     * These events originate from the southbound error catalog (auth failures, HMAC failures,
+     * mTLS errors) and must be stored as ACTIVE alarms for NOC visibility.
+     *
+     * SECURITY: device serial is the only identity field in the event; no credentials,
+     * signatures, or keys are present in a well-formed SouthboundErrorEvent.
+     *
+     * Supported errorCategory values that are routed here:
+     *   - auth_failure  → SOUTHBOUND_AUTH_FAILURE alarm type
+     *   - retryable     → SOUTHBOUND_RETRYABLE_ERROR (info/warning only)
+     *   - server_error  → SOUTHBOUND_SERVER_ERROR
+     *
+     * @param event map representation of a SouthboundErrorEvent Kafka message
+     * @return the persisted Alarm, or null if deduplication suppressed it
+     */
+    public Alarm processSouthboundErrorEvent(Map<String, Object> event) {
+        String errorCategory = getStr(event, "errorCategory", "server_error");
+        String errorReason   = getStr(event, "errorReason", "UNKNOWN");
+        String deviceSerial  = getStr(event, "deviceSerial", "unknown");
+        String correlationId = getStr(event, "correlationId", UUID.randomUUID().toString());
+        int    httpStatus    = event.get("httpStatus") instanceof Number
+                               ? ((Number) event.get("httpStatus")).intValue() : 500;
+
+        String alarmType;
+        String severity;
+        switch (errorCategory) {
+            case "auth_failure":
+                alarmType = "SOUTHBOUND_AUTH_FAILURE";
+                severity  = "CRITICAL";
+                break;
+            case "retryable":
+                alarmType = "SOUTHBOUND_RETRYABLE_ERROR";
+                severity  = "WARNING";
+                break;
+            default:
+                alarmType = "SOUTHBOUND_SERVER_ERROR";
+                severity  = "MAJOR";
+        }
+
+        // Build a raw alarm map that routes through the standard pipeline
+        Map<String, Object> raw = new LinkedHashMap<>();
+        raw.put("alarmId",      correlationId);
+        raw.put("deviceId",     deviceSerial);
+        raw.put("deviceType",   "UNKNOWN");
+        raw.put("alarmType",    alarmType);
+        raw.put("alarmName",    errorReason + " on southbound interface");
+        raw.put("severity",     severity);
+        raw.put("description",  String.format(
+                "Southbound error: reason=%s category=%s httpStatus=%d correlationId=%s",
+                errorReason, errorCategory, httpStatus, correlationId));
+        raw.put("source",       "SOUTHBOUND");
+        // Propagate correlation ID for log tracing — no secret data
+        raw.put("correlationId", correlationId);
+
+        log.info("Processing southbound error event: reason={} category={} correlationId={}",
+                 errorReason, errorCategory, correlationId);
+        return processRawAlarm(raw);
+    }
 }

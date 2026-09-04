@@ -59,9 +59,47 @@ paths:
             schema: { $ref: 'components.yaml#/components/schemas/BirthCertificate' }
       responses:
         "201": { description: Device registered and birth certificate stored, content: { application/json: { schema: { $ref: '#/components/schemas/CheckInResponse' } } } }
-        "400": { description: Invalid payload or HMAC failure, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "400": { description: Malformed payload or missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/SouthboundErrorBody' } } } }
         "409": { description: Device already registered, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
         "403": { description: Discovery mode disabled, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryModeDisabledError' } } } }
+        "429":
+          description: Rate limited — include Retry-After and X-Retry-Jitter-Max headers
+          headers:
+            Retry-After:        { schema: { type: integer }, description: Seconds to wait before retrying }
+            X-Retry-Jitter-Max: { schema: { type: integer }, description: Max jitter seconds to add to retry delay }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "462":
+          description: HMAC-SHA256 integrity check failed — no retry headers (auth failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "495":
+          description: mTLS certificate invalid — no retry headers (auth failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "496":
+          description: No mTLS certificate presented — no retry headers (auth failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "302":
+          description: NMS failover redirect — follow Location header
+          headers:
+            Location: { schema: { type: string, format: uri }, description: Alternate NMS discovery endpoint }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "503":
+          description: Service temporarily unavailable — retry with Retry-After
+          headers:
+            Retry-After:        { schema: { type: integer } }
+            X-Retry-Jitter-Max: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
 
   /discovery/modes:
     get:
@@ -157,3 +195,48 @@ components:
         error:   { type: string, example: DISCOVERY_MODE_DISABLED }
         mode:    { type: string }
         message: { type: string }
+
+    # ── WO-005: Southbound error shapes ─────────────────────────────────────
+    SouthboundErrorBody:
+      description: >
+        Canonical error response body returned by discovery-service southbound endpoints.
+        Auth failures (462, 495, 496) never carry retry hints.
+        Retryable errors (429, 503) include Retry-After and X-Retry-Jitter-Max response headers.
+        Failover (302) includes a Location header pointing to the alternate NMS endpoint.
+        Secrets, HMAC values, and private keys must never appear in this body.
+      type: object
+      required: [reason, category, message, correlationId, timestamp]
+      properties:
+        reason:
+          type: string
+          enum:
+            - BAD_REQUEST
+            - MTLS_CERT_INVALID
+            - MTLS_NO_CERT
+            - HMAC_INVALID
+            - RATE_LIMITED
+            - NMS_FAILOVER
+            - INTERNAL_ERROR
+            - SERVICE_UNAVAILABLE
+        category:
+          type: string
+          enum: [auth_failure, retryable, redirect, client_error, server_error]
+        message:        { type: string }
+        correlationId:  { type: string, description: Request correlation ID for log tracing }
+        timestamp:      { type: string, format: date-time }
+
+    SouthboundErrorEvent:
+      description: >
+        Kafka message published to audit/alarm topics when a southbound security
+        or protocol error occurs. Must never include secrets, HMAC values, or keys.
+      type: object
+      required: [eventId, correlationId, errorReason, errorCategory, httpStatus, timestamp, serviceId]
+      properties:
+        eventId:        { type: string, format: uuid }
+        correlationId:  { type: string }
+        deviceSerial:   { type: string, description: Sanitised device identity only — no credentials }
+        errorReason:    { type: string }
+        errorCategory:  { type: string }
+        httpStatus:     { type: integer }
+        timestamp:      { type: string, format: date-time }
+        serviceId:      { type: string }
