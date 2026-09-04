@@ -203,3 +203,73 @@ describe('Integration — health probes', () => {
     expect(res.status).toBe(200);
   });
 });
+
+// ── WO-007: Authorization boundary tests ─────────────────────────────────────
+
+describe('WO-007: Authorization boundary tests', () => {
+  const { checkActionPermission } = require('../../src/middleware/rbac.middleware');
+
+  test('admin can perform all release-1 actions', () => {
+    const actions = [
+      'discovery.mode.manage', 'discovery.status.read',
+      'onboarding.assignment.override', 'onboarding.status.read',
+      'capability.policy.read', 'config.target.preview', 'config.execute',
+      'audit.evidence.read', 'audit.evidence.export',
+    ];
+    const user = { role: 'admin' };
+    actions.forEach((action) => {
+      expect(checkActionPermission(action, user)).toBe(true);
+    });
+  });
+
+  test('network_engineer: can read/execute config but cannot manage modes or read audit', () => {
+    const user = { role: 'network_engineer' };
+    expect(checkActionPermission('config.execute', user)).toBe(true);
+    expect(checkActionPermission('config.target.preview', user)).toBe(true);
+    expect(checkActionPermission('discovery.mode.manage', user)).toBe(false);
+    expect(checkActionPermission('audit.evidence.read', user)).toBe(false);
+  });
+
+  test('noc_operator: can read onboarding status but cannot override or execute config', () => {
+    const user = { role: 'noc_operator' };
+    expect(checkActionPermission('onboarding.status.read', user)).toBe(true);
+    expect(checkActionPermission('onboarding.assignment.override', user)).toBe(false);
+    expect(checkActionPermission('config.execute', user)).toBe(false);
+    expect(checkActionPermission('discovery.mode.manage', user)).toBe(false);
+  });
+
+  test('compliance: can read and export evidence but cannot execute config', () => {
+    const user = { role: 'compliance' };
+    expect(checkActionPermission('audit.evidence.read', user)).toBe(true);
+    expect(checkActionPermission('audit.evidence.export', user)).toBe(true);
+    expect(checkActionPermission('config.execute', user)).toBe(false);
+    expect(checkActionPermission('discovery.mode.manage', user)).toBe(false);
+  });
+
+  test('auditor: can read evidence but cannot export or execute config', () => {
+    const user = { role: 'auditor' };
+    expect(checkActionPermission('audit.evidence.read', user)).toBe(true);
+    expect(checkActionPermission('audit.evidence.export', user)).toBe(false);
+    expect(checkActionPermission('config.execute', user)).toBe(false);
+  });
+
+  test('viewer: can only read discovery status', () => {
+    const user = { role: 'viewer' };
+    expect(checkActionPermission('discovery.status.read', user)).toBe(true);
+    expect(checkActionPermission('onboarding.status.read', user)).toBe(false);
+    expect(checkActionPermission('capability.policy.read', user)).toBe(false);
+    expect(checkActionPermission('audit.evidence.read', user)).toBe(false);
+  });
+
+  test('unknown action returns false for all roles', () => {
+    const roles = ['admin', 'network_engineer', 'noc_operator', 'compliance', 'auditor', 'viewer'];
+    roles.forEach((role) => {
+      expect(checkActionPermission('nonexistent.action', { role })).toBe(false);
+    });
+  });
+
+  test('missing resource context returns false', () => {
+    expect(checkActionPermission(null, { role: 'admin' })).toBe(false);
+    expect(checkActionPermission('', { role: 'admin' })).toBe(false);
+  });
+});

@@ -41,6 +41,7 @@ const NAV_GROUPS: NavGroup[] = [
       { path: '/v2/config',       label: 'Config',       icon: <CogIcon />,    allowedRoles: ['Admin', 'Operator'] as Role[] },
       { path: '/v2/troubleshoot', label: 'Troubleshoot', icon: <WrenchIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
       { path: '/v2/reports',      label: 'Reports',      icon: <ReportIcon /> },
+      { path: '/v2/discovery',    label: 'Discovery',    icon: <DiscoveryIcon /> },
     ],
   },
   {
@@ -256,6 +257,7 @@ function NotifIcon()    { return <svg width="16" height="16" viewBox="0 0 16 16"
 function AdminIcon()    { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.4"/><path d="M2.5 14c0-2.76 2.46-5 5.5-5s5.5 2.24 5.5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>; }
 function OrgIcon()      { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5" y="1" width="6" height="4" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="1" y="11" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="6" y="11" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="11" y="11" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.4"/><path d="M3 11V9h10v2M8 5v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>; }
 function GroupIcon()    { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="2" width="6" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="9" y="2" width="6" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="1" y="9" width="6" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="9" y="9" width="6" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/></svg>; }
+function DiscoveryIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4"/><path d="M8 5v3l2 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><circle cx="8" cy="2" r="1" fill="currentColor"/></svg>; }
 
 function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   return collapsed

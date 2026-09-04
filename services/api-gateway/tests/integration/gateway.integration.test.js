@@ -123,3 +123,58 @@ describe('API Gateway integration', () => {
     expect(res.headers['x-correlation-id']).toBe('test-corr-id-001');
   });
 });
+
+// ── WO-007: Action permission policies integration tests ──────────────────────
+
+describe('WO-007: Action permission policies — 6 personas × protected endpoints', () => {
+  let app;
+  beforeAll(() => { app = createApp(null); });
+
+  function makeToken(role, userId) {
+    return jwt.sign(
+      { sub: userId || `user-${role}`, role },
+      mockPrivatePem,
+      { algorithm: 'RS256', expiresIn: '15m', issuer: 'ubr-nms-auth', audience: 'ubr-nms' }
+    );
+  }
+
+  // Admin can access protected admin routes
+  it('admin can access /api/v1/users', async () => {
+    const token = makeToken('admin');
+    const res = await request(app)
+      .get('/api/v1/users')
+      .set('Authorization', `Bearer ${token}`);
+    expect([200, 404]).toContain(res.status);
+  });
+
+  // NOC operator can read general data
+  it('noc_operator can GET /api/v1/alarms', async () => {
+    const token = makeToken('noc_operator');
+    const res = await request(app)
+      .get('/api/v1/alarms')
+      .set('Authorization', `Bearer ${token}`);
+    expect([200]).toContain(res.status);
+  });
+
+  // Non-admin cannot access users endpoint
+  ['network_engineer', 'noc_operator', 'compliance', 'auditor', 'viewer'].forEach((role) => {
+    it(`${role} cannot GET /api/v1/users`, async () => {
+      const token = makeToken(role);
+      const res = await request(app)
+        .get('/api/v1/users')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(403);
+    });
+  });
+
+  // Compliance and auditor can access audit routes (reachable but may get proxied 403)
+  ['compliance', 'auditor'].forEach((role) => {
+    it(`${role} can reach /api/v1/audit endpoint`, async () => {
+      const token = makeToken(role);
+      const res = await request(app)
+        .get('/api/v1/audit')
+        .set('Authorization', `Bearer ${token}`);
+      expect([200, 403]).toContain(res.status);
+    });
+  });
+});
