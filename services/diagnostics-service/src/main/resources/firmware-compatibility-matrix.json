@@ -1,0 +1,41 @@
+{
+  "compatibilityRules": [
+    {
+      "deviceModel": "UBR-BTS-A60",
+      "currentVersionMin": "3.0.0",
+      "targetVersionMin": "3.5.0",
+      "targetVersionMax": "4.0.0",
+      "upgradePolicy": "INCREMENTAL",
+      "comment": "BTS-A60 requires incremental upgrades; cannot skip major versions"
+    },
+    {
+      "deviceModel": "UBR-CPE-A61",
+      "currentVersionMin": "2.0.0",
+      "targetVersionMin": "3.0.0",
+      "targetVersionMax": "5.0.0",
+      "upgradePolicy": "DIRECT",
+      "comment": "CPE-A61 supports direct upgrades across major versions"
+    },
+    {
+      "deviceModel": "UBR-IDU-I22",
+      "currentVersionMin": "1.5.0",
+      "targetVersionMin": "2.0.0",
+      "targetVersionMax": "3.0.0",
+      "upgradePolicy": "INCREMENTAL",
+      "comment": "IDU-I22 requires incremental upgrades"
+    },
+    {
+      "deviceModel": "GENERIC",
+      "currentVersionMin": "1.0.0",
+      "targetVersionMin": "1.0.0",
+      "targetVersionMax": "10.0.0",
+      "upgradePolicy": "PERMISSIVE",
+      "comment": "Fallback rule for unrecognized device models"
+    }
+  ],
+  "policyRules": {
+    "minFirmwareVersion": "2.0.0",
+    "blockDowngrades": true,
+    "requireExplicitConfirmation": true
+  }
+}

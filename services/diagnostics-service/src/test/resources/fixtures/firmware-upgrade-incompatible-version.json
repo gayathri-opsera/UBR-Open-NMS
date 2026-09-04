@@ -1,0 +1,9 @@
+{
+  "imageRef": "firmware-images/ubr-bts-a60-v1.0.0.bin",
+  "expectedVersion": "1.0.0",
+  "checksumAlgorithm": "SHA256",
+  "checksumValue": "a3c7d8f9e2b1c4d5a6e7f8901234567890abcdef1234567890abcdef12345678",
+  "transferMethod": "HTTP",
+  "reason": "Downgrade test (should be blocked by policy)",
+  "comment": "This version is below the minimum firmware version policy and should be rejected"
+}

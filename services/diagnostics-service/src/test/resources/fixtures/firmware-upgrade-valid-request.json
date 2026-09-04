@@ -1,0 +1,9 @@
+{
+  "imageRef": "firmware-images/ubr-bts-a60-v3.5.2.1.bin",
+  "expectedVersion": "3.5.2.1",
+  "checksumAlgorithm": "SHA256",
+  "checksumValue": "a3c7d8f9e2b1c4d5a6e7f8901234567890abcdef1234567890abcdef12345678",
+  "transferMethod": "HTTP",
+  "reason": "Security patch for CVE-2024-1234",
+  "confirmation": true
+}

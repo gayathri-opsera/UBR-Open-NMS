@@ -1,0 +1,8 @@
+{
+  "imageRef": "firmware-images/ubr-bts-a60-v3.5.2.1.bin",
+  "expectedVersion": "3.5.2.1",
+  "checksumAlgorithm": "SHA256",
+  "checksumValue": "invalid-checksum",
+  "transferMethod": "HTTP",
+  "reason": "Test checksum mismatch"
+}

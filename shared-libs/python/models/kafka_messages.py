@@ -136,3 +136,35 @@ class InventorySyncMessage:
     organization_id: Optional[str] = None
     sync_source: Optional[Literal["mobinet", "telemedia", "manual"]] = None
     synced_at: Optional[datetime] = None
+
+
+@dataclass
+class FirmwareUpgradeCommand:
+    """
+    Firmware upgrade command message (WO-012).
+    Published to firmware-commands topic for worker execution.
+    """
+    job_id: str
+    device_id: str
+    command_type: Literal["FIRMWARE_UPGRADE"]
+    image_ref: str
+    expected_version: str
+    checksum_algorithm: Literal["SHA256", "MD5", "SHA1"]
+    checksum_value: str
+    transfer_method: Literal["SCP", "TFTP", "HTTP", "CALL_HOME"]
+    actor: str
+
+
+@dataclass
+class FirmwarePhaseCallback:
+    """
+    Firmware phase callback message (WO-012).
+    Worker publishes these to firmware-results topic to update job phases.
+    """
+    job_id: str
+    device_id: str
+    phase: Literal["TRANSFER_PROGRESS", "TRANSFER_COMPLETE", "CHECKSUM_SUCCESS",
+                   "CHECKSUM_FAILURE", "INSTALL_COMPLETE", "REBOOT_OBSERVED",
+                   "POSTCHECK_COMPLETE", "FAILURE"]
+    data: dict
+    timestamp: datetime
