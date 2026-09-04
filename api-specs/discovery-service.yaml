@@ -61,6 +61,40 @@ paths:
         "201": { description: Device registered and birth certificate stored, content: { application/json: { schema: { $ref: '#/components/schemas/CheckInResponse' } } } }
         "400": { description: Invalid payload or HMAC failure, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
         "409": { description: Device already registered, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "403": { description: Discovery mode disabled, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryModeDisabledError' } } } }
+
+  /discovery/modes:
+    get:
+      tags: [discovery]
+      summary: Get current discovery mode state for both modes (any authenticated role)
+      operationId: getDiscoveryModes
+      responses:
+        "200":
+          description: Current discovery mode policies
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscoveryModesResponse' }
+        "401": { description: Unauthorized }
+
+  /discovery/modes/{mode}:
+    parameters:
+      - name: mode
+        in: path
+        required: true
+        schema: { type: string, enum: [UBR_CALL_HOME, GENERIC_DISCOVERY] }
+    put:
+      tags: [discovery]
+      summary: Update discovery mode policy (admin only)
+      operationId: updateDiscoveryMode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateDiscoveryModeRequest' }
+      responses:
+        "200": { description: Updated policy, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryModeEntry' } } } }
+        "400": { description: Malformed rolloutLevel or missing reason }
+        "403": { description: Non-admin caller or denied audit event }
 
 components:
   securitySchemes:
@@ -91,3 +125,35 @@ components:
         deviceId:   { type: string, format: uuid }
         registered: { type: boolean }
         message:    { type: string }
+
+    DiscoveryModeEntry:
+      type: object
+      properties:
+        enabled:        { type: boolean }
+        rolloutLevel:   { type: string, enum: [disabled, beta, production] }
+        betaSignoffRef: { type: ["string", "null"] }
+        updatedBy:      { type: ["string", "null"] }
+        updatedAt:      { type: ["string", "null"], format: date-time }
+        reason:         { type: ["string", "null"] }
+
+    DiscoveryModesResponse:
+      type: object
+      properties:
+        genericDiscovery: { $ref: '#/components/schemas/DiscoveryModeEntry' }
+        ubrCallHome:      { $ref: '#/components/schemas/DiscoveryModeEntry' }
+
+    UpdateDiscoveryModeRequest:
+      type: object
+      required: [reason]
+      properties:
+        enabled:        { type: boolean }
+        rolloutLevel:   { type: string, enum: [disabled, beta, production] }
+        betaSignoffRef: { type: string }
+        reason:         { type: string, minLength: 1 }
+
+    DiscoveryModeDisabledError:
+      type: object
+      properties:
+        error:   { type: string, example: DISCOVERY_MODE_DISABLED }
+        mode:    { type: string }
+        message: { type: string }

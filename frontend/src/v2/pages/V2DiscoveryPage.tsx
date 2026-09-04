@@ -20,15 +20,32 @@ import { MetricCard } from '../components/common/MetricCard';
 import { LoadingState, EmptyState } from '../components/common/States';
 import { useToast } from '../components/common/Toast';
 import { logger } from '../utils/logger';
+import { apiClient } from '../../api/client';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type DiscoveryTab = 'provisioning' | 'auth_failures' | 'all';
+type DiscoveryTab = 'provisioning' | 'auth_failures' | 'all' | 'mode_admin';
 
 const TAB_LABELS: Record<DiscoveryTab, string> = {
   provisioning:  'Provisioning Queue',
   auth_failures: 'Auth Failures',
   all:           'All Discovered',
+  mode_admin:    'Mode Admin',
 };
+
+// ── Discovery mode entry shape (WO-001) ──────────────────────────────────────
+interface DiscoveryModeEntry {
+  enabled: boolean;
+  rolloutLevel: 'disabled' | 'beta' | 'production';
+  betaSignoffRef: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+  reason: string | null;
+}
+
+interface DiscoveryModesResponse {
+  genericDiscovery: DiscoveryModeEntry;
+  ubrCallHome: DiscoveryModeEntry;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function relTime(iso?: string): string {
@@ -445,6 +462,104 @@ function AllDiscoveredTab() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Tab 4 — Mode Administration (admin only, WO-001)
+// ─────────────────────────────────────────────────────────────────────────────
+function ModeAdminTab() {
+  const { addToast } = useToast();
+  const [modes, setModes] = useState<DiscoveryModesResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    apiClient.get<DiscoveryModesResponse>('/discovery/modes')
+      .then((r) => setModes(r.data))
+      .catch((e) => { logger.error('Mode fetch failed', e); addToast('Failed to load discovery modes', 'error'); })
+      .finally(() => setLoading(false));
+  }, [addToast]);
+
+  useEffect(load, [load]);
+
+  async function toggleMode(modeKey: 'UBR_CALL_HOME' | 'GENERIC_DISCOVERY', currentEnabled: boolean) {
+    setSaving(modeKey);
+    try {
+      await apiClient.put(`/discovery/modes/${modeKey}`, {
+        enabled: !currentEnabled,
+        rolloutLevel: !currentEnabled ? 'production' : 'disabled',
+        reason: `Mode ${!currentEnabled ? 'enabled' : 'disabled'} via UI`,
+      });
+      addToast(`${modeKey} ${!currentEnabled ? 'enabled' : 'disabled'}`, 'success');
+      load();
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number } };
+      if (err?.response?.status === 403) {
+        addToast('Admin role required to change discovery modes', 'error');
+      } else {
+        addToast('Failed to update discovery mode', 'error');
+      }
+      logger.error('Mode toggle failed', e);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  if (loading) return <LoadingState label="Loading discovery mode policies…" />;
+
+  const modeEntries: Array<{ key: 'UBR_CALL_HOME' | 'GENERIC_DISCOVERY'; label: string; entry: DiscoveryModeEntry }> = modes ? [
+    { key: 'UBR_CALL_HOME', label: 'UBR Call-Home', entry: modes.ubrCallHome },
+    { key: 'GENERIC_DISCOVERY', label: 'Generic Discovery', entry: modes.genericDiscovery },
+  ] : [];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ fontSize: 13, color: 'var(--vf-text-muted)', padding: '8px 0' }}>
+        Discovery modes control whether UBR call-home and generic SNMP/CLI discovery are active.
+        <strong style={{ color: '#f87171' }}> Admin role required to change.</strong>
+      </div>
+      {modeEntries.map(({ key, label, entry }) => (
+        <div key={key} style={{
+          background: 'var(--vf-surface)',
+          border: `1px solid ${entry.enabled ? 'rgba(34,197,94,0.3)' : 'var(--vf-border-subtle)'}`,
+          borderRadius: 10, padding: '20px 24px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 20,
+        }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>{label}</div>
+            <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginTop: 4 }}>
+              Rollout: <span style={{ fontWeight: 600 }}>{entry.rolloutLevel}</span>
+              {entry.betaSignoffRef && <> · Signoff: <span style={{ fontFamily: 'monospace' }}>{entry.betaSignoffRef}</span></>}
+            </div>
+            {entry.reason && (
+              <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 3 }}>Reason: {entry.reason}</div>
+            )}
+            {entry.updatedBy && (
+              <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 2 }}>
+                Last updated by <strong>{entry.updatedBy}</strong>
+                {entry.updatedAt ? ` at ${new Date(entry.updatedAt).toLocaleString()}` : ''}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Badge variant={entry.enabled ? 'success' : 'default'} dot>
+              {entry.enabled ? 'Enabled' : 'Disabled'}
+            </Badge>
+            <Button
+              variant={entry.enabled ? 'ghost' : 'primary'}
+              size="sm"
+              onClick={() => toggleMode(key, entry.enabled)}
+              disabled={saving === key}
+            >
+              {saving === key ? 'Saving…' : entry.enabled ? 'Disable' : 'Enable'}
+            </Button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────────────────────────────────────
 export default function V2DiscoveryPage() {
@@ -550,12 +665,14 @@ export default function V2DiscoveryPage() {
         <TabBtn id="provisioning"  active={tab === 'provisioning'}  count={stats.provisioning} onClick={setTab} />
         <TabBtn id="auth_failures" active={tab === 'auth_failures'} count={stats.authFails}    onClick={setTab} />
         <TabBtn id="all"           active={tab === 'all'}                                      onClick={setTab} />
+        <TabBtn id="mode_admin"    active={tab === 'mode_admin'}                               onClick={setTab} />
       </div>
 
       {/* Tab content */}
       {tab === 'provisioning'  && <ProvisioningTab />}
       {tab === 'auth_failures' && <AuthFailuresTab />}
       {tab === 'all'           && <AllDiscoveredTab />}
+      {tab === 'mode_admin'    && <ModeAdminTab />}
     </div>
   );
 }
