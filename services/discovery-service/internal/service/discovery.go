@@ -33,6 +33,12 @@ var ErrDeviceNotFound = errors.New("device not found or not authorized")
 // ErrSecretStoreUnavailable is returned when the secret store is unavailable (WO-010).
 var ErrSecretStoreUnavailable = errors.New("secret store unavailable")
 
+// ErrInvalidScope is returned when discovery scope validation fails (WO-011).
+var ErrInvalidScope = errors.New("invalid discovery scope")
+
+// ErrScopeTooLarge is returned when scope exceeds maximum size (WO-011).
+var ErrScopeTooLarge = errors.New("scope exceeds maximum allowed size")
+
 // Publisher abstracts Kafka publishing for testability.
 type Publisher interface {
 	PublishDevice(d model.DiscoveredDevice) error
@@ -565,4 +571,239 @@ func isValidSerialNumber(serial string) bool {
 		}
 	}
 	return true
+}
+
+// ── WO-011: Discovery scope validation and run creation ──────────────────────
+
+const MaxScopeSize = 10000 // Maximum total IP addresses across all scope entries
+
+// ValidateAndNormalizeScope validates discovery scope entries and removes duplicates (WO-011).
+func ValidateAndNormalizeScope(scope []model.ScopeEntry) ([]model.ScopeEntry, []model.ValidationError, error) {
+	if len(scope) == 0 {
+		return nil, []model.ValidationError{{Field: "scope", Message: "scope cannot be empty"}}, ErrInvalidScope
+	}
+
+	seen := make(map[string]bool)
+	normalized := []model.ScopeEntry{}
+	fieldErrors := []model.ValidationError{}
+	totalSize := 0
+
+	for i, entry := range scope {
+		fieldPrefix := fmt.Sprintf("scope[%d]", i)
+
+		// Validate type
+		if entry.Type != "CIDR" && entry.Type != "IP" && entry.Type != "SEED" {
+			fieldErrors = append(fieldErrors, model.ValidationError{
+				Field:   fieldPrefix + ".type",
+				Message: fmt.Sprintf("invalid type '%s': must be CIDR, IP, or SEED", entry.Type),
+			})
+			continue
+		}
+
+		// Validate value
+		if entry.Value == "" {
+			fieldErrors = append(fieldErrors, model.ValidationError{
+				Field:   fieldPrefix + ".value",
+				Message: "value cannot be empty",
+			})
+			continue
+		}
+
+		// Type-specific validation
+		switch entry.Type {
+		case "CIDR":
+			if !isValidCIDR(entry.Value) {
+				fieldErrors = append(fieldErrors, model.ValidationError{
+					Field:   fieldPrefix + ".value",
+					Message: fmt.Sprintf("invalid CIDR notation: %s", entry.Value),
+				})
+				continue
+			}
+			size := estimateCIDRSize(entry.Value)
+			totalSize += size
+
+		case "IP":
+			if !isValidIPAddress(entry.Value) {
+				fieldErrors = append(fieldErrors, model.ValidationError{
+					Field:   fieldPrefix + ".value",
+					Message: fmt.Sprintf("invalid IP address: %s", entry.Value),
+				})
+				continue
+			}
+			totalSize++
+
+		case "SEED":
+			if !isValidHostname(entry.Value) && !isValidIPAddress(entry.Value) {
+				fieldErrors = append(fieldErrors, model.ValidationError{
+					Field:   fieldPrefix + ".value",
+					Message: fmt.Sprintf("invalid hostname or IP: %s", entry.Value),
+				})
+				continue
+			}
+			totalSize++
+		}
+
+		// Check for duplicates
+		key := entry.Type + ":" + entry.Value
+		if seen[key] {
+			continue // Skip duplicate
+		}
+		seen[key] = true
+
+		normalized = append(normalized, entry)
+	}
+
+	if len(fieldErrors) > 0 {
+		return nil, fieldErrors, ErrInvalidScope
+	}
+
+	// Check maximum scope size
+	if totalSize > MaxScopeSize {
+		return nil, []model.ValidationError{{
+			Field:   "scope",
+			Message: fmt.Sprintf("total scope size (%d) exceeds maximum allowed (%d)", totalSize, MaxScopeSize),
+		}}, ErrScopeTooLarge
+	}
+
+	return normalized, nil, nil
+}
+
+// isValidCIDR checks if a string is valid CIDR notation.
+func isValidCIDR(cidr string) bool {
+	parts := strings.Split(cidr, "/")
+	if len(parts) != 2 {
+		return false
+	}
+	if !isValidIPAddress(parts[0]) {
+		return false
+	}
+	// Validate prefix length
+	prefix := parts[1]
+	for _, c := range prefix {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// estimateCIDRSize estimates the number of hosts in a CIDR block.
+func estimateCIDRSize(cidr string) int {
+	parts := strings.Split(cidr, "/")
+	if len(parts) != 2 {
+		return 1
+	}
+	// Simple estimation: 2^(32-prefix) for IPv4
+	// For this implementation, just use a conservative estimate
+	prefix := parts[1]
+	if prefix == "24" {
+		return 256
+	} else if prefix == "16" {
+		return 65536
+	} else if prefix == "32" {
+		return 1
+	}
+	return 256 // Default conservative estimate
+}
+
+// isValidIPAddress checks if a string is a valid IPv4 or IPv6 address.
+func isValidIPAddress(ip string) bool {
+	// Simple IPv4 validation
+	parts := strings.Split(ip, ".")
+	if len(parts) == 4 {
+		for _, part := range parts {
+			if len(part) == 0 || len(part) > 3 {
+				return false
+			}
+			for _, c := range part {
+				if c < '0' || c > '9' {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	// Simple IPv6 validation (contains colons)
+	if strings.Contains(ip, ":") {
+		return len(ip) > 2 // Basic check
+	}
+	return false
+}
+
+// isValidHostname checks if a string is a valid hostname.
+func isValidHostname(hostname string) bool {
+	if len(hostname) == 0 || len(hostname) > 253 {
+		return false
+	}
+	// Basic hostname validation: alphanumeric, dots, hyphens
+	for _, c := range hostname {
+		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '.' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// ── WO-011: Discovery run repository (in-memory for local dev) ───────────────
+
+// DiscoveryRunStore stores discovery run records (WO-011).
+type DiscoveryRunStore struct {
+	mu   sync.RWMutex
+	runs map[string]*model.DiscoveryRun
+}
+
+func NewDiscoveryRunStore() *DiscoveryRunStore {
+	return &DiscoveryRunStore{
+		runs: make(map[string]*model.DiscoveryRun),
+	}
+}
+
+func (s *DiscoveryRunStore) Create(run *model.DiscoveryRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runs[run.ID] = run
+	return nil
+}
+
+func (s *DiscoveryRunStore) Get(id string) (*model.DiscoveryRun, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	run, ok := s.runs[id]
+	return run, ok
+}
+
+// CreateDiscoveryRun validates scope and creates a discovery run record (WO-011).
+func (s *DiscoveryService) CreateDiscoveryRun(req *model.DiscoveryRunRequest, createdBy string, runStore *DiscoveryRunStore) (*model.DiscoveryRunResponse, []model.ValidationError, error) {
+	// Validate and normalize scope
+	normalized, fieldErrors, err := ValidateAndNormalizeScope(req.Scope)
+	if err != nil {
+		return nil, fieldErrors, err
+	}
+
+	// Create discovery run record
+	run := &model.DiscoveryRun{
+		ID:              uuid.NewString(),
+		NormalizedScope: normalized,
+		Status:          "CREATED",
+		CreatedBy:       createdBy,
+		CreatedAt:       time.Now().UTC(),
+		ValidationNotes: fmt.Sprintf("Validated %d scope entries", len(normalized)),
+	}
+
+	// Persist run
+	if err := runStore.Create(run); err != nil {
+		return nil, nil, fmt.Errorf("failed to persist discovery run: %w", err)
+	}
+
+	// Build response
+	response := &model.DiscoveryRunResponse{
+		RunID:             run.ID,
+		Status:            run.Status,
+		NormalizedScope:   run.NormalizedScope,
+		CreatedBy:         run.CreatedBy,
+		CreatedAt:         run.CreatedAt,
+		ValidationSummary: run.ValidationNotes,
+	}
+
+	return response, nil, nil
 }

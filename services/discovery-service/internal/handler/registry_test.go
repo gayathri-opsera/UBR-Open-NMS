@@ -14,6 +14,7 @@ import (
 // TestServiceRegistry_Success verifies the registry endpoint with valid recurse=1 parameter.
 func TestServiceRegistry_Success(t *testing.T) {
 	store := service.NewDeviceStore()
+	runStore := service.NewDiscoveryRunStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	svc.SetServiceURLs(
 		"https://auth.local:3000",
@@ -21,7 +22,7 @@ func TestServiceRegistry_Success(t *testing.T) {
 		"https://event.local:8083",
 		"wss://realtime.local:8084",
 	)
-	h := New(svc, store)
+	h := New(svc, store, runStore)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery/v1/kv/services?recurse=1", nil)
 	req.Header.Set("X-Correlation-ID", "test-corr-id")
@@ -75,7 +76,8 @@ func TestServiceRegistry_MissingRecurse(t *testing.T) {
 	store := service.NewDeviceStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	svc.SetServiceURLs("http://a:3000", "http://b:8082", "http://c:8083", "ws://d:8084")
-	h := New(svc, store)
+	runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery/v1/kv/services", nil)
 	req.Header.Set("X-Correlation-ID", "test-corr-id")
@@ -97,7 +99,8 @@ func TestServiceRegistry_InvalidRecurseValue(t *testing.T) {
 			store := service.NewDeviceStore()
 			svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 			svc.SetServiceURLs("http://a:3000", "http://b:8082", "http://c:8083", "ws://d:8084")
-			h := New(svc, store)
+			runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 			req := httptest.NewRequest(http.MethodGet, "/discovery/v1/kv/services?recurse="+recurseValue, nil)
 			req.Header.Set("X-Correlation-ID", "test-corr-id")
@@ -117,7 +120,8 @@ func TestServiceRegistry_ServiceUnavailable(t *testing.T) {
 	store := service.NewDeviceStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	// Do not set service URLs (incomplete configuration)
-	h := New(svc, store)
+	runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery/v1/kv/services?recurse=1", nil)
 	req.Header.Set("X-Correlation-ID", "test-corr-id")
@@ -135,7 +139,8 @@ func TestServiceRegistry_UnknownQueryParams(t *testing.T) {
 	store := service.NewDeviceStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	svc.SetServiceURLs("http://a:3000", "http://b:8082", "http://c:8083", "ws://d:8084")
-	h := New(svc, store)
+	runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery/v1/kv/services?recurse=1&extra=foo&bar=baz", nil)
 	req.Header.Set("X-Correlation-ID", "test-corr-id")

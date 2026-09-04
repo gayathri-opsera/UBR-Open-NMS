@@ -108,3 +108,53 @@ type DeviceSecret struct {
 	InvalidatedReason string
 	Active          bool
 }
+
+// ── WO-011: Generic discovery scope intake models ────────────────────────────
+
+// ScopeEntry represents a single discovery target (CIDR, IP, or seed device).
+type ScopeEntry struct {
+	Type            string   `json:"type"`                      // "CIDR", "IP", or "SEED"
+	Value           string   `json:"value"`                     // e.g., "192.168.1.0/24", "10.0.0.1", "device.example.com"
+	Label           string   `json:"label,omitempty"`           // Optional user-provided label
+	ManagementPorts []int    `json:"managementPorts,omitempty"` // Optional custom ports
+	Tags            []string `json:"tags,omitempty"`            // Optional tags
+}
+
+// DiscoveryRunRequest is the request payload for POST /api/v1/discovery/runs (WO-011).
+type DiscoveryRunRequest struct {
+	Scope []ScopeEntry `json:"scope"`
+}
+
+// DiscoveryRunResponse is the successful response for creating a discovery run (WO-011).
+type DiscoveryRunResponse struct {
+	RunID              string         `json:"runId"`
+	Status             string         `json:"status"`              // "CREATED" or "QUEUED"
+	NormalizedScope    []ScopeEntry   `json:"normalizedScope"`
+	CreatedBy          string         `json:"createdBy"`
+	CreatedAt          time.Time      `json:"createdAt"`
+	ValidationSummary  string         `json:"validationSummary"`
+}
+
+// ValidationError represents field-level validation errors (WO-011).
+type ValidationError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// ScopeValidationError is returned for invalid scope requests (WO-011).
+type ScopeValidationError struct {
+	Status      string            `json:"status"`
+	Reason      string            `json:"reason"`
+	Message     string            `json:"message"`
+	FieldErrors []ValidationError `json:"fieldErrors,omitempty"`
+}
+
+// DiscoveryRun represents a stored discovery run record (WO-011).
+type DiscoveryRun struct {
+	ID              string
+	NormalizedScope []ScopeEntry
+	Status          string
+	CreatedBy       string
+	CreatedAt       time.Time
+	ValidationNotes string
+}

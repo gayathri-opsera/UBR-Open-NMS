@@ -43,7 +43,10 @@ func main() {
 	inventoryAuth := service.NewLocalInventoryAuthorizer()
 	svc.SetAuthDependencies(secretStore, inventoryAuth)
 
-	h := handler.New(svc, store)
+	// Configure discovery run store (WO-011)
+	runStore := service.NewDiscoveryRunStore()
+
+	h := handler.New(svc, store, runStore)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -58,6 +61,7 @@ func main() {
 		r.Post("/check-in", h.CheckIn)
 		r.Get("/devices", h.Lookup)
 		r.Post("/scan", h.TriggerScan)
+		r.Post("/runs", h.CreateDiscoveryRun) // WO-011
 	})
 
 	// Southbound service registry for UBR call-home (WO-009)

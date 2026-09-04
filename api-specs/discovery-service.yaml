@@ -48,6 +48,32 @@ paths:
         "200": { description: Scan status, content: { application/json: { schema: { $ref: '#/components/schemas/ScanJob' } } } }
         "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
 
+  # ── WO-011: Generic discovery scope intake ───────────────────────────────
+  /discovery/runs:
+    post:
+      tags: [discovery]
+      summary: Create a generic discovery run with validated scope (operator+)
+      operationId: createDiscoveryRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoveryRunRequest' }
+      responses:
+        "201":
+          description: Discovery run created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscoveryRunResponse' }
+        "400":
+          description: Validation error (malformed CIDR, invalid IP, empty scope, duplicates, size limit exceeded)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScopeValidationError' }
+        "401": { description: Unauthenticated request }
+        "403": { description: Insufficient permissions (requires operator+ role) }
+        "500": { description: Internal server error }
+
   /discovery/check-in:
     post:
       tags: [discovery]
@@ -287,6 +313,54 @@ components:
         error:   { type: string, example: DISCOVERY_MODE_DISABLED }
         mode:    { type: string }
         message: { type: string }
+
+    # ── WO-011: Generic discovery scope intake models ────────────────────────
+    ScopeEntry:
+      description: Single discovery target (CIDR, IP, or seed device)
+      type: object
+      required: [type, value]
+      properties:
+        type:            { type: string, enum: [CIDR, IP, SEED] }
+        value:           { type: string, example: "192.168.1.0/24" }
+        label:           { type: string, example: "Office Network" }
+        managementPorts: { type: array, items: { type: integer }, example: [22, 161] }
+        tags:            { type: array, items: { type: string }, example: ["production", "core"] }
+
+    DiscoveryRunRequest:
+      description: Request payload for creating a discovery run
+      type: object
+      required: [scope]
+      properties:
+        scope: { type: array, items: { $ref: '#/components/schemas/ScopeEntry' }, minItems: 1 }
+
+    DiscoveryRunResponse:
+      description: Successful discovery run creation response
+      type: object
+      required: [runId, status, normalizedScope, createdBy, createdAt, validationSummary]
+      properties:
+        runId:             { type: string, format: uuid }
+        status:            { type: string, enum: [CREATED, QUEUED] }
+        normalizedScope:   { type: array, items: { $ref: '#/components/schemas/ScopeEntry' } }
+        createdBy:         { type: string, example: "user@example.com" }
+        createdAt:         { type: string, format: date-time }
+        validationSummary: { type: string, example: "Validated 3 scope entries" }
+
+    ScopeValidationError:
+      description: Validation error response for invalid scope
+      type: object
+      required: [status, reason, message]
+      properties:
+        status:  { type: string, example: "error" }
+        reason:  { type: string, example: "VALIDATION_ERROR" }
+        message: { type: string, example: "invalid discovery scope" }
+        fieldErrors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:   { type: string, example: "scope[0].value" }
+              message: { type: string, example: "invalid CIDR notation: 192.168.1/24" }
 
     # ── WO-010: Device authentication models ─────────────────────────────────
     DeviceAuthRequest:

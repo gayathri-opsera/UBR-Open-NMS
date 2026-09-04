@@ -18,7 +18,8 @@ func TestAuthenticateDevice_Success(t *testing.T) {
 	store := service.NewDeviceStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	svc.SetAuthDependencies(secretStore, inventoryAuth)
-	h := New(svc, store)
+	runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 	// Register authorized device
 	inventoryAuth.RegisterDevice("UBR-BTS-12345678", "AA:BB:CC:DD:EE:FF", "device-001")
@@ -68,7 +69,8 @@ func TestAuthenticateDevice_UnauthorizedDevice(t *testing.T) {
 	store := service.NewDeviceStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	svc.SetAuthDependencies(secretStore, inventoryAuth)
-	h := New(svc, store)
+	runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 	// Do not register device
 
@@ -98,7 +100,8 @@ func TestAuthenticateDevice_MalformedPayload(t *testing.T) {
 	store := service.NewDeviceStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	svc.SetAuthDependencies(secretStore, inventoryAuth)
-	h := New(svc, store)
+	runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/v1/device", bytes.NewReader([]byte("not-json")))
 	req.Header.Set("Content-Type", "application/json")
@@ -119,7 +122,8 @@ func TestAuthenticateDevice_MissingRequiredFields(t *testing.T) {
 	store := service.NewDeviceStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	svc.SetAuthDependencies(secretStore, inventoryAuth)
-	h := New(svc, store)
+	runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 	tests := []struct {
 		name    string
@@ -154,7 +158,8 @@ func TestAuthenticateDevice_InvalidMACFormat(t *testing.T) {
 	store := service.NewDeviceStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	svc.SetAuthDependencies(secretStore, inventoryAuth)
-	h := New(svc, store)
+	runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 	reqBody := model.DeviceAuthRequest{
 		SerialNumber: "UBR-BTS-12345678",
@@ -182,7 +187,8 @@ func TestAuthenticateDevice_KeyRotation(t *testing.T) {
 	store := service.NewDeviceStore()
 	svc := service.NewDiscoveryService("test-secret", 300, &noopPublisher{}, store)
 	svc.SetAuthDependencies(secretStore, inventoryAuth)
-	h := New(svc, store)
+	runStore := service.NewDiscoveryRunStore()
+	h := New(svc, store, runStore)
 
 	inventoryAuth.RegisterDevice("UBR-BTS-87654321", "11:22:33:44:55:66", "device-002")
 

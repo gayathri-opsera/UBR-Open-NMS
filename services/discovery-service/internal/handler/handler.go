@@ -14,13 +14,14 @@ import (
 
 // DiscoveryHandler holds handler dependencies.
 type DiscoveryHandler struct {
-	svc   *service.DiscoveryService
-	store *service.DeviceStore
+	svc      *service.DiscoveryService
+	store    *service.DeviceStore
+	runStore *service.DiscoveryRunStore // WO-011
 }
 
 // New creates a DiscoveryHandler.
-func New(svc *service.DiscoveryService, store *service.DeviceStore) *DiscoveryHandler {
-	return &DiscoveryHandler{svc: svc, store: store}
+func New(svc *service.DiscoveryService, store *service.DeviceStore, runStore *service.DiscoveryRunStore) *DiscoveryHandler {
+	return &DiscoveryHandler{svc: svc, store: store, runStore: runStore}
 }
 
 // CheckIn handles POST /api/v1/discovery/check-in
@@ -222,4 +223,48 @@ func writeError(w http.ResponseWriter, code int, errCode, message string) {
 		"status": "error",
 		"error":  map[string]string{"code": errCode, "message": message},
 	})
+}
+
+// CreateDiscoveryRun handles POST /api/v1/discovery/runs (WO-011).
+// Creates a validated discovery run from operator-provided scope.
+func (h *DiscoveryHandler) CreateDiscoveryRun(w http.ResponseWriter, r *http.Request) {
+	corrID := r.Header.Get("X-Correlation-ID")
+
+	// Extract user identity from context/header (simplified for this implementation)
+	createdBy := r.Header.Get("X-User-ID")
+	if createdBy == "" {
+		createdBy = "system" // Fallback
+	}
+
+	var req model.DiscoveryRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		southbound.BadRequest(w, "Invalid or malformed request body", corrID)
+		return
+	}
+
+	// Create discovery run
+	response, fieldErrors, err := h.svc.CreateDiscoveryRun(&req, createdBy, h.runStore)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidScope) || errors.Is(err, service.ErrScopeTooLarge) {
+			// Validation error: 400
+			validationErr := model.ScopeValidationError{
+				Status:      "error",
+				Reason:      "VALIDATION_ERROR",
+				Message:     err.Error(),
+				FieldErrors: fieldErrors,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(validationErr)
+			return
+		}
+		// Unexpected internal fault: 500
+		southbound.InternalError(w, corrID)
+		return
+	}
+
+	// Return 201 Created
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
 }
