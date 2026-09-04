@@ -4,10 +4,13 @@ package service
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +23,9 @@ var ErrInvalidSignature = errors.New("invalid HMAC-SHA256 signature")
 
 // ErrMissingFields is returned when required check-in fields are absent.
 var ErrMissingFields = errors.New("missing required check-in fields")
+
+// ErrServiceUnavailable is returned when service registry configuration is incomplete (WO-009).
+var ErrServiceUnavailable = errors.New("service registry configuration incomplete")
 
 // Publisher abstracts Kafka publishing for testability.
 type Publisher interface {
@@ -69,12 +75,17 @@ func (s *DeviceStore) FindByIP(ip string) (*model.DiscoveredDevice, bool) {
 	return d, ok
 }
 
-// DiscoveryService handles device check-ins.
+// DiscoveryService handles device check-ins and service registry (WO-009).
 type DiscoveryService struct {
-	hmacSecret      string
-	checkInInterval time.Duration
-	publisher       Publisher
-	store           *DeviceStore
+	hmacSecret         string
+	checkInInterval    time.Duration
+	publisher          Publisher
+	store              *DeviceStore
+	// Southbound service registry URLs (WO-009)
+	authServiceURL     string
+	checkinServiceURL  string
+	eventServiceURL    string
+	realtimeServiceURL string
 }
 
 func NewDiscoveryService(hmacSecret string, interval time.Duration, pub Publisher, store *DeviceStore) *DiscoveryService {
@@ -84,6 +95,14 @@ func NewDiscoveryService(hmacSecret string, interval time.Duration, pub Publishe
 		publisher:       pub,
 		store:           store,
 	}
+}
+
+// SetServiceURLs configures southbound service registry endpoints (WO-009).
+func (s *DiscoveryService) SetServiceURLs(auth, checkin, event, realtime string) {
+	s.authServiceURL = auth
+	s.checkinServiceURL = checkin
+	s.eventServiceURL = event
+	s.realtimeServiceURL = realtime
 }
 
 // VerifyHMAC checks the HMAC-SHA256 signature of the canonical JSON payload.
@@ -153,4 +172,112 @@ func (s *DiscoveryService) ProcessCheckIn(req *model.CheckInRequest) (*model.Dis
 
 	s.store.Upsert(device)
 	return device, nil
+}
+
+// BuildServiceRegistry builds the Consul-style KV registry for UBR call-home (WO-009).
+// Returns ErrServiceUnavailable if any required service URL is missing or malformed.
+func (s *DiscoveryService) BuildServiceRegistry() ([]model.KVEntry, error) {
+	// Validate all required service URLs are configured
+	if s.authServiceURL == "" || s.checkinServiceURL == "" || s.eventServiceURL == "" || s.realtimeServiceURL == "" {
+		return nil, ErrServiceUnavailable
+	}
+
+	entries := []model.KVEntry{}
+	now := int(time.Now().Unix())
+
+	// services/auth
+	authMeta, err := s.buildServiceMetadata(s.authServiceURL, "auth_path", "/api/v1/auth/device")
+	if err != nil {
+		return nil, fmt.Errorf("invalid auth service URL: %w", err)
+	}
+	entries = append(entries, model.KVEntry{
+		LockIndex:   0,
+		Key:         "services/auth",
+		Flags:       0,
+		Value:       authMeta,
+		CreateIndex: now,
+		ModifyIndex: now,
+	})
+
+	// services/checkin
+	checkinMeta, err := s.buildServiceMetadata(s.checkinServiceURL, "checkin_path", "/api/v1/checkin")
+	if err != nil {
+		return nil, fmt.Errorf("invalid checkin service URL: %w", err)
+	}
+	entries = append(entries, model.KVEntry{
+		LockIndex:   0,
+		Key:         "services/checkin",
+		Flags:       0,
+		Value:       checkinMeta,
+		CreateIndex: now,
+		ModifyIndex: now,
+	})
+
+	// services/event
+	eventMeta, err := s.buildServiceMetadata(s.eventServiceURL, "event_path", "/api/v1/events")
+	if err != nil {
+		return nil, fmt.Errorf("invalid event service URL: %w", err)
+	}
+	entries = append(entries, model.KVEntry{
+		LockIndex:   0,
+		Key:         "services/event",
+		Flags:       0,
+		Value:       eventMeta,
+		CreateIndex: now,
+		ModifyIndex: now,
+	})
+
+	// services/realtime
+	realtimeMeta, err := s.buildServiceMetadata(s.realtimeServiceURL, "ws_path", "/ws/v1/realtime")
+	if err != nil {
+		return nil, fmt.Errorf("invalid realtime service URL: %w", err)
+	}
+	entries = append(entries, model.KVEntry{
+		LockIndex:   0,
+		Key:         "services/realtime",
+		Flags:       0,
+		Value:       realtimeMeta,
+		CreateIndex: now,
+		ModifyIndex: now,
+	})
+
+	return entries, nil
+}
+
+// buildServiceMetadata creates base64-encoded ServiceMetadata JSON for a service URL.
+func (s *DiscoveryService) buildServiceMetadata(serviceURL, pathField, pathValue string) (string, error) {
+	u, err := url.Parse(serviceURL)
+	if err != nil {
+		return "", err
+	}
+
+	meta := model.ServiceMetadata{
+		Scheme:  u.Scheme,
+		Address: u.Host,
+	}
+
+	// IPv6 literal addresses must be preserved correctly (edge case from WO-009)
+	if strings.Contains(u.Host, "[") && strings.Contains(u.Host, "]") {
+		// Already in bracket notation, preserve as-is
+		meta.Address = u.Host
+	}
+
+	// Set the appropriate path field
+	switch pathField {
+	case "auth_path":
+		meta.AuthPath = pathValue
+	case "checkin_path":
+		meta.CheckinPath = pathValue
+	case "event_path":
+		meta.EventPath = pathValue
+	case "ws_path":
+		meta.WSPath = pathValue
+	}
+
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(metaJSON), nil
 }

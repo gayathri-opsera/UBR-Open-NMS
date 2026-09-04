@@ -50,3 +50,24 @@ type ScanRequest struct {
 	SNMP    bool   `json:"snmp"`
 	ICMP    bool   `json:"icmp"`
 }
+
+// KVEntry is a Consul-style service registry entry (WO-009).
+// Returned by GET /discovery/v1/kv/services?recurse=1 for UBR call-home devices.
+type KVEntry struct {
+	LockIndex   int    `json:"LockIndex"`
+	Key         string `json:"Key"`
+	Flags       int    `json:"Flags"`
+	Value       string `json:"Value"`       // base64-encoded ServiceMetadata JSON
+	CreateIndex int    `json:"CreateIndex"`
+	ModifyIndex int    `json:"ModifyIndex"`
+}
+
+// ServiceMetadata is the decoded Value payload for each service in the registry.
+type ServiceMetadata struct {
+	Scheme   string `json:"scheme"`           // "http" or "https"
+	Address  string `json:"address"`          // "hostname:port" or IPv6 literal
+	AuthPath string `json:"auth_path,omitempty"`     // for services/auth
+	CheckinPath string `json:"checkin_path,omitempty"` // for services/checkin
+	EventPath string `json:"event_path,omitempty"`   // for services/event
+	WSPath   string `json:"ws_path,omitempty"`      // for services/realtime
+}

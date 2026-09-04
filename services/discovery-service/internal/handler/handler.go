@@ -142,6 +142,35 @@ func (h *DiscoveryHandler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ServiceRegistry handles GET /discovery/v1/kv/services?recurse=1 (WO-009).
+// Returns Consul-style KV entries for UBR call-home device bootstrap.
+func (h *DiscoveryHandler) ServiceRegistry(w http.ResponseWriter, r *http.Request) {
+	corrID := r.Header.Get("X-Correlation-ID")
+
+	// Validate recurse=1 query parameter (exact firmware contract requirement)
+	recurse := r.URL.Query().Get("recurse")
+	if recurse != "1" {
+		southbound.BadRequest(w, "recurse=1 query parameter is required", corrID)
+		return
+	}
+
+	// Build service registry
+	entries, err := h.svc.BuildServiceRegistry()
+	if err != nil {
+		if errors.Is(err, service.ErrServiceUnavailable) {
+			// Service registry configuration incomplete: 503
+			southbound.ServiceUnavailable(w, corrID)
+			return
+		}
+		// Unexpected internal fault: 500
+		southbound.InternalError(w, corrID)
+		return
+	}
+
+	// Return Consul-style KV array
+	writeJSON(w, http.StatusOK, entries)
+}
+
 func writeJSON(w http.ResponseWriter, code int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

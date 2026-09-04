@@ -19,6 +19,11 @@ type Config struct {
 	MaxCheckInSeconds int
 	SyslogEnabled     bool
 	LogLevel          string
+	// Southbound service registry configuration (WO-009)
+	AuthServiceURL      string
+	CheckinServiceURL   string
+	EventServiceURL     string
+	RealtimeServiceURL  string
 }
 
 // Load reads configuration from environment, applying defaults.
@@ -38,6 +43,11 @@ func Load() *Config {
 		HMACSecret:       getEnv("HMAC_SECRET", "change-me-in-production"),
 		CheckInInterval:  time.Duration(intervalSec) * time.Second,
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
+		// Southbound service registry defaults for local/test environments (WO-009)
+		AuthServiceURL:     getEnv("AUTH_SERVICE_URL", "http://localhost:3000"),
+		CheckinServiceURL:  getEnv("CHECKIN_SERVICE_URL", "http://localhost:8082"),
+		EventServiceURL:    getEnv("EVENT_SERVICE_URL", "http://localhost:8083"),
+		RealtimeServiceURL: getEnv("REALTIME_SERVICE_URL", "ws://localhost:8084"),
 	}
 }
 

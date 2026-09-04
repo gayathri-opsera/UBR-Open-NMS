@@ -9,6 +9,8 @@ info:
 servers:
   - url: /api/v1
     description: Via API Gateway
+  - url: /discovery/v1
+    description: Southbound UBR call-home (direct to discovery service, mTLS)
 
 security:
   - BearerAuth: []
@@ -97,6 +99,50 @@ paths:
           headers:
             Retry-After:        { schema: { type: integer } }
             X-Retry-Jitter-Max: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+
+  # ── WO-009: Southbound service registry for UBR call-home ─────────────────
+  /kv/services:
+    get:
+      tags: [southbound]
+      summary: Southbound service registry for UBR call-home bootstrap (mTLS only)
+      operationId: getServiceRegistry
+      description: >
+        Returns Consul-style KV entries with base64-encoded service metadata for
+        authentication, check-in, event, and realtime WebSocket services. UBR devices
+        use this endpoint during bootstrap to discover service locations without hardcoded URLs.
+      security: []
+      parameters:
+        - name: recurse
+          in: query
+          required: true
+          description: Must be "1" per firmware contract
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: Service registry KV array (Consul-style)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KVEntry' }
+        "400":
+          description: Bad request (recurse != 1 or malformed query)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "503":
+          description: Service registry configuration incomplete
+          headers:
+            Retry-After:        { schema: { type: integer } }
+            X-Retry-Jitter-Max: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "500":
+          description: Internal server error
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
@@ -195,6 +241,31 @@ components:
         error:   { type: string, example: DISCOVERY_MODE_DISABLED }
         mode:    { type: string }
         message: { type: string }
+
+    # ── WO-009: Service registry models ─────────────────────────────────────
+    KVEntry:
+      description: Consul-style KV entry for service registry
+      type: object
+      required: [LockIndex, Key, Flags, Value, CreateIndex, ModifyIndex]
+      properties:
+        LockIndex:   { type: integer, example: 0 }
+        Key:         { type: string, example: "services/auth" }
+        Flags:       { type: integer, example: 0 }
+        Value:       { type: string, description: Base64-encoded ServiceMetadata JSON }
+        CreateIndex: { type: integer }
+        ModifyIndex: { type: integer }
+
+    ServiceMetadata:
+      description: Decoded Value payload for each service (base64-encoded in KVEntry.Value)
+      type: object
+      required: [scheme, address]
+      properties:
+        scheme:       { type: string, enum: [http, https, ws, wss] }
+        address:      { type: string, description: "host:port or IPv6 literal [::1]:port" }
+        auth_path:    { type: string, example: "/api/v1/auth/device" }
+        checkin_path: { type: string, example: "/api/v1/checkin" }
+        event_path:   { type: string, example: "/api/v1/events" }
+        ws_path:      { type: string, example: "/ws/v1/realtime" }
 
     # ── WO-005: Southbound error shapes ─────────────────────────────────────
     SouthboundErrorBody:

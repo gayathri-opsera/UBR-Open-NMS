@@ -35,6 +35,8 @@ func main() {
 	}
 
 	svc := service.NewDiscoveryService(cfg.HMACSecret, cfg.CheckInInterval, pub, store)
+	// Configure southbound service registry URLs (WO-009)
+	svc.SetServiceURLs(cfg.AuthServiceURL, cfg.CheckinServiceURL, cfg.EventServiceURL, cfg.RealtimeServiceURL)
 	h := handler.New(svc, store)
 
 	r := chi.NewRouter()
@@ -50,6 +52,11 @@ func main() {
 		r.Post("/check-in", h.CheckIn)
 		r.Get("/devices", h.Lookup)
 		r.Post("/scan", h.TriggerScan)
+	})
+
+	// Southbound service registry for UBR call-home (WO-009)
+	r.Route("/discovery/v1/kv", func(r chi.Router) {
+		r.Get("/services", h.ServiceRegistry)
 	})
 
 	server := &http.Server{
