@@ -84,11 +84,29 @@ paths:
         - name: to
           in: query
           schema: { type: string, format: date-time }
+        - name: retentionClass
+          in: query
+          schema: { type: string, enum: [audit, security, onboarding, alarm_incident, config_history, evidence_export, legacy] }
       responses:
         "200":
           description: Audit export file
           content:
             text/csv: { schema: { type: string, format: binary } }
+
+  /audit/retention-policies:
+    get:
+      tags: [audit]
+      summary: List retention policy catalog (compliance and auditor roles)
+      operationId: listRetentionPolicies
+      responses:
+        "200":
+          description: Retention policy catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RetentionPolicy' }
+        "403": { description: Forbidden }
 
 components:
   securitySchemes:
@@ -97,3 +115,11 @@ components:
     AuditEntry:   { $ref: 'components.yaml#/components/schemas/AuditEntry' }
     ErrorResponse: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
     PaginatedResponse: { $ref: 'components.yaml#/components/schemas/PaginatedResponse' }
+
+    RetentionPolicy:
+      type: object
+      properties:
+        retentionClass:          { type: string }
+        displayName:             { type: string }
+        minimumRetentionDays:    { type: integer }
+        applicableRecordTypes:   { type: array, items: { type: string } }
