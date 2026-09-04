@@ -17,6 +17,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -32,11 +34,34 @@ public class InventoryService {
     @Autowired(required = false)
     private com.ubrnms.inventory.repository.hierarchy.PreAssignmentRepository preAssignRepo;
 
+    @Autowired(required = false)
+    private com.ubrnms.inventory.repository.DiscoveryModePolicyRepository discoveryModePolicyRepo;
+
+    @Autowired(required = false)
+    private com.ubrnms.inventory.repository.CapabilityProfileRepository capabilityProfileRepo;
+
     @Value("${kafka.topics.inventory-sync}")
     private String inventorySyncTopic;
 
+    @Value("${kafka.topics.audit:audit-events}")
+    private String auditTopic;
+
     @Value("${inventory.search.default-radius-km:1.0}")
     private double defaultRadiusKm;
+
+    /** OID pattern for sysObjectID validation (WO-004). */
+    private static final Pattern OID_PATTERN = Pattern.compile("^[0-9]+(\\.[0-9]+)*$");
+    private static final int OID_MAX_LEN = 128;
+
+    /**
+     * UBR call-home is authoritative for these fields.
+     * Generic discovery must NOT overwrite them (WO-002).
+     */
+    private static final Set<String> UBR_PROTECTED_FIELDS = Set.of(
+        "serialNumber", "macAddress", "deviceType",
+        "identityAuthority", "onlineStateAuthority",
+        "bootstrapState", "lastCheckInAt", "lastRealtimeAt", "credentialRef"
+    );
 
     // ---- Device CRUD ----
 
@@ -44,6 +69,7 @@ public class InventoryService {
         if (device.getLatitude() != 0 || device.getLongitude() != 0) {
             device.setLocation(new double[]{device.getLongitude(), device.getLatitude()});
         }
+        if (device.getSchemaVersion() == null) device.setSchemaVersion("1.0");
         Device saved = deviceRepo.save(device);
         publishInventorySync(saved);
         return saved;
@@ -54,10 +80,15 @@ public class InventoryService {
     }
 
     public List<Device> listDevices(String deviceType, String status, int page, int limit) {
+        return listDevices(deviceType, status, null, page, limit);
+    }
+
+    public List<Device> listDevices(String deviceType, String status, String sysObjectID, int page, int limit) {
         List<Device> all = deviceRepo.findAll();
         return all.stream()
                 .filter(d -> deviceType == null || deviceType.equalsIgnoreCase(d.getDeviceType()))
                 .filter(d -> status == null || status.equalsIgnoreCase(d.getStatus()))
+                .filter(d -> sysObjectID == null || sysObjectID.equals(d.getSysObjectID()))
                 .skip((long) page * limit)
                 .limit(limit)
                 .collect(Collectors.toList());
@@ -73,6 +104,16 @@ public class InventoryService {
 
     public Optional<Device> findByIp(String ip) {
         return deviceRepo.findByIpAddress(ip);
+    }
+
+    /**
+     * Filter devices by sysObjectID — returns only generic-discovery devices matching the OID.
+     * UBR devices (which never have a sysObjectID) are excluded (WO-004).
+     */
+    public List<Device> filterBySysObjectId(String sysObjectID) {
+        return deviceRepo.findAll().stream()
+                .filter(d -> sysObjectID.equals(d.getSysObjectID()))
+                .collect(Collectors.toList());
     }
 
     public Device updateDevice(String id, Device updates) {
@@ -127,6 +168,54 @@ public class InventoryService {
         return bcRepo.findBySerialNumber(serialNumber);
     }
 
+    /**
+     * Authority-aware merge for upsert operations (WO-002).
+     *
+     * <p>UBR call-home is authoritative for identity fields; generic discovery
+     * may only update enrichment fields. Any attempt by a generic caller to
+     * overwrite UBR-protected fields is silently ignored and logged with
+     * correlation context (never logs secret values).
+     *
+     * @param existing      the persisted device record (may be a new empty Device)
+     * @param update        the incoming field map from the discovery event
+     * @param callerParadigm the discovery paradigm of the caller (UBR_CALL_HOME or GENERIC_*)
+     * @return the merged device, not yet persisted
+     */
+    public Device mergeWithAuthority(Device existing, Map<String, Object> update, String callerParadigm) {
+        boolean isUbr = "UBR_CALL_HOME".equalsIgnoreCase(callerParadigm);
+
+        for (Map.Entry<String, Object> entry : update.entrySet()) {
+            String field = entry.getKey();
+            Object value = entry.getValue();
+            if (value == null) continue;
+
+            // Generic callers may not overwrite UBR-protected fields
+            if (!isUbr && UBR_PROTECTED_FIELDS.contains(field)
+                    && "UBR".equalsIgnoreCase(existing.getIdentityAuthority())) {
+                log.warn(
+                    "Generic discovery attempted to overwrite UBR-protected field '{}' on device serial=[redacted], correlation={}; preserving existing value",
+                    field, update.getOrDefault("correlationId", "n/a")
+                );
+                continue;
+            }
+
+            applyField(existing, field, value, callerParadigm);
+        }
+
+        // Assign defaults when first-time creation
+        if (existing.getSchemaVersion() == null) existing.setSchemaVersion("1.0");
+        if (existing.getDiscoveryParadigm() == null) existing.setDiscoveryParadigm(callerParadigm);
+
+        // Assign capability profile if not yet set
+        if (existing.getCapabilityProfileId() == null) {
+            assignDefaultCapabilityProfile(existing);
+        }
+
+        return existing;
+    }
+
+    // ---- Upsert from discovery ----
+
     /** Upsert device from Kafka device-discovered event (idempotent). Validates pre-assignment. */
     public Device upsertFromDiscovery(Map<String, Object> event) {
         String serial = (String) event.get("serialNumber");
@@ -145,7 +234,7 @@ public class InventoryService {
                     ));
                     kafkaTemplate.send("raw-alarms", serial, alarmPayload);
                 } catch (Exception e) {
-                    log.error("Failed to publish unassigned device alarm for {}", serial, e);
+                    log.error("Failed to publish unassigned device alarm for serial=[redacted]", e);
                 }
                 throw new NotPreAssignedException("Device not pre-assigned: " + serial);
             }
@@ -154,28 +243,131 @@ public class InventoryService {
             preAssignRepo.save(pa.get());
         }
 
+        String callerParadigm = (String) event.getOrDefault("discoveryParadigm", "UNKNOWN");
         Device device = deviceRepo.findBySerialNumber(serial).orElse(new Device());
-        device.setSerialNumber(serial);
-        device.setMacAddress((String) event.get("macAddress"));
-        device.setIpAddress((String) event.get("ipAddress"));
-        device.setDeviceType((String) event.getOrDefault("deviceType", "UNKNOWN"));
-        device.setSoftwareVersion((String) event.get("softwareVersion"));
-        device.setStatus("ACTIVE");
-        Number lat = (Number) event.get("latitude");
-        Number lon = (Number) event.get("longitude");
-        if (lat != null && lon != null) {
-            device.setLatitude(lat.doubleValue());
-            device.setLongitude(lon.doubleValue());
-            device.setLocation(new double[]{lon.doubleValue(), lat.doubleValue()});
+
+        // Route through authority merge
+        device = mergeWithAuthority(device, event, callerParadigm);
+
+        // Validate and apply sysObjectID for generic devices (WO-004)
+        if (event.containsKey("sysObjectID")) {
+            String oid = (String) event.get("sysObjectID");
+            if (oid != null && !oid.isBlank()) {
+                validateSysObjectId(oid);
+                device.setSysObjectID(oid);
+            }
         }
-        Number azimuth = (Number) event.get("azimuth");
-        if (azimuth != null) device.setAzimuth(azimuth.doubleValue());
-        Number uptime = (Number) event.get("uptimeSeconds");
-        if (uptime != null) device.setUptimeSeconds(uptime.longValue());
+
+        // Emit audit event for discovery mode change audit trail (WO-006)
+        publishOnboardingAuditEvent(device, callerParadigm);
 
         Device saved = deviceRepo.save(device);
         publishInventorySync(saved);
         return saved;
+    }
+
+    // ── sysObjectID validation (WO-004) ──────────────────────────────────────
+
+    /**
+     * Validates a sysObjectID string against OID format rules.
+     * Pattern: dotted-numeric segments only, max 128 chars.
+     * Rejects empty, alphabetic tokens, path-like input, excessively long values.
+     */
+    public void validateSysObjectId(String oid) {
+        if (oid == null || oid.isBlank()) {
+            throw new ValidationException("sysObjectID must not be empty");
+        }
+        if (oid.length() > OID_MAX_LEN) {
+            throw new ValidationException("sysObjectID exceeds maximum length of " + OID_MAX_LEN + " characters");
+        }
+        if (!OID_PATTERN.matcher(oid).matches()) {
+            throw new ValidationException(
+                "sysObjectID must be a dotted-numeric OID (e.g. 1.3.6.1.4.1.9) — received: [redacted]"
+            );
+        }
+    }
+
+    // ── private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Applies a single field from a discovery event to a device, respecting authority rules.
+     * UBR-only fields are set unconditionally from UBR callers; generic callers
+     * are limited to enrichment fields only.
+     */
+    @SuppressWarnings("unchecked")
+    private void applyField(Device device, String field, Object value, String callerParadigm) {
+        switch (field) {
+            // --- Shared identity (set by UBR or first writer) ---
+            case "serialNumber"    -> device.setSerialNumber(str(value));
+            case "macAddress"      -> device.setMacAddress(str(value));
+            case "deviceType"      -> device.setDeviceType(str(value));
+            case "ipAddress"       -> device.setIpAddress(str(value));
+            // --- UBR-authoritative fields ---
+            case "identityAuthority"    -> device.setIdentityAuthority(str(value));
+            case "onlineStateAuthority" -> device.setOnlineStateAuthority(str(value));
+            case "bootstrapState"       -> device.setBootstrapState(str(value));
+            case "lastCheckInAt"        -> device.setLastCheckInAt(toInstant(value));
+            case "lastRealtimeAt"       -> device.setLastRealtimeAt(toInstant(value));
+            // credentialRef is never logged or surfaced — stored opaquely
+            case "credentialRef"        -> device.setCredentialRef(str(value));
+            // --- Enrichment fields (generic or UBR may set) ---
+            case "model"             -> device.setModel(str(value));
+            case "firmwareVersion"   -> device.setFirmwareVersion(str(value));
+            case "softwareVersion"   -> device.setSoftwareVersion(str(value));
+            case "status"            -> device.setStatus(str(value));
+            case "configVersion"     -> device.setConfigVersion(str(value));
+            case "capabilityProfileId" -> device.setCapabilityProfileId(str(value));
+            case "discoveryParadigm" -> device.setDiscoveryParadigm(str(value));
+            case "schemaVersion"     -> device.setSchemaVersion(str(value));
+            case "latitude" -> {
+                double lat = toDouble(value);
+                device.setLatitude(lat);
+                if (device.getLongitude() != 0) {
+                    device.setLocation(new double[]{device.getLongitude(), lat});
+                }
+            }
+            case "longitude" -> {
+                double lon = toDouble(value);
+                device.setLongitude(lon);
+                device.setLocation(new double[]{lon, device.getLatitude()});
+            }
+            case "azimuth"        -> device.setAzimuth(toDouble(value));
+            case "uptimeSeconds"  -> device.setUptimeSeconds(toLong(value));
+            case "region"         -> device.setRegion(str(value));
+            case "organizationId" -> device.setOrganizationId(str(value));
+            default -> { /* ignore unknown fields */ }
+        }
+    }
+
+    /**
+     * Assigns the default capability profile based on deviceType + discoveryParadigm (WO-003).
+     * Falls back to a UNKNOWN paradigm entry when no exact match exists.
+     */
+    private void assignDefaultCapabilityProfile(Device device) {
+        if (capabilityProfileRepo == null) return;
+        String paradigm = device.getDiscoveryParadigm();
+        String type = device.getDeviceType();
+        capabilityProfileRepo.findByDeviceTypeAndDiscoveryParadigm(type, paradigm)
+            .or(() -> capabilityProfileRepo.findByDiscoveryParadigm(paradigm))
+            .ifPresent(p -> device.setCapabilityProfileId(p.getProfileId()));
+    }
+
+    /** Emits an onboarding attempt audit event via Kafka (WO-006). */
+    private void publishOnboardingAuditEvent(Device device, String callerParadigm) {
+        try {
+            Map<String, Object> auditEvent = Map.of(
+                "action", "onboarding.attempt",
+                "actor", Map.of("userId", "system", "username", "inventory-service", "role", "system"),
+                "resource", Map.of("type", "device", "id",
+                    device.getSerialNumber() != null ? device.getSerialNumber() : "unknown"),
+                "outcome", "pending",
+                "discoveryParadigm", callerParadigm,
+                "timestamp", Instant.now().toString()
+            );
+            kafkaTemplate.send(auditTopic, device.getSerialNumber(), objectMapper.writeValueAsString(auditEvent));
+        } catch (Exception e) {
+            log.warn("Failed to publish onboarding audit event; continuing upsert", e);
+        }
     }
 
     private void publishInventorySync(Device device) {
@@ -183,15 +375,39 @@ public class InventoryService {
             String payload = objectMapper.writeValueAsString(device);
             kafkaTemplate.send(inventorySyncTopic, device.getSerialNumber(), payload);
         } catch (Exception e) {
-            log.error("Failed to publish inventory-sync for device {}", device.getSerialNumber(), e);
+            log.error("Failed to publish inventory-sync for device serial=[redacted]", e);
         }
     }
+
+    // ── Type coercions ────────────────────────────────────────────────────────
+
+    private static String str(Object v) {
+        return v != null ? v.toString() : null;
+    }
+
+    private static double toDouble(Object v) {
+        if (v instanceof Number n) return n.doubleValue();
+        try { return Double.parseDouble(v.toString()); } catch (Exception e) { return 0; }
+    }
+
+    private static long toLong(Object v) {
+        if (v instanceof Number n) return n.longValue();
+        try { return Long.parseLong(v.toString()); } catch (Exception e) { return 0; }
+    }
+
+    private static Instant toInstant(Object v) {
+        if (v instanceof Instant i) return i;
+        if (v instanceof String s) {
+            try { return Instant.parse(s); } catch (Exception e) { return null; }
+        }
+        return null;
+    }
+
+    // ---- Inner exception types ----
 
     public static class NotPreAssignedException extends RuntimeException {
         public NotPreAssignedException(String msg) { super(msg); }
     }
-
-    // ---- Inner exception types ----
 
     public static class ResourceNotFoundException extends RuntimeException {
         public ResourceNotFoundException(String msg) { super(msg); }
@@ -199,5 +415,9 @@ public class InventoryService {
 
     public static class ConflictException extends RuntimeException {
         public ConflictException(String msg) { super(msg); }
+    }
+
+    public static class ValidationException extends RuntimeException {
+        public ValidationException(String msg) { super(msg); }
     }
 }

@@ -38,6 +38,60 @@
     "organizationId":   { "type": "string" },
     "networkId":        { "type": "string" },
     "createdAt":        { "type": "string", "format": "date-time" },
-    "updatedAt":        { "type": "string", "format": "date-time" }
+    "updatedAt":        { "type": "string", "format": "date-time" },
+
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version for migration tracking. Default 1.0.",
+      "default": "1.0"
+    },
+    "discoveryParadigm": {
+      "type": "string",
+      "enum": ["UBR_CALL_HOME", "GENERIC_SNMP", "GENERIC_CLI", "UNKNOWN"],
+      "description": "How the device was discovered."
+    },
+    "identityAuthority": {
+      "type": "string",
+      "enum": ["UBR", "GENERIC", "UNKNOWN"],
+      "description": "Authoritative system for device identity fields."
+    },
+    "onlineStateAuthority": {
+      "type": "string",
+      "enum": ["UBR", "GENERIC", "UNKNOWN"],
+      "description": "Authoritative system for online/offline state."
+    },
+    "bootstrapState": {
+      "type": "string",
+      "enum": ["PENDING", "AUTHENTICATED", "CHECK_IN_RECEIVED", "REALTIME_ESTABLISHED", "FAILED", "UNKNOWN"],
+      "description": "UBR bootstrap handshake state. Only applicable for UBR_CALL_HOME devices."
+    },
+    "lastCheckInAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Timestamp of the most recent UBR check-in."
+    },
+    "lastRealtimeAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Timestamp of the most recent UBR real-time heartbeat."
+    },
+    "capabilityProfileId": {
+      "type": ["string", "null"],
+      "description": "Reference to CapabilityProfile document driving operation gating."
+    },
+    "credentialRef": {
+      "type": ["string", "null"],
+      "description": "Opaque reference to credential store entry. Never the credential value."
+    },
+    "configVersion": {
+      "type": ["string", "null"],
+      "description": "Config version string from the last successful config push."
+    },
+    "sysObjectID": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]+(\\.[0-9]+)*$",
+      "maxLength": 128,
+      "description": "SNMP sysObjectID for generic-discovery devices. Not present on UBR devices."
+    }
   }
 }

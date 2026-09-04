@@ -7,12 +7,27 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.List;
 
+/**
+ * Shared DeviceEntity model extended with authority, bootstrap, capability,
+ * and credential reference fields (WO-002) and sysObjectID (WO-004).
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class DeviceEntity {
 
     public enum DeviceType { BTS, CPE, IDU }
     public enum DeviceStatus { online, offline, provisioning, decommissioned }
+
+    /** How the device was discovered. */
+    public enum DiscoveryParadigm { UBR_CALL_HOME, GENERIC_SNMP, GENERIC_CLI, UNKNOWN }
+
+    /** Authoritative system for device identity / online-state fields. */
+    public enum IdentityAuthority { UBR, GENERIC, UNKNOWN }
+
+    /** UBR bootstrap handshake state. */
+    public enum BootstrapState {
+        PENDING, AUTHENTICATED, CHECK_IN_RECEIVED, REALTIME_ESTABLISHED, FAILED, UNKNOWN
+    }
 
     @JsonProperty("deviceId")    private String deviceId;
     @JsonProperty("serialNumber") private String serialNumber;
@@ -35,7 +50,27 @@ public class DeviceEntity {
     @JsonProperty("createdAt")    private Instant createdAt;
     @JsonProperty("updatedAt")    private Instant updatedAt;
 
+    // ── WO-002 authority fields ───────────────────────────────────────────────
+
+    @JsonProperty("schemaVersion")        private String schemaVersion;
+    @JsonProperty("discoveryParadigm")    private String discoveryParadigm;
+    @JsonProperty("identityAuthority")    private String identityAuthority;
+    @JsonProperty("onlineStateAuthority") private String onlineStateAuthority;
+    @JsonProperty("bootstrapState")       private String bootstrapState;
+    @JsonProperty("lastCheckInAt")        private Instant lastCheckInAt;
+    @JsonProperty("lastRealtimeAt")       private Instant lastRealtimeAt;
+    @JsonProperty("capabilityProfileId")  private String capabilityProfileId;
+    /** Opaque reference only — never the credential value. */
+    @JsonProperty("credentialRef")        private String credentialRef;
+    @JsonProperty("configVersion")        private String configVersion;
+
+    // ── WO-004 sysObjectID ───────────────────────────────────────────────────
+
+    @JsonProperty("sysObjectID")          private String sysObjectID;
+
     public DeviceEntity() {}
+
+    // ── Getters / setters ─────────────────────────────────────────────────────
 
     public String getDeviceId() { return deviceId; }
     public void setDeviceId(String deviceId) { this.deviceId = deviceId; }
@@ -77,4 +112,27 @@ public class DeviceEntity {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+
+    public String getSchemaVersion() { return schemaVersion; }
+    public void setSchemaVersion(String schemaVersion) { this.schemaVersion = schemaVersion; }
+    public String getDiscoveryParadigm() { return discoveryParadigm; }
+    public void setDiscoveryParadigm(String discoveryParadigm) { this.discoveryParadigm = discoveryParadigm; }
+    public String getIdentityAuthority() { return identityAuthority; }
+    public void setIdentityAuthority(String identityAuthority) { this.identityAuthority = identityAuthority; }
+    public String getOnlineStateAuthority() { return onlineStateAuthority; }
+    public void setOnlineStateAuthority(String onlineStateAuthority) { this.onlineStateAuthority = onlineStateAuthority; }
+    public String getBootstrapState() { return bootstrapState; }
+    public void setBootstrapState(String bootstrapState) { this.bootstrapState = bootstrapState; }
+    public Instant getLastCheckInAt() { return lastCheckInAt; }
+    public void setLastCheckInAt(Instant lastCheckInAt) { this.lastCheckInAt = lastCheckInAt; }
+    public Instant getLastRealtimeAt() { return lastRealtimeAt; }
+    public void setLastRealtimeAt(Instant lastRealtimeAt) { this.lastRealtimeAt = lastRealtimeAt; }
+    public String getCapabilityProfileId() { return capabilityProfileId; }
+    public void setCapabilityProfileId(String capabilityProfileId) { this.capabilityProfileId = capabilityProfileId; }
+    public String getCredentialRef() { return credentialRef; }
+    public void setCredentialRef(String credentialRef) { this.credentialRef = credentialRef; }
+    public String getConfigVersion() { return configVersion; }
+    public void setConfigVersion(String configVersion) { this.configVersion = configVersion; }
+    public String getSysObjectID() { return sysObjectID; }
+    public void setSysObjectID(String sysObjectID) { this.sysObjectID = sysObjectID; }
 }

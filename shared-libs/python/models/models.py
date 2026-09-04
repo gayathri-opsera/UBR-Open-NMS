@@ -10,10 +10,20 @@ DeviceStatus = Literal["online", "offline", "provisioning", "decommissioned"]
 AlarmSeverity = Literal["CRITICAL", "MAJOR", "MINOR", "WARNING", "INDETERMINATE", "CLEARED"]
 AlarmState = Literal["RAISED", "ACKNOWLEDGED", "CLEARED"]
 UserRole = Literal["admin", "operator", "user"]
-AuditOutcome = Literal["success", "failure", "denied"]
+AuditOutcome = Literal["success", "failure", "denied", "blocked", "pending"]
 KPIGranularity = Literal["raw", "15min", "1hour", "daily"]
 ConfigStatus = Literal["pending", "queued", "running", "completed", "failed", "rolled_back"]
 ConfigProtocol = Literal["NETCONF", "CLI", "TR-069"]
+DiscoveryParadigm = Literal["UBR_CALL_HOME", "GENERIC_SNMP", "GENERIC_CLI", "UNKNOWN"]
+IdentityAuthority = Literal["UBR", "GENERIC", "UNKNOWN"]
+BootstrapState = Literal[
+    "PENDING", "AUTHENTICATED", "CHECK_IN_RECEIVED",
+    "REALTIME_ESTABLISHED", "FAILED", "UNKNOWN"
+]
+RetentionClass = Literal[
+    "audit", "security", "onboarding", "alarm_incident",
+    "config_history", "evidence_export", "legacy"
+]
 
 
 @dataclass
@@ -48,6 +58,22 @@ class DeviceEntity:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+    # ── WO-002 authority fields ───────────────────────────────────────────────
+    schema_version: Optional[str] = "1.0"
+    discovery_paradigm: Optional[DiscoveryParadigm] = None
+    identity_authority: Optional[IdentityAuthority] = None
+    online_state_authority: Optional[IdentityAuthority] = None
+    bootstrap_state: Optional[BootstrapState] = None
+    last_check_in_at: Optional[datetime] = None
+    last_realtime_at: Optional[datetime] = None
+    capability_profile_id: Optional[str] = None
+    # Opaque reference only — never the credential value
+    credential_ref: Optional[str] = None
+    config_version: Optional[str] = None
+
+    # ── WO-004 sysObjectID ───────────────────────────────────────────────────
+    sys_object_id: Optional[str] = None
+
 
 @dataclass
 class AlarmRecord:
@@ -65,6 +91,8 @@ class AlarmRecord:
     acknowledged_by: Optional[str] = None
     cleared_at: Optional[datetime] = None
     ttl_expiry: Optional[datetime] = None
+    # ── WO-008 retention class ────────────────────────────────────────────────
+    retention_class: Optional[RetentionClass] = None
 
 
 @dataclass
@@ -149,6 +177,8 @@ class AuditEntry:
     timestamp: datetime
     payload: Optional[Dict] = None
     error_message: Optional[str] = None
+    # ── WO-008 retention class ────────────────────────────────────────────────
+    retention_class: Optional[RetentionClass] = None
 
 
 @dataclass

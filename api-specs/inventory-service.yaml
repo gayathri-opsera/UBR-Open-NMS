@@ -42,6 +42,10 @@ paths:
         - name: organizationId
           in: query
           schema: { type: string }
+        - name: sysObjectID
+          in: query
+          description: Filter by SNMP sysObjectID — returns only generic-discovery devices matching this OID
+          schema: { type: string, pattern: '^[0-9]+(\.[0-9]+)*$', maxLength: 128 }
       responses:
         "200":
           description: Paginated device list
@@ -225,6 +229,7 @@ components:
         serialNumber:   { type: string }
         deviceType:     { $ref: 'components.yaml#/components/schemas/DeviceType' }
         tags:           { type: array, items: { $ref: 'components.yaml#/components/schemas/DeviceTag' } }
+        sysObjectID:    { type: string, pattern: '^[0-9]+(\.[0-9]+)*$', maxLength: 128, description: 'Filter by SNMP sysObjectID (generic devices only)' }
         gpsRadius:
           type: object
           properties:

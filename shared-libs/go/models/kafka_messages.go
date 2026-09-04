@@ -73,4 +73,34 @@ type InventorySyncMessage struct {
 	OrganizationID string     `json:"organizationId,omitempty"`
 	SyncSource     string     `json:"syncSource,omitempty"`
 	SyncedAt       time.Time  `json:"syncedAt,omitempty"`
+
+	// WO-002: authority, bootstrap, capability, and credential reference fields
+	SchemaVersion        string    `json:"schemaVersion,omitempty"`
+	DiscoveryParadigm    string    `json:"discoveryParadigm,omitempty"`
+	IdentityAuthority    string    `json:"identityAuthority,omitempty"`
+	OnlineStateAuthority string    `json:"onlineStateAuthority,omitempty"`
+	BootstrapState       string    `json:"bootstrapState,omitempty"`
+	LastCheckInAt        time.Time `json:"lastCheckInAt,omitempty"`
+	LastRealtimeAt       time.Time `json:"lastRealtimeAt,omitempty"`
+	CapabilityProfileID  string    `json:"capabilityProfileId,omitempty"`
+	// CredentialRef is an opaque reference only — never the credential value.
+	CredentialRef        string    `json:"credentialRef,omitempty"`
+	ConfigVersion        string    `json:"configVersion,omitempty"`
+
+	// WO-004: sysObjectID for SNMP-discovered devices
+	SysObjectID          string    `json:"sysObjectID,omitempty"`
+}
+
+// SouthboundErrorEvent is published to the audit/alarm Kafka topics when a
+// southbound security or protocol error occurs (WO-005).
+// Secrets, HMAC values, and private keys must never appear in this struct.
+type SouthboundErrorEvent struct {
+	EventID       string    `json:"eventId"`
+	CorrelationID string    `json:"correlationId"`
+	DeviceSerial  string    `json:"deviceSerial,omitempty"` // sanitised device identity only
+	ErrorReason   string    `json:"errorReason"`             // e.g. HMAC_INVALID, MTLS_CERT_INVALID
+	ErrorCategory string    `json:"errorCategory"`           // auth_failure, retryable, redirect, etc.
+	HTTPStatus    int       `json:"httpStatus"`
+	Timestamp     time.Time `json:"timestamp"`
+	ServiceID     string    `json:"serviceId"`
 }

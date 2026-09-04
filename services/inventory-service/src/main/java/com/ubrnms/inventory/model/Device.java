@@ -18,6 +18,8 @@ import java.util.List;
 
 /**
  * Unified device document — stores BTS (NMS-IV-02) and CPE (NMS-IV-03) fields.
+ * Extended with authority, bootstrap, capability, and credential reference fields (WO-002)
+ * to support coexistence of UBR call-home and generic discovery without last-writer-wins corruption.
  */
 @Data
 @NoArgsConstructor
@@ -27,6 +29,25 @@ import java.util.List;
 @CompoundIndex(name = "idx_mac", def = "{'macAddress': 1}")
 @CompoundIndex(name = "idx_ip", def = "{'ipAddress': 1}")
 public class Device {
+
+    // ── Authority / paradigm enums (WO-002) ──────────────────────────────────
+
+    /** How this device was discovered. */
+    public enum DiscoveryParadigm {
+        UBR_CALL_HOME, GENERIC_SNMP, GENERIC_CLI, UNKNOWN
+    }
+
+    /** Which system is authoritative for identity and online-state fields. */
+    public enum IdentityAuthority {
+        UBR, GENERIC, UNKNOWN
+    }
+
+    /** Bootstrap handshake state for UBR call-home devices. */
+    public enum BootstrapState {
+        PENDING, AUTHENTICATED, CHECK_IN_RECEIVED, REALTIME_ESTABLISHED, FAILED, UNKNOWN
+    }
+
+    // ── Identity ──────────────────────────────────────────────────────────────
 
     @Id
     private String id;
@@ -86,6 +107,58 @@ public class Device {
 
     // --- Birth certificate reference ---
     private String birthCertificateId;
+
+    // ── WO-002: Authority, bootstrap, capability, credential ref ─────────────
+
+    /** Schema version for migration tracking. Defaults to "1.0". */
+    private String schemaVersion = "1.0";
+
+    /** How this device was discovered — determines which authority rules apply. */
+    @Indexed
+    private String discoveryParadigm;   // DiscoveryParadigm enum value
+
+    /**
+     * Which system is authoritative for serialNumber, macAddress, deviceType identity.
+     * UBR call-home sets UBR; generic discovery sets GENERIC.
+     */
+    @Indexed
+    private String identityAuthority;   // IdentityAuthority enum value
+
+    /**
+     * Which system is authoritative for online/offline state.
+     * UBR is authoritative when call-home is active; GENERIC otherwise.
+     */
+    private String onlineStateAuthority;  // IdentityAuthority enum value
+
+    /** UBR bootstrap handshake state — only meaningful for UBR_CALL_HOME devices. */
+    @Indexed
+    private String bootstrapState;        // BootstrapState enum value
+
+    /** Timestamp of the most recent UBR check-in message. */
+    private Instant lastCheckInAt;
+
+    /** Timestamp of the most recent UBR real-time WebSocket heartbeat. */
+    private Instant lastRealtimeAt;
+
+    /**
+     * Reference to the CapabilityProfile document for this device.
+     * Drives operation gating and protocol selection (WO-003).
+     */
+    @Indexed
+    private String capabilityProfileId;
+
+    /**
+     * Opaque reference to the credential store entry for this device.
+     * NEVER stores the credential value — only the reference key.
+     */
+    private String credentialRef;
+
+    /** Config version string from the last successful config push. */
+    private String configVersion;
+
+    /** SNMP sysObjectID for generic-discovery devices (WO-004). */
+    @Indexed
+    private String sysObjectID;
 
     @CreatedDate
     private Instant createdAt;
