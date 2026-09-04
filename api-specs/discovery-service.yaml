@@ -147,6 +147,52 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
 
+  # ── WO-010: Device authentication for per-device HMAC secrets ────────────
+  /device:
+    post:
+      tags: [southbound]
+      summary: Device authentication endpoint for UBR call-home (mTLS only)
+      operationId: authenticateDevice
+      description: >
+        Issues a unique per-device HMAC secret to authorized UBR devices. Devices exchange
+        serial number and MAC address for a signing secret used in subsequent call-home requests.
+        Unauthorized or removed devices receive HTTP 404 with no secret disclosure.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeviceAuthRequest' }
+      responses:
+        "200":
+          description: Device authenticated successfully, secret issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceAuthResponse' }
+        "400":
+          description: Bad request (malformed payload or validation failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "404":
+          description: Device not found or not authorized
+          content:
+            application/json:
+              schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+        "503":
+          description: Authentication service unavailable (secret store failure)
+          headers:
+            Retry-After:        { schema: { type: integer } }
+            X-Retry-Jitter-Max: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+
   /discovery/modes:
     get:
       tags: [discovery]
@@ -241,6 +287,30 @@ components:
         error:   { type: string, example: DISCOVERY_MODE_DISABLED }
         mode:    { type: string }
         message: { type: string }
+
+    # ── WO-010: Device authentication models ─────────────────────────────────
+    DeviceAuthRequest:
+      description: Request payload for device authentication (WO-010)
+      type: object
+      required: [serialNumber, macAddress, deviceType]
+      properties:
+        serialNumber:    { type: string, minLength: 8, maxLength: 32, example: "UBR-BTS-12345678" }
+        macAddress:      { type: string, pattern: "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", example: "AA:BB:CC:DD:EE:FF" }
+        deviceType:      { type: string, enum: [BTS, CPE, IDU], example: "BTS" }
+        firmwareVersion: { type: string, example: "v2.3.1" }
+
+    DeviceAuthResponse:
+      description: Successful authentication response with per-device secret (WO-010)
+      type: object
+      required: [deviceId, serialNumber, macAddress, secret, issuedAt, keyVersion]
+      properties:
+        deviceId:     { type: string, format: uuid }
+        serialNumber: { type: string }
+        macAddress:   { type: string }
+        secret:       { type: string, description: "HMAC signing secret (NEVER log this value)" }
+        issuedAt:     { type: string, format: date-time }
+        expiresAt:    { type: string, format: date-time, nullable: true }
+        keyVersion:   { type: integer, minimum: 1 }
 
     # ── WO-009: Service registry models ─────────────────────────────────────
     KVEntry:

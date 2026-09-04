@@ -71,3 +71,40 @@ type ServiceMetadata struct {
 	EventPath string `json:"event_path,omitempty"`   // for services/event
 	WSPath   string `json:"ws_path,omitempty"`      // for services/realtime
 }
+
+// ── WO-010: Device authentication models ────────────────────────────────────
+
+// DeviceAuthRequest is the payload for POST /auth/v1/device (WO-010).
+// UBR devices use this to obtain a unique per-device HMAC secret for call-home requests.
+type DeviceAuthRequest struct {
+	SerialNumber    string `json:"serialNumber"`
+	MACAddress      string `json:"macAddress"`
+	DeviceType      string `json:"deviceType"`
+	FirmwareVersion string `json:"firmwareVersion,omitempty"`
+}
+
+// DeviceAuthResponse is the successful authentication response (WO-010).
+// The Secret field contains the per-device HMAC key and must never be logged.
+type DeviceAuthResponse struct {
+	DeviceID    string    `json:"deviceId"`
+	SerialNumber string   `json:"serialNumber"`
+	MACAddress   string   `json:"macAddress"`
+	Secret       string   `json:"secret"`       // HMAC signing secret — NEVER log this value
+	IssuedAt     time.Time `json:"issuedAt"`
+	ExpiresAt    *time.Time `json:"expiresAt,omitempty"` // nil if no expiration
+	KeyVersion   int       `json:"keyVersion"`
+}
+
+// DeviceSecret represents the per-device authentication secret metadata (WO-010).
+// Stored in SecretStore to track secret lifecycle and invalidation state.
+type DeviceSecret struct {
+	DeviceID        string
+	SerialNumber    string
+	MACAddress      string
+	SecretValue     string    // HMAC secret — NEVER log this value
+	KeyVersion      int
+	IssuedAt        time.Time
+	InvalidatedAt   *time.Time
+	InvalidatedReason string
+	Active          bool
+}

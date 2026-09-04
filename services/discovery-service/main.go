@@ -37,6 +37,12 @@ func main() {
 	svc := service.NewDiscoveryService(cfg.HMACSecret, cfg.CheckInInterval, pub, store)
 	// Configure southbound service registry URLs (WO-009)
 	svc.SetServiceURLs(cfg.AuthServiceURL, cfg.CheckinServiceURL, cfg.EventServiceURL, cfg.RealtimeServiceURL)
+
+	// Configure authentication dependencies (WO-010)
+	secretStore := service.NewInMemorySecretStore()
+	inventoryAuth := service.NewLocalInventoryAuthorizer()
+	svc.SetAuthDependencies(secretStore, inventoryAuth)
+
 	h := handler.New(svc, store)
 
 	r := chi.NewRouter()
@@ -57,6 +63,11 @@ func main() {
 	// Southbound service registry for UBR call-home (WO-009)
 	r.Route("/discovery/v1/kv", func(r chi.Router) {
 		r.Get("/services", h.ServiceRegistry)
+	})
+
+	// Device authentication endpoint (WO-010)
+	r.Route("/auth/v1", func(r chi.Router) {
+		r.Post("/device", h.AuthenticateDevice)
 	})
 
 	server := &http.Server{

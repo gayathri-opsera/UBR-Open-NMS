@@ -159,7 +159,7 @@ func (h *DiscoveryHandler) ServiceRegistry(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		if errors.Is(err, service.ErrServiceUnavailable) {
 			// Service registry configuration incomplete: 503
-			southbound.ServiceUnavailable(w, corrID)
+			southbound.ServiceUnavailable(w, "Service registry configuration is incomplete.", corrID, southbound.DefaultRetryConfig)
 			return
 		}
 		// Unexpected internal fault: 500
@@ -169,6 +169,44 @@ func (h *DiscoveryHandler) ServiceRegistry(w http.ResponseWriter, r *http.Reques
 
 	// Return Consul-style KV array
 	writeJSON(w, http.StatusOK, entries)
+}
+
+// AuthenticateDevice handles POST /auth/v1/device (WO-010).
+// Issues per-device HMAC secrets for authorized UBR call-home devices.
+func (h *DiscoveryHandler) AuthenticateDevice(w http.ResponseWriter, r *http.Request) {
+	corrID := r.Header.Get("X-Correlation-ID")
+
+	var req model.DeviceAuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		southbound.BadRequest(w, "Invalid or malformed request body", corrID)
+		return
+	}
+
+	// Authenticate device and issue secret
+	response, err := h.svc.AuthenticateDevice(&req)
+	if err != nil {
+		if errors.Is(err, service.ErrDeviceNotFound) {
+			// Device not found or not authorized: 404
+			writeError(w, http.StatusNotFound, "DEVICE_NOT_FOUND", "Device not found or not authorized")
+			return
+		}
+		if errors.Is(err, service.ErrSecretStoreUnavailable) {
+			// Secret store unavailable: 503
+			southbound.ServiceUnavailable(w, "Authentication service temporarily unavailable.", corrID, southbound.DefaultRetryConfig)
+			return
+		}
+		if errors.Is(err, service.ErrMissingFields) || err.Error() == "invalid MAC address format: must be XX:XX:XX:XX:XX:XX" || err.Error() == "invalid serial number format: must be 8-32 alphanumeric characters" {
+			// Validation error: 400
+			southbound.BadRequest(w, err.Error(), corrID)
+			return
+		}
+		// Unexpected internal fault: 500
+		southbound.InternalError(w, corrID)
+		return
+	}
+
+	// Return authentication response
+	writeJSON(w, http.StatusOK, response)
 }
 
 func writeJSON(w http.ResponseWriter, code int, body interface{}) {
