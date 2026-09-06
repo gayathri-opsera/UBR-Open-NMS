@@ -64,6 +64,11 @@ public class FirmwareService {
             throw new IllegalStateException("Device " + deviceId + " is offline — firmware upgrades require an active connection");
         }
 
+        // Require explicit confirmation for destructive firmware operations (RTM REQ-008)
+        if (!Boolean.TRUE.equals(request.getConfirmation())) {
+            throw new IllegalArgumentException("Firmware upgrade requires explicit confirmation — set confirmation=true to proceed");
+        }
+
         // Create firmware job
         FirmwareJob job = new FirmwareJob();
         job.setDeviceId(deviceId);

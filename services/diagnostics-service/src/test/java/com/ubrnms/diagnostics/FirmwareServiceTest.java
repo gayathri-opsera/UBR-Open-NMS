@@ -57,6 +57,7 @@ public class FirmwareServiceTest {
         request.setChecksumValue("abc123def456");
         request.setTransferMethod("HTTP");
         request.setReason("Security patch");
+        request.setConfirmation(true);  // Explicit confirmation required
 
         when(deviceStatusChecker.isOnline(deviceId)).thenReturn(true);
         when(jobRepo.findByDeviceIdAndStatusIn(eq(deviceId), anyList())).thenReturn(Collections.emptyList());
@@ -89,6 +90,7 @@ public class FirmwareServiceTest {
         request.setChecksumAlgorithm("SHA256");
         request.setChecksumValue("abc123def456");
         request.setTransferMethod("HTTP");
+        request.setConfirmation(true);
 
         when(deviceStatusChecker.isOnline(deviceId)).thenReturn(true);
         when(jobRepo.findByDeviceIdAndStatusIn(eq(deviceId), anyList())).thenReturn(Collections.emptyList());
@@ -198,6 +200,7 @@ public class FirmwareServiceTest {
         request.setChecksumAlgorithm("SHA256");
         request.setChecksumValue("abc123def456");
         request.setTransferMethod("HTTP");
+        request.setConfirmation(true);
 
         FirmwareJob existingJob = createMockJob("fw-job-007", deviceId, "TRANSFER");
         when(deviceStatusChecker.isOnline(deviceId)).thenReturn(true);
@@ -221,6 +224,7 @@ public class FirmwareServiceTest {
         request.setChecksumAlgorithm("SHA256");
         request.setChecksumValue("abc123def456");
         request.setTransferMethod("HTTP");
+        request.setConfirmation(true);
 
         when(deviceStatusChecker.isOnline(deviceId)).thenReturn(false);
         when(jobRepo.findByDeviceIdAndStatusIn(eq(deviceId), anyList())).thenReturn(Collections.emptyList());
@@ -230,6 +234,29 @@ public class FirmwareServiceTest {
         });
 
         assertTrue(exception.getMessage().contains("offline"));
+    }
+
+    // ── Edge case: Missing confirmation (RTM REQ-008) ─────────────────────────
+
+    @Test
+    public void testSubmitFirmwareUpgrade_MissingConfirmation_Rejected() throws Exception {
+        String deviceId = "dev-bts-dn-010";
+        FirmwareUpgradeRequest request = new FirmwareUpgradeRequest();
+        request.setImageRef("firmware-images/ubr-bts-a60-v3.5.2.1.bin");
+        request.setExpectedVersion("3.5.2.1");
+        request.setChecksumAlgorithm("SHA256");
+        request.setChecksumValue("abc123def456");
+        request.setTransferMethod("HTTP");
+        // confirmation field not set (null) or false
+
+        when(deviceStatusChecker.isOnline(deviceId)).thenReturn(true);
+        when(jobRepo.findByDeviceIdAndStatusIn(eq(deviceId), anyList())).thenReturn(Collections.emptyList());
+
+        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+            firmwareService.submitFirmwareUpgrade(deviceId, request, "operator", "Admin");
+        });
+
+        assertTrue(exception.getMessage().contains("explicit confirmation"));
     }
 
     // ── Edge case: Idempotency ────────────────────────────────────────────────
@@ -244,6 +271,7 @@ public class FirmwareServiceTest {
         request.setChecksumValue("abc123def456");
         request.setTransferMethod("HTTP");
         request.setIdempotencyKey("idem-001");
+        request.setConfirmation(true);
 
         FirmwareJob existingJob = createMockJob("fw-job-008", deviceId, "ACCEPTED");
         existingJob.setIdempotencyKey("idem-001");

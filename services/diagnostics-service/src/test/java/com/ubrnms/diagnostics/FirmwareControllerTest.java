@@ -46,6 +46,7 @@ public class FirmwareControllerTest {
         request.setChecksumValue("abc123def456");
         request.setTransferMethod("HTTP");
         request.setReason("Security patch");
+        request.setConfirmation(true);
 
         FirmwareUpgradeResponse response = new FirmwareUpgradeResponse(
                 "fw-job-001",
@@ -78,6 +79,7 @@ public class FirmwareControllerTest {
         request.setChecksumAlgorithm("SHA256");
         request.setChecksumValue("abc123def456");
         request.setTransferMethod("HTTP");
+        request.setConfirmation(true);
 
         when(firmwareService.submitFirmwareUpgrade(eq("dev-bts-dn-010"), any(FirmwareUpgradeRequest.class), anyString(), anyString()))
                 .thenThrow(new IllegalStateException("Device dev-bts-dn-010 has an in-flight firmware operation"));
