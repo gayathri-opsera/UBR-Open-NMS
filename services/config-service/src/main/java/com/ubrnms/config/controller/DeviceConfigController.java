@@ -142,7 +142,12 @@ public class DeviceConfigController {
         } else {
             // Legacy format: convert flat status map to minimal delivery record shape
             List<Map<String, Object>> perDevice = job.getPerDeviceStatus().entrySet().stream()
-                    .map(e -> Map.of("deviceId", e.getKey(), "currentState", e.getValue()))
+                    .map(e -> {
+                        Map<String, Object> entry = new java.util.LinkedHashMap<>();
+                        entry.put("deviceId", e.getKey());
+                        entry.put("currentState", e.getValue());
+                        return entry;
+                    })
                     .collect(Collectors.toList());
             body.put("perDeviceStatus", perDevice);
         }

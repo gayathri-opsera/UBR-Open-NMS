@@ -4,6 +4,7 @@ import com.ubrnms.config.model.*;
 import com.ubrnms.config.service.ConfigService;
 import com.ubrnms.config.service.ConfigService.ConfirmationResult;
 import com.ubrnms.config.service.InventorySearchClient;
+import com.ubrnms.config.service.RollbackService;
 import com.ubrnms.config.service.TargetResolverService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ public class ConfigController {
 
     private final ConfigService configService;
     private final TargetResolverService targetResolverService;
+    private final RollbackService rollbackService;
 
     // ── Templates ──────────────────────────────────────────────────
 
@@ -235,5 +237,72 @@ public class ConfigController {
                 "totalDevices", job.getTotalDevices(),
                 "perDeviceStatus", job.getPerDeviceStatus()
         ));
+    }
+
+    // ── Config rollback (WO-052) ───────────────────────────────────────────────
+
+    /**
+     * POST /api/v1/config/history/{deviceId}/{versionId}/rollback
+     *
+     * Initiates a rollback of a failed configuration change.
+     * Only permitted when the targeted version is rollback-eligible and
+     * a prior APPLIED version exists as the restore target.
+     * Operator confirmation via 'reason' is required.
+     */
+    @PostMapping("/history/{deviceId}/{versionId}/rollback")
+    public ResponseEntity<?> rollbackVersion(
+            @PathVariable String deviceId,
+            @PathVariable String versionId,
+            @RequestBody RollbackRequest request) {
+
+        if (request.getReason() == null || request.getReason().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "REASON_REQUIRED",
+                            "message", "A non-empty 'reason' is required to initiate rollback.")));
+        }
+
+        String actor = request.getActor() != null ? request.getActor() : "system";
+        RollbackService.RollbackResult result =
+                rollbackService.initiateRollback(deviceId, versionId, request.getReason(), actor);
+
+        return switch (result.outcome) {
+            case ACCEPTED -> ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of(
+                    "status",        "accepted",
+                    "rollbackJobId", result.rollbackJob.getId(),
+                    "jobStatus",     result.rollbackJob.getStatus(),
+                    "startedAt",     result.rollbackJob.getStartedAt().toString(),
+                    "trackingUrl",   "/api/v1/config/jobs/" + result.rollbackJob.getId() + "/status"
+            ));
+            case VERSION_NOT_FOUND -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "VERSION_NOT_FOUND",
+                            "message", result.ineligibilityReason)));
+            case NOT_ROLLBACK_ELIGIBLE -> ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "NOT_ROLLBACK_ELIGIBLE",
+                            "message", result.ineligibilityReason)));
+            case NO_PRIOR_GOOD_VERSION -> ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "NO_PRIOR_GOOD_VERSION",
+                            "message", result.ineligibilityReason)));
+            case OPERATION_IN_FLIGHT -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "OPERATION_IN_FLIGHT",
+                            "message", result.ineligibilityReason)));
+            case AUDIT_PUBLISH_FAILED -> ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of(
+                    "status",        "accepted",
+                    "rollbackJobId", result.rollbackJob.getId(),
+                    "jobStatus",     result.rollbackJob.getStatus(),
+                    "startedAt",     result.rollbackJob.getStartedAt().toString(),
+                    "trackingUrl",   "/api/v1/config/jobs/" + result.rollbackJob.getId() + "/status",
+                    "warning",       "Audit event could not be published. Rollback job is running."
+            ));
+        };
     }
 }

@@ -30,13 +30,17 @@ class ConfigServiceDeliveryGateTest {
     @Mock DeviceStatusChecker statusChecker;
     @Mock DeviceEligibilityChecker eligibilityChecker;
     @Mock OperationGuard operationGuard;
+    @Mock PreviewStoreService previewStoreService;
+    @Mock DeliveryRouter deliveryRouter;
+    @Mock ConfigDiffSanitizer configDiffSanitizer;
 
     private ConfigService service;
 
     @BeforeEach
     void setup() throws Exception {
         service = new ConfigService(templateRepo, pendingRepo, versionRepo, jobRepo,
-                kafkaTemplate, new ObjectMapper(), statusChecker, eligibilityChecker, operationGuard);
+                kafkaTemplate, new ObjectMapper(), statusChecker, eligibilityChecker, operationGuard,
+                previewStoreService, deliveryRouter, configDiffSanitizer);
         setField(service, "configPushTopic", "config-push");
         setField(service, "ttlHours", 72);
     }
