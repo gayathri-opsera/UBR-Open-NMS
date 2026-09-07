@@ -48,6 +48,27 @@ public class ConfigJob {
     /** The job ID that is blocking this operation (when concurrencyState=BLOCKED). */
     private String blockedByJobId;
 
+    // ── WO-045: Confirmation gate fields ──────────────────────────────────────
+    /**
+     * Preview ID this job was created from.
+     * Links the accepted job back to the target resolver preview for audit purposes.
+     */
+    private String previewId;
+    /** PENDING | CONFIRMED | DENIED — lifecycle of the confirmation step. */
+    private String confirmationStatus;
+    /** Username or service account that confirmed execution. */
+    private String confirmedBy;
+    /** Timestamp when execution was confirmed. */
+    private Instant confirmedAt;
+    /** Target count that the operator confirmed — must match the preview at execution time. */
+    private int expectedTargetCount;
+    /** Optional external approval reference (ticket number, change record, etc.). */
+    private String approvalReference;
+    /** Whether the operator acknowledged warnings present in the preview. */
+    private boolean acceptedWarnings;
+    /** Client-supplied idempotency key — duplicate confirmation returns the existing job. */
+    private String idempotencyKey;
+
     public int getProgressPercent() {
         if (totalDevices == 0) return 100;
         return (int) (((double)(successCount + failureCount) / totalDevices) * 100);

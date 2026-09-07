@@ -36,11 +36,189 @@ public class ConfigService {
     // WO-018: per-device operation concurrency guard
     private final OperationGuard operationGuard;
 
+    // WO-045: preview store for confirmation gate
+    private final PreviewStoreService previewStoreService;
+
     @Value("${kafka.topics.config-push:config-push}")
     private String configPushTopic;
 
     @Value("${config.pending-command.ttl-hours:72}")
     private int ttlHours;
+
+    /**
+     * Maximum allowed deviation between expectedTargetCount in the request and the
+     * current preview's totalCount. Zero tolerance by default — any count mismatch blocks.
+     */
+    @Value("${config.confirmation.target-count-tolerance:0}")
+    private int targetCountTolerance;
+
+    // ── Confirmation gate (WO-045) ─────────────────────────────────
+
+    /**
+     * Confirmation result returned from {@link #confirmExecution}.
+     */
+    public enum ConfirmationOutcome {
+        ACCEPTED,
+        PREVIEW_NOT_FOUND,
+        PREVIEW_EXPIRED,
+        TARGET_COUNT_MISMATCH,
+        UNAUTHORIZED,
+        DUPLICATE_IDEMPOTENCY_KEY
+    }
+
+    public static class ConfirmationResult {
+        public final ConfirmationOutcome outcome;
+        public final ConfigJob job;
+        public final String conflictDetail;
+
+        private ConfirmationResult(ConfirmationOutcome outcome, ConfigJob job, String conflictDetail) {
+            this.outcome       = outcome;
+            this.job           = job;
+            this.conflictDetail = conflictDetail;
+        }
+
+        public static ConfirmationResult accepted(ConfigJob job) {
+            return new ConfirmationResult(ConfirmationOutcome.ACCEPTED, job, null);
+        }
+        public static ConfirmationResult notFound() {
+            return new ConfirmationResult(ConfirmationOutcome.PREVIEW_NOT_FOUND, null, "Preview not found — generate a new preview");
+        }
+        public static ConfirmationResult expired() {
+            return new ConfirmationResult(ConfirmationOutcome.PREVIEW_EXPIRED, null, "Preview has expired — generate a new preview and confirm again");
+        }
+        public static ConfirmationResult countMismatch(int previewCount, int requestedCount) {
+            return new ConfirmationResult(ConfirmationOutcome.TARGET_COUNT_MISMATCH, null,
+                    "Target count changed: preview has " + previewCount + " but request expected " + requestedCount
+                    + ". Refresh preview before confirming.");
+        }
+        public static ConfirmationResult unauthorized() {
+            return new ConfirmationResult(ConfirmationOutcome.UNAUTHORIZED, null, "Actor lacks configuration execution permission");
+        }
+        public static ConfirmationResult duplicateIdempotency(ConfigJob existing) {
+            return new ConfirmationResult(ConfirmationOutcome.DUPLICATE_IDEMPOTENCY_KEY, existing, null);
+        }
+    }
+
+    /**
+     * Confirm configuration execution against a resolved target preview.
+     *
+     * <p>Validation sequence:
+     * <ol>
+     *   <li>Actor role authorization (must be admin or network_engineer)</li>
+     *   <li>Idempotency check — return existing job if same key+previewId already accepted</li>
+     *   <li>Preview existence — 404 if previewId unknown</li>
+     *   <li>Preview freshness — 409 STALE if expired</li>
+     *   <li>Target count match — 409 MISMATCH if count changed beyond tolerance</li>
+     *   <li>Create accepted ConfigJob and invalidate the preview (one-time use)</li>
+     * </ol>
+     *
+     * @param request   the confirmation request payload
+     * @param actorRole the caller's role (from X-Actor-Role header)
+     * @param actor     the caller's identity string (username/email)
+     * @return result containing the outcome and the accepted job (when ACCEPTED)
+     */
+    public ConfirmationResult confirmExecution(
+            com.ubrnms.config.model.ConfirmExecutionRequest request,
+            String actorRole,
+            String actor) {
+
+        // Step 1: Authorization
+        if (!isExecutionAuthorized(actorRole)) {
+            publishAuditEvent("CONFIRMATION_DENIED", request.getPreviewId(), actor, "UNAUTHORIZED");
+            return ConfirmationResult.unauthorized();
+        }
+
+        // Step 2: Idempotency check — prevent duplicate jobs from re-submitted confirmations
+        if (request.getIdempotencyKey() != null && !request.getIdempotencyKey().isBlank()) {
+            List<ConfigJob> existing = jobRepo.findAll().stream()
+                    .filter(j -> request.getIdempotencyKey().equals(j.getIdempotencyKey())
+                            && request.getPreviewId().equals(j.getPreviewId()))
+                    .toList();
+            if (!existing.isEmpty()) {
+                log.info("Returning existing job for idempotency key={} previewId={}",
+                        request.getIdempotencyKey(), request.getPreviewId());
+                return ConfirmationResult.duplicateIdempotency(existing.get(0));
+            }
+        }
+
+        // Step 3: Preview existence
+        var previewOpt = previewStoreService.find(request.getPreviewId());
+        if (previewOpt.isEmpty()) {
+            if (previewStoreService.isExpired(request.getPreviewId())) {
+                publishAuditEvent("CONFIRMATION_STALE_PREVIEW", request.getPreviewId(), actor, "EXPIRED");
+                return ConfirmationResult.expired();
+            }
+            publishAuditEvent("CONFIRMATION_DENIED", request.getPreviewId(), actor, "PREVIEW_NOT_FOUND");
+            return ConfirmationResult.notFound();
+        }
+
+        com.ubrnms.config.model.ConfigTargetPreviewResponse preview = previewOpt.get();
+
+        // Step 4: Target count mismatch check
+        int actualCount = preview.getTotalCount();
+        int expectedCount = request.getExpectedTargetCount();
+        if (Math.abs(actualCount - expectedCount) > targetCountTolerance) {
+            publishAuditEvent("CONFIRMATION_DENIED", request.getPreviewId(), actor, "TARGET_COUNT_MISMATCH");
+            return ConfirmationResult.countMismatch(actualCount, expectedCount);
+        }
+
+        // Step 5: Create accepted job
+        ConfigJob job = new ConfigJob();
+        job.setId(UUID.randomUUID().toString());
+        job.setJobType(request.getActionType());
+        job.setTemplateId(request.getTemplateId());
+        job.setOperationClass(OperationClass.CONFIG_CHANGE.name());
+        job.setTotalDevices(actualCount);
+        job.setPendingCount(actualCount);
+        job.setStatus("ACCEPTED");
+        job.setActor(actor);
+        job.setStartedAt(Instant.now());
+        job.setRetryable(true);
+        job.setMaxRetries(3);
+        // WO-045 confirmation metadata
+        job.setPreviewId(request.getPreviewId());
+        job.setConfirmationStatus("CONFIRMED");
+        job.setConfirmedBy(actor);
+        job.setConfirmedAt(Instant.now());
+        job.setExpectedTargetCount(expectedCount);
+        job.setApprovalReference(request.getApprovalReference());
+        job.setAcceptedWarnings(request.isAcceptWarnings());
+        job.setIdempotencyKey(request.getIdempotencyKey());
+
+        // Initialize per-device pending records from preview targets
+        for (com.ubrnms.config.model.ConfigTargetPreviewResponse.TargetEntry target : preview.getTargets()) {
+            job.getPerDeviceStatus().put(target.getDeviceId(), "PENDING");
+        }
+
+        job = jobRepo.save(job);
+
+        // Invalidate preview so it cannot be replayed
+        previewStoreService.invalidate(request.getPreviewId());
+
+        publishAuditEvent("CONFIRMATION_ACCEPTED", request.getPreviewId(), actor, "ACCEPTED:" + job.getId());
+        log.info("Config execution confirmed: jobId={} actor={} targets={} previewId={}",
+                job.getId(), actor, actualCount, request.getPreviewId());
+
+        return ConfirmationResult.accepted(job);
+    }
+
+    private boolean isExecutionAuthorized(String actorRole) {
+        return actorRole != null && (actorRole.equals("admin") || actorRole.equals("network_engineer"));
+    }
+
+    private void publishAuditEvent(String eventType, String previewId, String actor, String outcome) {
+        try {
+            Map<String, Object> event = new LinkedHashMap<>();
+            event.put("eventType", eventType);
+            event.put("previewId", previewId);
+            event.put("actor", actor);
+            event.put("outcome", outcome);
+            event.put("timestamp", Instant.now().toString());
+            kafkaTemplate.send("config-audit", previewId, objectMapper.writeValueAsString(event));
+        } catch (Exception e) {
+            log.warn("Failed to publish audit event eventType={}: {}", eventType, e.getMessage());
+        }
+    }
 
     // ── Template CRUD ──────────────────────────────────────────────
 

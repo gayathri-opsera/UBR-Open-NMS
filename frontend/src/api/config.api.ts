@@ -209,6 +209,77 @@ export async function previewConfigTargets(
   return res.data;
 }
 
+// ── Execution confirmation (WO-045) ──────────────────────────────────────────
+
+/** Payload for POST /api/v1/config/actions/confirm */
+export interface ConfirmExecutionRequest {
+  /** Preview ID returned by previewConfigTargets. */
+  previewId: string;
+  /** Must match the actionType used when generating the preview. */
+  actionType: string;
+  /** Template ID to apply (optional for COMMAND_EXECUTE/PARAMETER_CHANGE). */
+  templateId?: string;
+  /**
+   * Target count the operator is confirming.
+   * Server validates this matches the current preview to prevent accidental broad execution.
+   */
+  expectedTargetCount: number;
+  /** Whether the operator acknowledged warnings in the preview. */
+  acceptWarnings?: boolean;
+  /** External approval reference (change ticket, JIRA ID, etc.). */
+  approvalReference?: string;
+  /**
+   * Client-generated idempotency key (UUID).
+   * Duplicate requests with the same key+previewId return the existing job.
+   */
+  idempotencyKey?: string;
+}
+
+/** Response from a successful or idempotent confirmation. */
+export interface ConfirmExecutionResponse {
+  jobId: string;
+  status: string;
+  acceptedAt: string;
+  acceptedBy: string;
+  targetCount: number;
+  previewId: string;
+  trackingUrl: string;
+  /** Only present for idempotent responses. */
+  note?: string;
+}
+
+/**
+ * Confirm a previewed configuration execution (WO-045).
+ *
+ * Requires network_engineer or admin actor role (sent via X-Actor-Role header).
+ * Returns an accepted async job the caller can track via trackingUrl.
+ *
+ * Throws on 400 (malformed), 403 (unauthorized), 404 (unknown preview),
+ * 409 (stale preview or target count mismatch).
+ */
+export async function confirmConfigExecution(
+  request: ConfirmExecutionRequest,
+  actorRole = 'network_engineer',
+): Promise<ConfirmExecutionResponse> {
+  let actor = 'operator';
+  try {
+    const raw = localStorage.getItem('nms_user') || localStorage.getItem('user') || localStorage.getItem('auth_user');
+    if (raw) { const u = JSON.parse(raw); actor = u.username || u.email || u.name || actor; }
+  } catch { /* ignore */ }
+
+  const res = await apiClient.post<ConfirmExecutionResponse>(
+    '/config/actions/confirm',
+    request,
+    {
+      headers: {
+        'X-Actor-Role': actorRole,
+        'X-Actor': actor,
+      },
+    },
+  );
+  return res.data;
+}
+
 // ── Internal shape normalization ──────────────────────────────────────────────
 
 /** Config-service returns flat fields; collect them into a `parameters` map */

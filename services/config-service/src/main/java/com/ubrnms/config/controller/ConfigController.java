@@ -2,6 +2,7 @@ package com.ubrnms.config.controller;
 
 import com.ubrnms.config.model.*;
 import com.ubrnms.config.service.ConfigService;
+import com.ubrnms.config.service.ConfigService.ConfirmationResult;
 import com.ubrnms.config.service.InventorySearchClient;
 import com.ubrnms.config.service.TargetResolverService;
 import jakarta.validation.Valid;
@@ -145,6 +146,80 @@ public class ConfigController {
                 )
             ));
         }
+    }
+
+    // ── Confirm execution (WO-045) ─────────────────────────────────────────────
+
+    /**
+     * Explicit confirmation gate for configuration execution.
+     *
+     * <p>Validates a previously generated target preview and creates an accepted
+     * async job only when:
+     * <ul>
+     *   <li>The actor has network_engineer or admin role</li>
+     *   <li>The preview exists and has not expired</li>
+     *   <li>The expected target count matches the current preview</li>
+     * </ul>
+     *
+     * POST /api/v1/config/actions/confirm
+     */
+    @PostMapping("/actions/confirm")
+    public ResponseEntity<?> confirmExecution(
+            @Valid @RequestBody ConfirmExecutionRequest request,
+            @RequestHeader(name = "X-Actor-Role", required = false, defaultValue = "") String actorRole,
+            @RequestHeader(name = "X-Actor", required = false, defaultValue = "unknown") String actor) {
+
+        ConfirmationResult result = configService.confirmExecution(request, actorRole, actor);
+
+        return switch (result.outcome) {
+            case ACCEPTED -> ResponseEntity.accepted().body(Map.of(
+                "jobId",         result.job.getId(),
+                "status",        result.job.getStatus(),
+                "acceptedAt",    result.job.getConfirmedAt().toString(),
+                "acceptedBy",    result.job.getConfirmedBy(),
+                "targetCount",   result.job.getTotalDevices(),
+                "previewId",     result.job.getPreviewId(),
+                "trackingUrl",   "/api/v1/config/jobs/" + result.job.getId() + "/status"
+            ));
+            case DUPLICATE_IDEMPOTENCY_KEY -> ResponseEntity.ok().body(Map.of(
+                "jobId",         result.job.getId(),
+                "status",        result.job.getStatus(),
+                "acceptedAt",    result.job.getConfirmedAt().toString(),
+                "acceptedBy",    result.job.getConfirmedBy(),
+                "targetCount",   result.job.getTotalDevices(),
+                "previewId",     result.job.getPreviewId(),
+                "trackingUrl",   "/api/v1/config/jobs/" + result.job.getId() + "/status",
+                "note",          "Idempotent: returning existing accepted job"
+            ));
+            case PREVIEW_NOT_FOUND -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                "status", "error",
+                "error",  Map.of(
+                    "code",    "PREVIEW_NOT_FOUND",
+                    "message", result.conflictDetail
+                )
+            ));
+            case PREVIEW_EXPIRED -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "status", "error",
+                "error",  Map.of(
+                    "code",    "PREVIEW_EXPIRED",
+                    "message", result.conflictDetail
+                )
+            ));
+            case TARGET_COUNT_MISMATCH -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "status", "error",
+                "error",  Map.of(
+                    "code",    "TARGET_COUNT_MISMATCH",
+                    "message", result.conflictDetail
+                )
+            ));
+            case UNAUTHORIZED -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                "status", "error",
+                "error",  Map.of(
+                    "code",    "FORBIDDEN",
+                    "message", result.conflictDetail
+                )
+            ));
+        };
     }
 
     @GetMapping("/jobs/{jobId}/status")

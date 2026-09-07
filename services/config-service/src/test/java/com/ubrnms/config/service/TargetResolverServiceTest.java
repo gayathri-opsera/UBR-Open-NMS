@@ -39,11 +39,14 @@ class TargetResolverServiceTest {
     @Mock
     private InventorySearchClient inventorySearchClient;
 
+    @Mock
+    private PreviewStoreService previewStoreService;
+
     private TargetResolverService service;
 
     @BeforeEach
     void setUp() {
-        service = new TargetResolverService(deviceStatusChecker, inventorySearchClient);
+        service = new TargetResolverService(deviceStatusChecker, inventorySearchClient, previewStoreService);
     }
 
     // ── AC3: Validation — empty filters ───────────────────────────────────────

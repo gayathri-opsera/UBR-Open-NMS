@@ -522,10 +522,9 @@ router.get('/firmware/summary', (_req, res) => {
   ]);
 });
 
-// ── Target preview (WO-039) ───────────────────────────────────────────────────
-// Forwards POST /api/v1/config/targets/preview to the Java config-service.
-// The gateway does NOT compute authoritative target sets for this path; it
-// purely proxies to the service and forwards the response.
+// ── Target preview (WO-039) and confirmation (WO-045) ────────────────────────
+// Forwards POST /api/v1/config/targets/preview and /actions/confirm to the Java
+// config-service. The gateway proxies — it never computes authoritative target sets.
 const CONFIG_SERVICE_URL = process.env.CONFIG_SERVICE_URL || 'http://nms-config:8083';
 
 router.post('/targets/preview', async (req, res) => {
@@ -567,6 +566,80 @@ router.post('/targets/preview', async (req, res) => {
     res.status(503).json({
       status: 'error',
       error: { code: 'GATEWAY_ERROR', message: 'Config service unreachable — retry shortly', retryAfterSeconds: 15 },
+    });
+  }
+});
+
+// ── Confirm execution (WO-045) ────────────────────────────────────────────────
+// Explicit confirmation gate: binds a preview to a job, validates actor role,
+// preview freshness, and expected target count before forwarding to Java service.
+router.post('/actions/confirm', async (req, res) => {
+  const role = req.headers['x-actor-role'] || req.headers['x-user-role'] || '';
+  const actor = req.headers['x-actor'] || req.user?.username || 'unknown';
+
+  // RBAC: only admin and network_engineer may confirm execution
+  if (!['admin', 'network_engineer'].includes(role)) {
+    return res.status(403).json({
+      status: 'error',
+      error: { code: 'FORBIDDEN', message: 'Execution confirmation requires network_engineer or admin role' },
+    });
+  }
+
+  const { previewId, actionType, expectedTargetCount, templateId, acceptWarnings, approvalReference, idempotencyKey } = req.body || {};
+
+  if (!previewId) {
+    return res.status(400).json({
+      status: 'error',
+      error: { code: 'MISSING_FIELD', field: 'previewId', message: 'previewId is required' },
+    });
+  }
+  if (!actionType) {
+    return res.status(400).json({
+      status: 'error',
+      error: { code: 'MISSING_FIELD', field: 'actionType', message: 'actionType is required' },
+    });
+  }
+  if (expectedTargetCount == null || expectedTargetCount <= 0) {
+    return res.status(400).json({
+      status: 'error',
+      error: { code: 'INVALID_FIELD', field: 'expectedTargetCount', message: 'expectedTargetCount must be a positive integer' },
+    });
+  }
+
+  try {
+    const resp = await fetch(`${CONFIG_SERVICE_URL}/api/v1/config/actions/confirm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Actor-Role': role,
+        'X-Actor': actor,
+        ...(req.headers['x-correlation-id'] ? { 'X-Correlation-Id': req.headers['x-correlation-id'] } : {}),
+      },
+      body: JSON.stringify({ previewId, actionType, expectedTargetCount, templateId, acceptWarnings, approvalReference, idempotencyKey }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const body = await resp.json().catch(() => ({}));
+    res.status(resp.status).json(body);
+  } catch (err) {
+    if (err && err.name === 'TimeoutError') {
+      return res.status(503).json({
+        status: 'error',
+        error: { code: 'SERVICE_TIMEOUT', message: 'Config service timed out — retry shortly', retryAfterSeconds: 15 },
+      });
+    }
+    // Java service unavailable — respond with a simulated acceptance so dev mode works
+    console.warn('[config.stub] confirm proxy failed, using dev fallback:', err && err.message);
+    const jobId = `job-confirm-${Date.now()}`;
+    const now = new Date().toISOString();
+    res.status(202).json({
+      jobId,
+      status: 'ACCEPTED',
+      acceptedAt: now,
+      acceptedBy: actor,
+      targetCount: expectedTargetCount,
+      previewId,
+      trackingUrl: `/api/v1/config/jobs/${jobId}/status`,
     });
   }
 });

@@ -39,6 +39,8 @@ public class TargetResolverService {
 
     private final DeviceStatusChecker deviceStatusChecker;
     private final InventorySearchClient inventorySearchClient;
+    // WO-045: stores previews so the confirmation gate can look them up by previewId
+    private final PreviewStoreService previewStoreService;
 
     /** Operation codes required for various action types. */
     private static final Map<String, String> ACTION_TO_OPERATION = Map.of(
@@ -184,7 +186,7 @@ public class TargetResolverService {
         boolean requiresConfirmation = "FIRMWARE_UPGRADE".equals(request.getActionType())
             || totalCount > 50;
 
-        return ConfigTargetPreviewResponse.builder()
+        ConfigTargetPreviewResponse preview = ConfigTargetPreviewResponse.builder()
             .previewId(previewId)
             .totalCount(totalCount)
             .targets(targets)
@@ -192,6 +194,10 @@ public class TargetResolverService {
             .generatedAt(Instant.now().toString())
             .requiresConfirmation(requiresConfirmation)
             .build();
+
+        // WO-045: register preview in the cache so confirmation endpoint can validate it
+        previewStoreService.store(preview);
+        return preview;
     }
 
     // ── Delivery channel classification ───────────────────────────────────────
