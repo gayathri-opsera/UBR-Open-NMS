@@ -32,6 +32,7 @@ const V2AdminPage         = lazy(() => import('./pages/V2AdminPage'));
 const V2GroupsPage        = lazy(() => import('./pages/V2GroupsPage'));
 const V2ProfilePage       = lazy(() => import('./pages/V2ProfilePage'));
 const V2NotFoundPage      = lazy(() => import('./pages/V2NotFoundPage'));
+const V2UnifiedOnboardingPage = lazy(() => import('./pages/V2UnifiedOnboardingPage'));
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
@@ -123,6 +124,14 @@ export function V2App() {
                   }
                 />
                 <Route path="profile" element={<V2ProfilePage />} />
+                <Route
+                  path="onboarding"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2UnifiedOnboardingPage />
+                    </V2ProtectedRoute>
+                  }
+                />
                 <Route path="*" element={<V2NotFoundPage />} />
               </Routes>
             </Suspense>
