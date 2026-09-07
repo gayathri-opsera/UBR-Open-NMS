@@ -1,0 +1,9 @@
+{
+  "alarm_id": "ALM-20260907-001",
+  "severity": "CRITICAL",
+  "lifecycle_events": [
+    {"state": "RAISED", "timestamp": "2026-09-07T10:15:00Z"},
+    {"state": "ACKNOWLEDGED", "timestamp": "2026-09-07T10:16:00Z"}
+  ],
+  "affected_devices": ["BTS-001", "BTS-002"]
+}

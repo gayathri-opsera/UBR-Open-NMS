@@ -1,0 +1,9 @@
+{
+  "scenario_name": "device-onboarding",
+  "requirement_capability": "UBR Call-Home Discovery",
+  "priority": "P0",
+  "status": "PASS",
+  "duration_ms": 1234.5,
+  "device_count": 3,
+  "artifact_path": "fixtures/evidence-export.json"
+}

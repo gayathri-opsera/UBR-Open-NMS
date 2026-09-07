@@ -1,0 +1,11 @@
+{
+  "export_id": "exp-20260907-001",
+  "timestamp": "2026-09-07T10:30:00Z",
+  "devices": ["CPE-001", "CPE-002", "BTS-001"],
+  "evidence_type": "onboarding",
+  "artifacts": [
+    "check-in-log.json",
+    "inventory-registration.json",
+    "mobinet-sync-confirmation.json"
+  ]
+}

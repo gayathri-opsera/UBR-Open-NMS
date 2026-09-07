@@ -1,0 +1,8 @@
+{
+  "scenario_name": "end-to-end-flow",
+  "requirement_capability": "Complete Device Lifecycle",
+  "priority": "P1",
+  "status": "BLOCKED",
+  "duration_ms": 100.0,
+  "error_message": "Prerequisite service unavailable"
+}

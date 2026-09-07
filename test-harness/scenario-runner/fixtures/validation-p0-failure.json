@@ -1,0 +1,10 @@
+{
+  "scenario_name": "alarm-lifecycle",
+  "requirement_capability": "Critical Alarm Processing",
+  "priority": "P0",
+  "status": "FAIL",
+  "duration_ms": 5432.1,
+  "device_count": 2,
+  "error_message": "Alarm acknowledgement timeout after 30s",
+  "artifact_path": "fixtures/alarm-evidence.json"
+}

@@ -5,6 +5,7 @@
 name: device-onboarding
 description: "End-to-end device onboarding: check-in → inventory → Mobinet"
 timeout_seconds: 120
+priority: P0  # WO-065: Release acceptance priority
 
 setup:
   - action: reset_stub
