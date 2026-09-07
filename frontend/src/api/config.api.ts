@@ -53,6 +53,69 @@ export async function getVersionHistory(deviceId: string): Promise<ConfigVersion
   return res.data;
 }
 
+// ── Paginated configuration history (WO-050) ─────────────────────────────────
+
+/** A single sanitized field-level change entry. */
+export interface ConfigDiffEntry {
+  field: string;
+  /** Previous value; 'REDACTED_SECRET' when field is secret-like. */
+  from: unknown;
+  /** New value; 'REDACTED_SECRET' when field is secret-like. */
+  to: unknown;
+}
+
+/** Rich version record returned by the WO-050 paginated history endpoint. */
+export interface ConfigVersionRecord {
+  versionId: string;
+  versionNumber: number;
+  /** APPLIED | FAILED | ATTEMPTED */
+  status: string;
+  jobId: string | null;
+  templateId: string | null;
+  actor: string;
+  approvalReference: string | null;
+  deliveryChannel: string | null;
+  appliedAt: string | null;
+  attemptedAt: string | null;
+  diffSummary: string | null;
+  sanitizedDiff: ConfigDiffEntry[];
+  rollbackEligible: boolean;
+  failureReason: string | null;
+  renderedHash: string | null;
+}
+
+/** Response shape for paginated configuration history. */
+export interface ConfigHistoryPage {
+  deviceId: string;
+  items: ConfigVersionRecord[];
+  nextCursor: number | null;
+  totalKnown: number;
+  page: number;
+  limit: number;
+}
+
+/**
+ * Fetch paginated configuration history for a device (WO-050).
+ *
+ * Returns items in descending appliedAt order. An empty items[] is returned
+ * (not a 404) when the device has no history.
+ *
+ * @param deviceId the device to query
+ * @param limit    max records per page (1–200); defaults to 50
+ * @param cursor   0-indexed page cursor (from nextCursor in previous response)
+ */
+export async function getVersionHistoryPaged(
+  deviceId: string,
+  limit = 50,
+  cursor = 0,
+): Promise<ConfigHistoryPage> {
+  const res = await apiClient.get<ConfigHistoryPage>(
+    `/config/history/${deviceId}`,
+    { params: { limit, cursor } },
+  );
+  return res.data;
+}
+
 export async function pushFirmware(deviceId: string, firmwareVersion: string, firmwareUrl?: string): Promise<PushResult> {
   const res = await apiClient.post<PushResult>(`/config/push/${deviceId}`, null, {
     params: { templateId: 'firmware', firmware: 'true', firmwareVersion, firmwareUrl: firmwareUrl ?? '' },

@@ -6,6 +6,8 @@ import com.ubrnms.config.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -41,6 +43,9 @@ public class ConfigService {
 
     // WO-049: per-paradigm delivery router
     private final DeliveryRouter deliveryRouter;
+
+    // WO-050: config diff sanitizer
+    private final ConfigDiffSanitizer diffSanitizer;
 
     @Value("${kafka.topics.config-push:config-push}")
     private String configPushTopic;
@@ -441,10 +446,148 @@ public class ConfigService {
         }
     }
 
-    // ── Version history ────────────────────────────────────────────
+    // ── Version history (WO-050) ───────────────────────────────────
 
     public List<ConfigVersion> getVersionHistory(String deviceId) {
         return versionRepo.findByDeviceIdOrderByVersionNumberDesc(deviceId);
+    }
+
+    /**
+     * Paginated configuration history for a device (WO-050).
+     *
+     * @param deviceId the device to query history for
+     * @param page     0-indexed page number
+     * @param limit    maximum records per page (capped at 200)
+     * @return paginated history page
+     */
+    public Page<ConfigVersion> getVersionHistoryPaged(String deviceId, int page, int limit) {
+        int safePage  = Math.max(0, page);
+        int safeLimit = Math.min(Math.max(1, limit), 200);
+        return versionRepo.findByDeviceIdOrderByAppliedAtDesc(deviceId, PageRequest.of(safePage, safeLimit));
+    }
+
+    /**
+     * Record a successful applied version from a confirmed job delivery (WO-050).
+     *
+     * <p>Idempotent: if a version already exists for this device+idempotencyKey, returns it.
+     * No inline secrets are stored — before/after values are sanitized before persistence.
+     *
+     * @param deviceId         device that received the change
+     * @param templateId       applied template
+     * @param actor            user who confirmed the change
+     * @param jobId            confirmed job ID
+     * @param deliveryChannel  the channel used for delivery
+     * @param approvalRef      optional approval/change reference
+     * @param idempotencyKey   idempotency key from the confirmed job
+     * @param before           previous sanitized parameter values
+     * @param after            new sanitized parameter values
+     * @return persisted version record
+     */
+    public ConfigVersion recordVersionForDevice(
+            String deviceId,
+            String templateId,
+            String actor,
+            String jobId,
+            String deliveryChannel,
+            String approvalRef,
+            String idempotencyKey,
+            Map<String, Object> before,
+            Map<String, Object> after) {
+
+        // Idempotency: return existing version if already persisted for this job/device
+        if (idempotencyKey != null) {
+            Optional<ConfigVersion> existing = versionRepo.findByDeviceIdAndIdempotencyKey(deviceId, idempotencyKey);
+            if (existing.isPresent()) {
+                log.info("Returning existing version for idempotencyKey={} device={}", idempotencyKey, deviceId);
+                return existing.get();
+            }
+        }
+
+        // Sanitize before/after to strip credential-like values before diff computation
+        Map<String, Object> sanitizedBefore = diffSanitizer.sanitizeParams(before);
+        Map<String, Object> sanitizedAfter  = diffSanitizer.sanitizeParams(after);
+
+        List<ConfigVersion.DiffEntry> diffEntries = diffSanitizer.buildSanitizedDiff(sanitizedBefore, sanitizedAfter);
+        String diffSummary   = diffSanitizer.buildDiffSummary(diffEntries);
+        String renderedHash  = diffSanitizer.computeRenderedHash(diffEntries);
+
+        int nextVersion = versionRepo.countByDeviceId(deviceId) + 1;
+        ConfigVersion cv = new ConfigVersion();
+        cv.setDeviceId(deviceId);
+        cv.setVersionNumber(nextVersion);
+        cv.setTemplateId(templateId);
+        cv.setActor(actor);
+        cv.setJobId(jobId);
+        cv.setDeliveryChannel(deliveryChannel);
+        cv.setApprovalReference(approvalRef);
+        cv.setIdempotencyKey(idempotencyKey);
+        cv.setStatus("APPLIED");
+        cv.setAppliedAt(Instant.now());
+        cv.setRollbackEligible(true);
+        cv.setSanitizedDiff(diffEntries);
+        cv.setDiffSummary(diffSummary);
+        cv.setRenderedHash(renderedHash);
+        // Store sanitized before/after (never raw values)
+        cv.setPreviousValues(sanitizedBefore);
+        cv.setNewValues(sanitizedAfter);
+
+        cv = versionRepo.save(cv);
+        log.info("Recorded config version: deviceId={} version={} jobId={}", deviceId, nextVersion, jobId);
+        return cv;
+    }
+
+    /**
+     * Record a failed delivery attempt as evidence (WO-050).
+     *
+     * <p>The record has no after-state snapshot since no change was applied.
+     * No inline secrets are persisted.
+     *
+     * @param deviceId        device for which delivery was attempted
+     * @param templateId      template that was being applied
+     * @param actor           user who initiated the change
+     * @param jobId           job ID
+     * @param deliveryChannel channel that was attempted
+     * @param failureReason   human-readable reason for the failure
+     * @param idempotencyKey  idempotency key for dedup
+     * @return persisted failure evidence record
+     */
+    public ConfigVersion recordFailureEvidenceForDevice(
+            String deviceId,
+            String templateId,
+            String actor,
+            String jobId,
+            String deliveryChannel,
+            String failureReason,
+            String idempotencyKey) {
+
+        // Idempotency
+        if (idempotencyKey != null) {
+            Optional<ConfigVersion> existing = versionRepo.findByDeviceIdAndIdempotencyKey(deviceId, idempotencyKey);
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+        }
+
+        int nextVersion = versionRepo.countByDeviceId(deviceId) + 1;
+        ConfigVersion cv = new ConfigVersion();
+        cv.setDeviceId(deviceId);
+        cv.setVersionNumber(nextVersion);
+        cv.setTemplateId(templateId);
+        cv.setActor(actor);
+        cv.setJobId(jobId);
+        cv.setDeliveryChannel(deliveryChannel);
+        cv.setIdempotencyKey(idempotencyKey);
+        cv.setStatus("FAILED");
+        cv.setAttemptedAt(Instant.now());
+        cv.setRollbackEligible(false);
+        cv.setFailureReason(failureReason);
+        cv.setSanitizedDiff(Collections.emptyList());
+        cv.setDiffSummary("Delivery attempt failed — no configuration change applied");
+
+        cv = versionRepo.save(cv);
+        log.info("Recorded config failure evidence: deviceId={} version={} jobId={} reason={}",
+                deviceId, nextVersion, jobId, failureReason);
+        return cv;
     }
 
     // ── Scheduled TTL expiry ───────────────────────────────────────

@@ -318,25 +318,60 @@ router.post('/push/:deviceId', (req, res) => {
   });
 });
 
-// ── Config push history (per device) ─────────────────────────────────────────
-// Resolves all device aliases (serialNumber, Java id, MongoDB _id) so history
-// recorded under any identifier is returned regardless of which ID the frontend uses.
+// ── Config history (WO-050): proxy to Java config-service ────────────────────
+// The authoritative history is now owned by the Java config-service (WO-050).
+// We forward requests there first and fall back to the local MongoDB stub only
+// when the Java service is unavailable (dev/offline mode).
 router.get('/history/:deviceId', async (req, res) => {
   const { deviceId } = req.params;
-  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+  const limit  = Math.min(parseInt(req.query.limit  || '50', 10), 200);
+  const cursor = Math.max(parseInt(req.query.cursor || '0',  10), 0);
+
+  // Try Java config-service first (authoritative WO-050 endpoint)
+  try {
+    await new Promise((resolve, reject) => {
+      const url = `${CONFIG_SERVICE_URL}/api/v1/config/history/${encodeURIComponent(deviceId)}?limit=${limit}&cursor=${cursor}`;
+      http.get(url, { timeout: 6000 }, (javaRes) => {
+        if (javaRes.statusCode === 200) {
+          let raw = '';
+          javaRes.on('data', (c) => raw += c);
+          javaRes.on('end', () => {
+            try {
+              const parsed = JSON.parse(raw);
+              res.json(parsed);
+              resolve('java');
+            } catch (e) {
+              reject(new Error('Java history parse error'));
+            }
+          });
+        } else {
+          reject(new Error(`Java config-service returned ${javaRes.statusCode}`));
+        }
+      }).on('error', reject).on('timeout', () => reject(new Error('timeout')));
+    });
+    return; // Java service responded — we're done
+  } catch (javaErr) {
+    console.warn('[config-stub] Java config history unavailable, using local stub:', javaErr.message);
+  }
+
+  // Fallback: local MongoDB stub history (WO-050 dev fallback)
+  const deviceIdOrig = deviceId;
+  const legacyLimit = limit;
   try {
     // Build a set of all known aliases for this device
-    const aliases = new Set([deviceId]);
+  try {
+    // Build a set of all known aliases for this device
+    const aliases = new Set([deviceIdOrig]);
 
     // 1. Try MongoDB inventory (for manually-created / IDU devices)
     try {
       const invCol = await getInvCol();
       const inv = await invCol.findOne({
         $or: [
-          { serialNumber: deviceId },
-          { deviceId:    deviceId },
-          { id:          deviceId },
-          { _id:         deviceId },
+          { serialNumber: deviceIdOrig },
+          { deviceId:    deviceIdOrig },
+          { id:          deviceIdOrig },
+          { _id:         deviceIdOrig },
         ],
       });
       if (inv) {
@@ -352,7 +387,7 @@ router.get('/history/:deviceId', async (req, res) => {
     // 2. Also try Java inventory service (authoritative for BTS/CPE devices)
     // Java may return { id, serialNumber, deviceId } — all should be treated as aliases.
     try {
-      const javaDevice = await fetchJavaDevice(deviceId);
+      const javaDevice = await fetchJavaDevice(deviceIdOrig);
       if (javaDevice) {
         if (javaDevice.serialNumber) aliases.add(javaDevice.serialNumber);
         if (javaDevice.deviceId)     aliases.add(javaDevice.deviceId);
@@ -367,22 +402,36 @@ router.get('/history/:deviceId', async (req, res) => {
     const docs = await col
       .find({ deviceId: { $in: Array.from(aliases) } })
       .sort({ pushedAt: -1 })
-      .limit(limit)
+      .limit(legacyLimit)
       .toArray();
 
-    const versions = docs.map((doc, i) => ({
-      id:            String(doc._id),
-      deviceId:      doc.deviceId,
-      versionNumber: docs.length - i,
-      actor:         doc.actor,
-      appliedAt:     doc.pushedAt instanceof Date ? doc.pushedAt.toISOString() : doc.pushedAt,
-      templateId:    doc.templateId,
-      status:        doc.status,
-      newValues:     Object.fromEntries(
-        Object.entries(doc.params || {}).map(([k, v]) => [k, String(v)])
-      ),
+    // Shape to match WO-050 paginated response format
+    const items = docs.map((doc, i) => ({
+      versionId:       String(doc._id),
+      versionNumber:   docs.length - i,
+      status:          doc.status || 'APPLIED',
+      jobId:           doc.jobId || null,
+      templateId:      doc.templateId || null,
+      actor:           doc.actor || 'system',
+      approvalReference: doc.approvalReference || null,
+      deliveryChannel: doc.deliveryChannel || null,
+      appliedAt:       doc.pushedAt instanceof Date ? doc.pushedAt.toISOString() : doc.pushedAt,
+      attemptedAt:     null,
+      diffSummary:     doc.diffSummary || null,
+      sanitizedDiff:   [],
+      rollbackEligible: true,
+      failureReason:   null,
+      renderedHash:    null,
     }));
-    res.json(versions);
+
+    res.json({
+      deviceId: deviceIdOrig,
+      items,
+      nextCursor: null,
+      totalKnown: items.length,
+      page: 0,
+      limit: legacyLimit,
+    });
   } catch (e) {
     console.error('[config-stub] History query failed:', e.message);
     res.status(500).json({ code: 'DB_ERROR', message: e.message });
