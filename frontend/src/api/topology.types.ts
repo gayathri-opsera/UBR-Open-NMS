@@ -1,4 +1,4 @@
-export type NodeType = 'BTS' | 'CPE' | 'IDU';
+export type NodeType = 'BTS' | 'CPE' | 'IDU' | 'GENERIC';
 export type NodeHealth = 'HEALTHY' | 'DEGRADED' | 'FAULTY' | 'UNKNOWN';
 
 export interface TopologyNode {
@@ -28,6 +28,17 @@ export interface TopologyNode {
   location?: { lat: number; lng: number };
   parentDeviceId?: string;
   cascadeHop?: number;
+  // ── WO-036: Health overlay fields ─────────────────────────────────────────
+  /** Composed health state from availability + alarm context. May differ from raw `health`. */
+  healthState?: NodeHealth;
+  /** Primary human-readable reason for the current health state. */
+  primaryReason?: string;
+  /** Number of active alarms on this device. */
+  activeAlarmCount?: number;
+  /** ISO timestamp of the most recent observation contributing to this health state. */
+  lastObservedAt?: string | null;
+  /** Source that determined this health state: 'AVAILABILITY' | 'ALARM' | 'CONNECTIVITY' | 'UNKNOWN' */
+  healthSource?: 'AVAILABILITY' | 'ALARM' | 'CONNECTIVITY' | 'UNKNOWN';
 }
 
 export interface TopologyEdge {
@@ -92,4 +103,32 @@ export interface DeviceEvent {
   description: string;
   deviceId: string;
   acknowledged?: boolean;
+}
+
+// ── WO-036: Health overlay composition types ──────────────────────────────────
+
+/**
+ * Availability summary per device — GET /api/v1/kpi/availability-summary.
+ * Keyed by deviceId or serialNumber.
+ */
+export interface AvailabilitySummary {
+  deviceId: string;
+  serialNumber: string;
+  availabilityPct: number;
+  healthState: NodeHealth;
+  activeAlarmCount: number;
+  primaryReason: string;
+  lastObservedAt: string | null;
+  healthSource: 'AVAILABILITY' | 'ALARM' | 'CONNECTIVITY' | 'UNKNOWN';
+}
+
+/** Edge link-health overlay for WO-036 rendering. */
+export interface EdgeHealthOverlay {
+  edgeId: string;
+  /**
+   * Derived link health — worst of source endpoint health and link quality.
+   * 'UNKNOWN' when link-quality data is absent (must not drop the edge).
+   */
+  derivedHealth: NodeHealth | 'UNKNOWN';
+  linkQuality?: 'GOOD' | 'FAIR' | 'POOR' | 'DOWN';
 }

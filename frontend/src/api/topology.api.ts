@@ -1,7 +1,7 @@
 import { apiClient } from './client';
 import type {
   TopologyGraph, TopologyNode, TopologyEdge, NodeHealth,
-  DeviceSummary, LinkHealth, DeviceEvent,
+  DeviceSummary, LinkHealth, DeviceEvent, AvailabilitySummary,
 } from './topology.types';
 
 type RawNode = Omit<TopologyNode, 'deviceType' | 'health' | 'location'> & {
@@ -109,4 +109,18 @@ export async function searchTopology(params: {
 }): Promise<TopologyNode[]> {
   const res = await apiClient.get<RawNode[]>('/topology/search', { params });
   return res.data.map(normalizeNode);
+}
+
+/**
+ * Fetches availability summaries for all devices or a specific network (WO-036).
+ * Used to compose health overlays on topology nodes.
+ *
+ * GET /api/v1/kpi/availability-summary
+ * Returns: array of AvailabilitySummary keyed by deviceId
+ */
+export async function fetchAvailabilitySummary(networkId?: string): Promise<AvailabilitySummary[]> {
+  const params: Record<string, string> = {};
+  if (networkId) params.networkId = networkId;
+  const res = await apiClient.get<AvailabilitySummary[]>('/kpi/availability-summary', { params });
+  return res.data;
 }
