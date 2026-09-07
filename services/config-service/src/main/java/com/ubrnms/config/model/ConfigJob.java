@@ -6,7 +6,9 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Bulk config push job tracking with per-device operation concurrency state (WO-018). */
@@ -68,6 +70,16 @@ public class ConfigJob {
     private boolean acceptedWarnings;
     /** Client-supplied idempotency key — duplicate confirmation returns the existing job. */
     private String idempotencyKey;
+
+    // ── WO-049: Per-device delivery routing fields ────────────────────────────
+    /**
+     * Per-device delivery records — one entry per target in the confirmed job.
+     * Authoritative source for operator-visible per-device status, channel, and attempts.
+     */
+    private List<PerDeviceDeliveryRecord> perDeviceDelivery = new ArrayList<>();
+
+    /** Count of targets whose currentState is QUEUED (offline, pending check-in). */
+    private int queuedCount;
 
     public int getProgressPercent() {
         if (totalDevices == 0) return 100;

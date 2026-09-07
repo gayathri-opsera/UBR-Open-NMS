@@ -173,20 +173,38 @@ function buildJobResponse(job) {
   const devices        = job.devices || [];
   const total          = devices.length;
   const success        = devices.filter((d) => d.status === 'SUCCESS').length;
-  const failed         = devices.filter((d) => d.status === 'FAILED').length;
-  const pending        = devices.filter((d) => d.status === 'QUEUED').length;
+  const failed         = devices.filter((d) => ['FAILED', 'UNSUPPORTED'].includes(d.status)).length;
+  const queuedCount    = devices.filter((d) => d.status === 'QUEUED').length;
+  const pending        = total - success - failed - queuedCount;
   const progressPercent = total === 0 ? 0 : Math.round(((success + failed) / total) * 100);
-  const perDeviceStatus = {};
-  devices.forEach((d) => { perDeviceStatus[d.deviceId] = d.status; });
+
+  // WO-049: Build rich per-device delivery records
+  const perDeviceStatus = devices.map((d) => ({
+    deviceId: d.deviceId,
+    deliveryChannel: d.deliveryChannel || null,
+    currentState: d.status,
+    queueEligible: d.queueEligible !== undefined ? d.queueEligible : (d.status === 'QUEUED'),
+    pendingCommandId: d.pendingCommandId || null,
+    failureReason: d.failureReason || null,
+    lastUpdatedAt: d.updatedAt || job.startedAt || new Date().toISOString(),
+    retryable: d.retryable !== undefined ? d.retryable : (d.status === 'FAILED'),
+    idempotencyKey: d.idempotencyKey || null,
+    protocolAttempts: d.protocolAttempts || [],
+  }));
+
   return {
     jobId: job.jobId,
     status: job.status,
     totalDevices: total,
     successCount: success,
-    failureCount: failed,
-    pendingCount: pending,
+    failedCount: failed,
+    queuedCount,
+    pendingCount: Math.max(0, pending),
     progressPercent,
     perDeviceStatus,
+    previewId: job.previewId || null,
+    confirmedBy: job.confirmedBy || null,
+    confirmedAt: job.confirmedAt || null,
     startedAt: job.startedAt,
     completedAt: job.completedAt || null,
   };

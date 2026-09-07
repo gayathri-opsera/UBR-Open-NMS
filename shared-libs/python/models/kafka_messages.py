@@ -156,6 +156,51 @@ class FirmwareUpgradeCommand:
 
 
 @dataclass
+class ConfigPushRoutedMessage:
+    """
+    Routed config push command published to the config-push topic (WO-049).
+
+    Extends the basic ConfigPushMessage with paradigm-aware routing hints.
+    Workers consume this message and follow protocol_order for fallback delivery.
+
+    Credentials MUST be a vault reference only — never inline credentials or secrets.
+    """
+    job_id: str
+    device_id: str
+    template_id: str
+    delivery_channel: Literal["SNMP_PROTOCOL", "CLI_PROTOCOL", "UBR_REALTIME", "UBR_CHECKIN"]
+    protocol_order: List[str]          # ordered fallback list e.g. ["NETCONF", "CLI"]
+    credential_ref: str                # vault ref: "vault://config/<device_id>"
+    idempotency_key: str
+    job_correlation_id: str
+    actor: str
+    timestamp: Optional[datetime] = None
+    # UBR-only fields (only set when delivery_channel is UBR_REALTIME or UBR_CHECKIN)
+    pending_command_id: Optional[str] = None
+
+
+@dataclass
+class ConfigWorkerResultMessage:
+    """
+    Worker result callback published after a delivery attempt (WO-049).
+
+    Published to config-results topic. ConfigService consumes these to update
+    per-device delivery records and overall job status without polling.
+    """
+    job_id: str
+    device_id: str
+    delivery_channel: str
+    protocol: str                      # protocol that was attempted
+    status: Literal["SUCCESS", "FAILURE", "TIMEOUT", "FALLBACK"]
+    idempotency_key: str
+    completed_at: datetime
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    # Set when status=FALLBACK — the next protocol that should be tried
+    fallback_protocol: Optional[str] = None
+
+
+@dataclass
 class FirmwarePhaseCallback:
     """
     Firmware phase callback message (WO-012).

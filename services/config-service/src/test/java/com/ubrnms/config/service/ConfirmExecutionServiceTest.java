@@ -50,6 +50,7 @@ class ConfirmExecutionServiceTest {
     @Mock private DeviceEligibilityChecker deviceEligibilityChecker;
     @Mock private OperationGuard operationGuard;
     @Mock private PreviewStoreService previewStoreService;
+    @Mock private DeliveryRouter deliveryRouter;
 
     private ConfigService service;
 
@@ -95,7 +96,8 @@ class ConfirmExecutionServiceTest {
         service = new ConfigService(
                 templateRepo, pendingRepo, versionRepo, jobRepo,
                 kafkaTemplate, new ObjectMapper().registerModule(new JavaTimeModule()),
-                deviceStatusChecker, deviceEligibilityChecker, operationGuard, previewStoreService
+                deviceStatusChecker, deviceEligibilityChecker, operationGuard, previewStoreService,
+                deliveryRouter
         );
 
         // Inject @Value fields

@@ -39,6 +39,9 @@ public class ConfigService {
     // WO-045: preview store for confirmation gate
     private final PreviewStoreService previewStoreService;
 
+    // WO-049: per-paradigm delivery router
+    private final DeliveryRouter deliveryRouter;
+
     @Value("${kafka.topics.config-push:config-push}")
     private String configPushTopic;
 
@@ -218,6 +221,42 @@ public class ConfigService {
         } catch (Exception e) {
             log.warn("Failed to publish audit event eventType={}: {}", eventType, e.getMessage());
         }
+    }
+
+    // ── Paradigm-routed job execution (WO-049) ─────────────────────
+
+    /**
+     * Execute a confirmed config job by routing each target to the appropriate
+     * delivery channel based on the preview's classified deliveryChannel values.
+     *
+     * <p>Can only be called for jobs in ACCEPTED status. Fetches the preview
+     * from the preview store (or reconstructs routing from per-device status)
+     * and delegates per-device dispatch to {@link DeliveryRouter}.
+     *
+     * @param jobId     the ID of the accepted job
+     * @param previewId the previewId recorded on the job (used to load routing metadata)
+     * @return the updated job with per-device delivery records
+     * @throws NoSuchElementException when job or preview is not found
+     * @throws IllegalStateException  when the job is not in ACCEPTED status
+     */
+    public ConfigJob executeConfirmedJob(String jobId, String previewId) {
+        ConfigJob job = jobRepo.findById(jobId)
+                .orElseThrow(() -> new NoSuchElementException("Job not found: " + jobId));
+
+        if (!"ACCEPTED".equals(job.getStatus())) {
+            throw new IllegalStateException(
+                    "Job " + jobId + " cannot be executed: status is " + job.getStatus() + ", expected ACCEPTED");
+        }
+
+        ConfigTargetPreviewResponse preview = previewStoreService.find(previewId)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Preview not found: " + previewId + ". Preview may have been consumed or expired."));
+
+        job.setStatus("RUNNING");
+        job = jobRepo.save(job);
+
+        log.info("Executing confirmed job: jobId={} previewId={} targets={}", jobId, previewId, preview.getTotalCount());
+        return deliveryRouter.executeJob(job, preview);
     }
 
     // ── Template CRUD ──────────────────────────────────────────────

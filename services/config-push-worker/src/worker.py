@@ -3,10 +3,10 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone
 
 from prometheus_client import Counter, Histogram
 
+from datetime import datetime, timezone
 from .config import Config
 from .netconf_adapter import _build_netconf_xml, netconf_push
 from .cli_adapter import _params_to_cli_commands, cli_push
@@ -34,11 +34,20 @@ class ConfigPushWorker:
         self.producer = kafka_producer
 
     async def handle_push_event(self, event: dict) -> dict:
-        """Process a single config-push event. Returns result dict."""
+        """
+        Process a single config-push event. Returns result dict.
+
+        Supports both legacy single-protocol events and WO-049 routed events.
+        When 'protocolOrder' is present in the event, attempts protocols in order
+        and records each attempt for fallback visibility.
+        """
         device_id = event.get("deviceId")
         template_id = event.get("templateId")
         job_id = event.get("jobId")
         actor = event.get("actor", "system")
+        idempotency_key = event.get("idempotencyKey")
+        delivery_channel = event.get("deliveryChannel")
+        protocol_order = event.get("protocolOrder")  # WO-049 routed delivery
 
         template = await self._get_template(template_id)
         device = await self._get_device(device_id)
@@ -47,9 +56,16 @@ class ConfigPushWorker:
             return self._fail(device_id, job_id, "Template or device not found", "UNKNOWN")
 
         params = self._template_to_params(template)
-        protocol = self._select_protocol(device)
         host = device.get("ipAddress", device_id)
 
+        # WO-049: use routed protocol order when present; fall back to legacy selection
+        if protocol_order and isinstance(protocol_order, list) and len(protocol_order) > 0:
+            return await self._handle_with_fallback(
+                device_id, job_id, host, params, protocol_order, idempotency_key, delivery_channel
+            )
+
+        # Legacy single-protocol path
+        protocol = self._select_protocol(device)
         start = time.monotonic()
         try:
             await retry_async(
@@ -109,6 +125,75 @@ class ConfigPushWorker:
                 pending_drained_total.inc()
 
         return drained
+
+    async def _handle_with_fallback(
+        self,
+        device_id: str,
+        job_id: str | None,
+        host: str,
+        params: dict,
+        protocol_order: list[str],
+        idempotency_key: str | None,
+        delivery_channel: str | None,
+    ) -> dict:
+        """
+        WO-049: Attempt protocols in preference order, recording each attempt.
+        Returns on first success. Falls back to next protocol on transient failure.
+        """
+        protocol_attempts = []
+        last_error = None
+
+        for protocol in protocol_order:
+            start = time.monotonic()
+            attempt: dict = {"protocol": protocol, "startedAt": datetime.now(timezone.utc).isoformat()}
+            try:
+                await retry_async(
+                    lambda: self._dispatch(protocol, host, params),
+                    attempts=Config.RETRY_ATTEMPTS,
+                    base_delay=Config.RETRY_BASE_DELAY_S,
+                    label=f"push:{device_id}:{protocol}",
+                )
+                elapsed = time.monotonic() - start
+                config_push_total.labels(status="SUCCESS", protocol=protocol).inc()
+                config_push_duration.observe(elapsed)
+                attempt["status"] = "SUCCESS"
+                attempt["completedAt"] = datetime.now(timezone.utc).isoformat()
+                protocol_attempts.append(attempt)
+                await self._update_job(job_id, device_id, "SUCCESS")
+                return {
+                    "deviceId": device_id,
+                    "status": "SUCCESS",
+                    "protocol": protocol,
+                    "deliveryChannel": delivery_channel,
+                    "idempotencyKey": idempotency_key,
+                    "protocolAttempts": protocol_attempts,
+                    "durationMs": int(elapsed * 1000),
+                }
+            except Exception as exc:
+                elapsed = time.monotonic() - start
+                is_timeout = isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+                status = "TIMEOUT" if is_timeout else "FAILURE"
+                config_push_total.labels(status=status, protocol=protocol).inc()
+                attempt["status"] = "FALLBACK" if len(protocol_order) > protocol_order.index(protocol) + 1 else status
+                attempt["failureReason"] = str(exc)
+                attempt["completedAt"] = datetime.now(timezone.utc).isoformat()
+                protocol_attempts.append(attempt)
+                last_error = exc
+                log.warning("Protocol %s failed for device=%s, trying fallback: %s", protocol, device_id, exc)
+
+        # All protocols exhausted
+        config_push_total.labels(status="FAILURE", protocol=protocol_order[-1]).inc()
+        await self._update_job(job_id, device_id, "FAILURE")
+        return {
+            "deviceId": device_id,
+            "jobId": job_id,
+            "status": "FAILURE",
+            "reason": str(last_error),
+            "protocol": protocol_order[-1],
+            "deliveryChannel": delivery_channel,
+            "idempotencyKey": idempotency_key,
+            "protocolAttempts": protocol_attempts,
+        }
 
     # ── private helpers ──────────────────────────────────────────────
 
