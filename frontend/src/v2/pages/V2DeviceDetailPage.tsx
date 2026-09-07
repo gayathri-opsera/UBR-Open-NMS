@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { fetchDevices, updateDevice } from '../../api/devices.api';
-import { fetchDeviceKpi } from '../../api/kpi.api';
+import { fetchDeviceKpi, fetchDeviceAvailabilitySummary } from '../../api/kpi.api';
 import { timeRangeToGranularity, timeRangeToMs, KPI_PARAMS } from '../../api/kpi.types';
 import { pushDeviceParam, getVersionHistory } from '../../api/config.api';
 import { apiClient } from '../../api/client';
@@ -9,6 +9,8 @@ import { extractDeviceLogs } from '../../api/diagnostics.api';
 import type { LogEntry } from '../../api/diagnostics.api';
 import type { Device } from '../../api/devices.types';
 import type { KpiSeries } from '../../api/kpi.types';
+import type { DeviceAvailabilitySummary } from '../../api/kpi.types';
+import { AvailabilityBadge } from '../../components/kpi/AvailabilityBadge';
 import { Tabs, TabPanel } from '../components/common/Tabs';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
@@ -64,6 +66,7 @@ export default function V2DeviceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [kpiData, setKpiData] = useState<KpiSeries[]>([]);
   const [kpiLoading, setKpiLoading] = useState(false);
+  const [availabilitySummary, setAvailabilitySummary] = useState<DeviceAvailabilitySummary | null>(null);
   const [tab, setTab] = useState('summary');
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Device>>({});
@@ -94,6 +97,13 @@ export default function V2DeviceDetailPage() {
       .then(setKpiData)
       .catch((e) => logger.warn('KPI fetch failed', { error: e }))
       .finally(() => setKpiLoading(false));
+    // Load availability summary alongside KPI data (WO-041)
+    fetchDeviceAvailabilitySummary({ deviceId: devId, deviceType: device.deviceType })
+      .then((resp) => {
+        const first = resp.devices?.[0];
+        if (first) setAvailabilitySummary(first);
+      })
+      .catch((e) => logger.warn('Availability summary fetch failed', { error: e }));
   }, [device, tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openEdit = () => {
@@ -218,6 +228,21 @@ export default function V2DeviceDetailPage() {
             <div style={{ padding: 24 }}><Spinner /></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 16 }}>
+              {/* WO-041: Availability health badge */}
+              {availabilitySummary && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 6 }}>
+                      Operational Health
+                    </div>
+                    <AvailabilityBadge
+                      summary={availabilitySummary}
+                      showReason
+                      showTimestamp
+                    />
+                  </div>
+                </div>
+              )}
               <div className="vf-kpi-grid">
                 {kpiData.map((series, ki) => {
                   const last = series.data[series.data.length - 1];
