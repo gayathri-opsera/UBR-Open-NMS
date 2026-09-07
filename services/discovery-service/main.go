@@ -13,9 +13,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/airtel-ubrnms/discovery-service/internal/auth"
 	"github.com/airtel-ubrnms/discovery-service/internal/config"
 	"github.com/airtel-ubrnms/discovery-service/internal/handler"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
+	"github.com/airtel-ubrnms/discovery-service/internal/scanner"
+	"github.com/airtel-ubrnms/discovery-service/internal/scheduler"
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
 )
 
@@ -46,7 +49,26 @@ func main() {
 	// Configure discovery run store (WO-011)
 	runStore := service.NewDiscoveryRunStore()
 
-	h := handler.New(svc, store, runStore)
+	// Configure HMAC validation middleware (WO-015)
+	// Uses in-memory nonce store; replace with Redis-backed store for multi-instance deployments.
+	nonceStore := auth.NewInMemoryNonceStore(auth.DefaultNonceTTL)
+	hmacValidator := auth.NewValidator(nonceStore, secretStore, auth.ValidatorConfig{
+		OnFailure: func(corrID, reason, serial string) {
+			slog.Warn("southbound.hmac.failure", "corrID", corrID, "reason", reason)
+		},
+	})
+
+	// Configure ICMP sweep service (WO-016)
+	sweepCfg := scanner.LoadSweepConfig()
+	sweeper := scanner.NewICMPSweepService(scanner.NewNetDialProber(), sweepCfg, nil)
+
+	// Configure rediscovery scheduler (WO-017)
+	schedStore := scheduler.NewInMemoryScheduleStore()
+	rediscoSched := scheduler.NewRediscoveryScheduler(schedStore, runStore, sweeper, nil)
+	rediscoSched.Start()
+
+	h := handler.New(svc, store, runStore).WithHMACValidator(hmacValidator)
+	schedHandler := handler.NewScheduleHandler(rediscoSched)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -61,7 +83,12 @@ func main() {
 		r.Post("/check-in", h.CheckIn)
 		r.Get("/devices", h.Lookup)
 		r.Post("/scan", h.TriggerScan)
-		r.Post("/runs", h.CreateDiscoveryRun) // WO-011
+		r.Post("/runs", h.CreateDiscoveryRun)                                   // WO-011
+		r.Post("/schedules", schedHandler.CreateSchedule)                       // WO-017
+		r.Get("/schedules", schedHandler.ListSchedules)                         // WO-017
+		r.Delete("/schedules/{scheduleId}", schedHandler.DeleteSchedule)        // WO-017
+		r.Post("/schedules/{scheduleId}/run", schedHandler.TriggerScheduleRun)  // WO-017
+		r.Get("/schedules/{scheduleId}/history", schedHandler.GetScheduleHistory) // WO-017
 	})
 
 	// Southbound service registry for UBR call-home (WO-009)
@@ -97,6 +124,7 @@ func main() {
 	slog.Info("Shutting down")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	rediscoSched.Stop()
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("Graceful shutdown failed", "error", err)
 	}

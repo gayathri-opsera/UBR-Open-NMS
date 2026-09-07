@@ -4,9 +4,11 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
+	"github.com/airtel-ubrnms/discovery-service/internal/auth"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
 	"github.com/airtel-ubrnms/discovery-service/internal/southbound"
@@ -14,9 +16,10 @@ import (
 
 // DiscoveryHandler holds handler dependencies.
 type DiscoveryHandler struct {
-	svc      *service.DiscoveryService
-	store    *service.DeviceStore
-	runStore *service.DiscoveryRunStore // WO-011
+	svc           *service.DiscoveryService
+	store         *service.DeviceStore
+	runStore      *service.DiscoveryRunStore // WO-011
+	hmacValidator *auth.Validator            // WO-015: nil disables HMAC validation (dev/test)
 }
 
 // New creates a DiscoveryHandler.
@@ -24,11 +27,42 @@ func New(svc *service.DiscoveryService, store *service.DeviceStore, runStore *se
 	return &DiscoveryHandler{svc: svc, store: store, runStore: runStore}
 }
 
+// WithHMACValidator attaches an HMAC Validator to the handler (WO-015).
+// When set, CheckIn and other signed southbound endpoints require valid HMAC headers.
+func (h *DiscoveryHandler) WithHMACValidator(v *auth.Validator) *DiscoveryHandler {
+	h.hmacValidator = v
+	return h
+}
+
 // CheckIn handles POST /api/v1/discovery/check-in
 // Uses the canonical southbound error catalog (WO-005) so firmware can react
 // deterministically to every failure category.
+// When an HMAC Validator is attached (WO-015), the X-UBR-Signature, X-UBR-Timestamp,
+// and X-UBR-Nonce headers are validated before any state mutation occurs.
 func (h *DiscoveryHandler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	corrID := r.Header.Get("X-Correlation-ID")
+
+	// ── WO-015: HMAC validation before any state mutation ─────────────────────
+	if h.hmacValidator != nil {
+		// Read the raw body bytes first so we can peek the serial number for
+		// per-device secret resolution, then pass the bytes to the validator.
+		rawBody, err := io.ReadAll(r.Body)
+		if err != nil {
+			southbound.InternalError(w, corrID)
+			return
+		}
+
+		// Peek only the serial number — the full decode happens below after validation.
+		var peek struct {
+			SerialNumber string `json:"serialNumber"`
+		}
+		_ = json.Unmarshal(rawBody, &peek) // best-effort; validator handles empty serial
+
+		if !h.hmacValidator.ValidatePreloaded(w, r, peek.SerialNumber, corrID, rawBody) {
+			return // error already written by validator; body rewound on success only
+		}
+		// r.Body has been rewound to rawBody by ValidatePreloaded; the decode below reads it normally.
+	}
 
 	var req model.CheckInRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -77,9 +77,29 @@ paths:
   /discovery/check-in:
     post:
       tags: [discovery]
-      summary: Device self-registration at first boot (mTLS endpoint)
+      summary: Device self-registration at first boot (mTLS + HMAC-signed endpoint — WO-015)
       operationId: deviceCheckIn
       security: []
+      parameters:
+        - in: header
+          name: X-UBR-Signature
+          required: true
+          schema: { type: string }
+          description: >
+            HMAC-SHA256 signature over "METHOD\nPATH\nTIMESTAMP\nNONCE\nSHA256(body)".
+            Computed with the per-device secret provisioned at manufacture time.
+        - in: header
+          name: X-UBR-Timestamp
+          required: true
+          schema: { type: string }
+          description: Unix epoch seconds (string). Must be within ±5 minutes of server time (configurable via HMAC_TIMESTAMP_TOLERANCE_SECS).
+        - in: header
+          name: X-UBR-Nonce
+          required: true
+          schema: { type: string }
+          description: >
+            Unique per-request nonce. Replayed nonces are rejected within a 10-minute window.
+            Store in Redis with TTL=10m.
       requestBody:
         required: true
         content:
@@ -88,6 +108,13 @@ paths:
       responses:
         "201": { description: Device registered and birth certificate stored, content: { application/json: { schema: { $ref: '#/components/schemas/CheckInResponse' } } } }
         "400": { description: Malformed payload or missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/SouthboundErrorBody' } } } }
+        "401":
+          description: >
+            HMAC signature invalid. Possible causes: wrong secret, expired timestamp (>±5 min),
+            replayed nonce, or tampered body. Emits southbound.hmac.failure audit event.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
         "409": { description: Device already registered, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
         "403": { description: Discovery mode disabled, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryModeDisabledError' } } } }
         "429":
@@ -251,6 +278,99 @@ paths:
         "200": { description: Updated policy, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryModeEntry' } } } }
         "400": { description: Malformed rolloutLevel or missing reason }
         "403": { description: Non-admin caller or denied audit event }
+
+  # ── WO-017: Rediscovery schedules ────────────────────────────────────────────
+  /discovery/schedules:
+    get:
+      tags: [discovery]
+      summary: List all rediscovery schedules (operator+)
+      operationId: listRediscoverySchedules
+      responses:
+        "200":
+          description: List of schedules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schedules:
+                    type: array
+                    items: { $ref: '#/components/schemas/RediscoverySchedule' }
+    post:
+      tags: [discovery]
+      summary: Create a rediscovery schedule (operator+)
+      operationId: createRediscoverySchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRediscoveryScheduleRequest' }
+      responses:
+        "201":
+          description: Schedule created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RediscoverySchedule' }
+        "400": { description: Invalid cron expression or missing scope }
+        "409": { description: A schedule for this scope already exists }
+
+  /discovery/schedules/{scheduleId}:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [discovery]
+      summary: Delete a rediscovery schedule (operator+)
+      operationId: deleteRediscoverySchedule
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Schedule not found }
+
+  /discovery/schedules/{scheduleId}/run:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [discovery]
+      summary: Manually trigger a scheduled rediscovery run (operator+)
+      operationId: triggerRediscoveryRun
+      responses:
+        "202":
+          description: Run triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId: { type: string, format: uuid }
+        "404": { description: Schedule not found }
+
+  /discovery/schedules/{scheduleId}/history:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [discovery]
+      summary: Get history of past rediscovery runs for a schedule (operator+)
+      operationId: getRediscoveryHistory
+      responses:
+        "200":
+          description: Run history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items: { $ref: '#/components/schemas/RediscoveryHistoryEntry' }
+        "404": { description: Schedule not found }
 
 components:
   securitySchemes:
@@ -455,3 +575,48 @@ components:
         httpStatus:     { type: integer }
         timestamp:      { type: string, format: date-time }
         serviceId:      { type: string }
+
+    # ── WO-017: Rediscovery schedule models ────────────────────────────────────
+
+    CreateRediscoveryScheduleRequest:
+      type: object
+      required: [cronExpression, scopeRunId]
+      properties:
+        cronExpression:  { type: string, example: "0 2 * * *", description: Standard 5-field cron expression }
+        scopeRunId:      { type: string, format: uuid, description: Discovery run ID whose scope will be re-executed }
+        notifyOnChange:  { type: boolean, default: true, description: Emit audit event when changes are detected }
+        disabled:        { type: boolean, default: false }
+
+    RediscoverySchedule:
+      type: object
+      properties:
+        scheduleId:     { type: string, format: uuid }
+        cronExpression: { type: string }
+        scopeRunId:     { type: string, format: uuid }
+        notifyOnChange: { type: boolean }
+        disabled:       { type: boolean }
+        createdAt:      { type: string, format: date-time }
+        updatedAt:      { type: string, format: date-time }
+        lastRunAt:      { type: string, format: date-time, nullable: true }
+
+    DeviceChange:
+      type: object
+      properties:
+        ip:        { type: string }
+        changeType: { type: string, enum: [added, removed, modified] }
+        before:    { type: object, additionalProperties: true }
+        after:     { type: object, additionalProperties: true }
+
+    RediscoveryHistoryEntry:
+      type: object
+      properties:
+        runId:          { type: string, format: uuid }
+        scheduleId:     { type: string, format: uuid }
+        triggeredAt:    { type: string, format: date-time }
+        completedAt:    { type: string, format: date-time, nullable: true }
+        status:         { type: string, enum: [running, completed, failed] }
+        hostsScanned:   { type: integer }
+        changesDetected: { type: integer }
+        changes:
+          type: array
+          items: { $ref: '#/components/schemas/DeviceChange' }
