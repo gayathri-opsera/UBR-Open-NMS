@@ -1,0 +1,15 @@
+{
+  "alarmId": "op-alarm-001",
+  "deviceId": "bts-001",
+  "deviceType": "BTS",
+  "alarmType": "LINK_DOWN",
+  "alarmName": "Link Down",
+  "severity": "MAJOR",
+  "source": "SNMP",
+  "sourceSystem": "SNMP_POLLER",
+  "description": "Interface GigabitEthernet0/0 is down",
+  "networkId": "net-001",
+  "organizationId": "org-001",
+  "correlationId": "corr-op-001",
+  "eventId": "evt-op-001"
+}

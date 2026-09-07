@@ -1,0 +1,16 @@
+{
+  "alarmId": "hmac-alarm-001",
+  "deviceId": "AA:BB:CC:DD:EE:FF",
+  "deviceType": "BTS",
+  "alarmType": "SOUTHBOUND_AUTH_FAILURE",
+  "alarmName": "HMAC_INVALID on southbound interface",
+  "severity": "CRITICAL",
+  "source": "SOUTHBOUND",
+  "sourceSystem": "DISCOVERY_SERVICE",
+  "errorCategory": "auth_failure",
+  "errorReason": "HMAC_INVALID",
+  "httpStatus": 462,
+  "description": "Southbound error: reason=HMAC_INVALID category=auth_failure httpStatus=462",
+  "correlationId": "corr-hmac-001",
+  "eventId": "evt-hmac-001"
+}

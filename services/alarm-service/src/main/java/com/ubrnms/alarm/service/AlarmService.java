@@ -201,7 +201,11 @@ public class AlarmService {
         alarm.setDeviceType(getStr(raw, "deviceType", "UNKNOWN"));
         alarm.setAlarmType(getStr(raw, "alarmType", "GENERIC"));
         alarm.setAlarmName(getStr(raw, "alarmName", alarm.getAlarmType()));
-        alarm.setSeverity(getStr(raw, "severity", "WARNING"));
+
+        // Map severity — reject unrecognised values with INDETERMINATE to prevent partial records.
+        String rawSeverity = getStr(raw, "severity", null);
+        alarm.setSeverity(normalizeSeverity(rawSeverity));
+
         alarm.setState("ACTIVE");
         alarm.setDescription(getStr(raw, "description", ""));
         alarm.setSource(getStr(raw, "source", "SNMP"));
@@ -210,7 +214,123 @@ public class AlarmService {
         alarm.setRaisedAt(Instant.now());
         alarm.setDedupWindowStart(Instant.now());
         alarm.setRawData(raw);
+
+        // WO-051: Normalize classification metadata after basic fields are populated.
+        normalizeClassification(alarm, raw);
         return alarm;
+    }
+
+    /**
+     * Maps a raw severity string to one of the known severity values.
+     * Malformed or unrecognised values produce INDETERMINATE so the record is still
+     * persisted without crashing the pipeline.
+     */
+    private String normalizeSeverity(String raw) {
+        if (raw == null || raw.isBlank()) return "WARNING";
+        return switch (raw.toUpperCase()) {
+            case "CRITICAL", "MAJOR", "MINOR", "WARNING", "INFO", "INDETERMINATE" -> raw.toUpperCase();
+            default -> {
+                log.warn("Unrecognised severity value — defaulting to INDETERMINATE");
+                yield "INDETERMINATE";
+            }
+        };
+    }
+
+    /**
+     * Derives and sets unified classification metadata on an already-mapped Alarm.
+     *
+     * <p>WO-051: Called from {@link #mapRawToAlarm} so that every persisted alarm
+     * carries a stable category, sourceSystem, schemaVersion, eventId, idempotencyKey,
+     * correlationId, classificationReason, and evidenceContext.
+     *
+     * <p>SECURITY: evidenceContext must never include certificate material, HMAC
+     * signatures, nonces, per-device secrets, or raw request bodies.
+     */
+    private void normalizeClassification(Alarm alarm, Map<String, Object> raw) {
+        alarm.setSchemaVersion("2.0");
+
+        // eventId — prefer caller-supplied value; fall back to alarmId.
+        String eventId = getStr(raw, "eventId", alarm.getAlarmId());
+        alarm.setEventId(eventId);
+
+        // sourceSystem — explicit field takes precedence over derived value.
+        String sourceSystem = deriveSourceSystem(raw);
+        alarm.setSourceSystem(sourceSystem);
+
+        // idempotencyKey — stable composite key for cross-session dedup.
+        alarm.setIdempotencyKey(alarm.getDeviceId() + ":" + alarm.getAlarmType() + ":" + sourceSystem);
+
+        // correlationId — propagated from raw event for log tracing.
+        alarm.setCorrelationId(getStr(raw, "correlationId", null));
+
+        // category + classificationReason — derived from source and alarmType.
+        ClassificationResult classification = deriveCategory(alarm, raw);
+        alarm.setCategory(classification.category());
+        alarm.setClassificationReason(classification.reason());
+
+        // evidenceContext — non-sensitive diagnostic fields only.
+        Map<String, Object> ctx = new LinkedHashMap<>();
+        if (alarm.getCorrelationId() != null) ctx.put("correlationId", alarm.getCorrelationId());
+        if (alarm.getDeviceType() != null)    ctx.put("deviceType", alarm.getDeviceType());
+        if (alarm.getAlarmType() != null)     ctx.put("alarmType", alarm.getAlarmType());
+        if (alarm.getNetworkId() != null)     ctx.put("networkId", alarm.getNetworkId());
+        alarm.setEvidenceContext(ctx.isEmpty() ? null : ctx);
+    }
+
+    /** Internal DTO carrying category name and reason for classificationReason field. */
+    private record ClassificationResult(String category, String reason) {}
+
+    /**
+     * Derives the alarm category from source field and alarmType.
+     * Safe defaults ensure every alarm gets a valid category even with incomplete source data.
+     */
+    private ClassificationResult deriveCategory(Alarm alarm, Map<String, Object> raw) {
+        // Use the raw source field to distinguish "not provided" from the "SNMP" default
+        // set in mapRawToAlarm. This ensures FALLBACK_DEFAULT fires when source is absent.
+        String rawSource = getStr(raw, "source", null);
+        String source    = rawSource != null ? rawSource : alarm.getSource();
+        String alarmType = alarm.getAlarmType() != null ? alarm.getAlarmType() : "";
+
+        if ("SOUTHBOUND".equalsIgnoreCase(source)
+                || alarmType.startsWith("SOUTHBOUND_AUTH")
+                || alarmType.startsWith("SOUTHBOUND_MTLS")) {
+            return new ClassificationResult("SECURITY", "source=SOUTHBOUND mapped to SECURITY");
+        }
+        if ("THRESHOLD".equalsIgnoreCase(source)) {
+            return new ClassificationResult("THRESHOLD", "source=THRESHOLD mapped to THRESHOLD");
+        }
+        if ("SELF_HEALTH".equalsIgnoreCase(source)) {
+            return new ClassificationResult("LIFECYCLE", "source=SELF_HEALTH mapped to LIFECYCLE");
+        }
+        if (alarmType.contains("BOOTSTRAP") || alarmType.contains("DISCOVERY")
+                || alarmType.contains("ONBOARD")) {
+            return new ClassificationResult("DISCOVERY", "alarmType matches DISCOVERY pattern");
+        }
+        if (alarmType.contains("CONFIG")) {
+            return new ClassificationResult("CONFIG", "alarmType matches CONFIG pattern");
+        }
+        if (rawSource == null || rawSource.isBlank()) {
+            return new ClassificationResult("FAULT", "FALLBACK_DEFAULT");
+        }
+        return new ClassificationResult("FAULT", "source=" + source + " defaulted to FAULT");
+    }
+
+    /**
+     * Derives the sourceSystem identifier from raw event fields.
+     * Maps known source type strings to canonical source system names.
+     */
+    private String deriveSourceSystem(Map<String, Object> raw) {
+        String explicit = getStr(raw, "sourceSystem", null);
+        if (explicit != null && !explicit.isBlank()) return explicit;
+        String source = getStr(raw, "source", "UNKNOWN");
+        return switch (source.toUpperCase()) {
+            case "SNMP"       -> "SNMP_POLLER";
+            case "SYSLOG"     -> "SYSLOG_COLLECTOR";
+            case "THRESHOLD"  -> "THRESHOLD_ENGINE";
+            case "SELF_HEALTH"-> "SELF_HEALTH_MONITOR";
+            case "SOUTHBOUND" -> "DISCOVERY_SERVICE";
+            default           -> "UNKNOWN";
+        };
     }
 
     @SuppressWarnings("unchecked")
@@ -231,6 +351,9 @@ public class AlarmService {
             netcool.put("alarmDescription", alarm.getDescription());
             netcool.put("state", alarm.getState());
             netcool.put("Time", alarm.getRaisedAt() != null ? alarm.getRaisedAt().toString() : "");
+            // WO-051: include schemaVersion and correlationId for northbound consumer compatibility.
+            netcool.put("schemaVersion", alarm.getSchemaVersion() != null ? alarm.getSchemaVersion() : "1.0");
+            if (alarm.getCorrelationId() != null) netcool.put("correlationId", alarm.getCorrelationId());
             netcool.put("data", Map.of(
                     "deviceType", alarm.getDeviceType(),
                     "deviceId", alarm.getDeviceId()

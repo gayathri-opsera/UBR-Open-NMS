@@ -1,0 +1,16 @@
+{
+  "alarmId": "thr-alarm-001",
+  "deviceId": "bts-002",
+  "deviceType": "BTS",
+  "alarmType": "HIGH_CPU",
+  "alarmName": "CPU usage threshold breached",
+  "severity": "MAJOR",
+  "source": "THRESHOLD",
+  "sourceSystem": "THRESHOLD_ENGINE",
+  "description": "CPU=95.0 exceeded threshold=90.0",
+  "metricValue": 95.0,
+  "threshold": 90.0,
+  "networkId": "net-001",
+  "correlationId": "corr-thr-001",
+  "eventId": "evt-thr-001"
+}

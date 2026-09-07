@@ -1,0 +1,12 @@
+{
+  "alarmId": "op-alarm-001",
+  "deviceId": "bts-001",
+  "deviceType": "BTS",
+  "alarmType": "LINK_DOWN",
+  "state": "CLEAR",
+  "source": "SNMP",
+  "sourceSystem": "SNMP_POLLER",
+  "description": "Interface GigabitEthernet0/0 restored",
+  "correlationId": "corr-clear-001",
+  "eventId": "evt-clear-001"
+}

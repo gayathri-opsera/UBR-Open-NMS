@@ -214,4 +214,187 @@ class AlarmServiceTest {
         m.put("source", "SNMP"); m.put("description", "test alarm");
         return m;
     }
+
+    // ── WO-051: Classification normalization tests ────────────────────────────
+
+    @Test
+    void normalization_setsSchemaVersion2_0() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Alarm result = service.processRawAlarm(rawEvent("dev-n1", "LINK_DOWN"));
+
+        assertThat(result.getSchemaVersion()).isEqualTo("2.0");
+    }
+
+    @Test
+    void normalization_snmpSourceMappedToFaultCategory() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> raw = rawEvent("dev-n2", "INTERFACE_DOWN");
+        raw.put("source", "SNMP");
+        Alarm result = service.processRawAlarm(raw);
+
+        assertThat(result.getCategory()).isEqualTo("FAULT");
+        assertThat(result.getSourceSystem()).isEqualTo("SNMP_POLLER");
+    }
+
+    @Test
+    void normalization_thresholdSourceMappedToThresholdCategory() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> raw = rawEvent("dev-n3", "HIGH_CPU");
+        raw.put("source", "THRESHOLD");
+        Alarm result = service.processRawAlarm(raw);
+
+        assertThat(result.getCategory()).isEqualTo("THRESHOLD");
+        assertThat(result.getSourceSystem()).isEqualTo("THRESHOLD_ENGINE");
+    }
+
+    @Test
+    void normalization_selfHealthSourceMappedToLifecycleCategory() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> raw = rawEvent("dev-n4", "SERVICE_RESTART");
+        raw.put("source", "SELF_HEALTH");
+        Alarm result = service.processRawAlarm(raw);
+
+        assertThat(result.getCategory()).isEqualTo("LIFECYCLE");
+        assertThat(result.getSourceSystem()).isEqualTo("SELF_HEALTH_MONITOR");
+    }
+
+    @Test
+    void normalization_southboundSourceMappedToSecurityCategory() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> raw = rawEvent("dev-n5", "SOUTHBOUND_AUTH_FAILURE");
+        raw.put("source", "SOUTHBOUND");
+        raw.put("correlationId", "corr-sec-001");
+        Alarm result = service.processRawAlarm(raw);
+
+        assertThat(result.getCategory()).isEqualTo("SECURITY");
+        assertThat(result.getSourceSystem()).isEqualTo("DISCOVERY_SERVICE");
+        assertThat(result.getCorrelationId()).isEqualTo("corr-sec-001");
+    }
+
+    @Test
+    void normalization_missingSourceFallsBackToFaultWithFallbackReason() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> raw = new HashMap<>();
+        raw.put("deviceId", "dev-n6");
+        raw.put("alarmType", "GENERIC");
+        raw.put("deviceType", "BTS");
+        // No source field intentionally
+        Alarm result = service.processRawAlarm(raw);
+
+        assertThat(result.getCategory()).isEqualTo("FAULT");
+        assertThat(result.getClassificationReason()).isEqualTo("FALLBACK_DEFAULT");
+    }
+
+    @Test
+    void normalization_evidenceContextExcludesSensitiveFields() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> raw = rawEvent("dev-n7", "SOUTHBOUND_AUTH_FAILURE");
+        raw.put("source", "SOUTHBOUND");
+        // Simulate raw event that might contain sensitive fields (should never appear in evidenceContext)
+        raw.put("hmacSignature", "should-not-appear");
+        raw.put("certificatePem", "should-not-appear");
+        Alarm result = service.processRawAlarm(raw);
+
+        assertThat(result.getEvidenceContext()).doesNotContainKey("hmacSignature");
+        assertThat(result.getEvidenceContext()).doesNotContainKey("certificatePem");
+    }
+
+    @Test
+    void normalization_idempotencyKeyIsCompositeOfDeviceTypeAndSource() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Alarm result = service.processRawAlarm(rawEvent("dev-n8", "HIGH_CPU"));
+
+        assertThat(result.getIdempotencyKey()).isEqualTo("dev-n8:HIGH_CPU:SNMP_POLLER");
+    }
+
+    @Test
+    void normalization_malformedSeverityProducesIndeterminate() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> raw = rawEvent("dev-n9", "LINK_DOWN");
+        raw.put("severity", "NOT_A_VALID_SEVERITY");
+        Alarm result = service.processRawAlarm(raw);
+
+        assertThat(result.getSeverity()).isEqualTo("INDETERMINATE");
+    }
+
+    @Test
+    void normalization_deduplicationPreservesOriginalClassification() {
+        Alarm existing = new Alarm();
+        existing.setAlarmId("a-dup"); existing.setDeviceId("dev-dup");
+        existing.setAlarmType("HIGH_CPU"); existing.setState("ACTIVE");
+        existing.setDedupCount(2); existing.setDedupWindowStart(Instant.now());
+        existing.setCategory("THRESHOLD");
+        existing.setSchemaVersion("2.0");
+        existing.setSourceSystem("THRESHOLD_ENGINE");
+
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                eq("dev-dup"), eq("HIGH_CPU"), eq("ACTIVE"), any()))
+                .thenReturn(Optional.of(existing));
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> raw = rawEvent("dev-dup", "HIGH_CPU");
+        Alarm result = service.processRawAlarm(raw);
+
+        // Dedup should increment count and preserve the original classification metadata.
+        assertThat(result.getDedupCount()).isEqualTo(3);
+        assertThat(result.getCategory()).isEqualTo("THRESHOLD");
+        assertThat(result.getSchemaVersion()).isEqualTo("2.0");
+    }
+
+    @Test
+    void normalization_securityEventWithUnknownIdentityAcceptedAsPlatformAlarm() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Map<String, Object> raw = new HashMap<>();
+        raw.put("alarmType", "SOUTHBOUND_AUTH_FAILURE");
+        raw.put("source", "SOUTHBOUND");
+        raw.put("deviceType", "UNKNOWN");
+        // No deviceId — simulates a cert failure with no associated inventory record.
+        raw.put("description", "mTLS cert invalid — device identity undetermined");
+        Alarm result = service.processRawAlarm(raw);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getCategory()).isEqualTo("SECURITY");
+        // Device identity must be marked as unknown, not as a crash.
+        assertThat(result.getDeviceId()).isEqualTo("unknown");
+    }
 }
