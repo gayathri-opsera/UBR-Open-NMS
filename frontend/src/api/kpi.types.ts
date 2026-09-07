@@ -48,3 +48,88 @@ export function timeRangeToMs(tr: TimeRange): number {
   const h = { '1h': 1, '6h': 6, '24h': 24, '7d': 168 };
   return h[tr] * 3_600_000;
 }
+
+// ── WO-034: KPI Operations Summary types ──────────────────────────────────────
+
+export type KpiSeverity = 'HEALTHY' | 'DEGRADED' | 'CRITICAL' | 'UNAVAILABLE' | 'UNKNOWN';
+
+export interface KpiSummaryCard {
+  metric: string;
+  displayName: string;
+  unit: string;
+  currentValue: number | null;
+  trend: 'UP' | 'DOWN' | 'STABLE' | 'UNAVAILABLE';
+  trendPct: number | null;
+  severity: KpiSeverity;
+  deviceCount: number;
+  /** null means metric not supported for this device mix */
+  unsupported: boolean;
+  lastUpdated: string | null;
+}
+
+export interface DeviceImpactEntry {
+  deviceId: string;
+  serialNumber: string;
+  deviceType: string;
+  impactedMetrics: string[];
+  worstSeverity: KpiSeverity;
+  latencyMs: number | null;
+  packetLossPct: number | null;
+  availabilityPct: number | null;
+  lastObservedAt: string | null;
+}
+
+export interface KpiTrendSeries {
+  metric: string;
+  granularity: Granularity;
+  points: Array<{
+    bucketStart: string;
+    fleetAvg: number | null;
+    fleetMin: number | null;
+    fleetMax: number | null;
+    deviceCount: number;
+  }>;
+}
+
+export interface KpiOperationsSummaryResponse {
+  generatedAt: string;
+  timeRange: {
+    from: string;
+    to: string;
+    window: TimeRange;
+  };
+  summaryCards: KpiSummaryCard[];
+  topImpactedDevices: DeviceImpactEntry[];
+  trendSeries: KpiTrendSeries[];
+  staleData: boolean;
+  staleReason?: string;
+}
+
+export interface KpiOperationsSummaryRequest {
+  timeRange?: TimeRange;
+  networkId?: string;
+  organizationId?: string;
+  deviceType?: string;
+  metricGroup?: 'radio' | 'system' | 'traffic' | 'all';
+}
+
+/** Maps KpiSeverity to a CSS variable color token. */
+export function severityColor(s: KpiSeverity): string {
+  switch (s) {
+    case 'HEALTHY':     return 'var(--vf-success)';
+    case 'DEGRADED':    return 'var(--vf-warning)';
+    case 'CRITICAL':    return 'var(--vf-danger)';
+    case 'UNAVAILABLE': return 'var(--vf-text-muted)';
+    default:            return 'var(--vf-text-dim)';
+  }
+}
+
+/** Maps KpiSeverity to a badge variant. */
+export function severityVariant(s: KpiSeverity): 'success' | 'warning' | 'danger' | 'default' {
+  switch (s) {
+    case 'HEALTHY':  return 'success';
+    case 'DEGRADED': return 'warning';
+    case 'CRITICAL': return 'danger';
+    default:         return 'default';
+  }
+}
