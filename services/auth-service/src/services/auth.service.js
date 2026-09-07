@@ -10,6 +10,10 @@ const logger = require('../utils/logger');
 // Lazy-required to avoid circular dep at module load time
 const getMfaService = () => require('./mfa.service');
 
+// Roles for which MFA is required by policy (WO-014).
+// Admin users without MFA enrolled are blocked from receiving a full access token.
+const MFA_REQUIRED_ROLES = new Set(['admin']);
+
 /**
  * Attempt authentication. LDAP-first, MongoDB-fallback when circuit is open.
  * Returns { accessToken, refreshToken, expiresIn, role } on success.
@@ -90,11 +94,27 @@ async function login(username, password, ip, userAgent) {
   // Clear any previous failure count on successful auth.
   await sessionService.clearFailedAttempts(username);
 
-  // ── MFA gate ─────────────────────────────────────────────────────────────────
-  // Fetch fresh user record to check mfaEnabled (not fetched above for LDAP path).
-  const userRecord = await User.findById(userId).select('mfaEnabled username');
+  // ── MFA gate (WO-014) ─────────────────────────────────────────────────────────
+  // Fetch fresh user record to check mfaEnabled and policy requirement.
+  const userRecord = await User.findById(userId).select('mfaEnabled mfaResetRequired username');
+
+  // Admin users are required to have MFA enrolled by policy.
+  // If an admin has not enrolled MFA (or had it reset), block the login and require enrollment.
+  if (MFA_REQUIRED_ROLES.has((role || '').toLowerCase())) {
+    if (!userRecord || !userRecord.mfaEnabled || userRecord.mfaResetRequired) {
+      logger.warn('Admin login blocked: MFA not enrolled or reset required',
+        logger.maskPii({ username, ip, role }));
+      // Emit LOGIN_FAILED audit event for policy-blocked admin login
+      logger.info('audit:LOGIN_FAILED', { username, role, reason: 'MFA_ENROLLMENT_REQUIRED', ip: ip ? ip.split('.').slice(0, 2).join('.') + '.*.*' : 'unknown' });
+      const err = new Error('Administrators must enroll in MFA before logging in. Use the MFA setup endpoint to enroll.');
+      err.code = 'MFA_REQUIRED';
+      err.status = 403;
+      throw err;
+    }
+  }
+
   if (userRecord && userRecord.mfaEnabled) {
-    // Password is correct but MFA is required — issue a short-lived challenge token
+    // Password is correct but MFA challenge is required — issue a short-lived challenge token
     // instead of the real access token.
     const mfaToken = jwtService.generateMfaChallengeToken(userId, username, role);
     logger.info('MFA challenge issued', logger.maskPii({ username, ip }));

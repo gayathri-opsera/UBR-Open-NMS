@@ -86,6 +86,25 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // ── WO-014: Backup codes and admin MFA enforcement ────────────────────────
+    // Backup codes are bcrypt-hashed single-use recovery codes.
+    // SECURITY: raw codes are only shown once at generation time; only hashes are stored.
+    mfaBackupCodes: {
+      type: [String],
+      default: [],
+      select: false, // never returned by default queries
+    },
+    // Tracks whether this user's role requires MFA by policy.
+    // Set to true for admin accounts to enforce enrollment at next login.
+    mfaRequiredByPolicy: {
+      type: Boolean,
+      default: false,
+    },
+    // Set to true when admin resets MFA (forces re-enrollment at next login).
+    mfaResetRequired: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -95,6 +114,7 @@ const userSchema = new mongoose.Schema(
         delete ret.passwordHistory;
         delete ret.mfaSecret;
         delete ret.mfaPendingSecret;
+        delete ret.mfaBackupCodes;
         delete ret.__v;
         return ret;
       },

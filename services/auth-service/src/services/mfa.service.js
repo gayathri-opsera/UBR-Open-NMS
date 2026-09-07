@@ -3,10 +3,17 @@
 // speakeasy is a pure CJS TOTP library — no ESM dependencies
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
+const bcrypt = require('bcrypt');
+const { v4: uuidv4 } = require('uuid');
 const { User } = require('../models/user.model');
 const logger = require('../utils/logger');
 
 const APP_NAME_PREFIX = 'UBR-NMS';
+const BACKUP_CODE_COUNT = 8;
+const BACKUP_CODE_BCRYPT_ROUNDS = 12;
+
+// Roles that require MFA by policy. Admin accounts must enroll before receiving a full token.
+const MFA_REQUIRED_ROLES = new Set(['admin']);
 
 /**
  * Generate a new TOTP secret and QR code for a user.
@@ -164,4 +171,120 @@ async function getMfaStatus(userId) {
   };
 }
 
-module.exports = { setupMfa, enableMfa, verifyOtp, disableMfa, getMfaStatus };
+/**
+ * Returns true when the given role is required to have MFA by policy (WO-014).
+ */
+function isMfaRequiredForRole(role) {
+  return MFA_REQUIRED_ROLES.has((role || '').toLowerCase());
+}
+
+/**
+ * Generate 8 single-use backup recovery codes and store them bcrypt-hashed.
+ * Returns the plaintext codes ONCE — they cannot be recovered after this call.
+ * The caller must display them immediately and store nothing.
+ *
+ * SECURITY: raw codes are returned only here; hashes are persisted.
+ */
+async function generateBackupCodes(userId) {
+  const user = await User.findById(userId);
+  if (!user) {
+    const err = new Error('User not found.');
+    err.code = 'USER_NOT_FOUND';
+    err.status = 404;
+    throw err;
+  }
+  if (!user.mfaEnabled) {
+    const err = new Error('MFA must be enabled before generating backup codes.');
+    err.code = 'MFA_NOT_ENABLED';
+    err.status = 400;
+    throw err;
+  }
+
+  // Generate raw codes (UUID fragments for entropy)
+  const rawCodes = Array.from({ length: BACKUP_CODE_COUNT }, () =>
+    (uuidv4().replace(/-/g, '').slice(0, 8)).toUpperCase()
+  );
+
+  // Hash each code — same bcrypt settings as passwords
+  const hashes = await Promise.all(
+    rawCodes.map((code) => bcrypt.hash(code, BACKUP_CODE_BCRYPT_ROUNDS))
+  );
+
+  await User.findByIdAndUpdate(userId, { mfaBackupCodes: hashes });
+
+  logger.info('MFA backup codes generated', { userId });
+  // SECURITY: return raw codes only once; they are never stored in plaintext
+  return { backupCodes: rawCodes };
+}
+
+/**
+ * Verify a backup recovery code for a user.
+ * On success, the used code is invalidated (removed from the stored list).
+ * Returns true on success, throws on failure.
+ *
+ * SECURITY: timing-safe bcrypt comparison is used to prevent code enumeration.
+ */
+async function verifyBackupCode(userId, code) {
+  const user = await User.findById(userId).select('+mfaBackupCodes +mfaSecret');
+  if (!user) {
+    const err = new Error('User not found.');
+    err.code = 'USER_NOT_FOUND';
+    err.status = 404;
+    throw err;
+  }
+  if (!user.mfaEnabled || !user.mfaBackupCodes || user.mfaBackupCodes.length === 0) {
+    const err = new Error('No backup codes available for this account.');
+    err.code = 'NO_BACKUP_CODES';
+    err.status = 400;
+    throw err;
+  }
+
+  // Find the matching hash using timing-safe comparison
+  let matchedIndex = -1;
+  for (let i = 0; i < user.mfaBackupCodes.length; i++) {
+    const isMatch = await bcrypt.compare(code, user.mfaBackupCodes[i]);
+    if (isMatch) {
+      matchedIndex = i;
+      break; // stop at first match — codes are unique
+    }
+  }
+
+  if (matchedIndex === -1) {
+    logger.warn('MFA backup code verification failed', { userId });
+    const err = new Error('Invalid backup code.');
+    err.code = 'INVALID_BACKUP_CODE';
+    err.status = 401;
+    throw err;
+  }
+
+  // Invalidate the used code by removing it from the array
+  const remaining = user.mfaBackupCodes.filter((_, i) => i !== matchedIndex);
+  await User.findByIdAndUpdate(userId, { mfaBackupCodes: remaining });
+
+  logger.info('MFA backup code used', { userId, remaining: remaining.length });
+  return true;
+}
+
+/**
+ * Disable MFA for a user, also clearing backup codes.
+ * Requires the user to confirm with a valid OTP (unless called by admin with adminOverride=true).
+ * Overrides the original disableMfa to also clear backup codes (WO-014).
+ */
+async function disableMfaWithCleanup(userId, code, adminOverride = false) {
+  const result = await disableMfa(userId, code, adminOverride);
+  // Clear backup codes on MFA disable
+  await User.findByIdAndUpdate(userId, { mfaBackupCodes: [], mfaResetRequired: false });
+  logger.info('MFA backup codes cleared on disable', { userId });
+  return result;
+}
+
+module.exports = {
+  setupMfa,
+  enableMfa,
+  verifyOtp,
+  disableMfa: disableMfaWithCleanup,
+  getMfaStatus,
+  isMfaRequiredForRole,
+  generateBackupCodes,
+  verifyBackupCode,
+};

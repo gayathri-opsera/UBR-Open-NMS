@@ -283,3 +283,119 @@ describe('mfaService.getMfaStatus', () => {
     });
   });
 });
+
+// ── WO-014: Backup codes ──────────────────────────────────────────────────────
+jest.mock('bcrypt', () => ({
+  hash: jest.fn(async (code) => `hashed:${code}`),
+  compare: jest.fn(async (code, hash) => hash === `hashed:${code}`),
+}));
+jest.mock('uuid', () => ({ v4: jest.fn(() => 'aaaaaabb-cccc-dddd-eeee-ffffffffffff') }));
+
+const bcrypt = require('bcrypt');
+
+describe('mfaService.generateBackupCodes', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('generates 8 backup codes when MFA is enabled', async () => {
+    User.findById.mockResolvedValue({ _id: 'user-123', mfaEnabled: true });
+    User.findByIdAndUpdate.mockResolvedValue({});
+
+    const result = await mfaService.generateBackupCodes('user-123');
+    expect(result.backupCodes).toHaveLength(8);
+    expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+      'user-123',
+      expect.objectContaining({ mfaBackupCodes: expect.any(Array) })
+    );
+  });
+
+  test('throws MFA_NOT_ENABLED when MFA is not enabled', async () => {
+    User.findById.mockResolvedValue({ _id: 'user-123', mfaEnabled: false });
+    await expect(mfaService.generateBackupCodes('user-123')).rejects.toMatchObject({
+      code: 'MFA_NOT_ENABLED',
+    });
+  });
+
+  test('throws USER_NOT_FOUND for unknown user', async () => {
+    User.findById.mockResolvedValue(null);
+    await expect(mfaService.generateBackupCodes('ghost')).rejects.toMatchObject({
+      code: 'USER_NOT_FOUND',
+      status: 404,
+    });
+  });
+});
+
+describe('mfaService.verifyBackupCode', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('accepts a valid backup code and invalidates it', async () => {
+    User.findById.mockReturnValue({
+      select: jest.fn().mockResolvedValue({
+        _id: 'user-123',
+        mfaEnabled: true,
+        mfaBackupCodes: ['hashed:CODE1234', 'hashed:CODEABCD'],
+      }),
+    });
+    User.findByIdAndUpdate.mockResolvedValue({});
+
+    const result = await mfaService.verifyBackupCode('user-123', 'CODE1234');
+    expect(result).toBe(true);
+    // Should save remaining codes (one removed)
+    expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+      'user-123',
+      expect.objectContaining({ mfaBackupCodes: expect.arrayContaining(['hashed:CODEABCD']) })
+    );
+  });
+
+  test('throws INVALID_BACKUP_CODE for wrong code', async () => {
+    User.findById.mockReturnValue({
+      select: jest.fn().mockResolvedValue({
+        _id: 'user-123',
+        mfaEnabled: true,
+        mfaBackupCodes: ['hashed:CODE1234'],
+      }),
+    });
+    // bcrypt.compare returns false for wrong code
+    bcrypt.compare.mockResolvedValue(false);
+
+    await expect(mfaService.verifyBackupCode('user-123', 'WRONGCODE')).rejects.toMatchObject({
+      code: 'INVALID_BACKUP_CODE',
+      status: 401,
+    });
+  });
+
+  test('throws NO_BACKUP_CODES when no codes exist', async () => {
+    User.findById.mockReturnValue({
+      select: jest.fn().mockResolvedValue({
+        _id: 'user-123',
+        mfaEnabled: true,
+        mfaBackupCodes: [],
+      }),
+    });
+    await expect(mfaService.verifyBackupCode('user-123', 'anything')).rejects.toMatchObject({
+      code: 'NO_BACKUP_CODES',
+    });
+  });
+});
+
+// ── WO-014: Admin MFA policy ──────────────────────────────────────────────────
+describe('mfaService.isMfaRequiredForRole', () => {
+  test('returns true for admin role', () => {
+    expect(mfaService.isMfaRequiredForRole('admin')).toBe(true);
+  });
+
+  test('returns false for operator role', () => {
+    expect(mfaService.isMfaRequiredForRole('operator')).toBe(false);
+  });
+
+  test('returns false for user role', () => {
+    expect(mfaService.isMfaRequiredForRole('user')).toBe(false);
+  });
+
+  test('case-insensitive match for Admin', () => {
+    expect(mfaService.isMfaRequiredForRole('Admin')).toBe(true);
+  });
+
+  test('returns false for undefined role', () => {
+    expect(mfaService.isMfaRequiredForRole(undefined)).toBe(false);
+  });
+});

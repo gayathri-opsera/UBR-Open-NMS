@@ -135,8 +135,8 @@ router.post('/challenge', [
     // 2. Verify the TOTP code against the user's secret
     await mfaService.verifyOtp(userId, code);
 
-    // 3. All checks passed — issue the real JWT access + refresh tokens
-    const accessToken = jwtService.generateAccessToken(userId, role);
+    // 3. All checks passed — issue the real JWT access + refresh tokens with MFA assurance claim (WO-014)
+    const accessToken = jwtService.generateAccessToken(userId, role, { mfaVerified: true });
     const refreshToken = jwtService.generateRefreshToken();
 
     await sessionService.createSession(userId, role, refreshToken, {
@@ -162,6 +162,92 @@ router.post('/challenge', [
     res.status(err.status || 401).json({
       status: 'error',
       error: { code: err.code || 'MFA_CHALLENGE_FAILED', message: err.message },
+    });
+  }
+});
+
+// ── POST /api/v1/auth/mfa/backup-codes ───────────────────────────────────────
+/**
+ * Generate 8 single-use backup recovery codes (WO-014).
+ * Requires authentication. MFA must be enabled.
+ * SECURITY: raw codes are returned only once and never stored in plaintext.
+ */
+router.post('/backup-codes', authenticate, async (req, res) => {
+  try {
+    const result = await mfaService.generateBackupCodes(req.user.userId);
+    res.json({
+      status: 'ok',
+      data: {
+        backupCodes: result.backupCodes,
+        message: 'Store these codes securely. Each code can only be used once. They will not be shown again.',
+        codesRemaining: result.backupCodes.length,
+      },
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({
+      status: 'error',
+      error: { code: err.code || 'BACKUP_CODE_ERROR', message: err.message },
+    });
+  }
+});
+
+// ── POST /api/v1/auth/mfa/backup-codes/verify ─────────────────────────────────
+/**
+ * Use a backup recovery code to complete MFA (WO-014).
+ * This is a PUBLIC endpoint — the backup code IS the second factor.
+ * Accepts { mfaToken, backupCode }, returns full access+refresh tokens on success.
+ */
+router.post('/backup-codes/verify', [
+  body('mfaToken').notEmpty().withMessage('mfaToken is required.'),
+  body('backupCode').trim().notEmpty().withMessage('backupCode is required.'),
+], async (req, res) => {
+  const validationErr = handleValidation(req, res);
+  if (validationErr) return;
+
+  const { mfaToken, backupCode } = req.body;
+
+  const payload = jwtService.verifyMfaChallengeToken(mfaToken);
+  if (!payload) {
+    return res.status(401).json({
+      status: 'error',
+      error: {
+        code: 'MFA_TOKEN_EXPIRED',
+        message: 'MFA session has expired or is invalid. Please log in again.',
+      },
+    });
+  }
+
+  const { sub: userId, username, role } = payload;
+
+  try {
+    await mfaService.verifyBackupCode(userId, backupCode);
+
+    const accessToken = jwtService.generateAccessToken(userId, role, { mfaVerified: true });
+    const refreshToken = jwtService.generateRefreshToken();
+
+    await sessionService.createSession(userId, role, refreshToken, {
+      ip: req.ip || req.headers['x-forwarded-for'] || 'unknown',
+      userAgent: req.headers['user-agent'] || '',
+    });
+
+    await User.findByIdAndUpdate(userId, { lastLogin: new Date() });
+
+    logger.info('MFA backup code login successful', { userId, role });
+
+    res.json({
+      status: 'ok',
+      data: {
+        accessToken,
+        refreshToken,
+        expiresIn: config.jwt.accessTokenTtlSeconds,
+        role,
+        userId,
+      },
+    });
+  } catch (err) {
+    res.status(err.status || 401).json({
+      status: 'error',
+      error: { code: err.code || 'BACKUP_CODE_FAILED', message: err.message },
     });
   }
 });

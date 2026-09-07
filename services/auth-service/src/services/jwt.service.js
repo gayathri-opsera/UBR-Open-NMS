@@ -11,21 +11,24 @@ const MFA_CHALLENGE_TTL_SECONDS = 5 * 60; // 5 minutes
 /**
  * Generate an RS256-signed JWT access token.
  * Claims: sub, role, jti, iat, exp, iss, aud.
+ * When mfaVerified is true, the token includes mfaVerified=true and mfaVerifiedAt claims
+ * so API gateway can enforce MFA assurance on admin-sensitive routes (WO-014).
  */
-function generateAccessToken(userId, role) {
+function generateAccessToken(userId, role, { mfaVerified = false } = {}) {
   if (!config.jwt.privateKey) {
     throw new Error('JWT_PRIVATE_KEY not configured');
   }
-  return jwt.sign(
-    { sub: userId, role, jti: uuidv4() },
-    config.jwt.privateKey,
-    {
-      algorithm: config.jwt.algorithm,
-      expiresIn: config.jwt.accessTokenTtl,
-      issuer: config.jwt.issuer,
-      audience: config.jwt.audience,
-    }
-  );
+  const claims = { sub: userId, role, jti: uuidv4() };
+  if (mfaVerified) {
+    claims.mfaVerified = true;
+    claims.mfaVerifiedAt = Math.floor(Date.now() / 1000);
+  }
+  return jwt.sign(claims, config.jwt.privateKey, {
+    algorithm: config.jwt.algorithm,
+    expiresIn: config.jwt.accessTokenTtl,
+    issuer: config.jwt.issuer,
+    audience: config.jwt.audience,
+  });
 }
 
 /**

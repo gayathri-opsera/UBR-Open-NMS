@@ -120,4 +120,67 @@ function checkActionPermission_mw(action, resourceType) {
   };
 }
 
-module.exports = { authenticate, requireRole, checkActionPermission, checkActionPermission_mw, ACTION_PERMISSIONS };
+// ── WO-014: MFA assurance middleware ──────────────────────────────────────────
+
+// Routes matching these patterns require MFA-verified tokens for admin users.
+const MFA_SENSITIVE_PATTERNS = [
+  /^\/api\/v1\/users/,
+  /^\/api\/v1\/system\//,
+  /^\/api\/v1\/auth\/sso\//,
+];
+
+/**
+ * Middleware that requires MFA assurance for admin users on sensitive routes.
+ * Non-admin users pass through without MFA assurance requirement.
+ *
+ * Tokens issued after successful MFA challenge carry { mfaVerified: true }.
+ * Tokens issued without MFA challenge (or pre-WO-014 tokens) lack this claim.
+ */
+function requireMfaAssurance(req, res, next) {
+  if (!req.user) return next();
+  const role = (req.user.role || '').toLowerCase();
+
+  // Only enforce MFA assurance for admin users
+  if (role !== 'admin') return next();
+
+  // Check whether the current route is MFA-sensitive
+  const isSensitive = MFA_SENSITIVE_PATTERNS.some((pattern) => pattern.test(req.path));
+  if (!isSensitive) return next();
+
+  // Check for MFA assurance claim in the decoded token
+  // The token payload is attached by the authenticate middleware via verifyAccessToken
+  const token = (req.headers.authorization || '').slice(7);
+  if (!token) return next();
+
+  let payload;
+  try {
+    payload = require('../services/jwt.service').verifyAccessToken(token);
+  } catch (_) {
+    return next(); // authenticate middleware will already have rejected this
+  }
+
+  if (!payload.mfaVerified) {
+    logger.warn('Admin route access denied: MFA assurance required', {
+      userId: req.user.userId,
+      path: req.path,
+    });
+    return res.status(403).json({
+      status: 'error',
+      error: {
+        code: 'MFA_REQUIRED',
+        message: 'This resource requires MFA verification. Please complete the MFA challenge.',
+      },
+    });
+  }
+
+  next();
+}
+
+module.exports = {
+  authenticate,
+  requireRole,
+  requireMfaAssurance,
+  checkActionPermission,
+  checkActionPermission_mw,
+  ACTION_PERMISSIONS,
+};
