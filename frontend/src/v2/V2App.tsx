@@ -22,6 +22,7 @@ const V2AlarmsPage        = lazy(() => import('./pages/V2AlarmsPage'));
 const V2TopologyPage      = lazy(() => import('./pages/V2TopologyPage'));
 const V2KpiPage           = lazy(() => import('./pages/V2KpiPage'));
 const V2KpiOperationsSummaryPage = lazy(() => import('./pages/V2KpiOperationsSummaryPage'));
+const V2KpiDrilldownPage = lazy(() => import('./pages/V2KpiDrilldownPage'));
 const V2ConfigPage        = lazy(() => import('./pages/V2ConfigPage'));
 const V2HierarchyPage     = lazy(() => import('./pages/V2HierarchyPage'));
 const V2TroubleshootPage  = lazy(() => import('./pages/V2TroubleshootPage'));
@@ -78,6 +79,7 @@ export function V2App() {
                 <Route path="topology"        element={<V2TopologyPage />} />
                 <Route path="kpi"             element={<V2KpiPage />} />
                 <Route path="kpi/operations"  element={<V2KpiOperationsSummaryPage />} />
+                <Route path="kpi/drilldown"  element={<V2KpiDrilldownPage />} />
                 <Route
                   path="config"
                   element={

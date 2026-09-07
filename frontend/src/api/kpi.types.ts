@@ -133,3 +133,123 @@ export function severityVariant(s: KpiSeverity): 'success' | 'warning' | 'danger
     default:         return 'default';
   }
 }
+
+// ── WO-040: KPI Drilldown types ───────────────────────────────────────────────
+
+export type DrilldownGranularity = 'RAW' | '15MIN' | '1HOUR' | 'DAILY';
+
+export interface KpiDrilldownRequest {
+  deviceId?: string;
+  serialNumber?: string;
+  networkId?: string;
+  organizationId?: string;
+  deviceType?: string;
+  discoveryParadigm?: string;
+  metricName?: string;
+  metricGroup?: 'radio' | 'system' | 'traffic' | 'all';
+  from: string;
+  to: string;
+  granularity: DrilldownGranularity;
+}
+
+export interface KpiDrilldownTableRow {
+  timestamp: string;
+  metricName: string;
+  deviceId: string;
+  serialNumber: string;
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+  unit: string;
+  sampleCount: number;
+}
+
+export interface KpiDrilldownSeries {
+  metricName: string;
+  deviceId: string;
+  serialNumber: string;
+  unit: string;
+  supported: boolean;
+  unsupportedReason?: string;
+  data: Array<{
+    bucketStart: string;
+    avg: number | null;
+    min: number | null;
+    max: number | null;
+    sampleCount: number;
+    stale?: boolean;
+  }>;
+}
+
+export interface KpiDrilldownResponse {
+  query: KpiDrilldownRequest;
+  series: KpiDrilldownSeries[];
+  tableRows: KpiDrilldownTableRow[];
+  supportedGranularities: DrilldownGranularity[];
+  units: Record<string, string>;
+  generatedAt: string;
+  staleData: boolean;
+  staleReason?: string;
+}
+
+/** Validate that `from` is before `to`. Returns an error message or null. */
+export function validateDrilldownTimeRange(from: string, to: string): string | null {
+  const fromMs = new Date(from).getTime();
+  const toMs   = new Date(to).getTime();
+  if (isNaN(fromMs) || isNaN(toMs)) return 'Invalid time range: from and to must be valid ISO timestamps.';
+  if (fromMs >= toMs) return 'Invalid time range: start time must be before end time.';
+  return null;
+}
+
+// ── WO-041: Availability Health State types ───────────────────────────────────
+
+export type AvailabilityHealthState = 'UP' | 'DOWN' | 'DEGRADED' | 'UNKNOWN';
+
+export interface DeviceAvailabilitySummary {
+  deviceId: string;
+  serialNumber: string;
+  deviceType: string;
+  healthState: AvailabilityHealthState;
+  primaryReason: string;
+  secondaryReasons: string[];
+  lastObservedAt: string | null;
+  source: 'CALL_HOME' | 'KPI' | 'ALARM' | 'SNMP' | 'UNKNOWN';
+  confidence: number;
+  stale: boolean;
+  dampenedUntil: string | null;
+}
+
+export interface AvailabilitySummaryResponse {
+  generatedAt: string;
+  devices: DeviceAvailabilitySummary[];
+}
+
+export interface AvailabilitySummaryRequest {
+  deviceId?: string;
+  serialNumber?: string;
+  networkId?: string;
+  organizationId?: string;
+  deviceType?: string;
+  from?: string;
+  to?: string;
+}
+
+/** Maps AvailabilityHealthState to a CSS color token. */
+export function availabilityStateColor(state: AvailabilityHealthState): string {
+  switch (state) {
+    case 'UP':       return 'var(--vf-success)';
+    case 'DEGRADED': return 'var(--vf-warning)';
+    case 'DOWN':     return 'var(--vf-danger)';
+    default:         return 'var(--vf-text-muted)';
+  }
+}
+
+/** Maps AvailabilityHealthState to a badge variant. */
+export function availabilityStateBadge(state: AvailabilityHealthState): 'success' | 'warning' | 'danger' | 'default' {
+  switch (state) {
+    case 'UP':       return 'success';
+    case 'DEGRADED': return 'warning';
+    case 'DOWN':     return 'danger';
+    default:         return 'default';
+  }
+}

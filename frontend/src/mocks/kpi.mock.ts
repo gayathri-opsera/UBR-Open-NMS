@@ -1,7 +1,11 @@
 import type {
   KpiOperationsSummaryResponse, KpiSummaryCard, DeviceImpactEntry, KpiTrendSeries,
 } from '../api/kpi.types';
-import type { KpiDataPoint, KpiParam, KpiSeries, TimeRange } from '../api/kpi.types';
+import type {
+  KpiDataPoint, KpiParam, KpiSeries, TimeRange,
+  KpiDrilldownResponse, KpiDrilldownRequest, DrilldownGranularity,
+  AvailabilitySummaryResponse,
+} from '../api/kpi.types';
 
 function generateSeries(
   deviceId: string,
@@ -207,4 +211,232 @@ export const MOCK_KPI_OPERATIONS_SUMMARY_EMPTY: KpiOperationsSummaryResponse = {
   topImpactedDevices: [],
   trendSeries: [],
   staleData: false,
+};
+
+// ── WO-040: KPI Drilldown fixtures ────────────────────────────────────────────
+
+function makeDrilldownSeries(
+  metricName: string,
+  deviceId: string,
+  serialNumber: string,
+  unit: string,
+  granularity: DrilldownGranularity,
+  from: string,
+  to: string,
+  baseValue: number,
+  variance: number,
+  supported = true,
+  unsupportedReason?: string,
+) {
+  if (!supported) {
+    return { metricName, deviceId, serialNumber, unit, supported: false, unsupportedReason, data: [] };
+  }
+  const intervalMs: Record<DrilldownGranularity, number> = {
+    RAW: 60_000, '15MIN': 900_000, '1HOUR': 3_600_000, DAILY: 86_400_000,
+  };
+  const fromMs = new Date(from).getTime();
+  const toMs   = new Date(to).getTime();
+  const stepMs = intervalMs[granularity];
+  const count  = Math.min(Math.ceil((toMs - fromMs) / stepMs), 48);
+  const data = Array.from({ length: count }, (_, i) => ({
+    bucketStart: new Date(fromMs + i * stepMs).toISOString(),
+    avg: parseFloat((baseValue + Math.sin(i / 4) * variance).toFixed(2)),
+    min: parseFloat((baseValue + Math.sin(i / 4) * variance - variance * 0.3).toFixed(2)),
+    max: parseFloat((baseValue + Math.sin(i / 4) * variance + variance * 0.3).toFixed(2)),
+    sampleCount: 4,
+    stale: i === 3,
+  }));
+  return { metricName, deviceId, serialNumber, unit, supported: true, data };
+}
+
+function buildDrilldownResponse(
+  req: KpiDrilldownRequest,
+  deviceId: string,
+  serialNumber: string,
+  deviceType: string,
+): KpiDrilldownResponse {
+  const gran = req.granularity;
+  const from = req.from;
+  const to   = req.to;
+
+  const metrics = req.metricName
+    ? [req.metricName]
+    : ['cpuUtilization', 'memoryUtilization', 'throughputDL', 'throughputUL', 'rssi'];
+
+  // IDU does not support radio metrics
+  const iduUnsupported = new Set(['rssi', 'snr', 'txPower']);
+  const unitMap: Record<string, string> = {
+    cpuUtilization: '%', memoryUtilization: '%', throughputDL: 'Mbps', throughputUL: 'Mbps',
+    rssi: 'dBm', snr: 'dB', latencyMs: 'ms', packetLossPct: '%', txPower: 'dBm',
+    channelUtilization: '%', connectedClients: '', retryRate: '%', temperature: '°C',
+  };
+  const baseMap: Record<string, { base: number; variance: number }> = {
+    cpuUtilization: { base: 55, variance: 15 }, memoryUtilization: { base: 62, variance: 10 },
+    throughputDL: { base: 76, variance: 20 }, throughputUL: { base: 42, variance: 15 },
+    rssi: { base: -65, variance: 8 }, snr: { base: 22, variance: 5 },
+    latencyMs: { base: 12, variance: 5 }, packetLossPct: { base: 0.8, variance: 0.5 },
+    txPower: { base: 20, variance: 2 }, channelUtilization: { base: 35, variance: 12 },
+    connectedClients: { base: 12, variance: 4 }, retryRate: { base: 2, variance: 2 },
+    temperature: { base: 42, variance: 6 },
+  };
+
+  const series = metrics.map((m) => {
+    const isUnsupported = deviceType === 'IDU' && iduUnsupported.has(m);
+    const cfg = baseMap[m] ?? { base: 50, variance: 10 };
+    return makeDrilldownSeries(
+      m, deviceId, serialNumber, unitMap[m] ?? '', gran, from, to,
+      cfg.base, cfg.variance, !isUnsupported,
+      isUnsupported ? `IDU devices do not report ${m}` : undefined,
+    );
+  });
+
+  const tableRows = series
+    .filter((s) => s.supported && s.data.length > 0)
+    .flatMap((s) =>
+      s.data.map((p) => ({
+        timestamp: p.bucketStart,
+        metricName: s.metricName,
+        deviceId: s.deviceId,
+        serialNumber: s.serialNumber,
+        avg: p.avg,
+        min: p.min,
+        max: p.max,
+        unit: unitMap[s.metricName] ?? '',
+        sampleCount: p.sampleCount,
+      })),
+    );
+
+  return {
+    query: req,
+    series,
+    tableRows,
+    supportedGranularities: ['RAW', '15MIN', '1HOUR', 'DAILY'],
+    units: unitMap,
+    generatedAt: new Date().toISOString(),
+    staleData: false,
+  };
+}
+
+/** BTS drilldown — 1HOUR granularity for radio and system metrics. */
+export function getMockKpiDrilldownBts(metricName?: string): KpiDrilldownResponse {
+  const from = new Date(Date.now() - 86_400_000).toISOString();
+  const to   = new Date().toISOString();
+  const req: KpiDrilldownRequest = {
+    deviceId: 'dev-bts-001', from, to, granularity: '1HOUR',
+    deviceType: 'BTS', discoveryParadigm: 'UBR_CALL_HOME',
+    metricName,
+  };
+  return buildDrilldownResponse(req, 'dev-bts-001', 'SN-BTS-001', 'BTS');
+}
+
+/** CPE drilldown — 15MIN granularity. */
+export function getMockKpiDrilldownCpe(): KpiDrilldownResponse {
+  const from = new Date(Date.now() - 6 * 3_600_000).toISOString();
+  const to   = new Date().toISOString();
+  const req: KpiDrilldownRequest = {
+    deviceId: 'dev-cpe-critical-001', from, to, granularity: '15MIN',
+    deviceType: 'CPE', discoveryParadigm: 'UBR_CALL_HOME',
+  };
+  return buildDrilldownResponse(req, 'dev-cpe-critical-001', 'SN-CPE-001', 'CPE');
+}
+
+/** IDU drilldown — radio metrics marked unsupported. */
+export function getMockKpiDrilldownIdu(): KpiDrilldownResponse {
+  const from = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const to   = new Date().toISOString();
+  const req: KpiDrilldownRequest = {
+    deviceId: 'dev-idu-001', from, to, granularity: 'DAILY',
+    deviceType: 'IDU',
+  };
+  return buildDrilldownResponse(req, 'dev-idu-001', 'SN-IDU-001', 'IDU');
+}
+
+/** Generic device drilldown — SNMP-polled device. */
+export function getMockKpiDrilldownGeneric(): KpiDrilldownResponse {
+  const from = new Date(Date.now() - 24 * 3_600_000).toISOString();
+  const to   = new Date().toISOString();
+  const req: KpiDrilldownRequest = {
+    networkId: 'net-001', from, to, granularity: '1HOUR',
+    deviceType: 'GENERIC', discoveryParadigm: 'GENERIC_SNMP',
+  };
+  return buildDrilldownResponse(req, 'dev-generic-001', 'GENERIC-IP-10.0.1.1', 'GENERIC');
+}
+
+/** Empty drilldown — no matching metrics. */
+export const MOCK_KPI_DRILLDOWN_EMPTY: KpiDrilldownResponse = {
+  query: {
+    deviceId: 'dev-unknown-999',
+    from: new Date(Date.now() - 3_600_000).toISOString(),
+    to: new Date().toISOString(),
+    granularity: '1HOUR',
+  },
+  series: [],
+  tableRows: [],
+  supportedGranularities: ['RAW', '15MIN', '1HOUR', 'DAILY'],
+  units: {},
+  generatedAt: new Date().toISOString(),
+  staleData: false,
+};
+
+/** Stale drilldown — for testing stale-data warning. */
+export function getMockKpiDrilldownStale(): KpiDrilldownResponse {
+  const base = getMockKpiDrilldownBts();
+  return {
+    ...base,
+    staleData: true,
+    staleReason: 'KPI aggregation last updated 12 minutes ago; some buckets may be incomplete.',
+  };
+}
+
+// ── WO-041: Availability health state fixtures ────────────────────────────────
+
+export const MOCK_AVAILABILITY_SUMMARY: AvailabilitySummaryResponse = {
+  generatedAt: new Date().toISOString(),
+  devices: [
+    {
+      deviceId: 'dev-bts-001', serialNumber: 'SN-BTS-001', deviceType: 'BTS',
+      healthState: 'UP', primaryReason: 'All KPI metrics within normal thresholds',
+      secondaryReasons: [], source: 'KPI', confidence: 0.97, stale: false, dampenedUntil: null,
+      lastObservedAt: new Date(Date.now() - 90_000).toISOString(),
+    },
+    {
+      deviceId: 'dev-bts-degraded-001', serialNumber: 'SN-BTS-002', deviceType: 'BTS',
+      healthState: 'DEGRADED', primaryReason: 'CPU utilization elevated (68%)',
+      secondaryReasons: ['UL throughput trending down'], source: 'KPI', confidence: 0.82, stale: false, dampenedUntil: null,
+      lastObservedAt: new Date(Date.now() - 120_000).toISOString(),
+    },
+    {
+      deviceId: 'dev-cpe-critical-001', serialNumber: 'SN-CPE-001', deviceType: 'CPE',
+      healthState: 'DOWN', primaryReason: 'Critical alarm: packet loss 4.2%',
+      secondaryReasons: ['Latency 88ms above threshold', 'Availability below 90%'],
+      source: 'ALARM', confidence: 0.99, stale: false, dampenedUntil: null,
+      lastObservedAt: new Date(Date.now() - 300_000).toISOString(),
+    },
+    {
+      deviceId: 'dev-idu-001', serialNumber: 'SN-IDU-001', deviceType: 'IDU',
+      healthState: 'DEGRADED', primaryReason: 'Memory utilization near threshold (71%)',
+      secondaryReasons: [], source: 'KPI', confidence: 0.76, stale: false, dampenedUntil: null,
+      lastObservedAt: new Date(Date.now() - 600_000).toISOString(),
+    },
+    {
+      deviceId: 'dev-generic-001', serialNumber: 'GENERIC-IP-10.0.1.1', deviceType: 'GENERIC',
+      healthState: 'UNKNOWN', primaryReason: 'No KPI data in last 15 minutes',
+      secondaryReasons: ['SNMP poll may be failing'], source: 'UNKNOWN', confidence: 0.3, stale: true, dampenedUntil: null,
+      lastObservedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+    },
+    {
+      deviceId: 'dev-bts-flapping-001', serialNumber: 'SN-BTS-FLAP-001', deviceType: 'BTS',
+      healthState: 'DEGRADED',
+      primaryReason: 'Flap dampening active: device alternating UP/DOWN rapidly',
+      secondaryReasons: ['Last DOWN event: 2 minutes ago'], source: 'KPI', confidence: 0.6, stale: false,
+      dampenedUntil: new Date(Date.now() + 5 * 60_000).toISOString(),
+      lastObservedAt: new Date(Date.now() - 30_000).toISOString(),
+    },
+    {
+      deviceId: 'dev-cpe-new-001', serialNumber: 'SN-CPE-NEW-001', deviceType: 'CPE',
+      healthState: 'UNKNOWN', primaryReason: 'Newly onboarded device — no KPI history yet',
+      secondaryReasons: [], source: 'UNKNOWN', confidence: 0.0, stale: false, dampenedUntil: null,
+      lastObservedAt: null,
+    },
+  ],
 };
