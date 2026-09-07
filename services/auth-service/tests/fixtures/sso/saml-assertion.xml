@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Mock SAML Assertion (simplified — not cryptographically valid)
+  Used in unit tests with a mocked signature verifier.
+-->
+<samlp:Response
+  xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+  xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+  ID="_response-001"
+  Version="2.0"
+  IssueInstant="2023-11-14T00:00:00Z"
+  Destination="https://nms.example.com/api/v1/auth/sso/callback/saml"
+  InResponseTo="_request-001">
+
+  <saml:Issuer>https://idp.example.com/saml2/metadata</saml:Issuer>
+
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+
+  <saml:Assertion ID="_assertion-001" Version="2.0" IssueInstant="2023-11-14T00:00:00Z">
+    <saml:Issuer>https://idp.example.com/saml2/metadata</saml:Issuer>
+
+    <saml:Subject>
+      <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">
+        operator@example.com
+      </saml:NameID>
+      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+        <saml:SubjectConfirmationData
+          NotOnOrAfter="2099-01-01T00:00:00Z"
+          Recipient="https://nms.example.com/api/v1/auth/sso/callback/saml"
+          InResponseTo="_request-001"/>
+      </saml:SubjectConfirmation>
+    </saml:Subject>
+
+    <saml:Conditions NotBefore="2023-11-14T00:00:00Z" NotOnOrAfter="2099-01-01T00:00:00Z">
+      <saml:AudienceRestriction>
+        <saml:Audience>ubr-nms</saml:Audience>
+      </saml:AudienceRestriction>
+    </saml:Conditions>
+
+    <saml:AttributeStatement>
+      <saml:Attribute Name="email">
+        <saml:AttributeValue>operator@example.com</saml:AttributeValue>
+      </saml:Attribute>
+      <saml:Attribute Name="role">
+        <saml:AttributeValue>operator</saml:AttributeValue>
+      </saml:Attribute>
+      <saml:Attribute Name="groups">
+        <saml:AttributeValue>nms-operators</saml:AttributeValue>
+      </saml:Attribute>
+    </saml:AttributeStatement>
+
+    <saml:AuthnStatement AuthnInstant="2023-11-14T00:00:00Z">
+      <saml:AuthnContext>
+        <saml:AuthnContextClassRef>
+          urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport
+        </saml:AuthnContextClassRef>
+      </saml:AuthnContext>
+    </saml:AuthnStatement>
+  </saml:Assertion>
+</samlp:Response>

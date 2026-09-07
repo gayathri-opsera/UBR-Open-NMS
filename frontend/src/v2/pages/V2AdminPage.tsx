@@ -6,7 +6,9 @@ import {
   fetchAuditLog, fetchBackups, triggerBackup, restoreBackup, deleteBackup,
   fetchNorthboundConfig, updateNorthboundConfig,
   fetchRedundancyStatus, forceSyncRedundancy, triggerManualSwitchover,
+  getSsoConfig, updateSsoConfig,
 } from '../../api/admin.api';
+import type { TenantSsoConfig } from '../../api/admin.api';
 import type {
   NmsUser, UserRole, UserSession, SystemHealth, ServiceStatus,
   AuditEntry, BackupRecord, NorthboundConfig, RedundancyStatus, RedundancySite,
@@ -82,7 +84,7 @@ import { LoadingState, EmptyState } from '../components/common/States';
 import { useToast } from '../components/common/Toast';
 import { logger } from '../utils/logger';
 
-type AdminTab = 'users' | 'sessions' | 'health' | 'hierarchy' | 'audit' | 'backup' | 'northbound' | 'redundancy';
+type AdminTab = 'users' | 'sessions' | 'health' | 'hierarchy' | 'audit' | 'backup' | 'northbound' | 'redundancy' | 'security';
 
 const ROLE_OPTIONS = [
   { value: 'admin',    label: 'Admin' },
@@ -1048,6 +1050,208 @@ function RedundancyTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Security / SSO Configuration tab  (WO-013 AC#1, AC#9)
+// Shows current provider mode and a form to update it.
+// Secrets (client_secret, bind password, etc.) are never rendered.
+// ═══════════════════════════════════════════════════════════════════════════════
+const SSO_PROVIDER_OPTIONS = [
+  { value: 'local', label: 'Local (username + password)' },
+  { value: 'oidc',  label: 'OIDC / OpenID Connect' },
+  { value: 'saml',  label: 'SAML 2.0' },
+  { value: 'ldap',  label: 'LDAP / Active Directory' },
+];
+
+function SecurityTab() {
+  const { addToast } = useToast();
+  const [cfg, setCfg]       = useState<TenantSsoConfig | null>(null);
+  const [loading, setLoad]  = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft]   = useState<Partial<TenantSsoConfig>>({});
+
+  useEffect(() => {
+    getSsoConfig()
+      .then((data) => { setCfg(data); setDraft(data ?? {}); })
+      .catch(() => addToast('Failed to load SSO configuration', 'error'))
+      .finally(() => setLoad(false));
+  }, [addToast]);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const saved = await updateSsoConfig(draft);
+      setCfg(saved);
+      setDraft(saved);
+      addToast('SSO configuration saved', 'success');
+    } catch { addToast('Failed to save SSO configuration', 'error'); }
+    finally { setSaving(false); }
+  }
+
+  if (loading) return <LoadingState label="Loading SSO configuration…" />;
+
+  const sectionStyle: React.CSSProperties = {
+    background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)',
+    borderRadius: 10, padding: '18px 20px', marginBottom: 16,
+  };
+  const provider = draft.providerType ?? cfg?.providerType ?? 'local';
+
+  return (
+    <>
+      {/* Current mode banner */}
+      <div style={{ padding: '12px 16px', background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: 8, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>Current authentication mode:</span>
+        <Badge variant={provider === 'local' ? 'default' : 'info'} style={{ textTransform: 'uppercase', fontSize: 11 }}>
+          {provider}
+        </Badge>
+        {cfg?.localFallbackEnabled && provider !== 'local' && (
+          <Badge variant="warning" style={{ fontSize: 11 }}>local fallback enabled</Badge>
+        )}
+      </div>
+
+      {/* Provider selector */}
+      <div style={sectionStyle}>
+        <SectionLabel>Authentication Provider</SectionLabel>
+        <p style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+          Select how users authenticate to the NMS. Changes take effect immediately after saving.
+          Local fallback allows admins to log in with username/password if the IdP is unreachable.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+          <div>
+            <SectionLabel>Provider Mode</SectionLabel>
+            <select
+              value={provider}
+              onChange={(e) => setDraft((d) => ({ ...d, providerType: e.target.value as TenantSsoConfig['providerType'] }))}
+              style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-surface)', color: 'var(--vf-text-primary)', fontSize: 13 }}
+            >
+              {SSO_PROVIDER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          {provider !== 'local' && (
+            <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 2 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={draft.localFallbackEnabled ?? false}
+                  onChange={(e) => setDraft((d) => ({ ...d, localFallbackEnabled: e.target.checked }))}
+                />
+                Enable local fallback (admin login)
+              </label>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* OIDC settings */}
+      {provider === 'oidc' && (
+        <div style={sectionStyle}>
+          <SectionLabel>OpenID Connect Settings</SectionLabel>
+          <p style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+            Client secret is stored server-side and never returned by this API.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginTop: 10 }}>
+            <div>
+              <SectionLabel>Discovery URL</SectionLabel>
+              <FieldInput
+                value={draft.oidc?.discoveryUrl ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, oidc: { ...d.oidc, discoveryUrl: v, clientId: d.oidc?.clientId ?? '' } }))}
+                placeholder="https://idp.example.com/.well-known/openid-configuration"
+              />
+            </div>
+            <div>
+              <SectionLabel>Client ID</SectionLabel>
+              <FieldInput
+                value={draft.oidc?.clientId ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, oidc: { ...d.oidc, clientId: v, discoveryUrl: d.oidc?.discoveryUrl ?? '' } }))}
+                placeholder="ubr-nms-client"
+              />
+            </div>
+            <div>
+              <SectionLabel>Groups Claim</SectionLabel>
+              <FieldInput
+                value={draft.oidc?.groupsClaim ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, oidc: { ...d.oidc, groupsClaim: v, clientId: d.oidc?.clientId ?? '', discoveryUrl: d.oidc?.discoveryUrl ?? '' } }))}
+                placeholder="groups"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SAML settings */}
+      {provider === 'saml' && (
+        <div style={sectionStyle}>
+          <SectionLabel>SAML 2.0 Settings</SectionLabel>
+          <p style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+            IdP certificate is stored server-side. SP metadata is available at
+            <code style={{ marginLeft: 4, fontFamily: 'var(--vf-font-mono)', fontSize: 11 }}>/api/v1/auth/sso/metadata</code>.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginTop: 10 }}>
+            <div>
+              <SectionLabel>Entry Point (SSO URL)</SectionLabel>
+              <FieldInput
+                value={draft.saml?.entryPoint ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, saml: { ...d.saml, entryPoint: v, issuer: d.saml?.issuer ?? '' } }))}
+                placeholder="https://idp.example.com/saml2/sso"
+              />
+            </div>
+            <div>
+              <SectionLabel>Issuer (Entity ID)</SectionLabel>
+              <FieldInput
+                value={draft.saml?.issuer ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, saml: { ...d.saml, issuer: v, entryPoint: d.saml?.entryPoint ?? '' } }))}
+                placeholder="https://idp.example.com/saml2/metadata"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LDAP settings */}
+      {provider === 'ldap' && (
+        <div style={sectionStyle}>
+          <SectionLabel>LDAP / Active Directory Settings</SectionLabel>
+          <p style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+            Bind password is stored server-side and never returned by this API.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginTop: 10 }}>
+            <div>
+              <SectionLabel>LDAP URL</SectionLabel>
+              <FieldInput
+                value={draft.ldap?.ldapUrl ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, ldap: { ...d.ldap, ldapUrl: v, baseDn: d.ldap?.baseDn ?? '' } }))}
+                placeholder="ldap://niam.airtel.in:389"
+              />
+            </div>
+            <div>
+              <SectionLabel>Base DN</SectionLabel>
+              <FieldInput
+                value={draft.ldap?.baseDn ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, ldap: { ...d.ldap, baseDn: v, ldapUrl: d.ldap?.ldapUrl ?? '' } }))}
+                placeholder="ou=users,dc=airtel,dc=in"
+              />
+            </div>
+            <div>
+              <SectionLabel>Bind DN</SectionLabel>
+              <FieldInput
+                value={draft.ldap?.bindDn ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, ldap: { ...d.ldap, bindDn: v, ldapUrl: d.ldap?.ldapUrl ?? '', baseDn: d.ldap?.baseDn ?? '' } }))}
+                placeholder="cn=svc-nms,ou=service,dc=airtel,dc=in"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <Button variant="ghost" size="sm" onClick={() => setDraft(cfg ?? {})}>Reset</Button>
+        <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
+          {saving ? 'Saving…' : 'Save SSO Configuration'}
+        </Button>
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Main Admin Page
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function V2AdminPage() {
@@ -1069,6 +1273,7 @@ export default function V2AdminPage() {
         <TabBtn id="backup"     active={tab === 'backup'}     label="Backup & Restore" onClick={setTab} />
         <TabBtn id="northbound" active={tab === 'northbound'} label="Northbound"     onClick={setTab} />
         <TabBtn id="redundancy" active={tab === 'redundancy'} label="Redundancy"     onClick={setTab} />
+        <TabBtn id="security"   active={tab === 'security'}   label="Security / SSO" onClick={setTab} />
       </div>
 
       {tab === 'users'      && <UsersTab />}
@@ -1079,6 +1284,7 @@ export default function V2AdminPage() {
       {tab === 'backup'     && <BackupTab />}
       {tab === 'northbound' && <NorthboundTab />}
       {tab === 'redundancy' && <RedundancyTab />}
+      {tab === 'security'   && <SecurityTab />}
     </div>
   );
 }

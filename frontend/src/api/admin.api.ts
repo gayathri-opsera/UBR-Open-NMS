@@ -196,3 +196,52 @@ export async function forceSyncRedundancy(): Promise<void> {
 export async function triggerManualSwitchover(): Promise<void> {
   await apiClient.post('/admin/redundancy/switchover');
 }
+
+// ── SSO Configuration — GET/PUT /api/v1/auth/sso/config (admin only) ────────
+// AC#1 / WO-013: admin-only API to read and update tenant authentication mode.
+// Secrets (client_secret, bind password, etc.) are never returned by GET.
+
+export interface SsoOidcConfig {
+  discoveryUrl: string;
+  clientId: string;
+  scopes?: string[];
+  groupsClaim?: string;
+  roleMapping?: Record<string, string>;
+}
+
+export interface SsoSamlConfig {
+  entryPoint: string;
+  issuer: string;
+  cert?: string;
+}
+
+export interface SsoLdapConfig {
+  ldapUrl: string;
+  baseDn: string;
+  bindDn?: string;
+}
+
+export interface TenantSsoConfig {
+  tenantId: string;
+  providerType: 'local' | 'ldap' | 'oidc' | 'saml';
+  localFallbackEnabled?: boolean;
+  oidc?: SsoOidcConfig;
+  saml?: SsoSamlConfig;
+  ldap?: SsoLdapConfig;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export async function getSsoConfig(): Promise<TenantSsoConfig | null> {
+  try {
+    const res = await apiClient.get('/auth/sso/config');
+    return unwrap<TenantSsoConfig>(res.data);
+  } catch {
+    return null;
+  }
+}
+
+export async function updateSsoConfig(config: Partial<TenantSsoConfig>): Promise<TenantSsoConfig> {
+  const res = await apiClient.put('/auth/sso/config', config);
+  return unwrap<TenantSsoConfig>(res.data);
+}

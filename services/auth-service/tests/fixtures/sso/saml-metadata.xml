@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Mock SAML Identity Provider Metadata
+  Used in unit tests — no real IdP dependency required.
+-->
+<EntityDescriptor
+  xmlns="urn:oasis:names:tc:SAML:2.0:metadata"
+  entityID="https://idp.example.com/saml2/metadata">
+
+  <IDPSSODescriptor
+    WantAuthnRequestsSigned="false"
+    protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+
+    <KeyDescriptor use="signing">
+      <KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+        <X509Data>
+          <X509Certificate>MIICpDCCAYwCCQDe5gbbbbbbbbbbMA0GCSqGSIb3DQEBCwUAMBYxFDASBgNVBAMT
+C3Rlc3QtaWRwLWNhMB4XDTIzMDEwMTAwMDAwMFoXDTI0MDEwMTAwMDAwMFowFjEU
+MBIGA1UEAxMLdGVzdC1pZHAtY2EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEK
+AoIBAQC7o4qne60TB3wolVLMJQBF8test+mock+cert+data+only==
+</X509Certificate>
+        </X509Data>
+      </KeyInfo>
+    </KeyDescriptor>
+
+    <SingleLogoutService
+      Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+      Location="https://idp.example.com/saml2/slo"/>
+
+    <SingleSignOnService
+      Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+      Location="https://idp.example.com/saml2/sso"/>
+
+    <SingleSignOnService
+      Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+      Location="https://idp.example.com/saml2/sso/post"/>
+  </IDPSSODescriptor>
+</EntityDescriptor>
