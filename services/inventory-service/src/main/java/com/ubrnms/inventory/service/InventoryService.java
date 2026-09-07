@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ubrnms.inventory.model.BirthCertificate;
 import com.ubrnms.inventory.model.Device;
 import com.ubrnms.inventory.model.DeviceTag;
+import com.ubrnms.inventory.model.OnboardingAssignmentPolicy;
 import com.ubrnms.inventory.repository.BirthCertificateRepository;
 import com.ubrnms.inventory.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,9 @@ public class InventoryService {
 
     @Autowired(required = false)
     private com.ubrnms.inventory.repository.DiscoveryModePolicyRepository discoveryModePolicyRepo;
+
+    @Autowired(required = false)
+    private OnboardingPolicyService onboardingPolicyService;
 
     @Autowired(required = false)
     private com.ubrnms.inventory.repository.CapabilityProfileRepository capabilityProfileRepo;
@@ -216,31 +220,38 @@ public class InventoryService {
 
     // ---- Upsert from discovery ----
 
-    /** Upsert device from Kafka device-discovered event (idempotent). Validates pre-assignment. */
+    /** Upsert device from Kafka device-discovered event (idempotent). Applies assignment gate policy (WO-033). */
     public Device upsertFromDiscovery(Map<String, Object> event) {
         String serial = (String) event.get("serialNumber");
 
-        // Validate pre-assignment (WO-010)
+        // Check the onboarding assignment gate policy (WO-033).
+        // When the gate is enabled, a device without a pre-assignment is held in
+        // PENDING_ASSIGNMENT instead of being rejected.
+        boolean gateEnabled = onboardingPolicyService != null && onboardingPolicyService.isGateEnabled();
+        boolean hasPreAssignment = false;
+
         if (preAssignRepo != null) {
             var pa = preAssignRepo.findBySerialNumber(serial);
-            if (pa.isEmpty()) {
-                // Publish WARNING alarm for unassigned device
-                try {
-                    String alarmPayload = objectMapper.writeValueAsString(Map.of(
-                        "alarmType", "NMS-DIS-UNASSIGNED",
-                        "severity", "WARNING",
-                        "source", serial,
-                        "message", "Device attempted onboarding without pre-assignment: " + serial
-                    ));
-                    kafkaTemplate.send("raw-alarms", serial, alarmPayload);
-                } catch (Exception e) {
-                    log.error("Failed to publish unassigned device alarm for serial=[redacted]", e);
-                }
-                throw new NotPreAssignedException("Device not pre-assigned: " + serial);
+            if (pa.isPresent()) {
+                hasPreAssignment = true;
+                pa.get().setOnboarded(true);
+                preAssignRepo.save(pa.get());
             }
-            // Update pre-assignment as onboarded
-            pa.get().setOnboarded(true);
-            preAssignRepo.save(pa.get());
+        }
+
+        // Resolve onboarding gate state before persisting.
+        String onboardingGateState;
+        if (!gateEnabled) {
+            // Gate disabled — all valid call-home devices are automatically managed.
+            onboardingGateState = OnboardingAssignmentPolicy.GateState.MANAGED.name();
+        } else if (hasPreAssignment) {
+            // Gate enabled but device has an explicit pre-assignment — allow as managed.
+            onboardingGateState = OnboardingAssignmentPolicy.GateState.MANAGED.name();
+        } else {
+            // Gate enabled and no pre-assignment — hold device until operator assigns.
+            onboardingGateState = OnboardingAssignmentPolicy.GateState.PENDING_ASSIGNMENT.name();
+            log.info("Device serial=[redacted] held in PENDING_ASSIGNMENT; assignment gate is enabled and no pre-assignment found");
+            publishAssignmentPendingAuditEvent(serial, (String) event.getOrDefault("correlationId", "n/a"));
         }
 
         String callerParadigm = (String) event.getOrDefault("discoveryParadigm", "UNKNOWN");
@@ -248,6 +259,12 @@ public class InventoryService {
 
         // Route through authority merge
         device = mergeWithAuthority(device, event, callerParadigm);
+
+        // Apply assignment gate state (WO-033).
+        device.setOnboardingGateState(onboardingGateState);
+        if (OnboardingAssignmentPolicy.GateState.PENDING_ASSIGNMENT.name().equals(onboardingGateState)) {
+            device.setAssignmentRequired(true);
+        }
 
         // Validate and apply sysObjectID for generic devices (WO-004)
         if (event.containsKey("sysObjectID")) {
@@ -485,6 +502,24 @@ public class InventoryService {
         capabilityProfileRepo.findByDeviceTypeAndDiscoveryParadigm(type, paradigm)
             .or(() -> capabilityProfileRepo.findByDiscoveryParadigm(paradigm))
             .ifPresent(p -> device.setCapabilityProfileId(p.getProfileId()));
+    }
+
+    /** Emits an audit event when a device is held in PENDING_ASSIGNMENT state (WO-033). */
+    private void publishAssignmentPendingAuditEvent(String serial, String correlationId) {
+        try {
+            Map<String, Object> auditEvent = Map.of(
+                "action", "onboarding.assignment.pending",
+                "actor", Map.of("userId", "system", "username", "inventory-service", "role", "system"),
+                "resource", Map.of("type", "device", "id", "[redacted]"),
+                "outcome", "pending_assignment",
+                "reason", "assignment_gate_enabled_no_pre_assignment",
+                "correlationId", correlationId,
+                "timestamp", Instant.now().toString()
+            );
+            kafkaTemplate.send(auditTopic, serial, objectMapper.writeValueAsString(auditEvent));
+        } catch (Exception e) {
+            log.warn("Failed to publish pending-assignment audit event; correlationId={}", correlationId, e);
+        }
     }
 
     /** Emits an onboarding attempt audit event via Kafka (WO-006). */

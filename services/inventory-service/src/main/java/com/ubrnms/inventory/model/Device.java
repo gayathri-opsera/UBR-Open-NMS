@@ -193,6 +193,21 @@ public class Device {
      */
     private String commissioningPendingFields;
 
+    // ── WO-033: Onboarding assignment gate state ──────────────────────────────
+
+    /**
+     * Tracks where this device sits in the onboarding assignment gate lifecycle.
+     * Values: MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD.
+     *
+     * MANAGED — device has a hierarchy assignment (or gate is disabled) and is eligible
+     *   for configuration delivery.
+     * PENDING_ASSIGNMENT — gate is enabled, device authenticated successfully, but has no
+     *   hierarchy assignment yet. Config delivery is withheld until an operator assigns it.
+     * CONFIG_WITHHELD — operator has explicitly withheld config delivery for this device.
+     */
+    @Indexed
+    private String onboardingGateState;
+
     // ── WO-028: Realtime connection tracking ─────────────────────────────────
 
     /** Opaque ID of the active realtime WebSocket connection, if any. */

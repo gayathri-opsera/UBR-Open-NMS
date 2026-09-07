@@ -30,6 +30,9 @@ public class ConfigService {
     // External device status check — injected via DeviceStatusChecker
     private final DeviceStatusChecker deviceStatusChecker;
 
+    // WO-033: onboarding assignment gate eligibility check
+    private final DeviceEligibilityChecker deviceEligibilityChecker;
+
     // WO-018: per-device operation concurrency guard
     private final OperationGuard operationGuard;
 
@@ -83,6 +86,7 @@ public class ConfigService {
 
     /**
      * Push config to a single device.
+     * - If the device is in PENDING_ASSIGNMENT or CONFIG_WITHHELD state (WO-033) → return DELIVERY_WITHHELD.
      * - If a conflicting exclusive operation is in flight (WO-018) → return 409.
      * - If device is offline AND it's a firmware/bulk command → queue it.
      * - If device is offline AND it's an individual config command → reject with 503.
@@ -90,6 +94,15 @@ public class ConfigService {
      */
     public PushResult pushConfig(String deviceId, String templateId, String actor,
                                   boolean isFirmwareOrBulk) {
+        // WO-033: check onboarding gate eligibility before any other operation.
+        // PENDING_ASSIGNMENT and CONFIG_WITHHELD devices must never receive config pushes.
+        DeviceEligibilityChecker.IneligibilityReason ineligible =
+                deviceEligibilityChecker.checkEligibility(deviceId);
+        if (ineligible != null) {
+            log.info("Config push withheld for device={} reason={}", deviceId, ineligible);
+            return PushResult.deliveryWithheld(ineligible.name());
+        }
+
         // WO-018: acquire the per-device operation lock before any state change
         OperationClass opClass = isFirmwareOrBulk ? OperationClass.FIRMWARE_UPGRADE : OperationClass.CONFIG_CHANGE;
         String tempJobId = UUID.randomUUID().toString();
@@ -155,6 +168,15 @@ public class ConfigService {
             }
 
             try {
+                // WO-033: skip devices in PENDING_ASSIGNMENT or CONFIG_WITHHELD state.
+                DeviceEligibilityChecker.IneligibilityReason ineligible =
+                        deviceEligibilityChecker.checkEligibility(deviceId);
+                if (ineligible != null) {
+                    job.getPerDeviceStatus().put(deviceId, "WITHHELD:" + ineligible.name());
+                    log.info("Bulk push withheld for device={} reason={}", deviceId, ineligible);
+                    continue;
+                }
+
                 boolean online = deviceStatusChecker.isOnline(deviceId);
                 if (online) {
                     publishConfigPush(deviceId, templateId, job.getId(), actor);
@@ -268,28 +290,39 @@ public class ConfigService {
     // ── Result type ────────────────────────────────────────────────
 
     public static class PushResult {
-        public enum Type { PUBLISHED, QUEUED, DEVICE_OFFLINE, OPERATION_IN_FLIGHT }
+        public enum Type { PUBLISHED, QUEUED, DEVICE_OFFLINE, OPERATION_IN_FLIGHT, DELIVERY_WITHHELD }
         public final Type type;
         public final String queuedCommandId;
         /** Set when type=OPERATION_IN_FLIGHT: the job ID already holding the lock. */
         public final String existingOperationJobId;
         /** Set when type=OPERATION_IN_FLIGHT: the operation class already in flight. */
         public final String existingOperationClass;
+        /** Set when type=DELIVERY_WITHHELD: the reason config delivery is blocked (WO-033). */
+        public final String withheldReason;
 
-        private PushResult(Type type, String id, String existingJobId, String existingClass) {
+        private PushResult(Type type, String id, String existingJobId, String existingClass, String withheldReason) {
             this.type = type;
             this.queuedCommandId = id;
             this.existingOperationJobId = existingJobId;
             this.existingOperationClass = existingClass;
+            this.withheldReason = withheldReason;
         }
 
-        static PushResult published()     { return new PushResult(Type.PUBLISHED, null, null, null); }
-        static PushResult queued(String id) { return new PushResult(Type.QUEUED, id, null, null); }
-        static PushResult deviceOffline() { return new PushResult(Type.DEVICE_OFFLINE, null, null, null); }
+        static PushResult published()     { return new PushResult(Type.PUBLISHED, null, null, null, null); }
+        static PushResult queued(String id) { return new PushResult(Type.QUEUED, id, null, null, null); }
+        static PushResult deviceOffline() { return new PushResult(Type.DEVICE_OFFLINE, null, null, null, null); }
 
         /** WO-018: returned when a conflicting exclusive operation is already in flight. */
         static PushResult operationInFlight(String existingJobId, String existingClass) {
-            return new PushResult(Type.OPERATION_IN_FLIGHT, null, existingJobId, existingClass);
+            return new PushResult(Type.OPERATION_IN_FLIGHT, null, existingJobId, existingClass, null);
+        }
+
+        /**
+         * WO-033: returned when the device is in PENDING_ASSIGNMENT or CONFIG_WITHHELD state.
+         * Config delivery is explicitly skipped with an auditable reason.
+         */
+        static PushResult deliveryWithheld(String reason) {
+            return new PushResult(Type.DELIVERY_WITHHELD, null, null, null, reason);
         }
     }
 }

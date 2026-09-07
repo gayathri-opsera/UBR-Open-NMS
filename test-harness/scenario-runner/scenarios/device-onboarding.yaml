@@ -185,3 +185,91 @@ steps:
       action: "contact_support"
     expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max", "Location"]
     expect_body_absent_pattern: ["panic", "goroutine", "stack", "trace", "sql", "mongo"]
+
+---
+name: onboarding-gate-policy-read
+description: "WO-033: GET /api/v1/admin/onboarding/policy returns policy with all required fields"
+timeout_seconds: 30
+steps:
+  - name: get-policy
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/admin/onboarding/policy"
+    headers:
+      X-Caller-Role: "admin"
+      X-Caller-Id: "test-admin"
+    expect_status: 200
+    expect_body_fields: ["enabled", "defaultBehavior", "description", "updatedBy", "updatedAt"]
+
+---
+name: onboarding-gate-policy-update-enable
+description: "WO-033: PUT /api/v1/admin/onboarding/policy enables the gate; admin only"
+timeout_seconds: 30
+steps:
+  - name: enable-gate
+    action: http_put
+    url: "${INVENTORY_URL}/api/v1/admin/onboarding/policy"
+    body:
+      enabled: true
+      reason: "scenario-runner WO-033 test"
+    headers:
+      X-Caller-Role: "admin"
+      X-Caller-Id: "test-admin"
+    expect_status: 200
+    expect_body:
+      enabled: true
+      defaultBehavior: "PENDING_ASSIGNMENT"
+
+---
+name: onboarding-gate-policy-update-non-admin-denied
+description: "WO-033: PUT /api/v1/admin/onboarding/policy returns 403 for non-admin callers"
+timeout_seconds: 30
+steps:
+  - name: non-admin-update-attempt
+    action: http_put
+    url: "${INVENTORY_URL}/api/v1/admin/onboarding/policy"
+    body:
+      enabled: false
+    headers:
+      X-Caller-Role: "engineer"
+      X-Caller-Id: "test-engineer"
+    expect_status: 403
+    expect_body_fields: ["error"]
+
+---
+name: onboarding-gate-pending-assignment-device-config-withheld
+description: "WO-033: Config push to PENDING_ASSIGNMENT device is withheld with explicit reason"
+timeout_seconds: 30
+steps:
+  - name: enable-gate
+    action: http_put
+    url: "${INVENTORY_URL}/api/v1/admin/onboarding/policy"
+    body:
+      enabled: true
+      reason: "scenario-runner test"
+    headers:
+      X-Caller-Role: "admin"
+      X-Caller-Id: "test-admin"
+    expect_status: 200
+  - name: check-config-eligibility
+    action: http_get
+    url: "${CONFIG_URL}/api/v1/devices/${PENDING_DEVICE_ID}/onboarding-gate"
+    expect_status: 200
+    expect_body:
+      eligible: false
+    expect_body_fields: ["withheldReason"]
+
+---
+name: onboarding-gate-approve-assignment
+description: "WO-033: Admin can approve PENDING_ASSIGNMENT device, moving it to MANAGED"
+timeout_seconds: 30
+steps:
+  - name: approve-device
+    action: http_post
+    url: "${INVENTORY_URL}/api/v1/admin/devices/${PENDING_DEVICE_SERIAL}/approve-assignment"
+    headers:
+      X-Caller-Role: "admin"
+      X-Caller-Id: "test-admin"
+    expect_status: 200
+    expect_body:
+      onboardingGateState: "MANAGED"
+      assignmentRequired: false

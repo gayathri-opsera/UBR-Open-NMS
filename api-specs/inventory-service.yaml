@@ -420,3 +420,71 @@ components:
           type: string
           nullable: true
           description: Operator-visible reason for DEFERRED or ERROR status.
+
+    # ── WO-033: Onboarding Assignment Gate policy ─────────────────────────────
+
+    OnboardingAssignmentPolicyResponse:
+      description: >
+        Current state of the onboarding assignment gate policy.
+        When enabled=false (default) all valid call-home devices are automatically moved to
+        MANAGED state after authentication and check-in.
+        When enabled=true devices without a hierarchy assignment are held in PENDING_ASSIGNMENT
+        state until an operator approves them via the /approve-assignment endpoint.
+      type: object
+      required: [enabled, defaultBehavior, description, updatedBy, updatedAt]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the assignment gate is currently active.
+        defaultBehavior:
+          type: string
+          enum: [AUTO_MANAGED, PENDING_ASSIGNMENT]
+          description: >
+            AUTO_MANAGED — devices onboard without needing operator assignment (gate disabled).
+            PENDING_ASSIGNMENT — devices are held until assigned (gate enabled).
+        description:
+          type: string
+          description: Human-readable description of the current policy state.
+        updatedBy:
+          type: string
+          nullable: true
+          description: User ID of the admin who last changed the policy.
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        changeReason:
+          type: string
+          nullable: true
+
+    OnboardingAssignmentPolicyUpdateRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+        reason:
+          type: string
+          description: Human-readable reason for the policy change (for audit trail).
+
+    OnboardingGateState:
+      description: >
+        Onboarding gate lifecycle state of a device (WO-033).
+        MANAGED — device is fully onboarded and eligible for config delivery.
+        PENDING_ASSIGNMENT — gate is enabled and device has no hierarchy assignment.
+        CONFIG_WITHHELD — config delivery explicitly withheld by operator.
+      type: string
+      enum: [MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD]
+
+    DeviceAssignmentApprovalResponse:
+      type: object
+      required: [deviceId, onboardingGateState, approvedBy]
+      properties:
+        deviceId:
+          type: string
+        onboardingGateState:
+          $ref: '#/components/schemas/OnboardingGateState'
+        assignmentRequired:
+          type: boolean
+        approvedBy:
+          type: string
