@@ -70,6 +70,29 @@ const auditEntrySchema = new mongoose.Schema(
         // ── WO-006: Evidence export ──────────────────────────────────────────
         'evidence.exported',
         'evidence.export.denied',
+        // ── WO-020: SSO lifecycle ────────────────────────────────────────────
+        'sso.login.initiated',
+        'sso.login.success',
+        'sso.login.failed',
+        'sso.config.updated',
+        // ── WO-020: MFA lifecycle ────────────────────────────────────────────
+        'mfa.enrolled',
+        'mfa.challenge.success',
+        'mfa.challenge.failed',
+        'mfa.disabled',
+        'mfa.backup_code.used',
+        // ── WO-020: Password governance ──────────────────────────────────────
+        'password.expired',
+        'password.renewed',
+        'password.policy.violated',
+        'password.reset.initiated',
+        // ── WO-020: Role and identity governance ─────────────────────────────
+        'role.changed',
+        'permission.changed',
+        'identity.provider.changed',
+        // ── WO-020: Access control ───────────────────────────────────────────
+        'access.denied',
+        'access.partial',
       ],
       index: true,
     },

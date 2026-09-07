@@ -237,7 +237,6 @@ describe('WO-008: Retention class', () => {
   });
 
   it('legacy records without retentionClass are treated as "legacy"', () => {
-    // Records without retentionClass should map to "legacy" when read
     const legacyEntry = { ...mockEntry };
     delete legacyEntry.retentionClass;
     const retentionClass = legacyEntry.retentionClass || 'legacy';
@@ -264,6 +263,112 @@ describe('WO-008: Retention class', () => {
     AuditEntry.mockImplementation(() => ({ save: saveMock }));
 
     await ingestEvent(exportRecord);
+    expect(saveMock).toHaveBeenCalled();
+  });
+});
+
+// ── WO-020: Expanded security audit taxonomy ─────────────────────────────────
+
+describe('WO-020: SSO audit actions', () => {
+  const ssoActions = [
+    'sso.login.initiated',
+    'sso.login.success',
+    'sso.login.failed',
+    'sso.config.updated',
+  ];
+
+  ssoActions.forEach((action) => {
+    it(`accepts SSO action: ${action}`, async () => {
+      const saveMock = jest.fn().mockResolvedValue({ ...mockEntry, action });
+      AuditEntry.mockImplementation(() => ({ save: saveMock, action }));
+      await ingestEvent({
+        actor: { userId: 'user-sso', username: 'user@corp.com', role: 'user' },
+        action,
+        resource: 'sso',
+        outcome: action.includes('failed') ? 'failure' : 'success',
+      });
+      expect(saveMock).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('WO-020: MFA audit actions', () => {
+  const mfaActions = [
+    'mfa.enrolled',
+    'mfa.challenge.success',
+    'mfa.challenge.failed',
+    'mfa.disabled',
+    'mfa.backup_code.used',
+  ];
+
+  mfaActions.forEach((action) => {
+    it(`accepts MFA action: ${action}`, async () => {
+      const saveMock = jest.fn().mockResolvedValue({ ...mockEntry, action });
+      AuditEntry.mockImplementation(() => ({ save: saveMock, action }));
+      await ingestEvent({
+        actor: { userId: 'user-mfa', username: 'mfa-admin', role: 'admin' },
+        action,
+        resource: 'mfa',
+        outcome: action.includes('failed') ? 'failure' : 'success',
+      });
+      expect(saveMock).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('WO-020: Password governance audit actions', () => {
+  const passwordActions = [
+    'password.expired',
+    'password.renewed',
+    'password.policy.violated',
+    'password.reset.initiated',
+  ];
+
+  passwordActions.forEach((action) => {
+    it(`accepts password governance action: ${action}`, async () => {
+      const saveMock = jest.fn().mockResolvedValue({ ...mockEntry, action });
+      AuditEntry.mockImplementation(() => ({ save: saveMock, action }));
+      await ingestEvent({
+        actor: { userId: 'user-pwd', username: 'local-user', role: 'user' },
+        action,
+        resource: 'password',
+        outcome: action === 'password.renewed' ? 'success' : 'failure',
+      });
+      expect(saveMock).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('WO-020: Role and access audit actions', () => {
+  const accessActions = ['role.changed', 'permission.changed', 'identity.provider.changed', 'access.denied', 'access.partial'];
+
+  accessActions.forEach((action) => {
+    it(`accepts governance action: ${action}`, async () => {
+      const saveMock = jest.fn().mockResolvedValue({ ...mockEntry, action });
+      AuditEntry.mockImplementation(() => ({ save: saveMock, action }));
+      await ingestEvent({
+        actor: { userId: 'admin-001', username: 'admin', role: 'admin' },
+        action,
+        resource: 'rbac',
+        outcome: action === 'access.denied' ? 'denied' : 'success',
+      });
+      expect(saveMock).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('WO-020: Legacy records tolerate missing new fields', () => {
+  it('legacy record with unknown category is accepted by model without crashing', async () => {
+    const saveMock = jest.fn().mockResolvedValue({ ...mockEntry });
+    AuditEntry.mockImplementation(() => ({ save: saveMock }));
+    // Simulates reading an old record without new fields
+    const legacyRecord = {
+      actor: 'old-actor',
+      action: 'LOGIN',
+      resource: 'auth',
+      result: 'SUCCESS',
+    };
+    await ingestEvent(legacyRecord);
     expect(saveMock).toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ const sessionService = require('./session.service');
 const { User, validatePasswordComplexity } = require('../models/user.model');
 const config = require('../config');
 const logger = require('../utils/logger');
+const passwordPolicyService = require('./password_policy.service');
 
 // Lazy-required to avoid circular dep at module load time
 const getMfaService = () => require('./mfa.service');
@@ -126,6 +127,20 @@ async function login(username, password, ip, userAgent) {
   }
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // ── WO-019: Local password renewal gate ───────────────────────────────────────
+  // Only applies to users with a local password (non-SSO, non-LDAP-only).
+  // Check BEFORE issuing the access token so expired-password users cannot skip renewal.
+  const policyResult = await passwordPolicyService.checkPasswordPolicy(userId);
+  if (policyResult.status === 'expired') {
+    logger.warn('Login blocked: password expired', logger.maskPii({ username, ip }));
+    return {
+      passwordChangeRequired: true,
+      reason: policyResult.reason || 'PASSWORD_EXPIRED',
+      userId,
+    };
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const accessToken = jwtService.generateAccessToken(userId, role);
   const refreshToken = jwtService.generateRefreshToken();
 
@@ -136,13 +151,21 @@ async function login(username, password, ip, userAgent) {
 
   logger.info('Login successful', logger.maskPii({ username, ip, role }));
 
-  return {
+  const response = {
     accessToken,
     refreshToken,
     expiresIn: config.jwt.accessTokenTtlSeconds,
     role,
     userId,
   };
+
+  // WO-019: include password expiry warning metadata when in the warning window
+  if (policyResult.status === 'warning') {
+    response.passwordExpiresAt = policyResult.expiresAt;
+    response.passwordRenewalRequiredInDays = policyResult.daysRemaining;
+  }
+
+  return response;
 }
 
 /**

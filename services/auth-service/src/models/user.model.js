@@ -105,6 +105,13 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    // ── WO-019: Local password renewal enforcement ────────────────────────────
+    // Set to true by an administrator to force the user to change their password at next login.
+    passwordResetRequired: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

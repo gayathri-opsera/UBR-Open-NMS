@@ -104,6 +104,7 @@ async function initiateOIDC(tenantConfig, redis) {
   const issuerBase = oidc.discoveryUrl.replace('/.well-known/openid-configuration', '');
   const authorizationUrl = `${issuerBase}/authorize?${params.toString()}`;
 
+  _emitAudit('SSO_LOGIN_INIT', null, 'oidc', tenantConfig.tenantId, null);
   logger.info('OIDC login initiated', { tenantId: tenantConfig.tenantId });
   return { authorizationUrl, state };
 }
@@ -263,6 +264,7 @@ async function initiateSAML(tenantConfig, redis) {
     })
   );
 
+  _emitAudit('SSO_LOGIN_INIT', null, 'saml', tenantConfig.tenantId, null);
   logger.info('SAML login initiated', { tenantId: tenantConfig.tenantId });
   return { redirectUrl, requestId };
 }
@@ -497,17 +499,45 @@ function _decodeJwtPayload(token) {
 }
 
 /**
- * Emit a structured audit log entry.
+ * Emit a structured audit log entry using the WO-020 taxonomy.
+ * Maps legacy event types to the new sso.* action namespace.
  * SECURITY: never include tokens, assertions, passwords, or client secrets.
  * @private
  */
 function _emitAudit(eventType, userId, provider, tenantId, reason) {
-  logger.info(`audit:${eventType}`, {
-    provider,
-    tenantId,
-    userId: userId ? String(userId) : undefined,
-    reason,
-    serviceSource: 'sso',
+  // Map legacy types to WO-020 SSO taxonomy
+  const SSO_ACTION_MAP = {
+    LOGIN:              'sso.login.success',
+    LOGIN_FAILED:       'sso.login.failed',
+    SSO_CONFIG_UPDATED: 'sso.config.updated',
+    SSO_LOGIN_INIT:     'sso.login.initiated',
+  };
+
+  const action = SSO_ACTION_MAP[eventType] || `sso.${eventType.toLowerCase()}`;
+  const outcome = (eventType === 'LOGIN' || eventType === 'SSO_CONFIG_UPDATED')
+    ? 'success'
+    : 'failure';
+
+  // Emit as structured log — the audit Kafka consumer or ingest client will persist this.
+  // The auth-service does not have a direct MongoDB connection to audit-service; it emits
+  // via structured logger or a Kafka audit producer in production deployments.
+  logger.info('sso.audit', {
+    action,
+    actor: {
+      userId: userId ? String(userId) : 'anonymous',
+      username: 'sso-flow',
+      role: 'user',
+    },
+    resource: 'sso',
+    resourceId: tenantId,
+    outcome,
+    serviceSource: 'sso-service',
+    correlationId: tenantId,
+    payload: {
+      provider,
+      tenantId,
+      reason,
+    },
     timestamp: new Date().toISOString(),
   });
 }

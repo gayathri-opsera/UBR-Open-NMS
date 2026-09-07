@@ -8,6 +8,28 @@ const { v4: uuidv4 } = require('uuid');
 const { User } = require('../models/user.model');
 const logger = require('../utils/logger');
 
+/**
+ * Emit a WO-020 MFA audit event via structured logger.
+ * SECURITY: never include OTP codes, TOTP secrets, or backup code values.
+ * @private
+ */
+function _emitMfaAudit(action, userId, outcome, reason) {
+  logger.info('mfa.audit', {
+    action,
+    actor: {
+      userId: userId ? String(userId) : 'unknown',
+      username: 'mfa-flow',
+      role: 'user',
+    },
+    resource: 'mfa',
+    resourceId: userId ? String(userId) : undefined,
+    outcome,
+    serviceSource: 'mfa-service',
+    payload: reason ? { reason } : {},
+    timestamp: new Date().toISOString(),
+  });
+}
+
 const APP_NAME_PREFIX = 'UBR-NMS';
 const BACKUP_CODE_COUNT = 8;
 const BACKUP_CODE_BCRYPT_ROUNDS = 12;
@@ -76,6 +98,7 @@ async function enableMfa(userId, code) {
     mfaEnabledAt: new Date(),
   });
 
+  _emitMfaAudit('mfa.enrolled', userId, 'success', null);
   logger.info('MFA enabled successfully', { userId });
   return true;
 }
@@ -102,6 +125,7 @@ async function verifyOtp(userId, code) {
 
   const isValid = speakeasy.totp.verify({ secret: user.mfaSecret, encoding: 'base32', token: code, window: 1 });
   if (!isValid) {
+    _emitMfaAudit('mfa.challenge.failed', userId, 'failure', 'INVALID_OTP');
     logger.warn('MFA OTP verification failed', { userId });
     const err = new Error('Invalid or expired OTP code.');
     err.code = 'INVALID_OTP';
@@ -109,6 +133,7 @@ async function verifyOtp(userId, code) {
     throw err;
   }
 
+  _emitMfaAudit('mfa.challenge.success', userId, 'success', null);
   logger.info('MFA OTP verified', { userId });
   return true;
 }
@@ -150,6 +175,7 @@ async function disableMfa(userId, code, adminOverride = false) {
     mfaEnabledAt: null,
   });
 
+  _emitMfaAudit('mfa.disabled', userId, 'success', adminOverride ? 'ADMIN_OVERRIDE' : null);
   logger.info('MFA disabled', { userId, adminOverride });
   return true;
 }
@@ -261,6 +287,7 @@ async function verifyBackupCode(userId, code) {
   const remaining = user.mfaBackupCodes.filter((_, i) => i !== matchedIndex);
   await User.findByIdAndUpdate(userId, { mfaBackupCodes: remaining });
 
+  _emitMfaAudit('mfa.backup_code.used', userId, 'success', null);
   logger.info('MFA backup code used', { userId, remaining: remaining.length });
   return true;
 }

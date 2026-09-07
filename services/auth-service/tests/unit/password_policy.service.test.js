@@ -1,6 +1,14 @@
 'use strict';
 
-jest.mock('../../src/models/user.model');
+// Use the real validatePasswordComplexity to exercise complexity checks while mocking User.
+jest.mock('../../src/models/user.model', () => {
+  const real = jest.requireActual('../../src/models/user.model');
+  return {
+    ...jest.genMockFromModule('../../src/models/user.model'),
+    validatePasswordComplexity: real.validatePasswordComplexity,
+    ROLES: real.ROLES,
+  };
+});
 jest.mock('../../src/utils/logger', () => ({
   info: jest.fn(), warn: jest.fn(), error: jest.fn(), maskPii: jest.fn(x => x),
 }));
@@ -169,12 +177,16 @@ describe('renewPassword', () => {
     });
   }
 
+  // Passwords meeting the 12+ char, upper, lower, digit, special requirement
+  const VALID_NEW_PASS = 'NewP@ssw0rd123!';
+  const VALID_OLD_PASS = 'OldP@ssw0rd123!';
+
   test('successful renewal updates password and clears reset flag', async () => {
     const user = makeUser();
     stubUserFind(user);
 
-    const result = await passwordPolicyService.renewPassword('user-002', 'NewP@ss123!', 'OldP@ss123!');
-    expect(user.setPassword).toHaveBeenCalledWith('NewP@ss123!');
+    await passwordPolicyService.renewPassword('user-002', VALID_NEW_PASS, VALID_OLD_PASS);
+    expect(user.setPassword).toHaveBeenCalledWith(VALID_NEW_PASS);
     expect(user.passwordResetRequired).toBe(false);
     expect(user.save).toHaveBeenCalled();
   });
@@ -184,7 +196,7 @@ describe('renewPassword', () => {
     stubUserFind(user);
 
     await expect(
-      passwordPolicyService.renewPassword('user-002', 'NewP@ss123!', 'WrongOld!')
+      passwordPolicyService.renewPassword('user-002', VALID_NEW_PASS, 'WrongOldPass1!')
     ).rejects.toMatchObject({ code: 'INVALID_CURRENT_PASSWORD' });
   });
 
@@ -193,7 +205,7 @@ describe('renewPassword', () => {
     stubUserFind(user);
 
     await expect(
-      passwordPolicyService.renewPassword('user-002', 'weak', 'OldP@ss123!')
+      passwordPolicyService.renewPassword('user-002', 'weak', VALID_OLD_PASS)
     ).rejects.toMatchObject({ code: 'PASSWORD_COMPLEXITY_VIOLATION' });
   });
 
@@ -202,7 +214,7 @@ describe('renewPassword', () => {
     stubUserFind(user);
 
     await expect(
-      passwordPolicyService.renewPassword('user-002', 'NewP@ss123!', undefined)
+      passwordPolicyService.renewPassword('user-002', VALID_NEW_PASS, undefined)
     ).rejects.toMatchObject({ code: 'POLICY_EXEMPT_USER', status: 403 });
   });
 
@@ -210,8 +222,8 @@ describe('renewPassword', () => {
     const user = makeUser({ passwordResetRequired: true });
     stubUserFind(user);
 
-    await passwordPolicyService.renewPassword('user-002', 'NewP@ss123!', undefined);
-    expect(user.setPassword).toHaveBeenCalledWith('NewP@ss123!');
+    await passwordPolicyService.renewPassword('user-002', VALID_NEW_PASS, undefined);
+    expect(user.setPassword).toHaveBeenCalledWith(VALID_NEW_PASS);
     expect(user.verifyPassword).not.toHaveBeenCalled();
   });
 
