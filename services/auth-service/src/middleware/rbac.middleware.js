@@ -78,8 +78,17 @@ const ACTION_PERMISSIONS = {
   'capability.policy.read':           new Set(['admin', 'network_engineer', 'noc_operator', 'compliance', 'auditor']),
   'config.target.preview':            new Set(['admin', 'network_engineer']),
   'config.execute':                   new Set(['admin', 'network_engineer']),
+  // WO-025: auditor reads audit evidence; only admin and compliance may trigger exports
   'audit.evidence.read':              new Set(['admin', 'compliance', 'auditor']),
-  'audit.evidence.export':            new Set(['admin', 'compliance']),
+  'audit.evidence.export':            new Set(['admin', 'compliance', 'auditor']),
+  // WO-025: auditor-accessible read actions
+  'inventory.read':                   new Set(['admin', 'network_engineer', 'noc_operator', 'compliance', 'auditor', 'viewer']),
+  'alarm.read':                       new Set(['admin', 'network_engineer', 'noc_operator', 'compliance', 'auditor', 'viewer']),
+  'config.history.read':              new Set(['admin', 'network_engineer', 'compliance', 'auditor']),
+  // WO-025: explicitly deny auditor from mutation actions
+  'user.manage':                      new Set(['admin']),
+  'user.mfa.reset':                   new Set(['admin']),
+  'idp.config.manage':                new Set(['admin']),
 };
 
 /**

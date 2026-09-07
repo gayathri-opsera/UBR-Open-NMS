@@ -21,8 +21,11 @@ router.post('/events', async (req, res) => {
 
 // GET /api/v1/audit/logs — query with filters
 router.get('/logs', async (req, res) => {
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Admin role required' } });
+  const role = (req.user?.role || '').toLowerCase();
+  // WO-025: auditor and compliance roles may read audit logs (read-only evidence access)
+  const allowedReadRoles = ['admin', 'compliance', 'auditor'];
+  if (!allowedReadRoles.includes(role)) {
+    return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Admin, compliance, or auditor role required' } });
   }
   try {
     const { actor, action, resource, startTime, endTime, correlationId, offset, limit } = req.query;
@@ -36,8 +39,13 @@ router.get('/logs', async (req, res) => {
 
 // GET /api/v1/audit/logs/export — CSV export
 router.get('/logs/export', async (req, res) => {
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Admin role required' } });
+  const role = (req.user?.role || '').toLowerCase();
+  // WO-025: auditor and compliance roles may export approved audit evidence.
+  // Admin may export without restriction; auditor and compliance exports are
+  // subject to the same sanitization and authorization checks as audit queries.
+  const allowedExportRoles = ['admin', 'compliance', 'auditor'];
+  if (!allowedExportRoles.includes(role)) {
+    return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Admin, compliance, or auditor role required' } });
   }
   try {
     const { actor, action, resource, startTime, endTime } = req.query;

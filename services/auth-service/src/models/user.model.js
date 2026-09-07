@@ -4,7 +4,18 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const config = require('../config');
 
-const ROLES = Object.freeze(['admin', 'operator', 'user']);
+const ROLES = Object.freeze([
+  'admin',
+  'operator',
+  'user',
+  // WO-025: specialist read-only roles
+  'auditor',
+  // WO-007: additional specialist roles aligned with ACTION_PERMISSIONS matrix
+  'network_engineer',
+  'noc_operator',
+  'compliance',
+  'viewer',
+]);
 
 const userSchema = new mongoose.Schema(
   {

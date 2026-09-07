@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   fetchUsers, createUser, updateUser, deleteUser, resetPassword,
   fetchSessions, terminateSession, fetchSystemHealth,
-  fetchAuditLog, fetchBackups, triggerBackup, restoreBackup, deleteBackup,
+  fetchAuditLog, exportAuditLog, fetchBackups, triggerBackup, restoreBackup, deleteBackup,
   fetchNorthboundConfig, updateNorthboundConfig,
   fetchRedundancyStatus, forceSyncRedundancy, triggerManualSwitchover,
   getSsoConfig, updateSsoConfig,
@@ -87,9 +87,14 @@ import { logger } from '../utils/logger';
 type AdminTab = 'users' | 'sessions' | 'health' | 'hierarchy' | 'audit' | 'backup' | 'northbound' | 'redundancy' | 'security';
 
 const ROLE_OPTIONS = [
-  { value: 'admin',    label: 'Admin' },
-  { value: 'operator', label: 'Operator' },
-  { value: 'user',     label: 'Viewer' },
+  { value: 'admin',            label: 'Admin' },
+  { value: 'operator',         label: 'Operator' },
+  { value: 'network_engineer', label: 'Network Engineer' },
+  { value: 'noc_operator',     label: 'NOC Operator' },
+  { value: 'compliance',       label: 'Compliance' },
+  // WO-025: auditor is a dedicated read-only role
+  { value: 'auditor',          label: 'Auditor (read-only)' },
+  { value: 'user',             label: 'Viewer' },
 ];
 
 // Map legacy/display role values to backend-valid values
@@ -97,6 +102,19 @@ function normalizeRole(r: string): string {
   const lower = r.toLowerCase();
   if (lower === 'viewer') return 'user';
   return lower;
+}
+
+/**
+ * Returns the set of tabs visible to a given role (WO-025).
+ * Auditors see only the Audit Log and System Health tabs in read-only mode.
+ * Backend authorization is always authoritative; this controls navigation UX only.
+ */
+function getVisibleTabs(role: string | undefined): AdminTab[] {
+  const r = (role ?? '').toLowerCase();
+  if (r === 'auditor') return ['audit', 'health'];
+  if (r === 'compliance') return ['audit', 'health', 'hierarchy'];
+  // Admin, operator, and specialist roles see all tabs
+  return ['users', 'sessions', 'health', 'hierarchy', 'audit', 'backup', 'northbound', 'redundancy', 'security'];
 }
 
 interface UserFormState {
@@ -641,9 +659,13 @@ function HierarchyTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 function AuditTab() {
   const { addToast } = useToast();
+  const { user: currentUser } = useAuth();
   const [entries, setEntries]     = useState<AuditEntry[]>([]);
   const [loading, setLoading]     = useState(true);
   const [actorFilter, setActor]   = useState('');
+  const [exporting, setExporting] = useState(false);
+
+  const isAuditor = (currentUser?.role ?? '').toLowerCase() === 'auditor';
 
   const load = useCallback(() => {
     setLoading(true);
@@ -655,13 +677,46 @@ function AuditTab() {
 
   useEffect(load, [load]);
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const url = await exportAuditLog({ actor: actorFilter || undefined });
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      addToast('Audit export downloaded', 'success');
+    } catch {
+      addToast('Export failed', 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const visible = entries.filter((e) => !actorFilter || e.actor.toLowerCase().includes(actorFilter.toLowerCase()));
 
   return (
     <>
+      {/* WO-025: read-only banner for auditor role */}
+      {isAuditor && (
+        <div style={{
+          padding: '10px 14px', marginBottom: 16,
+          background: 'rgba(96,165,250,0.06)',
+          border: '1px solid rgba(96,165,250,0.2)',
+          borderRadius: 8, fontSize: 12, color: 'var(--vf-text-muted)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ color: '#60a5fa', fontWeight: 600 }}>Read-only access</span>
+          — Auditor role. You may view and export audit evidence. No mutations permitted.
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
         <Input placeholder="Filter by actor…" value={actorFilter} onChange={(e) => setActor(e.target.value)} style={{ width: 260 }} />
         <Button variant="ghost" size="sm" onClick={load}>↻ Refresh</Button>
+        <Button variant="ghost" size="sm" onClick={handleExport} loading={exporting} disabled={exporting}>
+          Export CSV
+        </Button>
         <span style={{ fontSize: 12, color: 'var(--vf-text-muted)', alignSelf: 'center' }}>{visible.length} entries</span>
       </div>
       {loading ? <LoadingState label="Loading audit log…" /> : visible.length === 0 ? (
@@ -1280,12 +1335,46 @@ function MfaRequiredBanner({ show }: { show: boolean }) {
   );
 }
 
+// WO-025: read-only role banner for auditor and compliance roles
+function ReadOnlyRoleBanner({ role }: { role?: string }) {
+  const r = (role ?? '').toLowerCase();
+  if (r !== 'auditor' && r !== 'compliance') return null;
+  return (
+    <div style={{
+      padding: '10px 14px', marginBottom: 20,
+      background: 'rgba(96,165,250,0.06)',
+      border: '1px solid rgba(96,165,250,0.2)',
+      borderRadius: 10, fontSize: 13, display: 'flex', alignItems: 'center', gap: 10,
+    }}>
+      <span style={{ color: '#60a5fa', fontWeight: 700 }}>
+        {r === 'auditor' ? 'Auditor' : 'Compliance'} — Read-only access
+      </span>
+      <span style={{ color: 'var(--vf-text-muted)' }}>
+        You can view audit evidence and system health. Mutation actions are disabled for your role.
+        Backend authorization is authoritative — attempting mutations via direct API calls will return 403.
+      </span>
+    </div>
+  );
+}
+
 export default function V2AdminPage() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<AdminTab>('users');
+  const role = (user?.role ?? '').toLowerCase();
+  const visibleTabs = getVisibleTabs(role);
+
+  // Default tab is the first visible tab for the role
+  const [tab, setTab] = useState<AdminTab>(() => visibleTabs[0] ?? 'audit');
+
   // Admin tabs that require MFA assurance per WO-014 AC#3
   const MFA_SENSITIVE_TABS: AdminTab[] = ['users', 'health', 'audit'];
-  const needsMfaBanner = user?.role === 'admin' && !(user as unknown as { mfaVerified?: boolean }).mfaVerified && MFA_SENSITIVE_TABS.includes(tab);
+  const needsMfaBanner = role === 'admin' && !(user as unknown as { mfaVerified?: boolean }).mfaVerified && MFA_SENSITIVE_TABS.includes(tab);
+
+  // Tab label map for display
+  const TAB_LABELS: Record<AdminTab, string> = {
+    users: 'Users', sessions: 'Sessions', health: 'System Health',
+    hierarchy: 'Hierarchy', audit: 'Audit Log', backup: 'Backup & Restore',
+    northbound: 'Northbound', redundancy: 'Redundancy', security: 'Security / SSO',
+  };
 
   return (
     <div className="vf-page">
@@ -1293,30 +1382,25 @@ export default function V2AdminPage() {
         <h1 className="vf-page-title">Admin Panel</h1>
       </div>
 
-      {/* Tab bar — scrollable so all 8 tabs fit on smaller screens */}
+      {/* Tab bar — only shows tabs the current role can access */}
       <div style={{ display: 'flex', background: 'var(--vf-surface)', borderBottom: '1px solid rgba(77,158,255,0.1)', marginBottom: 24, marginLeft: -28, marginRight: -28, paddingLeft: 28, overflowX: 'auto' }}>
-        <TabBtn id="users"      active={tab === 'users'}      label="Users"          onClick={setTab} />
-        <TabBtn id="sessions"   active={tab === 'sessions'}   label="Sessions"       onClick={setTab} />
-        <TabBtn id="health"     active={tab === 'health'}     label="System Health"  onClick={setTab} />
-        <TabBtn id="hierarchy"  active={tab === 'hierarchy'}  label="Hierarchy"      onClick={setTab} />
-        <TabBtn id="audit"      active={tab === 'audit'}      label="Audit Log"      onClick={setTab} />
-        <TabBtn id="backup"     active={tab === 'backup'}     label="Backup & Restore" onClick={setTab} />
-        <TabBtn id="northbound" active={tab === 'northbound'} label="Northbound"     onClick={setTab} />
-        <TabBtn id="redundancy" active={tab === 'redundancy'} label="Redundancy"     onClick={setTab} />
-        <TabBtn id="security"   active={tab === 'security'}   label="Security / SSO" onClick={setTab} />
+        {visibleTabs.map((id) => (
+          <TabBtn key={id} id={id} active={tab === id} label={TAB_LABELS[id]} onClick={setTab} />
+        ))}
       </div>
 
+      <ReadOnlyRoleBanner role={role} />
       <MfaRequiredBanner show={needsMfaBanner} />
 
-      {tab === 'users'      && <UsersTab />}
-      {tab === 'sessions'   && <SessionsTab />}
-      {tab === 'health'     && <HealthTab />}
-      {tab === 'hierarchy'  && <HierarchyTab />}
-      {tab === 'audit'      && <AuditTab />}
-      {tab === 'backup'     && <BackupTab />}
-      {tab === 'northbound' && <NorthboundTab />}
-      {tab === 'redundancy' && <RedundancyTab />}
-      {tab === 'security'   && <SecurityTab />}
+      {tab === 'users'      && visibleTabs.includes('users')      && <UsersTab />}
+      {tab === 'sessions'   && visibleTabs.includes('sessions')   && <SessionsTab />}
+      {tab === 'health'     && visibleTabs.includes('health')     && <HealthTab />}
+      {tab === 'hierarchy'  && visibleTabs.includes('hierarchy')  && <HierarchyTab />}
+      {tab === 'audit'      && visibleTabs.includes('audit')      && <AuditTab />}
+      {tab === 'backup'     && visibleTabs.includes('backup')     && <BackupTab />}
+      {tab === 'northbound' && visibleTabs.includes('northbound') && <NorthboundTab />}
+      {tab === 'redundancy' && visibleTabs.includes('redundancy') && <RedundancyTab />}
+      {tab === 'security'   && visibleTabs.includes('security')   && <SecurityTab />}
     </div>
   );
 }

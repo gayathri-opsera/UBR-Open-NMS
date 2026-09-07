@@ -29,6 +29,9 @@ const ROLE_HIERARCHY = {
 const ROUTE_PERMISSIONS = [
   { pattern: /^\/api\/v1\/users/,             minRole: 'admin' },
   { pattern: /^\/api\/v1\/system\//,          minRole: 'admin' },
+  // WO-025: auditors may read and export audit logs; POST ingest remains admin-only.
+  // The more specific /logs pattern must precede the general /audit pattern.
+  { pattern: /^\/api\/v1\/audit\/logs/,       minRole: 'auditor' },
   { pattern: /^\/api\/v1\/audit/,             minRole: 'admin' },
   { pattern: /^\/api\/v1\/config.*\/(create|update|delete|push)/, minRole: 'operator' },
   { pattern: /^\/api\/v1\/alarms.*\/acknowledge/, minRole: 'operator' },
@@ -42,6 +45,8 @@ const ROUTE_PERMISSIONS = [
 const MFA_REQUIRED_ADMIN_ROUTES = [
   /^\/api\/v1\/users/,
   /^\/api\/v1\/system\//,
+  // WO-025: admin tokens on the audit route require MFA assurance;
+  // non-admin auditor tokens are exempt from this check (auditor != admin).
   /^\/api\/v1\/audit/,
 ];
 
@@ -58,8 +63,17 @@ const ACTION_PERMISSIONS = {
   'capability.policy.read':           new Set(['admin', 'network_engineer', 'noc_operator', 'compliance', 'auditor']),
   'config.target.preview':            new Set(['admin', 'network_engineer']),
   'config.execute':                   new Set(['admin', 'network_engineer']),
+  // WO-025: auditors may read and export audit evidence; export is further constrained at service level
   'audit.evidence.read':              new Set(['admin', 'compliance', 'auditor']),
-  'audit.evidence.export':            new Set(['admin', 'compliance']),
+  'audit.evidence.export':            new Set(['admin', 'compliance', 'auditor']),
+  // WO-025: auditor-accessible read actions
+  'inventory.read':                   new Set(['admin', 'network_engineer', 'noc_operator', 'compliance', 'auditor', 'viewer']),
+  'alarm.read':                       new Set(['admin', 'network_engineer', 'noc_operator', 'compliance', 'auditor', 'viewer']),
+  'config.history.read':              new Set(['admin', 'network_engineer', 'compliance', 'auditor']),
+  // WO-025: explicitly admin-only mutations — deny-by-default for all others
+  'user.manage':                      new Set(['admin']),
+  'user.mfa.reset':                   new Set(['admin']),
+  'idp.config.manage':                new Set(['admin']),
 };
 
 /**

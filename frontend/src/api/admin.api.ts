@@ -132,6 +132,25 @@ export async function fetchAuditLog(params?: { limit?: number; actor?: string; a
   }
 }
 
+/**
+ * Export audit log as CSV.
+ * Available to admin, compliance, and auditor roles (WO-025).
+ * Returns the raw CSV blob URL for browser download.
+ */
+export async function exportAuditLog(params?: { actor?: string; action?: string; startTime?: string; endTime?: string }): Promise<string> {
+  const queryParams: Record<string, string> = {};
+  if (params?.actor)     queryParams.actor     = params.actor;
+  if (params?.action)    queryParams.action    = params.action;
+  if (params?.startTime) queryParams.startTime = params.startTime;
+  if (params?.endTime)   queryParams.endTime   = params.endTime;
+
+  const res = await apiClient.get('/audit/logs/export', {
+    params: queryParams,
+    responseType: 'blob',
+  });
+  return URL.createObjectURL(res.data as Blob);
+}
+
 // ── Backup & Restore ────────────────────────────────────────────────────────
 export async function fetchBackups(): Promise<BackupRecord[]> {
   try {
