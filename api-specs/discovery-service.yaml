@@ -844,3 +844,101 @@ components:
           description: "Protocols supporting LLDP/CDP walk: SNMP_NEIGHBOR, LLDP"
         isRediscovery:      { type: boolean }
         timestamp:          { type: string, format: date-time }
+
+    # ── WO-029: Southbound protocol error response ─────────────────────────────
+    # All southbound-facing endpoints (registry, authentication, check-in, realtime)
+    # return this exact shape for every non-2xx response.
+    # Firmware must key on `reason` and `action` to make safe retry/re-auth decisions.
+    # SECURITY: No credential values, HMAC signatures, certificate data, or stack traces
+    # may appear in any field of this response.
+
+    SouthboundErrorResponse:
+      description: >
+        Canonical UBR southbound error response.
+        Every non-2xx southbound endpoint response conforms to this shape.
+        Firmware uses `reason` + `action` for retry/re-auth routing.
+      type: object
+      required: [reason, category, action, message, correlationId, timestamp]
+      properties:
+        reason:
+          type: string
+          description: Machine-readable error reason constant.
+          enum:
+            - BAD_REQUEST
+            - MTLS_CERT_INVALID
+            - MTLS_NO_CERT
+            - HMAC_INVALID
+            - RATE_LIMITED
+            - NMS_FAILOVER
+            - INTERNAL_ERROR
+            - SERVICE_UNAVAILABLE
+        category:
+          type: string
+          description: >
+            Error category for routing decisions.
+            auth_failure — no retry; device must re-enroll.
+            retryable — apply Retry-After + jitter before next attempt.
+            redirect — connect to Location header endpoint.
+            client_error — fix the request before retrying.
+            server_error — contact NMS support.
+          enum: [auth_failure, retryable, redirect, client_error, server_error]
+        action:
+          type: string
+          description: Recommended next action for firmware.
+          enum:
+            - fix_request
+            - re_authenticate
+            - retry_with_backoff
+            - connect_to_alternate
+            - contact_support
+        message:
+          type: string
+          description: >
+            Human-readable error description.
+            NEVER contains credential values, signatures, secrets, or stack traces.
+        correlationId:
+          type: string
+          description: Request correlation identifier for operator troubleshooting.
+        timestamp:
+          type: string
+          format: date-time
+          description: UTC time the error was generated.
+      example:
+        reason: HMAC_INVALID
+        category: auth_failure
+        action: re_authenticate
+        message: "HMAC-SHA256 message integrity check failed. Device must re-enrol to obtain a new credential."
+        correlationId: "req-abc-123"
+        timestamp: "2026-09-07T08:00:00Z"
+
+  # ── WO-029: Southbound retry and failover response headers ─────────────────
+  # Applied to 429 RATE_LIMITED and 503 SERVICE_UNAVAILABLE responses only.
+  # Auth failures (462, 495, 496) and 5xx errors MUST NOT include these headers.
+  headers:
+    RetryAfter:
+      description: >
+        Number of seconds the device must wait before retrying (WO-029).
+        Present on 429 and 503 responses only.
+        Default: 15 seconds.
+      schema:
+        type: integer
+        minimum: 1
+        example: 15
+    XRetryJitterMax:
+      description: >
+        Maximum random jitter seconds the device should add to Retry-After (WO-029).
+        Present on 429 and 503 responses only.
+        Default: 30 seconds.
+      schema:
+        type: integer
+        minimum: 0
+        example: 30
+    LocationFailover:
+      description: >
+        Alternate Discovery Service endpoint URL for NMS_FAILOVER (302) responses (WO-029).
+        Points to GET /discovery/v1/kv/services?recurse=1 on the standby NMS instance.
+        Firmware MUST validate the URL before connecting.
+      schema:
+        type: string
+        format: uri
+        example: "https://nms-standby.ubrnms.internal/discovery/v1/kv/services?recurse=1"

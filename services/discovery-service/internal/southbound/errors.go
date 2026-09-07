@@ -62,16 +62,45 @@ const (
 	CategoryAuth = CategoryAuthFailure
 )
 
+// ── Action constants (WO-029) ─────────────────────────────────────────────────
+
+// Action constants tell firmware what to do after receiving an error response.
+const (
+	ActionFixRequest       = "fix_request"          // BAD_REQUEST — client must correct the payload
+	ActionReAuthenticate   = "re_authenticate"       // HMAC/mTLS failures — device must re-enroll
+	ActionRetryWithBackoff = "retry_with_backoff"    // RATE_LIMITED, SERVICE_UNAVAILABLE — retry after Retry-After
+	ActionConnectAlternate = "connect_to_alternate"  // NMS_FAILOVER — connect to Location header endpoint
+	ActionContactSupport   = "contact_support"       // INTERNAL_ERROR — escalate to NMS support
+)
+
 // ── Response body shape ───────────────────────────────────────────────────────
 
 // ErrorBody is the canonical southbound error response body.
-// Shape: { reason, category, message, correlationId, timestamp }
+// Shape: { reason, category, action, message, correlationId, timestamp }
+// All five fields are always present; firmware relies on them for routing decisions.
 type ErrorBody struct {
 	Reason        string `json:"reason"`
 	Category      string `json:"category"`
+	Action        string `json:"action"`
 	Message       string `json:"message"`
 	CorrelationID string `json:"correlationId"`
 	Timestamp     string `json:"timestamp"`
+}
+
+// ActionForReason derives the recommended device action from a reason string.
+func ActionForReason(reason string) string {
+	switch reason {
+	case ReasonBadRequest:
+		return ActionFixRequest
+	case ReasonHMACInvalid, ReasonMTLSCertInvalid, ReasonMTLSNoCert:
+		return ActionReAuthenticate
+	case ReasonRateLimited, ReasonServiceUnavail:
+		return ActionRetryWithBackoff
+	case ReasonNMSFailover:
+		return ActionConnectAlternate
+	default:
+		return ActionContactSupport
+	}
 }
 
 // ── Configuration types ───────────────────────────────────────────────────────
@@ -85,9 +114,10 @@ type RetryConfig struct {
 }
 
 // DefaultRetryConfig is the default retry config used when no custom values are specified.
+// Per WO-029 spec: Retry-After 15 s, X-Retry-Jitter-Max 30 s.
 var DefaultRetryConfig = RetryConfig{
-	RetryAfterSecs: 30,
-	JitterMaxSecs:  6,
+	RetryAfterSecs: 15,
+	JitterMaxSecs:  30,
 }
 
 // FailoverConfig carries the failover redirect parameters.
@@ -101,13 +131,14 @@ type FailoverConfig struct {
 
 // WriteError writes a standardised southbound error body with the given status, reason,
 // category, message, and correlationId. This is the lowest-level builder; prefer the
-// typed helpers below for common cases.
+// typed helpers below for common cases. The action field is derived from the reason.
 //
 // SECURITY: caller must never pass credentials, secrets, or signatures in any argument.
 func WriteError(w http.ResponseWriter, status int, reason, category, message, correlationID string) {
 	body := ErrorBody{
 		Reason:        reason,
 		Category:      category,
+		Action:        ActionForReason(reason),
 		Message:       message,
 		CorrelationID: correlationID,
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
@@ -219,7 +250,7 @@ func LookupCategory(reason string) string {
 	switch reason {
 	case ReasonHMACInvalid, ReasonMTLSCertInvalid, ReasonMTLSNoCert:
 		return CategoryAuthFailure
-	case ReasonRateLimited, ReasonServiceUnavail, ReasonInternalError:
+	case ReasonRateLimited, ReasonServiceUnavail:
 		return CategoryRetryable
 	case ReasonNMSFailover:
 		return CategoryRedirect

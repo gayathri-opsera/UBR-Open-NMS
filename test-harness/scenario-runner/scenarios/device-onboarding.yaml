@@ -46,3 +46,142 @@ steps:
 cleanup:
   - action: reset_stub
     stub: mobinet
+
+# ──────────────────────────────────────────────────────────────────
+# WO-029: Southbound error semantics — negative-path fixtures
+# Each scenario validates exact status code, reason string, action,
+# and header presence for every southbound error category.
+# ──────────────────────────────────────────────────────────────────
+
+---
+name: southbound-error-bad-request
+description: "WO-029: Malformed check-in body returns 400 BAD_REQUEST with reason, category, action"
+timeout_seconds: 30
+steps:
+  - name: bad-request-check-in
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body: "this is not valid json"
+    headers:
+      Content-Type: "application/json"
+      X-Correlation-ID: "scen-wo029-bad-001"
+    expect_status: 400
+    expect_body:
+      reason: "BAD_REQUEST"
+      category: "client_error"
+      action: "fix_request"
+    expect_header_present: ["Content-Type"]
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max", "Location"]
+
+---
+name: southbound-error-hmac-invalid
+description: "WO-029: Invalid HMAC signature returns 462 HMAC_INVALID with re_authenticate action"
+timeout_seconds: 30
+steps:
+  - name: hmac-invalid-check-in
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body:
+      serialNumber: "BADHMAC12345678"
+      macAddress: "AA:BB:CC:DD:EE:FF"
+      ipAddress: "10.0.0.1"
+      deviceType: "BTS"
+      softwareVersion: "1.0.0"
+      signature: "invalidsignature"
+    headers:
+      X-Correlation-ID: "scen-wo029-hmac-001"
+    expect_status: 462
+    expect_body:
+      reason: "HMAC_INVALID"
+      category: "auth_failure"
+      action: "re_authenticate"
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max", "Location"]
+
+---
+name: southbound-error-rate-limited
+description: "WO-029: Rate-limited request returns 429 with Retry-After and X-Retry-Jitter-Max headers"
+timeout_seconds: 30
+steps:
+  - name: trigger-rate-limit
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body:
+      serialNumber: "RATELIMIT123456"
+      macAddress: "AA:BB:CC:DD:EE:02"
+      ipAddress: "10.0.0.2"
+      deviceType: "CPE"
+      softwareVersion: "1.0.0"
+      signature: "ratelimited"
+    headers:
+      X-Simulate-Rate-Limit: "true"
+      X-Correlation-ID: "scen-wo029-rate-001"
+    expect_status: 429
+    expect_body:
+      reason: "RATE_LIMITED"
+      category: "retryable"
+      action: "retry_with_backoff"
+    expect_header_present: ["Retry-After", "X-Retry-Jitter-Max"]
+    expect_header_absent: ["Location"]
+
+---
+name: southbound-error-nms-failover
+description: "WO-029: NMS failover returns 302 NMS_FAILOVER with Location header and connect_to_alternate action"
+timeout_seconds: 30
+steps:
+  - name: trigger-failover
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    headers:
+      X-Simulate-Failover: "true"
+      X-Correlation-ID: "scen-wo029-failover-001"
+    expect_status: 302
+    expect_body:
+      reason: "NMS_FAILOVER"
+      category: "redirect"
+      action: "connect_to_alternate"
+    expect_header_present: ["Location"]
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max"]
+
+---
+name: southbound-error-service-unavailable
+description: "WO-029: Service unavailable returns 503 with Retry-After headers"
+timeout_seconds: 30
+steps:
+  - name: service-unavailable
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    headers:
+      X-Simulate-Unavailable: "true"
+      X-Correlation-ID: "scen-wo029-svcdown-001"
+    expect_status: 503
+    expect_body:
+      reason: "SERVICE_UNAVAILABLE"
+      category: "retryable"
+      action: "retry_with_backoff"
+    expect_header_present: ["Retry-After", "X-Retry-Jitter-Max"]
+
+---
+name: southbound-error-internal-error
+description: "WO-029: Internal error returns 500 INTERNAL_ERROR without secrets or stack traces"
+timeout_seconds: 30
+steps:
+  - name: trigger-internal-error
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body:
+      serialNumber: "INTERNAL12345678"
+      macAddress: "AA:BB:CC:DD:EE:03"
+      ipAddress: "10.0.0.3"
+      deviceType: "IDU"
+      softwareVersion: "1.0.0"
+      signature: "internalerror"
+    headers:
+      X-Simulate-Internal-Error: "true"
+      X-Correlation-ID: "scen-wo029-int-001"
+    expect_status: 500
+    expect_body:
+      reason: "INTERNAL_ERROR"
+      category: "server_error"
+      action: "contact_support"
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max", "Location"]
+    expect_body_absent_pattern: ["panic", "goroutine", "stack", "trace", "sql", "mongo"]

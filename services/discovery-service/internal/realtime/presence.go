@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/airtel-ubrnms/discovery-service/internal/southbound"
 	"github.com/google/uuid"
 )
 
@@ -205,21 +206,23 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Validate HMAC session token before upgrading
 	token := r.Header.Get("X-Device-Token")
 	if token == "" {
-		http.Error(w, `{"reason":"MISSING_DEVICE_TOKEN"}`, http.StatusUnauthorized)
+		southbound.BadRequest(w, "X-Device-Token header is required for realtime channel", corrID)
 		return
 	}
 
 	serial, err := m.validator.ValidateToken(r.Context(), token)
 	if err != nil {
 		slog.Warn("presence: token validation failed", "error", err, "corrID", corrID)
-		http.Error(w, `{"reason":"HMAC_INVALID"}`, http.StatusUnauthorized)
+		southbound.HMACInvalid(w, corrID)
 		return
 	}
 
-	// Upgrade to WebSocket
+	// Upgrade to WebSocket — must write error before the upgrader hijacks the connection.
 	wsConn, err := m.upgrader.Upgrade(w, r)
 	if err != nil {
+		// Upgrader has not yet hijacked the connection; send a proper HTTP error.
 		slog.Error("presence: WebSocket upgrade failed", "serial", serial, "error", err)
+		southbound.InternalError(w, corrID)
 		return
 	}
 

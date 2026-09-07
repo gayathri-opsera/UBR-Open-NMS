@@ -276,12 +276,114 @@ func TestWriteError_CorrelationID(t *testing.T) {
 // ─── itoa helper ─────────────────────────────────────────────────────────────
 
 func TestItoa(t *testing.T) {
-	cases := []struct{ in int; out string }{
+	cases := []struct {
+		in  int
+		out string
+	}{
 		{0, "0"}, {1, "1"}, {30, "30"}, {-5, "-5"}, {100, "100"},
 	}
 	for _, tc := range cases {
 		if got := itoa(tc.in); got != tc.out {
 			t.Errorf("itoa(%d) = %q, want %q", tc.in, got, tc.out)
+		}
+	}
+}
+
+// ─── Action field is always present ──────────────────────────────────────────
+
+func TestErrorBody_ActionAlwaysPresent(t *testing.T) {
+	cases := []struct {
+		name   string
+		reason string
+		action string
+	}{
+		{"bad_request", ReasonBadRequest, ActionFixRequest},
+		{"hmac_invalid", ReasonHMACInvalid, ActionReAuthenticate},
+		{"mtls_cert_invalid", ReasonMTLSCertInvalid, ActionReAuthenticate},
+		{"mtls_no_cert", ReasonMTLSNoCert, ActionReAuthenticate},
+		{"rate_limited", ReasonRateLimited, ActionRetryWithBackoff},
+		{"service_unavailable", ReasonServiceUnavail, ActionRetryWithBackoff},
+		{"nms_failover", ReasonNMSFailover, ActionConnectAlternate},
+		{"internal_error", ReasonInternalError, ActionContactSupport},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ActionForReason(tc.reason)
+			if got != tc.action {
+				t.Errorf("ActionForReason(%q) = %q, want %q", tc.reason, got, tc.action)
+			}
+		})
+	}
+}
+
+func TestWriteError_ActionFieldIncludedInResponse(t *testing.T) {
+	w := record(func(rw http.ResponseWriter) {
+		WriteError(rw, http.StatusBadRequest, ReasonBadRequest, CategoryClientError, "test", "corr-001")
+	})
+	body := decodeBody(t, w)
+	if body.Action == "" {
+		t.Error("action field must not be empty in southbound error response")
+	}
+	if body.Action != ActionFixRequest {
+		t.Errorf("action for BAD_REQUEST: got %q, want %q", body.Action, ActionFixRequest)
+	}
+}
+
+// ─── Default retry config is 15s / 30s per WO-029 spec ───────────────────────
+
+func TestDefaultRetryConfig_MatchesSpec(t *testing.T) {
+	if DefaultRetryConfig.RetryAfterSecs != 15 {
+		t.Errorf("DefaultRetryConfig.RetryAfterSecs: got %d, want 15", DefaultRetryConfig.RetryAfterSecs)
+	}
+	if DefaultRetryConfig.JitterMaxSecs != 30 {
+		t.Errorf("DefaultRetryConfig.JitterMaxSecs: got %d, want 30", DefaultRetryConfig.JitterMaxSecs)
+	}
+}
+
+// ─── LookupCategory: INTERNAL_ERROR must be server_error not retryable ───────
+
+func TestLookupCategory_InternalError_IsServerError(t *testing.T) {
+	got := LookupCategory(ReasonInternalError)
+	if got != CategoryServerError {
+		t.Errorf("LookupCategory(INTERNAL_ERROR) = %q, want %q", got, CategoryServerError)
+	}
+	if IsRetryable(ReasonInternalError) {
+		t.Error("INTERNAL_ERROR must not be retryable — no retry headers for 500")
+	}
+}
+
+// ─── Scenario-runner fixture: all required southbound error codes ─────────────
+
+// TestScenarioFixturesCoverage validates that the southbound package covers every
+// error case required by test-harness/scenario-runner/scenarios/device-onboarding.yaml.
+func TestScenarioFixturesCoverage_AllRequiredCodes(t *testing.T) {
+	type scenarioCase struct {
+		handler    func(http.ResponseWriter)
+		wantStatus int
+		wantReason string
+	}
+	corr := "scenario-fixture-001"
+	cases := []scenarioCase{
+		{func(w http.ResponseWriter) { BadRequest(w, "malformed body", corr) }, http.StatusBadRequest, ReasonBadRequest},
+		{func(w http.ResponseWriter) { HMACInvalid(w, corr) }, StatusHMACInvalid, ReasonHMACInvalid},
+		{func(w http.ResponseWriter) { RateLimited(w, "throttled", corr, DefaultRetryConfig) }, http.StatusTooManyRequests, ReasonRateLimited},
+		{func(w http.ResponseWriter) { ServiceUnavailable(w, "dependency down", corr, DefaultRetryConfig) }, http.StatusServiceUnavailable, ReasonServiceUnavail},
+		{func(w http.ResponseWriter) { InternalError(w, corr) }, http.StatusInternalServerError, ReasonInternalError},
+		{func(w http.ResponseWriter) {
+			WriteFailoverError(w, corr, FailoverConfig{Location: "https://nms-standby.ubrnms.internal/discovery/v1/kv/services?recurse=1"})
+		}, http.StatusFound, ReasonNMSFailover},
+	}
+	for _, tc := range cases {
+		w := record(tc.handler)
+		if w.Code != tc.wantStatus {
+			t.Errorf("scenario: %s got status %d, want %d", tc.wantReason, w.Code, tc.wantStatus)
+		}
+		body := decodeBody(t, w)
+		if body.Reason != tc.wantReason {
+			t.Errorf("scenario: reason got %q, want %q", body.Reason, tc.wantReason)
+		}
+		if body.Action == "" {
+			t.Errorf("scenario: action must not be empty for %q", tc.wantReason)
 		}
 	}
 }
