@@ -620,3 +620,147 @@ components:
         changes:
           type: array
           items: { $ref: '#/components/schemas/DeviceChange' }
+
+    # ── WO-030: Generic device classification and registration schemas ─────────
+
+    GenericDeviceClassificationResult:
+      description: >
+        Classification outcome from SNMP fingerprint data for a single discovered host.
+        classificationStatus drives registration eligibility.
+        DEFERRED_UNSUPPORTED and CLASSIFICATION_ERROR devices must not become managed records.
+      type: object
+      required: [classificationStatus, discoveryParadigm, identityAuthority, onlineStateAuthority]
+      properties:
+        classificationStatus:
+          type: string
+          enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR]
+          description: Outcome of OID / sysDescr classification.
+        deferReason:
+          type: string
+          nullable: true
+          description: >
+            Operator-visible reason for deferral. Never contains credential material.
+            Values: OID_NOT_IN_RELEASE_SCOPE, INSUFFICIENT_FINGERPRINT_EVIDENCE,
+            FINGERPRINT_TIMEOUT, FINGERPRINT_AUTH_FAILED, CLASSIFICATION_ERROR.
+        vendor:         { type: string, nullable: true, example: "Cisco" }
+        model:          { type: string, nullable: true, example: "Catalyst 2960-X" }
+        genericDeviceType:
+          type: string
+          nullable: true
+          enum: [ROUTER, SWITCH, FIREWALL, SERVER, UNKNOWN]
+          description: Generic device category — not the same as UBR deviceType (BTS/CPE).
+        capabilityProfileId:
+          type: string
+          nullable: true
+          example: cap-cisco-switch-v1
+        driverId:
+          type: string
+          nullable: true
+          example: drv-cisco-snmp-v1
+        sysObjectID:
+          type: string
+          nullable: true
+          description: SNMP sysObjectID fingerprint evidence (never used as a credential).
+        sysDescr:
+          type: string
+          nullable: true
+          description: SNMP sysDescr fingerprint evidence.
+        discoveryParadigm:
+          type: string
+          enum: [GENERIC_SNMP]
+          description: Always GENERIC_SNMP for this endpoint.
+        identityAuthority:
+          type: string
+          enum: [GENERIC]
+          description: Always GENERIC — UBR call-home identity is never overwritten.
+        onlineStateAuthority:
+          type: string
+          enum: [GENERIC]
+          description: Always GENERIC for generic-discovered devices.
+        correlationId:
+          type: string
+          nullable: true
+          description: Correlation ID linking back to the fingerprinting run.
+
+    GenericRegistrationResult:
+      description: >
+        Outcome of a single generic device registration attempt in inventory.
+        REGISTERED means the device is now a managed inventory record.
+        DEFERRED means the device was not registered (classification failed or is out of scope).
+        EVENT_PUBLISH_FAILED means the device was registered but downstream Kafka notification failed.
+      type: object
+      required: [registrationStatus, classificationStatus]
+      properties:
+        registrationStatus:
+          type: string
+          enum: [REGISTERED, DEFERRED, ERROR]
+        classificationStatus:
+          type: string
+          enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR]
+        inventoryDeviceId:
+          type: string
+          nullable: true
+          description: Inventory device ID assigned on REGISTERED status.
+        deferReason:
+          type: string
+          nullable: true
+        correlationId:  { type: string, nullable: true }
+        eventPublishFailed:
+          type: boolean
+          description: >
+            True when the device was registered but the downstream Kafka event
+            publication failed. The device IS registered; operators should
+            check Kafka dead-letter queues for reconciliation.
+
+    GenericDeviceClassifiedEvent:
+      description: >
+        Kafka message published to discovery.classification.results after SNMP fingerprint
+        classification. Authority metadata is always GENERIC_SNMP. Credential material
+        must never appear in this schema.
+      type: object
+      required: [eventId, runId, ip, classificationStatus, discoveryParadigm, identityAuthority, onlineStateAuthority, timestamp]
+      properties:
+        eventId:              { type: string, format: uuid }
+        runId:                { type: string, format: uuid }
+        ip:                   { type: string }
+        correlationId:        { type: string, nullable: true }
+        classificationStatus: { type: string, enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR] }
+        deferReason:          { type: string, nullable: true }
+        vendor:               { type: string, nullable: true }
+        model:                { type: string, nullable: true }
+        genericDeviceType:    { type: string, nullable: true }
+        capabilityProfileId:  { type: string, nullable: true }
+        driverId:             { type: string, nullable: true }
+        sysObjectID:          { type: string, nullable: true }
+        sysDescr:             { type: string, nullable: true }
+        discoveryParadigm:    { type: string, enum: [GENERIC_SNMP] }
+        identityAuthority:    { type: string, enum: [GENERIC] }
+        onlineStateAuthority: { type: string, enum: [GENERIC] }
+        timestamp:            { type: string, format: date-time }
+
+    GenericInventoryRegisteredEvent:
+      description: >
+        Kafka message published to inventory.device.registered after inventory persistence.
+        Emitted for both REGISTERED and DEFERRED outcomes for full observability.
+      type: object
+      required: [eventId, runId, registrationStatus, classificationStatus, discoveryParadigm, identityAuthority, onlineStateAuthority, timestamp]
+      properties:
+        eventId:              { type: string, format: uuid }
+        runId:                { type: string, format: uuid }
+        inventoryDeviceId:    { type: string, nullable: true }
+        ip:                   { type: string }
+        correlationId:        { type: string, nullable: true }
+        registrationStatus:   { type: string, enum: [REGISTERED, DEFERRED, ERROR] }
+        classificationStatus: { type: string, enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR] }
+        deferReason:          { type: string, nullable: true }
+        vendor:               { type: string, nullable: true }
+        model:                { type: string, nullable: true }
+        genericDeviceType:    { type: string, nullable: true }
+        capabilityProfileId:  { type: string, nullable: true }
+        driverId:             { type: string, nullable: true }
+        sysObjectID:          { type: string, nullable: true }
+        sysDescr:             { type: string, nullable: true }
+        discoveryParadigm:    { type: string, enum: [GENERIC_SNMP] }
+        identityAuthority:    { type: string, enum: [GENERIC] }
+        onlineStateAuthority: { type: string, enum: [GENERIC] }
+        timestamp:            { type: string, format: date-time }

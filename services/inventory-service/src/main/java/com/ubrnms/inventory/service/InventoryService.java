@@ -266,6 +266,134 @@ public class InventoryService {
         return saved;
     }
 
+    // ── Generic device registration from SNMP classification (WO-030) ────────
+
+    /**
+     * Registration payload for a generic SNMP-discovered device (WO-030).
+     *
+     * <p>Authority rules enforced:
+     * <ul>
+     *   <li>UBR call-home identity fields (serial, mac, deviceType, identityAuthority,
+     *       onlineStateAuthority) are NEVER overwritten by generic discovery enrichment.</li>
+     *   <li>If the device already exists as UBR, sysObjectID and sysDescr are added as
+     *       enrichment; other generic fields are preserved.</li>
+     *   <li>If {@code classificationStatus} is DEFERRED_UNSUPPORTED, the device is NOT
+     *       registered as a managed device — the deferred state is recorded and an audit
+     *       event is emitted so operators can investigate.</li>
+     * </ul>
+     */
+    public GenericRegistrationResult upsertFromGenericDiscovery(Map<String, Object> payload) {
+        String ip = (String) payload.get("ip");
+        String correlationId = (String) payload.getOrDefault("correlationId", "n/a");
+        String classificationStatus = (String) payload.getOrDefault("classificationStatus", "UNKNOWN");
+
+        // DEFERRED_UNSUPPORTED and CLASSIFICATION_ERROR must never silently create managed devices.
+        if (!"RECOGNISED".equalsIgnoreCase(classificationStatus)) {
+            String deferReason = (String) payload.getOrDefault("deferReason", "UNSPECIFIED");
+            log.warn("Generic discovery deferred: ip=[redacted], classificationStatus={}, reason={}, correlationId={}",
+                classificationStatus, deferReason, correlationId);
+            publishDeferredDiscoveryAuditEvent(ip, classificationStatus, deferReason, correlationId);
+            return new GenericRegistrationResult(
+                GenericRegistrationStatus.DEFERRED, null, classificationStatus, deferReason
+            );
+        }
+
+        // For recognised devices, locate the existing record by IP or create a new one.
+        // We deliberately do NOT use serial as idempotency key for generic devices because
+        // generic discovery cannot reliably obtain serial numbers — management IP + sysObjectID
+        // forms a stable composite identity (WO-030 technical_details).
+        String sysObjectID = (String) payload.get("sysObjectID");
+        Device device = deviceRepo.findByIpAddress(ip).orElse(new Device());
+
+        // Determine the existing discovery paradigm for authority enforcement.
+        String existingParadigm = device.getDiscoveryParadigm();
+        String callerParadigm = "GENERIC_SNMP";
+
+        device = mergeWithAuthority(device, payload, callerParadigm);
+
+        // Apply WO-030 classification result fields (never overwrite for UBR devices).
+        if (!"UBR_CALL_HOME".equalsIgnoreCase(existingParadigm)) {
+            device.setVendor((String) payload.get("vendor"));
+            device.setGenericDeviceType((String) payload.get("genericDeviceType"));
+            device.setDriverId((String) payload.get("driverId"));
+            device.setIdentityAuthority("GENERIC");
+            device.setOnlineStateAuthority("GENERIC");
+        }
+        // Classification metadata is always recorded, even on UBR enrichment.
+        device.setClassificationStatus(classificationStatus);
+        device.setClassificationDeferReason((String) payload.get("deferReason"));
+        device.setClassificationCorrelationId(correlationId);
+
+        // Validate and apply sysObjectID (WO-004).
+        if (sysObjectID != null && !sysObjectID.isBlank()) {
+            validateSysObjectId(stripLeadingDot(sysObjectID));
+            device.setSysObjectID(sysObjectID);
+        }
+        if (payload.containsKey("sysDescr") && payload.get("sysDescr") != null) {
+            device.setSysDescr((String) payload.get("sysDescr"));
+        }
+
+        // Default IP address for generic devices.
+        if (device.getIpAddress() == null && ip != null) {
+            device.setIpAddress(ip);
+        }
+
+        // Assign default serial for generic devices that have no serial (prevents compound-index clash).
+        // Format: GENERIC-IP-<ip> — stable across rediscovery runs for the same host.
+        if (device.getSerialNumber() == null || device.getSerialNumber().isBlank()) {
+            device.setSerialNumber("GENERIC-IP-" + ip);
+        }
+
+        publishOnboardingAuditEvent(device, callerParadigm);
+        Device saved = deviceRepo.save(device);
+        publishInventorySync(saved);
+
+        log.info("Generic device registered: ip=[redacted], genericDeviceType={}, correlationId={}",
+            device.getGenericDeviceType(), correlationId);
+
+        return new GenericRegistrationResult(
+            GenericRegistrationStatus.REGISTERED, saved.getId(), classificationStatus, null
+        );
+    }
+
+    /** Strips the leading dot from an OID string before OID_PATTERN validation. */
+    private static String stripLeadingDot(String oid) {
+        return oid.startsWith(".") ? oid.substring(1) : oid;
+    }
+
+    /** Emits a structured audit event for deferred discoveries so operators can investigate. */
+    private void publishDeferredDiscoveryAuditEvent(
+            String ip, String classificationStatus, String deferReason, String correlationId) {
+        try {
+            Map<String, Object> auditEvent = Map.of(
+                "action", "discovery.classification.deferred",
+                "actor", Map.of("userId", "system", "username", "inventory-service", "role", "system"),
+                "resource", Map.of("type", "device", "id", ip != null ? "[redacted]" : "unknown"),
+                "outcome", "deferred",
+                "classificationStatus", classificationStatus,
+                "deferReason", deferReason,
+                "correlationId", correlationId,
+                "timestamp", Instant.now().toString()
+            );
+            kafkaTemplate.send(auditTopic, correlationId, objectMapper.writeValueAsString(auditEvent));
+        } catch (Exception e) {
+            log.warn("Failed to publish deferred discovery audit event; correlationId={}", correlationId, e);
+        }
+    }
+
+    /** Status of a generic device registration attempt (WO-030). */
+    public enum GenericRegistrationStatus {
+        REGISTERED, DEFERRED, ERROR
+    }
+
+    /** Result returned from {@link #upsertFromGenericDiscovery(Map)}. */
+    public record GenericRegistrationResult(
+        GenericRegistrationStatus status,
+        String inventoryDeviceId,
+        String classificationStatus,
+        String deferReason
+    ) {}
+
     // ── sysObjectID validation (WO-004) ──────────────────────────────────────
 
     /**
@@ -319,6 +447,13 @@ public class InventoryService {
             case "capabilityProfileId" -> device.setCapabilityProfileId(str(value));
             case "discoveryParadigm" -> device.setDiscoveryParadigm(str(value));
             case "schemaVersion"     -> device.setSchemaVersion(str(value));
+            // WO-030 classification enrichment fields (generic-discovery only)
+            case "vendor"              -> device.setVendor(str(value));
+            case "genericDeviceType"   -> device.setGenericDeviceType(str(value));
+            case "driverId"            -> device.setDriverId(str(value));
+            case "classificationStatus" -> device.setClassificationStatus(str(value));
+            case "classificationDeferReason" -> device.setClassificationDeferReason(str(value));
+            case "classificationCorrelationId" -> device.setClassificationCorrelationId(str(value));
             case "latitude" -> {
                 double lat = toDouble(value);
                 device.setLatitude(lat);

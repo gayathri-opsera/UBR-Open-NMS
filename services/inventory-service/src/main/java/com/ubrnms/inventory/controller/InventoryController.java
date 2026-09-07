@@ -116,6 +116,45 @@ public class InventoryController {
         }
     }
 
+    /**
+     * Upserts a generic SNMP-discovered device from a classification payload (WO-030).
+     *
+     * <p>POST /api/v1/inventory/devices/generic
+     *
+     * <p>Authority rules enforced by InventoryService:
+     * <ul>
+     *   <li>DEFERRED_UNSUPPORTED and CLASSIFICATION_ERROR payloads are not persisted as
+     *       managed devices — a 422 is returned with the deferReason.</li>
+     *   <li>UBR call-home identity fields are never overwritten.</li>
+     * </ul>
+     */
+    @PostMapping("/generic")
+    public ResponseEntity<?> createGenericDevice(@RequestBody Map<String, Object> payload) {
+        try {
+            InventoryService.GenericRegistrationResult result = inventoryService.upsertFromGenericDiscovery(payload);
+            if (result.status() == InventoryService.GenericRegistrationStatus.REGISTERED) {
+                return ResponseEntity.status(HttpStatus.CREATED)
+                        .body(Map.of(
+                            "registrationStatus", result.status().name(),
+                            "deviceId", result.inventoryDeviceId() != null ? result.inventoryDeviceId() : ""
+                        ));
+            }
+            // DEFERRED — return 422 Unprocessable Entity with operator-visible reason
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(Map.of(
+                        "registrationStatus", result.status().name(),
+                        "classificationStatus", result.classificationStatus(),
+                        "deferReason", result.deferReason() != null ? result.deferReason() : ""
+                    ));
+        } catch (InventoryService.ValidationException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", Map.of("code", "VALIDATION_FAILED", "message", e.getMessage())));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", Map.of("code", "INTERNAL_ERROR", "message", "Registration failed")));
+        }
+    }
+
     @GetMapping("/export")
     public ResponseEntity<byte[]> export(
             @RequestParam(required = false, defaultValue = "csv") String format) throws Exception {

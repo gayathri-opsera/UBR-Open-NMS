@@ -168,6 +168,43 @@ paths:
         "200": { description: Birth certificate, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/BirthCertificate' } } } }
         "404": { $ref: '#/components/responses/NotFound' }
 
+  # ── WO-030: Generic device registration from SNMP classification ─────────────
+
+  /devices/generic:
+    post:
+      tags: [devices]
+      summary: Upsert a generic SNMP-discovered device from classification payload (WO-030)
+      operationId: registerGenericDevice
+      description: >
+        Accepts a classification payload from discovery-service and upserts the device
+        into inventory. Authority rules are enforced server-side — UBR call-home
+        identity fields are never overwritten. Payloads with classificationStatus of
+        DEFERRED_UNSUPPORTED or CLASSIFICATION_ERROR are not persisted as managed devices
+        and return HTTP 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenericDeviceRegistrationRequest' }
+      responses:
+        "201":
+          description: Device registered successfully
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenericDeviceRegistrationResponse' }
+        "422":
+          description: Deferred — device not registered because classification is out of scope or errored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenericDeviceRegistrationResponse' }
+        "400":
+          description: Validation error (e.g. malformed sysObjectID)
+          content:
+            application/json:
+              schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
   /capabilities/profiles:
     get:
       tags: [capabilities]
@@ -327,3 +364,59 @@ components:
             properties:
               deviceId: { type: string }
               reason:   { type: string }
+
+    # ── WO-030: Generic device registration endpoint ──────────────────────────
+
+    GenericDeviceRegistrationRequest:
+      description: >
+        Classification payload from discovery-service used to upsert a generic SNMP-discovered
+        device. Authority rules are enforced server-side: UBR call-home identity fields are
+        never overwritten. DEFERRED_UNSUPPORTED payloads are not persisted as managed devices.
+      type: object
+      required: [ip, classificationStatus, discoveryParadigm, identityAuthority, onlineStateAuthority]
+      properties:
+        ip:                   { type: string, description: "Management IP of the discovered device" }
+        runId:                { type: string, format: uuid }
+        correlationId:        { type: string, nullable: true }
+        classificationStatus:
+          type: string
+          enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR]
+        deferReason:          { type: string, nullable: true }
+        vendor:               { type: string, nullable: true }
+        model:                { type: string, nullable: true }
+        genericDeviceType:    { type: string, enum: [ROUTER, SWITCH, FIREWALL, SERVER, UNKNOWN], nullable: true }
+        capabilityProfileId:  { type: string, nullable: true }
+        driverId:             { type: string, nullable: true }
+        sysObjectID:
+          type: string
+          nullable: true
+          pattern: '^\.?[0-9]+(\.[0-9]+)+$'
+          maxLength: 128
+        sysDescr:             { type: string, nullable: true, maxLength: 512 }
+        discoveryParadigm:    { type: string, enum: [GENERIC_SNMP] }
+        identityAuthority:    { type: string, enum: [GENERIC] }
+        onlineStateAuthority: { type: string, enum: [GENERIC] }
+
+    GenericDeviceRegistrationResponse:
+      description: Result of a generic device registration attempt.
+      type: object
+      required: [registrationStatus, classificationStatus]
+      properties:
+        registrationStatus:
+          type: string
+          enum: [REGISTERED, DEFERRED, ERROR]
+          description: >
+            REGISTERED — device is now a managed inventory record.
+            DEFERRED — device was not registered (classification out of scope).
+            ERROR — registration failed; caller should retry.
+        deviceId:
+          type: string
+          nullable: true
+          description: Inventory device ID, populated when registrationStatus is REGISTERED.
+        classificationStatus:
+          type: string
+          enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR]
+        deferReason:
+          type: string
+          nullable: true
+          description: Operator-visible reason for DEFERRED or ERROR status.
