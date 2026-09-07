@@ -5,12 +5,12 @@ import "time"
 // RawAlarmMessage is the Kafka message on the raw-alarms topic.
 // Field "Time" matches the exact BRD format.
 type RawAlarmMessage struct {
-	AlarmID          string     `json:"alarmId"`
-	AlarmName        string     `json:"alarmName"`
+	AlarmID          string        `json:"alarmId"`
+	AlarmName        string        `json:"alarmName"`
 	Severity         AlarmSeverity `json:"severity"`
-	AlarmDescription string     `json:"alarmDescription,omitempty"`
-	State            string     `json:"state"`
-	Time             time.Time  `json:"Time"`
+	AlarmDescription string        `json:"alarmDescription,omitempty"`
+	State            string        `json:"state"`
+	Time             time.Time     `json:"Time"`
 	Data             struct {
 		DeviceType DeviceType `json:"deviceType"`
 		DeviceID   string     `json:"deviceId"`
@@ -19,12 +19,12 @@ type RawAlarmMessage struct {
 
 // NetcoolAlarmForwardMessage is the northbound message sent to Netcool OSS.
 type NetcoolAlarmForwardMessage struct {
-	AlarmID          string     `json:"alarmId"`
-	AlarmName        string     `json:"alarmName"`
+	AlarmID          string        `json:"alarmId"`
+	AlarmName        string        `json:"alarmName"`
 	Severity         AlarmSeverity `json:"severity"`
-	AlarmDescription string     `json:"alarmDescription"`
-	State            AlarmState `json:"state"`
-	Time             time.Time  `json:"Time"`
+	AlarmDescription string        `json:"alarmDescription"`
+	State            AlarmState    `json:"state"`
+	Time             time.Time     `json:"Time"`
 	Data             struct {
 		DeviceType DeviceType `json:"deviceType"`
 		DeviceID   string     `json:"deviceId"`
@@ -58,25 +58,28 @@ type MycomKPIExportMessage struct {
 	EthernetPorts []EthernetPort `json:"ethernetPorts,omitempty"`
 }
 
-// SouthboundErrorEvent is published to Kafka when a determinable southbound
-// security or protocol failure is detected (WO-005). It is consumed by the
-// alarm and audit services for security monitoring.
+// SouthboundErrorEvent is published to the audit/alarm Kafka topics when a
+// southbound security or protocol error occurs (WO-005).
 //
-// IMPORTANT: This struct must NEVER contain HMAC values, certificate bodies,
-// private key material, raw signatures, or any credential secret. Only include
-// sanitized identity and correlation context.
+// SECURITY: Secrets, HMAC values, private keys, and raw signatures must never
+// appear in this struct. Only sanitised identity and correlation context is included.
 type SouthboundErrorEvent struct {
-	EventID       string `json:"eventId"`
-	Reason        string `json:"reason"`               // one of the southbound error reason constants
-	Category      string `json:"category"`              // auth_failure | retryable | client_error | server_error
-	DeviceSerial  string `json:"deviceSerial,omitempty"` // sanitized, from request context only
-	DeviceIP      string `json:"deviceIp,omitempty"`
-	CorrelationID string `json:"correlationId,omitempty"`
-	SourceService string `json:"sourceService"` // e.g. "discovery-service"
-	Timestamp     string `json:"timestamp"`     // RFC3339 UTC
+	EventID       string    `json:"eventId"`
+	CorrelationID string    `json:"correlationId"`
+	DeviceSerial  string    `json:"deviceSerial,omitempty"` // sanitised device identity only
+	ErrorReason   string    `json:"errorReason"`             // e.g. HMAC_INVALID, MTLS_CERT_INVALID
+	ErrorCategory string    `json:"errorCategory"`           // auth_failure, retryable, redirect, etc.
+	HTTPStatus    int       `json:"httpStatus"`
+	Timestamp     time.Time `json:"timestamp"`
+	ServiceID     string    `json:"serviceId"`
+
+	// Legacy aliases — kept for backward compatibility with older alarm consumers.
+	Reason   string `json:"reason,omitempty"`   // same as ErrorReason
+	Category string `json:"category,omitempty"` // same as ErrorCategory
 }
 
-// InventorySyncMessage is the message from Mobinet/Telemedia sync.
+// InventorySyncMessage is the Kafka message for device inventory synchronisation.
+// Published when a device is discovered or updated through any discovery paradigm.
 type InventorySyncMessage struct {
 	SystemName     string     `json:"systemName,omitempty"`
 	IPAddress      string     `json:"ipAddress"`
@@ -102,26 +105,12 @@ type InventorySyncMessage struct {
 	LastRealtimeAt       time.Time `json:"lastRealtimeAt,omitempty"`
 	CapabilityProfileID  string    `json:"capabilityProfileId,omitempty"`
 	// CredentialRef is an opaque reference only — never the credential value.
-	CredentialRef        string    `json:"credentialRef,omitempty"`
-	ConfigVersion        string    `json:"configVersion,omitempty"`
+	CredentialRef string `json:"credentialRef,omitempty"`
+	ConfigVersion string `json:"configVersion,omitempty"`
 
-	// WO-004: sysObjectID for SNMP-discovered devices
-	SysObjectID          string    `json:"sysObjectID,omitempty"`
-}
-
-// SouthboundErrorEvent is published to the audit/alarm Kafka topics when a
-// southbound security or protocol error occurs (WO-005).
-// SECURITY: Secrets, HMAC values, private keys, and raw signatures must never
-// appear in this struct. Only sanitised identity and correlation context is included.
-type SouthboundErrorEvent struct {
-	EventID       string    `json:"eventId"`
-	CorrelationID string    `json:"correlationId"`
-	DeviceSerial  string    `json:"deviceSerial,omitempty"` // sanitised device identity only
-	ErrorReason   string    `json:"errorReason"`             // e.g. HMAC_INVALID, MTLS_CERT_INVALID
-	ErrorCategory string    `json:"errorCategory"`           // auth_failure, retryable, redirect, etc.
-	HTTPStatus    int       `json:"httpStatus"`
-	Timestamp     time.Time `json:"timestamp"`
-	ServiceID     string    `json:"serviceId"`
+	// WO-027: SNMP fingerprint fields
+	SysObjectID string `json:"sysObjectID,omitempty"`
+	SysDescr    string `json:"sysDescr,omitempty"`
 }
 
 // ICMPSweepResultEvent is published to the discovery.icmp.results Kafka topic (WO-016).
@@ -130,7 +119,7 @@ type ICMPSweepResultEvent struct {
 	EventID      string    `json:"eventId"`
 	RunID        string    `json:"runId"`
 	IP           string    `json:"ip"`
-	Status       string    `json:"status"`     // "reachable", "unreachable", "timeout", "error", "cancelled"
+	Status       string    `json:"status"`   // "reachable", "unreachable", "timeout", "error", "cancelled"
 	LatencyMs    int64     `json:"latencyMs,omitempty"`
 	ErrorMsg     string    `json:"errorMsg,omitempty"`
 	SourceLabels []string  `json:"sourceLabels,omitempty"`
@@ -150,11 +139,82 @@ type PortProbeResult struct {
 // ManagementProtocol is inferred from open ports: NETCONF if 830, SNMP if 161,
 // SSH if 22, HTTP/S if 80/443.
 type PortProbeResultEvent struct {
-	EventID             string            `json:"eventId"`
-	RunID               string            `json:"runId"`
-	IP                  string            `json:"ip"`
-	OpenPorts           []int             `json:"openPorts"`
-	PortResults         []PortProbeResult `json:"portResults"`
-	ManagementProtocol  string            `json:"managementProtocol"` // NETCONF | SNMP | SSH | HTTP | HTTPS | UNKNOWN
-	Timestamp           time.Time         `json:"timestamp"`
+	EventID            string            `json:"eventId"`
+	RunID              string            `json:"runId"`
+	IP                 string            `json:"ip"`
+	OpenPorts          []int             `json:"openPorts"`
+	PortResults        []PortProbeResult `json:"portResults"`
+	ManagementProtocol string            `json:"managementProtocol"` // NETCONF | SNMP | SSH | HTTP | HTTPS | UNKNOWN
+	Timestamp          time.Time         `json:"timestamp"`
+}
+
+// SNMPFingerprintResultEvent is published after SNMP GET fingerprinting (WO-027).
+// Never includes community strings, SNMP credentials, or authentication material.
+type SNMPFingerprintResultEvent struct {
+	EventID       string    `json:"eventId"`
+	RunID         string    `json:"runId"`
+	IP            string    `json:"ip"`
+	CorrelationID string    `json:"correlationId"`
+	Status        string    `json:"status"`              // "success" | "auth_failed" | "timeout" | "malformed" | "partial"
+	SysObjectID   string    `json:"sysObjectID,omitempty"`
+	SysDescr      string    `json:"sysDescr,omitempty"`
+	FailureReason string    `json:"failureReason,omitempty"` // categorised — no credential material
+	Timestamp     time.Time `json:"timestamp"`
+}
+
+// GenericDeviceClassifiedEvent is published after SNMP fingerprint classification (WO-030).
+// Published to the discovery.classification.results topic.
+// Authority rules: this event carries generic-discovery fields only.
+// UBR call-home authoritative fields (serial, mac, deviceType) are NEVER set here.
+type GenericDeviceClassifiedEvent struct {
+	EventID              string    `json:"eventId"`
+	RunID                string    `json:"runId"`
+	IP                   string    `json:"ip"`
+	CorrelationID        string    `json:"correlationId"`
+
+	// Classification outcome.
+	ClassificationStatus string `json:"classificationStatus"` // RECOGNISED | DEFERRED_UNSUPPORTED | CLASSIFICATION_ERROR
+	DeferReason          string `json:"deferReason,omitempty"`
+
+	// Populated when ClassificationStatus == RECOGNISED.
+	Vendor              string `json:"vendor,omitempty"`
+	Model               string `json:"model,omitempty"`
+	GenericDeviceType   string `json:"genericDeviceType,omitempty"` // ROUTER | SWITCH | FIREWALL | SERVER
+	CapabilityProfileID string `json:"capabilityProfileId,omitempty"`
+	DriverID            string `json:"driverId,omitempty"`
+
+	// Fingerprint evidence included for downstream audit (no credential material).
+	SysObjectID string `json:"sysObjectID,omitempty"`
+	SysDescr    string `json:"sysDescr,omitempty"`
+
+	// Authority metadata for downstream services.
+	DiscoveryParadigm    string `json:"discoveryParadigm"`    // always GENERIC_SNMP
+	IdentityAuthority    string `json:"identityAuthority"`    // always GENERIC
+	OnlineStateAuthority string `json:"onlineStateAuthority"` // always GENERIC
+
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// GenericInventoryRegisteredEvent is published after a generic device is persisted in inventory (WO-030).
+// Downstream services (topology, KPI, configuration) consume this to start monitoring the device.
+type GenericInventoryRegisteredEvent struct {
+	EventID              string    `json:"eventId"`
+	RunID                string    `json:"runId"`
+	InventoryDeviceID    string    `json:"inventoryDeviceId"`
+	IP                   string    `json:"ip"`
+	CorrelationID        string    `json:"correlationId"`
+	RegistrationStatus   string    `json:"registrationStatus"` // REGISTERED | DEFERRED
+	ClassificationStatus string    `json:"classificationStatus"`
+	DeferReason          string    `json:"deferReason,omitempty"`
+	Vendor               string    `json:"vendor,omitempty"`
+	Model                string    `json:"model,omitempty"`
+	GenericDeviceType    string    `json:"genericDeviceType,omitempty"`
+	CapabilityProfileID  string    `json:"capabilityProfileId,omitempty"`
+	DriverID             string    `json:"driverId,omitempty"`
+	SysObjectID          string    `json:"sysObjectID,omitempty"`
+	SysDescr             string    `json:"sysDescr,omitempty"`
+	DiscoveryParadigm    string    `json:"discoveryParadigm"`
+	IdentityAuthority    string    `json:"identityAuthority"`
+	OnlineStateAuthority string    `json:"onlineStateAuthority"`
+	Timestamp            time.Time `json:"timestamp"`
 }

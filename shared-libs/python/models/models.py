@@ -71,8 +71,31 @@ class DeviceEntity:
     credential_ref: Optional[str] = None
     config_version: Optional[str] = None
 
-    # ── WO-004 sysObjectID ───────────────────────────────────────────────────
+    # ── WO-027 SNMP fingerprint fields ──────────────────────────────────────
     sys_object_id: Optional[str] = None
+    sys_descr: Optional[str] = None
+
+    # ── WO-026 onboarding state progress fields ──────────────────────────────
+    last_successful_bootstrap_state: Optional[str] = None
+    onboarding_failure_reason: Optional[str] = None
+    retry_after_seconds: Optional[int] = None
+    retry_jitter_max_seconds: Optional[int] = None
+    assignment_required: Optional[bool] = None
+    commissioning_pending_fields: Optional[str] = None
+
+    # ── WO-028 realtime connection tracking ──────────────────────────────────
+    realtime_connection_id: Optional[str] = None
+    realtime_status_reason: Optional[str] = None
+
+    # ── WO-030 generic discovery classification results ───────────────────────
+    # Authority rules: vendor, generic_device_type, driver_id are GENERIC-only;
+    # never populated by UBR call-home discovery.
+    vendor: Optional[str] = None
+    generic_device_type: Optional[str] = None  # ROUTER | SWITCH | FIREWALL | SERVER
+    driver_id: Optional[str] = None
+    classification_status: Optional[str] = None  # RECOGNISED | DEFERRED_UNSUPPORTED | CLASSIFICATION_ERROR
+    classification_defer_reason: Optional[str] = None
+    classification_correlation_id: Optional[str] = None
 
 
 @dataclass

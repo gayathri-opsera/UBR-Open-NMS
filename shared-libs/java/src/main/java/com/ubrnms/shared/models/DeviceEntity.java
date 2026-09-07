@@ -64,9 +64,44 @@ public class DeviceEntity {
     @JsonProperty("credentialRef")        private String credentialRef;
     @JsonProperty("configVersion")        private String configVersion;
 
-    // ── WO-004 sysObjectID ───────────────────────────────────────────────────
+    // ── WO-004 sysObjectID / sysDescr ────────────────────────────────────────
 
     @JsonProperty("sysObjectID")          private String sysObjectID;
+    @JsonProperty("sysDescr")             private String sysDescr;
+
+    // ── WO-026 onboarding state progress ─────────────────────────────────────
+
+    @JsonProperty("lastSuccessfulBootstrapState") private String lastSuccessfulBootstrapState;
+    @JsonProperty("onboardingFailureReason")       private String onboardingFailureReason;
+    @JsonProperty("retryAfterSeconds")             private Integer retryAfterSeconds;
+    @JsonProperty("retryJitterMaxSeconds")         private Integer retryJitterMaxSeconds;
+    @JsonProperty("assignmentRequired")            private Boolean assignmentRequired;
+    @JsonProperty("commissioningPendingFields")    private String commissioningPendingFields;
+
+    // ── WO-028 realtime connection tracking ──────────────────────────────────
+
+    @JsonProperty("realtimeConnectionId")  private String realtimeConnectionId;
+    @JsonProperty("realtimeStatusReason")  private String realtimeStatusReason;
+
+    // ── WO-030 generic discovery classification results ───────────────────────
+
+    /** Vendor name assigned by SNMP fingerprint classification. */
+    @JsonProperty("vendor")                    private String vendor;
+
+    /** Generic device type (ROUTER, SWITCH, FIREWALL, SERVER). Not the same as UBR deviceType. */
+    @JsonProperty("genericDeviceType")         private String genericDeviceType;
+
+    /** Driver identifier assigned by classification (e.g. drv-cisco-snmp-v1). */
+    @JsonProperty("driverId")                  private String driverId;
+
+    /** Outcome of SNMP fingerprint classification (RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR). */
+    @JsonProperty("classificationStatus")      private String classificationStatus;
+
+    /** Operator-visible reason when classification is deferred or errored. */
+    @JsonProperty("classificationDeferReason") private String classificationDeferReason;
+
+    /** Correlation ID linking back to the fingerprinting run. */
+    @JsonProperty("classificationCorrelationId") private String classificationCorrelationId;
 
     public DeviceEntity() {}
 
@@ -135,4 +170,36 @@ public class DeviceEntity {
     public void setConfigVersion(String configVersion) { this.configVersion = configVersion; }
     public String getSysObjectID() { return sysObjectID; }
     public void setSysObjectID(String sysObjectID) { this.sysObjectID = sysObjectID; }
+    public String getSysDescr() { return sysDescr; }
+    public void setSysDescr(String sysDescr) { this.sysDescr = sysDescr; }
+
+    public String getLastSuccessfulBootstrapState() { return lastSuccessfulBootstrapState; }
+    public void setLastSuccessfulBootstrapState(String v) { this.lastSuccessfulBootstrapState = v; }
+    public String getOnboardingFailureReason() { return onboardingFailureReason; }
+    public void setOnboardingFailureReason(String v) { this.onboardingFailureReason = v; }
+    public Integer getRetryAfterSeconds() { return retryAfterSeconds; }
+    public void setRetryAfterSeconds(Integer v) { this.retryAfterSeconds = v; }
+    public Integer getRetryJitterMaxSeconds() { return retryJitterMaxSeconds; }
+    public void setRetryJitterMaxSeconds(Integer v) { this.retryJitterMaxSeconds = v; }
+    public Boolean getAssignmentRequired() { return assignmentRequired; }
+    public void setAssignmentRequired(Boolean v) { this.assignmentRequired = v; }
+    public String getCommissioningPendingFields() { return commissioningPendingFields; }
+    public void setCommissioningPendingFields(String v) { this.commissioningPendingFields = v; }
+    public String getRealtimeConnectionId() { return realtimeConnectionId; }
+    public void setRealtimeConnectionId(String v) { this.realtimeConnectionId = v; }
+    public String getRealtimeStatusReason() { return realtimeStatusReason; }
+    public void setRealtimeStatusReason(String v) { this.realtimeStatusReason = v; }
+
+    public String getVendor() { return vendor; }
+    public void setVendor(String vendor) { this.vendor = vendor; }
+    public String getGenericDeviceType() { return genericDeviceType; }
+    public void setGenericDeviceType(String genericDeviceType) { this.genericDeviceType = genericDeviceType; }
+    public String getDriverId() { return driverId; }
+    public void setDriverId(String driverId) { this.driverId = driverId; }
+    public String getClassificationStatus() { return classificationStatus; }
+    public void setClassificationStatus(String classificationStatus) { this.classificationStatus = classificationStatus; }
+    public String getClassificationDeferReason() { return classificationDeferReason; }
+    public void setClassificationDeferReason(String classificationDeferReason) { this.classificationDeferReason = classificationDeferReason; }
+    public String getClassificationCorrelationId() { return classificationCorrelationId; }
+    public void setClassificationCorrelationId(String classificationCorrelationId) { this.classificationCorrelationId = classificationCorrelationId; }
 }

@@ -160,6 +160,87 @@ public class Device {
     @Indexed
     private String sysObjectID;
 
+    /** SNMP sysDescr for generic-discovery devices (WO-027). */
+    private String sysDescr;
+
+    // ── WO-026: Onboarding state progress fields ─────────────────────────────
+
+    /**
+     * The last state that completed successfully during the bootstrap sequence.
+     * Used to distinguish "not yet reached" from "reached but then failed".
+     */
+    private String lastSuccessfulBootstrapState;
+
+    /**
+     * Categorised reason for the most recent onboarding failure.
+     * Values: AUTH_FAILED, SIGNING_INVALID, ASSIGNMENT_PENDING,
+     * CHECKIN_FAILED, REALTIME_TIMEOUT, GPS_PENDING, UNKNOWN.
+     */
+    private String onboardingFailureReason;
+
+    /** Seconds the device should wait before retrying after a failure. */
+    private Integer retryAfterSeconds;
+
+    /** Maximum jitter in seconds to add to retryAfterSeconds. */
+    private Integer retryJitterMaxSeconds;
+
+    /** True when the device must be assigned to a hierarchy before it can operate. */
+    private Boolean assignmentRequired;
+
+    /**
+     * Comma-separated list of commissioning fields still pending (e.g. "gps,azimuth").
+     * Present when bootstrapState is CHECK_IN_RECEIVED but commissioning is incomplete.
+     */
+    private String commissioningPendingFields;
+
+    // ── WO-028: Realtime connection tracking ─────────────────────────────────
+
+    /** Opaque ID of the active realtime WebSocket connection, if any. */
+    private String realtimeConnectionId;
+
+    /** Human-readable reason for the last realtime state change (e.g. TIMEOUT, RECONNECT). */
+    private String realtimeStatusReason;
+
+    // ── WO-030: Generic discovery classification results ─────────────────────
+
+    /**
+     * Vendor name assigned by the SNMP fingerprint classifier.
+     * Only populated for GENERIC_SNMP devices; never overwritten by UBR call-home.
+     */
+    private String vendor;
+
+    /**
+     * Generic device type assigned by classification — ROUTER, SWITCH, FIREWALL, SERVER.
+     * Not the same as deviceType (BTS/CPE) which is UBR-specific.
+     */
+    @Indexed
+    private String genericDeviceType;
+
+    /**
+     * Driver identifier assigned by classification. Drives protocol selection
+     * downstream (e.g. drv-cisco-snmp-v1).
+     */
+    private String driverId;
+
+    /**
+     * Outcome of the SNMP fingerprint classification.
+     * Values: RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR.
+     */
+    @Indexed
+    private String classificationStatus;
+
+    /**
+     * Operator-visible reason when classificationStatus is DEFERRED_UNSUPPORTED
+     * or CLASSIFICATION_ERROR. Never contains credentials or raw OIDs.
+     */
+    private String classificationDeferReason;
+
+    /**
+     * Correlation ID linking this record back to the fingerprinting run that
+     * produced the classification evidence.
+     */
+    private String classificationCorrelationId;
+
     @CreatedDate
     private Instant createdAt;
 
