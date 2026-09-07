@@ -398,3 +398,93 @@ steps:
       identityAuthority:    "UBR"
       onlineStateAuthority: "UBR"
     expect_body_contains_fields: ["lastCheckInAt", "lastRealtimeAt"]
+
+---
+# ──────────────────────────────────────────────────────────────────
+# WO-035: UBR Protocol Simulator — success path (BOOT → OPERATION)
+# Validates the full UBR call-home lifecycle against mocked endpoints.
+# ──────────────────────────────────────────────────────────────────
+name: ubr-simulator-full-bootstrap
+description: "WO-035: Simulator runs BOOT→DISCOVERY→AUTH→CHECK_IN→REALTIME→OPERATION"
+timeout_seconds: 120
+
+steps:
+  - name: seed-kv-registry
+    action: http_put
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services/auth"
+    body:
+      url: "${DISCOVERY_URL}/api/v1/discovery/auth"
+    expect_status: 200
+
+  - name: run-ubr-simulator
+    action: ubr_simulator_run
+    profile: "fixtures/ubr-bts-valid.json"
+    discovery_url: "${DISCOVERY_URL}"
+    expect_final_state: "OPERATION"
+    expect_transitions_include:
+      - "BOOT"
+      - "DISCOVERY"
+      - "AUTHENTICATION"
+      - "CHECK_IN"
+      - "REALTIME"
+      - "OPERATION"
+
+---
+name: ubr-simulator-hmac-invalid
+description: "WO-035: Simulator handles HMAC_INVALID (462) during authentication"
+timeout_seconds: 60
+
+steps:
+  - name: run-ubr-simulator-bad-hmac
+    action: ubr_simulator_run
+    profile: "fixtures/invalid-signature-profile.json"
+    discovery_url: "${DISCOVERY_URL}"
+    expect_final_state: "FAILED"
+    expect_reason: "HMAC_INVALID"
+    expect_retryable: false
+
+---
+name: ubr-simulator-nms-failover-redirect
+description: "WO-035: Simulator handles 302 NMS_FAILOVER during discovery"
+timeout_seconds: 60
+
+steps:
+  - name: run-ubr-simulator-failover
+    action: ubr_simulator_run
+    profile: "fixtures/nms-failover-profile.json"
+    discovery_url: "${DISCOVERY_URL}"
+    expect_final_state: "REDIRECTED"
+    expect_reason: "NMS_FAILOVER"
+    expect_transitions_include:
+      - "BOOT"
+      - "DISCOVERY"
+      - "REDIRECTED"
+
+---
+name: ubr-simulator-realtime-timeout
+description: "WO-035: Simulator reports REALTIME_TIMEOUT when WebSocket receives no PONG"
+timeout_seconds: 60
+
+steps:
+  - name: run-ubr-simulator-no-pong
+    action: ubr_simulator_run
+    profile: "fixtures/realtime-no-pong-profile.json"
+    discovery_url: "${DISCOVERY_URL}"
+    expect_final_state: "FAILED"
+    expect_reason: "REALTIME_TIMEOUT"
+    expect_retryable: true
+
+---
+name: ubr-simulator-rate-limited-uses-retry-headers
+description: "WO-035: Simulator applies Retry-After and X-Retry-Jitter-Max from response"
+timeout_seconds: 60
+
+steps:
+  - name: trigger-rate-limit-on-discovery
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    headers:
+      X-Simulate-Rate-Limit: "true"
+      X-Correlation-ID: "scen-wo035-rate-001"
+    expect_status: 429
+    expect_header_present: ["Retry-After", "X-Retry-Jitter-Max"]

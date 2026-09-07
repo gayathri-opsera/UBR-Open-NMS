@@ -1,0 +1,15 @@
+{
+  "profile_name": "realtime-no-pong",
+  "description": "Device that connects to realtime WebSocket but receives no PONG (negative case)",
+  "device_type": "CPE",
+  "serial_number": "SN-NOPONG-001",
+  "mac_address": "EE:FF:AA:BB:CC:NP",
+  "firmware_version": "fw-1.9.3",
+  "config_version": "cfg-v1",
+  "negative_case": {
+    "type": "realtime_timeout",
+    "expected_state": "FAILED",
+    "expected_reason": "REALTIME_TIMEOUT"
+  },
+  "hmac_secret_placeholder": "PLACEHOLDER_NOPONG_SECRET_DO_NOT_USE_IN_PRODUCTION"
+}

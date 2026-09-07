@@ -1,0 +1,15 @@
+{
+  "profile_name": "ubr-idu-valid",
+  "description": "Valid UBR IDU device for successful bootstrap simulation",
+  "device_type": "IDU",
+  "serial_number": "SN-IDU-SIM-001",
+  "mac_address": "CC:DD:EE:FF:00:03",
+  "firmware_version": "fw-3.1.0",
+  "config_version": "cfg-v1",
+  "retry_settings": {
+    "max_attempts": 3,
+    "base_delay_seconds": 5,
+    "jitter_max_seconds": 2
+  },
+  "hmac_secret_placeholder": "PLACEHOLDER_IDU_SECRET_DO_NOT_USE_IN_PRODUCTION"
+}

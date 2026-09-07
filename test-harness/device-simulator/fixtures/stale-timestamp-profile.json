@@ -1,0 +1,16 @@
+{
+  "profile_name": "stale-timestamp",
+  "description": "Device that presents an expired timestamp (negative case)",
+  "device_type": "CPE",
+  "serial_number": "SN-STALE-001",
+  "mac_address": "BB:CC:DD:EE:FF:STA",
+  "firmware_version": "fw-1.9.3",
+  "config_version": "cfg-v1",
+  "negative_case": {
+    "type": "stale_timestamp",
+    "timestamp_offset_seconds": -600,
+    "expected_status": 462,
+    "expected_reason": "HMAC_INVALID"
+  },
+  "hmac_secret_placeholder": "PLACEHOLDER_STALE_SECRET_DO_NOT_USE_IN_PRODUCTION"
+}

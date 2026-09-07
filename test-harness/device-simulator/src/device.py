@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 class DeviceType(str, Enum):
     BTS = "BTS"
     CPE = "CPE"
+    IDU = "IDU"
 
 
 class DeviceState(str, Enum):
@@ -56,7 +57,12 @@ class DeviceProfile:
         organization_id: str = "ORG-001",
     ) -> "DeviceProfile":
         """Generate a synthetic device profile."""
-        type_prefix = "BTS" if device_type == DeviceType.BTS else "CPE"
+        if device_type == DeviceType.BTS:
+            type_prefix = "BTS"
+        elif device_type == DeviceType.IDU:
+            type_prefix = "IDU"
+        else:
+            type_prefix = "CPE"
         device_id = f"{type_prefix}-{index:06d}"
         serial_number = f"SN-{uuid.uuid4().hex[:10].upper()}"
         model = models[index % len(models)]
@@ -64,10 +70,22 @@ class DeviceProfile:
         # Generate a deterministic but realistic-looking IP
         third_octet = (index // 254) % 254 + 1
         fourth_octet = (index % 254) + 1
-        ip = f"10.{device_type == DeviceType.BTS and 1 or 2}.{third_octet}.{fourth_octet}"
+        if device_type == DeviceType.BTS:
+            second_octet = 1
+        elif device_type == DeviceType.IDU:
+            second_octet = 3
+        else:
+            second_octet = 2
+        ip = f"10.{second_octet}.{third_octet}.{fourth_octet}"
 
-        # Deterministic MAC
-        mac_int = index + (0x100000000000 if device_type == DeviceType.BTS else 0x200000000000)
+        # Deterministic MAC — each device type uses a distinct prefix block.
+        if device_type == DeviceType.BTS:
+            mac_base = 0x100000000000
+        elif device_type == DeviceType.IDU:
+            mac_base = 0x300000000000
+        else:
+            mac_base = 0x200000000000
+        mac_int = index + mac_base
         mac = ":".join(f"{(mac_int >> (8 * i)) & 0xFF:02X}" for i in range(5, -1, -1))
 
         return cls(
