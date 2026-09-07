@@ -245,13 +245,6 @@ func NewHTTPInventoryClient(baseURL string) *HTTPInventoryClient {
 	}
 }
 
-// writeJSON serialises v as JSON and writes it to w with the given status code.
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 func (c *HTTPInventoryClient) UpsertCheckIn(ctx context.Context, req *CheckInUpsertRequest) (*CheckInUpsertResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {

@@ -67,6 +67,13 @@ type DiscoveredDevice struct {
 	UptimeSeconds   int64     `json:"uptimeSeconds"`
 	DiscoveredAt    time.Time `json:"discoveredAt"`
 	CheckInInterval int       `json:"checkInIntervalSeconds"`
+
+	// WO-026: onboarding state tracking fields — populated by check-in processor.
+	BootstrapState    string     `json:"bootstrapState,omitempty"`
+	OperationalStatus string     `json:"operationalStatus,omitempty"`
+	LastCheckInAt     *time.Time `json:"lastCheckInAt,omitempty"`
+	LastRealtimeAt    *time.Time `json:"lastRealtimeAt,omitempty"`
+	FailureReason     string     `json:"failureReason,omitempty"`
 }
 
 // Alarm represents a raw alarm event for the alarms Kafka topic.
@@ -192,6 +199,74 @@ type DiscoveryRun struct {
 	CreatedBy       string
 	CreatedAt       time.Time
 	ValidationNotes string
+}
+
+// ── WO-027: SNMP fingerprint models ──────────────────────────────────────────
+
+// SNMPFingerprintStatus represents the outcome of a single SNMP fingerprinting attempt.
+type SNMPFingerprintStatus string
+
+const (
+	SNMPFingerprintSuccess    SNMPFingerprintStatus = "success"
+	SNMPFingerprintAuthFailed SNMPFingerprintStatus = "auth_failed"
+	SNMPFingerprintTimeout    SNMPFingerprintStatus = "timeout"
+	SNMPFingerprintMalformed  SNMPFingerprintStatus = "malformed"
+	SNMPFingerprintPartial    SNMPFingerprintStatus = "partial"    // sysDescr returned but no sysObjectID
+)
+
+// SNMPFingerprintResult holds the outcome of querying sysDescr and sysObjectID
+// on a single host. Never contains credential material.
+type SNMPFingerprintResult struct {
+	IP            string                `json:"ip"`
+	RunID         string                `json:"runId"`
+	CorrelationID string                `json:"correlationId,omitempty"`
+	Status        SNMPFingerprintStatus `json:"status"`
+	SysObjectID   string                `json:"sysObjectID,omitempty"`
+	SysDescr      string                `json:"sysDescr,omitempty"`
+	// FailureCategory is one of: SNMP_AUTH_FAILED, SNMP_TIMEOUT, SNMP_MALFORMED_OID,
+	// SNMP_MISSING_DESCR, SNMP_UNSUPPORTED_VERSION, SNMP_INTERNAL.
+	// Never includes community strings or credentials.
+	FailureCategory string `json:"failureCategory,omitempty"`
+	FingerprintedAt time.Time `json:"fingerprintedAt"`
+}
+
+// ── WO-026: Bootstrap onboarding state summary ────────────────────────────────
+
+// OnboardingBootstrapState constants represent the stages a UBR device progresses
+// through during call-home onboarding (WO-026).
+const (
+	OnboardingBootstrapStateBoot      = "BOOT"
+	OnboardingBootstrapStateDiscovery = "DISCOVERY"
+	OnboardingBootstrapStateAuth      = "AUTHENTICATION"
+	OnboardingBootstrapStateOperation = "OPERATION"
+)
+
+// DeviceOnboardingState is the API response shape for a single device's bootstrap
+// progress as returned by GET /api/v1/discovery/onboarding (WO-026).
+// All sensitive authentication material is redacted — only state metadata is exposed.
+type DeviceOnboardingState struct {
+	DeviceID                   string    `json:"deviceId"`
+	SerialNumber               string    `json:"serialNumber"`
+	MACAddress                 string    `json:"macAddress"`
+	DeviceType                 string    `json:"deviceType"`
+	BootstrapState             string    `json:"bootstrapState"`
+	OperationalStatus          string    `json:"operationalStatus,omitempty"`
+	LastSuccessfulState        string    `json:"lastSuccessfulState,omitempty"`
+	FailureReason              string    `json:"failureReason,omitempty"`
+	RetryAfterSeconds          *int      `json:"retryAfterSeconds,omitempty"`
+	RetryJitterMaxSeconds      *int      `json:"retryJitterMaxSeconds,omitempty"`
+	AssignmentRequired         *bool     `json:"assignmentRequired,omitempty"`
+	CommissioningPendingFields string    `json:"commissioningPendingFields,omitempty"`
+	LastCheckInAt              *time.Time `json:"lastCheckInAt,omitempty"`
+	LastRealtimeAt             *time.Time `json:"lastRealtimeAt,omitempty"`
+	UpdatedAt                  *time.Time `json:"updatedAt,omitempty"`
+}
+
+// OnboardingStatesResponse wraps the paginated list of device onboarding states.
+type OnboardingStatesResponse struct {
+	Items  []DeviceOnboardingState `json:"items"`
+	Total  int                     `json:"total"`
+	Source string                  `json:"source"` // "discovery" or "inventory"
 }
 
 // ── WO-024: Management port probing ───────────────────────────────────────────

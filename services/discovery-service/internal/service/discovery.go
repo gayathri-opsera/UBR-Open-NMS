@@ -117,6 +117,18 @@ func (s *DeviceStore) FindByIP(ip string) (*model.DiscoveredDevice, bool) {
 	return d, ok
 }
 
+// All returns a snapshot of all devices currently in the store.
+// Used by WO-026 onboarding state handler to iterate all known devices.
+func (s *DeviceStore) All() []*model.DiscoveredDevice {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	devices := make([]*model.DiscoveredDevice, 0, len(s.bySerial))
+	for _, d := range s.bySerial {
+		devices = append(devices, d)
+	}
+	return devices
+}
+
 // ── WO-010: InMemorySecretStore implementation ────────────────────────────────
 
 // InMemorySecretStore is an in-memory implementation of SecretStore for local dev and tests.

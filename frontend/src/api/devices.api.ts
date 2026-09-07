@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { Device, DeviceFilter, GpsSearchParams } from './devices.types';
+import type { Device, DeviceFilter, GpsSearchParams, DeviceOnboardingState, OnboardingStatesResponse } from './devices.types';
 
 /** Safely extract a Device array from any paginated response shape. */
 function extractBatch(data: unknown): Device[] {
@@ -69,6 +69,30 @@ export async function searchByGps(params: GpsSearchParams): Promise<Device[]> {
 export async function fetchPendingCommands(id: string): Promise<unknown[]> {
   const res = await apiClient.get<unknown[]>(`/devices/${id}/pending-commands`);
   return res.data;
+}
+
+// ── WO-026: Bootstrap onboarding state API ───────────────────────────────────
+
+/**
+ * Fetch UBR device bootstrap onboarding states from the discovery service.
+ * Returns a list of call-home-capable devices with their current bootstrap
+ * progress, failure reasons, and commissioning pending fields.
+ * No sensitive authentication material is included in the response.
+ */
+export async function fetchOnboardingStates(stateFilter?: string): Promise<DeviceOnboardingState[]> {
+  const params: Record<string, string> = {};
+  if (stateFilter) params.state = stateFilter;
+  const res = await apiClient.get<OnboardingStatesResponse | DeviceOnboardingState[]>(
+    '/discovery/onboarding',
+    { params },
+  );
+  // Tolerate both array and wrapped { items: [] } shapes from API
+  const data = res.data;
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object' && 'items' in data && Array.isArray(data.items)) {
+    return data.items;
+  }
+  return [];
 }
 
 export async function downloadDeviceExport(filter: DeviceFilter, format: 'csv' | 'xls'): Promise<void> {

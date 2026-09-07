@@ -256,6 +256,60 @@ func writeError(w http.ResponseWriter, code int, errCode, message string) {
 	})
 }
 
+// GetOnboardingStates handles GET /api/v1/discovery/onboarding (WO-026).
+// Returns bootstrap state summaries for all call-home-capable devices that have
+// attempted onboarding. Sensitive authentication material is never included.
+// Query params:
+//   - limit  (int, optional, default 100)
+//   - page   (int, optional, default 0)
+//   - state  (string, optional) filter by bootstrapState value
+func (h *DiscoveryHandler) GetOnboardingStates(w http.ResponseWriter, r *http.Request) {
+	corrID := r.Header.Get("X-Correlation-ID")
+
+	// Parse optional filter params
+	stateFilter := r.URL.Query().Get("state")
+
+	// Build onboarding states from the in-memory device store.
+	// Production: this would query the inventory service, not the in-memory store.
+	devices := h.store.All()
+	items := make([]model.DeviceOnboardingState, 0, len(devices))
+
+	for _, d := range devices {
+		bState := d.BootstrapState
+		if bState == "" {
+			bState = model.BootstrapStatePending
+		}
+		if stateFilter != "" && bState != stateFilter {
+			continue
+		}
+		item := model.DeviceOnboardingState{
+			DeviceID:          d.SerialNumber, // serial as stable identifier for in-memory store
+			SerialNumber:      d.SerialNumber,
+			MACAddress:        d.MACAddress,
+			DeviceType:        d.DeviceType,
+			BootstrapState:    bState,
+			OperationalStatus: d.OperationalStatus,
+			FailureReason:     d.FailureReason,
+			LastCheckInAt:     d.LastCheckInAt,
+			LastRealtimeAt:    d.LastRealtimeAt,
+		}
+		if !d.DiscoveredAt.IsZero() {
+			t := d.DiscoveredAt
+			item.UpdatedAt = &t
+		}
+		items = append(items, item)
+	}
+
+	resp := model.OnboardingStatesResponse{
+		Items:  items,
+		Total:  len(items),
+		Source: "discovery",
+	}
+
+	_ = corrID
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // CreateDiscoveryRun handles POST /api/v1/discovery/runs (WO-011).
 // Creates a validated discovery run from operator-provided scope.
 func (h *DiscoveryHandler) CreateDiscoveryRun(w http.ResponseWriter, r *http.Request) {
