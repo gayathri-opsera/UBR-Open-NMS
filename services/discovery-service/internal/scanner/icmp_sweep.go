@@ -111,6 +111,7 @@ type ICMPSweepService struct {
 	prober     Prober
 	cfg        SweepConfig
 	publisher  SweepResultPublisher
+	metrics    SweepMetrics
 }
 
 // SweepResultPublisher publishes individual host results to a downstream sink (e.g. Kafka).
@@ -124,11 +125,21 @@ type noopPublisher struct{}
 func (n *noopPublisher) PublishHostResult(_ string, _ HostResult) error { return nil }
 
 // NewICMPSweepService constructs a sweep service with the given prober and config.
+// Pass nil for publisher or metrics to use no-op implementations.
 func NewICMPSweepService(prober Prober, cfg SweepConfig, publisher SweepResultPublisher) *ICMPSweepService {
 	if publisher == nil {
 		publisher = &noopPublisher{}
 	}
-	return &ICMPSweepService{prober: prober, cfg: cfg, publisher: publisher}
+	return &ICMPSweepService{prober: prober, cfg: cfg, publisher: publisher, metrics: NoopSweepMetrics{}}
+}
+
+// WithMetrics attaches a SweepMetrics implementation to the service (WO-016).
+// Call this immediately after NewICMPSweepService before the first Sweep call.
+func (s *ICMPSweepService) WithMetrics(m SweepMetrics) *ICMPSweepService {
+	if m != nil {
+		s.metrics = m
+	}
+	return s
 }
 
 // Sweep executes an ICMP sweep over the scope of the given discovery run.
@@ -144,17 +155,19 @@ func (s *ICMPSweepService) Sweep(ctx context.Context, run *model.DiscoveryRun) (
 		return nil, fmt.Errorf("scope expansion failed: %w", err)
 	}
 
+	sweepStart := time.Now()
 	result := &SweepResult{
 		RunID:           run.ID,
 		Status:          "SWEEP_RUNNING",
 		TotalCandidates: len(candidates),
-		StartedAt:       time.Now().UTC(),
+		StartedAt:       sweepStart.UTC(),
 	}
 
 	if len(candidates) == 0 {
 		now := time.Now().UTC()
 		result.Status = "SWEEP_COMPLETE"
 		result.CompletedAt = &now
+		s.metrics.ObserveSweepDuration(time.Since(sweepStart))
 		return result, nil
 	}
 
@@ -239,6 +252,11 @@ func (s *ICMPSweepService) Sweep(ctx context.Context, run *model.DiscoveryRun) (
 			result.CancelledCount++
 		}
 	}
+
+	// Emit Prometheus-compatible metrics (WO-016 AC: hosts_scanned_total, reachable_hosts_total, sweep_duration_seconds)
+	s.metrics.IncrHostsScanned(int64(result.ScannedCount))
+	s.metrics.IncrReachableHosts(int64(result.ReachableCount))
+	s.metrics.ObserveSweepDuration(time.Since(sweepStart))
 
 	now := time.Now().UTC()
 	result.CompletedAt = &now

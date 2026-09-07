@@ -72,3 +72,82 @@ export function parseScopeInput(input: string): ScopeEntry[] {
 
   return entries;
 }
+
+// ── WO-016: Parallel ICMP sweep progress and scheduling ──────────────────────
+
+/** Sweep progress fields included in a DiscoveryRun detail response (WO-016). */
+export interface SweepProgress {
+  totalHosts: number;
+  hostsScanned: number;
+  reachableHosts: number;
+  sweepStartedAt?: string;
+  sweepCompletedAt?: string;
+  sweepDurationMs?: number;
+  workerCount?: number;
+}
+
+/** Extended discovery run detail with sweep progress (WO-016). */
+export interface DiscoveryRunDetail extends DiscoveryRunResponse {
+  sweep?: SweepProgress;
+  updatedAt?: string;
+}
+
+/**
+ * Fetch a discovery run by ID, including sweep progress fields (WO-016).
+ */
+export async function getDiscoveryRun(runId: string): Promise<DiscoveryRunDetail> {
+  const res = await apiClient.get<DiscoveryRunDetail>(`/discovery/runs/${runId}`);
+  return res.data;
+}
+
+// ── WO-017: Discovery schedules ───────────────────────────────────────────────
+
+/** Cron-based schedule for recurring discovery runs (WO-017). */
+export interface DiscoverySchedule {
+  scheduleId: string;
+  name: string;
+  cronExpression: string;
+  scope: ScopeEntry[];
+  enabled: boolean;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  createdAt: string;
+}
+
+export interface CreateScheduleRequest {
+  name: string;
+  cronExpression: string;
+  scope: ScopeEntry[];
+  enabled?: boolean;
+}
+
+/**
+ * List all discovery schedules for the current tenant (WO-017).
+ */
+export async function listDiscoverySchedules(): Promise<DiscoverySchedule[]> {
+  try {
+    const res = await apiClient.get<DiscoverySchedule[] | { schedules: DiscoverySchedule[] }>('/discovery/schedules');
+    const data = res.data;
+    if (Array.isArray(data)) return data;
+    if (data && 'schedules' in data && Array.isArray(data.schedules)) return data.schedules;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Create a new discovery schedule (WO-017).
+ */
+export async function createSchedule(schedule: CreateScheduleRequest): Promise<DiscoverySchedule> {
+  const res = await apiClient.post<DiscoverySchedule>('/discovery/schedules', schedule);
+  return res.data;
+}
+
+/**
+ * Manually trigger an immediate run of an existing discovery schedule (WO-017).
+ */
+export async function triggerSchedule(scheduleId: string): Promise<DiscoveryRunResponse> {
+  const res = await apiClient.post<DiscoveryRunResponse>(`/discovery/schedules/${scheduleId}/trigger`);
+  return res.data;
+}
