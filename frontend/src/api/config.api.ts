@@ -125,6 +125,90 @@ export async function evaluateCapabilities(
   return res.data;
 }
 
+// ── Target preview types (WO-039) ─────────────────────────────────────────────
+
+export interface ConfigTargetFilters {
+  serialNumbers?: string[];
+  macAddresses?: string[];
+  deviceType?: 'BTS' | 'CPE' | 'IDU' | 'GENERIC';
+  sysObjectID?: string;
+  vendor?: string;
+  model?: string;
+  ipAddress?: string;
+  region?: string;
+  organizationId?: string;
+  networkId?: string;
+  /** UBR_CALL_HOME | GENERIC_SNMP | GENERIC_CLI */
+  discoveryParadigm?: string;
+  /** ACTIVE | INACTIVE | FAULTY | DECOMMISSIONED */
+  status?: string;
+  capabilityProfileId?: string;
+  tags?: Array<{ key: string; value: string }>;
+  onboardingGateState?: 'MANAGED' | 'PENDING_ASSIGNMENT' | 'CONFIG_WITHHELD';
+}
+
+export interface ConfigTargetPreviewRequest {
+  /** CONFIG_PUSH | FIRMWARE_UPGRADE | PARAMETER_CHANGE | COMMAND_EXECUTE */
+  actionType: string;
+  filters: ConfigTargetFilters;
+  limit?: number;
+  sort?: string;
+}
+
+export interface ConfigTargetEntry {
+  deviceId: string;
+  displayName: string;
+  serialNumber: string;
+  macAddress: string | null;
+  deviceType: string;
+  /** Present for GENERIC devices; null for UBR. */
+  sysObjectID: string | null;
+  discoveryParadigm: string;
+  status: string;
+  capabilities: string[];
+  matchedFilters: string[];
+  /**
+   * Delivery channel classification:
+   * UBR_REALTIME | UBR_CHECKIN | SNMP_PROTOCOL | CLI_PROTOCOL | UNSUPPORTED
+   */
+  deliveryChannel: string;
+  warnings: string[];
+}
+
+export interface ConfigUnsupportedTargetEntry {
+  deviceId: string;
+  serialNumber: string;
+  deviceType: string;
+  discoveryParadigm: string;
+  reason: string;
+  unsupportedOperation: string;
+}
+
+export interface ConfigTargetPreviewResponse {
+  previewId: string;
+  totalCount: number;
+  targets: ConfigTargetEntry[];
+  unsupportedTargets: ConfigUnsupportedTargetEntry[];
+  generatedAt: string;
+  requiresConfirmation: boolean;
+}
+
+/**
+ * Preview which devices would be targeted by a configuration action, and how
+ * they would be reached, without executing any change (WO-039).
+ *
+ * Sends POST /api/v1/config/targets/preview via the gateway proxy.
+ */
+export async function previewConfigTargets(
+  request: ConfigTargetPreviewRequest,
+): Promise<ConfigTargetPreviewResponse> {
+  const res = await apiClient.post<ConfigTargetPreviewResponse>(
+    '/config/targets/preview',
+    request,
+  );
+  return res.data;
+}
+
 // ── Internal shape normalization ──────────────────────────────────────────────
 
 /** Config-service returns flat fields; collect them into a `parameters` map */

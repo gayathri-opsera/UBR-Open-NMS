@@ -2,6 +2,9 @@ package com.ubrnms.config.controller;
 
 import com.ubrnms.config.model.*;
 import com.ubrnms.config.service.ConfigService;
+import com.ubrnms.config.service.InventorySearchClient;
+import com.ubrnms.config.service.TargetResolverService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +19,7 @@ import java.util.Map;
 public class ConfigController {
 
     private final ConfigService configService;
+    private final TargetResolverService targetResolverService;
 
     // ── Templates ──────────────────────────────────────────────────
 
@@ -71,6 +75,19 @@ public class ConfigController {
                     "error", Map.of(
                             "code", "DEVICE_OFFLINE",
                             "message", "Device offline — command not queued. Individual configuration commands require an active device connection.")));
+            case OPERATION_IN_FLIGHT -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "status", "error",
+                    "error", Map.of(
+                            "code", "OPERATION_IN_FLIGHT",
+                            "existingJobId", result.existingOperationJobId,
+                            "existingOperationClass", result.existingOperationClass,
+                            "message", "A conflicting operation is already in progress for this device.")));
+            case DELIVERY_WITHHELD -> ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+                    "status", "error",
+                    "error", Map.of(
+                            "code", "DELIVERY_WITHHELD",
+                            "reason", result.withheldReason,
+                            "message", "Configuration delivery withheld — device is not yet approved for config delivery.")));
         };
     }
 
@@ -80,6 +97,54 @@ public class ConfigController {
             @RequestParam String templateId,
             @RequestParam(required = false, defaultValue = "") String actor) {
         return ResponseEntity.accepted().body(configService.bulkPush(deviceIds, templateId, actor));
+    }
+
+    // ── Target preview (WO-039) ────────────────────────────────────────────────
+
+    /**
+     * Non-mutating target resolution endpoint.
+     *
+     * <p>Accepts structured filters and returns the resolved device set with
+     * delivery channel classification, before any configuration is executed.
+     * No device state is modified; no commands are enqueued.
+     *
+     * POST /api/v1/config/targets/preview
+     */
+    @PostMapping("/targets/preview")
+    public ResponseEntity<?> previewTargets(
+            @Valid @RequestBody ConfigTargetPreviewRequest request,
+            @RequestHeader(name = "X-Actor-Role", required = false, defaultValue = "operator") String actorRole) {
+        try {
+            targetResolverService.validateRequest(request);
+            ConfigTargetPreviewResponse preview = targetResolverService.resolveTargets(request, actorRole);
+            return ResponseEntity.ok(preview);
+        } catch (TargetResolverService.ValidationException ex) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "status", "error",
+                "error", Map.of(
+                    "code", "INVALID_FILTERS",
+                    "field", ex.field,
+                    "message", ex.getMessage()
+                )
+            ));
+        } catch (InventorySearchClient.InventoryServiceException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "status", "error",
+                "error", Map.of(
+                    "code", "INVENTORY_UNAVAILABLE",
+                    "message", "Cannot reach inventory service — retry shortly",
+                    "retryAfterSeconds", 30
+                )
+            ));
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "status", "error",
+                "error", Map.of(
+                    "code", "RESOLVER_FAILURE",
+                    "message", "Target resolution failed — contact support if issue persists"
+                )
+            ));
+        }
     }
 
     @GetMapping("/jobs/{jobId}/status")

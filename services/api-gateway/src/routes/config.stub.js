@@ -522,4 +522,53 @@ router.get('/firmware/summary', (_req, res) => {
   ]);
 });
 
+// ── Target preview (WO-039) ───────────────────────────────────────────────────
+// Forwards POST /api/v1/config/targets/preview to the Java config-service.
+// The gateway does NOT compute authoritative target sets for this path; it
+// purely proxies to the service and forwards the response.
+const CONFIG_SERVICE_URL = process.env.CONFIG_SERVICE_URL || 'http://nms-config:8083';
+
+router.post('/targets/preview', async (req, res) => {
+  // RBAC: only network_engineer, admin, and auditor (read-only preview) may access
+  const role = req.headers['x-user-role'] || '';
+  const allowed = ['admin', 'network_engineer', 'noc_operator', 'auditor'];
+  if (!allowed.includes(role)) {
+    return res.status(403).json({
+      status: 'error',
+      error: { code: 'FORBIDDEN', message: 'Target preview requires network_engineer or admin role' },
+    });
+  }
+
+  try {
+    const resp = await fetch(`${CONFIG_SERVICE_URL}/api/v1/config/targets/preview`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Actor-Role': role,
+        // Forward correlation ID for distributed tracing
+        ...(req.headers['x-correlation-id']
+          ? { 'X-Correlation-Id': req.headers['x-correlation-id'] } : {}),
+      },
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const body = await resp.json().catch(() => ({}));
+    // Forward the upstream status code so frontends handle 400/503 correctly.
+    res.status(resp.status).json(body);
+  } catch (err) {
+    if (err && err.name === 'TimeoutError') {
+      return res.status(503).json({
+        status: 'error',
+        error: { code: 'INVENTORY_UNAVAILABLE', message: 'Target resolution timed out — retry shortly', retryAfterSeconds: 30 },
+      });
+    }
+    console.error('[config.stub] target preview proxy error', err && err.message);
+    res.status(503).json({
+      status: 'error',
+      error: { code: 'GATEWAY_ERROR', message: 'Config service unreachable — retry shortly', retryAfterSeconds: 15 },
+    });
+  }
+});
+
 module.exports = router;
