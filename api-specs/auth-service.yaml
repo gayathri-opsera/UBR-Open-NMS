@@ -17,6 +17,10 @@ security:
 tags:
   - name: auth
     description: Login, token refresh, logout
+  - name: mfa
+    description: Multi-factor authentication (TOTP + backup codes) — WO-014
+  - name: sso
+    description: Tenant-selectable enterprise SSO (OIDC / SAML 2.0) — WO-013
   - name: users
     description: User CRUD (admin only)
 
@@ -247,3 +251,282 @@ components:
       properties:
         role:     { $ref: 'components.yaml#/components/schemas/UserRole' }
         isActive: { type: boolean }
+
+    # ── WO-013: SSO ───────────────────────────────────────────────────────────
+
+    OIDCConfig:
+      type: object
+      required: [discoveryUrl, clientId, callbackUrl]
+      properties:
+        discoveryUrl:    { type: string, format: uri, description: OIDC discovery metadata URL }
+        clientId:        { type: string }
+        clientSecretRef: { type: string, description: "Vault path reference — raw secret NEVER stored here" }
+        callbackUrl:     { type: string, format: uri }
+        scopes:          { type: array, items: { type: string }, example: ["openid","profile","email"] }
+
+    SAMLConfig:
+      type: object
+      required: [entryPoint, issuer, callbackUrl]
+      properties:
+        metadataUrl: { type: string, format: uri }
+        entryPoint:  { type: string, format: uri, description: IdP SSO URL }
+        issuer:      { type: string, description: SP entity ID }
+        cert:        { type: string, description: IdP signing certificate (PEM) }
+        callbackUrl: { type: string, format: uri }
+
+    TenantSSOConfig:
+      type: object
+      required: [providerType]
+      properties:
+        tenantId:             { type: string }
+        providerType:         { type: string, enum: [local, ldap, oidc, saml] }
+        enabled:              { type: boolean, default: true }
+        localFallbackEnabled: { type: boolean, default: true }
+        displayName:          { type: string }
+        oidc:                 { $ref: '#/components/schemas/OIDCConfig' }
+        saml:                 { $ref: '#/components/schemas/SAMLConfig' }
+        claimMapping:
+          type: object
+          properties:
+            email:    { type: string, default: email }
+            username: { type: string, default: preferred_username }
+            role:     { type: string, default: role }
+        defaultRole: { type: string, enum: [admin, operator, user], default: user }
+        createdAt:   { type: string, format: date-time }
+        updatedAt:   { type: string, format: date-time }
+
+    SSOTokenResponse:
+      type: object
+      properties:
+        accessToken:  { type: string }
+        refreshToken: { type: string }
+        expiresIn:    { type: integer, example: 900 }
+        role:         { type: string }
+        userId:       { type: string }
+
+    # ── WO-014: MFA ───────────────────────────────────────────────────────────
+
+    MFASetupResponse:
+      type: object
+      properties:
+        otpauthUrl:  { type: string, description: "otpauth:// URL for QR code generation" }
+        secret:      { type: string, description: Base32 TOTP secret (shown once) }
+        qrCode:      { type: string, description: Base64 PNG QR code image }
+
+    BackupCodesResponse:
+      type: object
+      properties:
+        codes:
+          type: array
+          items: { type: string }
+          description: "8 single-use backup codes (shown once; store securely)"
+
+# ── WO-013 SSO paths ──────────────────────────────────────────────────────────
+
+x-sso-paths:
+  /auth/sso/initiate:
+    post:
+      tags: [sso]
+      summary: Initiate enterprise SSO login
+      security: []
+      operationId: ssoInitiate
+      parameters:
+        - in: header
+          name: X-Tenant-ID
+          schema: { type: string }
+          description: Tenant identifier (falls back to hostname subdomain)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider: { type: string, enum: [oidc, saml], description: Override auto-detected provider }
+      responses:
+        "200":
+          description: OIDC — returns authorization URL for client-side redirect
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  redirectUrl: { type: string, format: uri }
+                  provider:    { type: string }
+        "302":
+          description: SAML — server-side redirect to IdP entry point
+        "404":
+          description: Tenant SSO not configured
+
+  /auth/sso/callback/oidc:
+    get:
+      tags: [sso]
+      summary: OIDC authorization code callback
+      security: []
+      operationId: oidcCallback
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema: { type: string }
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+        - in: query
+          name: error
+          schema: { type: string }
+      responses:
+        "200":
+          description: SSO login successful
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SSOTokenResponse' }
+        "401":
+          description: Invalid state or IdP error
+
+  /auth/sso/callback/saml:
+    post:
+      tags: [sso]
+      summary: SAML assertion callback (HTTP-POST binding)
+      security: []
+      operationId: samlCallback
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                SAMLResponse: { type: string }
+                RelayState:   { type: string }
+      responses:
+        "200":
+          description: SAML login successful
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SSOTokenResponse' }
+        "401":
+          description: Invalid or tampered SAML assertion
+
+  /auth/sso/metadata:
+    get:
+      tags: [sso]
+      summary: SAML Service Provider metadata
+      security: []
+      operationId: samlMetadata
+      responses:
+        "200":
+          description: SP metadata XML
+          content:
+            application/xml:
+              schema: { type: string }
+
+  /auth/sso/config:
+    get:
+      tags: [sso]
+      summary: Read tenant SSO configuration (admin)
+      operationId: getSSOConfig
+      responses:
+        "200":
+          description: Current tenant SSO config
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSSOConfig' }
+        "404":
+          description: Not configured
+    put:
+      tags: [sso]
+      summary: Create or update tenant SSO configuration (admin)
+      operationId: upsertSSOConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantSSOConfig' }
+      responses:
+        "200":
+          description: Saved configuration
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSSOConfig' }
+
+# ── WO-014 MFA paths ──────────────────────────────────────────────────────────
+
+x-mfa-paths:
+  /auth/mfa/setup:
+    post:
+      tags: [mfa]
+      summary: Generate TOTP secret and QR code for enrollment
+      operationId: mfaSetup
+      responses:
+        "200":
+          description: TOTP setup material (shown once)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MFASetupResponse' }
+
+  /auth/mfa/verify:
+    post:
+      tags: [mfa]
+      summary: Verify TOTP token to complete MFA enrollment or challenge
+      operationId: mfaVerify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, pattern: "^[0-9]{6}$", description: 6-digit TOTP code }
+      responses:
+        "200":
+          description: MFA verified — returns MFA-assured access token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: { type: string, description: "JWT with mfaVerified: true claim" }
+        "401":
+          description: Invalid TOTP token
+
+  /auth/mfa/backup-codes:
+    post:
+      tags: [mfa]
+      summary: Generate backup codes (admin-required action)
+      operationId: generateBackupCodes
+      responses:
+        "200":
+          description: 8 single-use backup codes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupCodesResponse' }
+
+  /auth/mfa/backup-codes/verify:
+    post:
+      tags: [mfa]
+      summary: Use a backup code to complete MFA
+      operationId: verifyBackupCode
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfaToken, backupCode]
+              properties:
+                mfaToken:   { type: string, description: Short-lived MFA challenge token }
+                backupCode: { type: string, description: Single-use backup code }
+      responses:
+        "200":
+          description: Backup code accepted — returns MFA-assured token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: { type: string }
+        "401":
+          description: Invalid or already-used backup code
