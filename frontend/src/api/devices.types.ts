@@ -118,3 +118,67 @@ export interface OnboardingStatesResponse {
   total: number;
   source: string;
 }
+
+// ── WO-038: Onboarding status API types ──────────────────────────────────────
+
+export type OnboardingStateValue =
+  | 'MANAGED'
+  | 'PENDING_ASSIGNMENT'
+  | 'CONFIG_WITHHELD'
+  | 'FAILED'
+  | 'RETRYING'
+  | 'REDIRECTED'
+  | 'CHECK_IN_RECEIVED'
+  | 'AUTHENTICATED'
+  | 'PENDING'
+  | 'UNKNOWN'
+  | string;
+
+export type ConfigDeliveryState = 'ELIGIBLE' | 'WITHHELD' | 'UNKNOWN' | string;
+
+/**
+ * Operator-facing onboarding status for a single device (WO-038).
+ * Sensitive fields (credential refs, certificates) are never present.
+ */
+export interface OnboardingStatusItem {
+  deviceId: string;
+  serialNumber: string;
+  macAddress?: string;
+  deviceType?: string;
+  discoveryParadigm?: string;
+  sysObjectID?: string;
+  bootstrapState?: string;
+  onboardingState: OnboardingStateValue;
+  lastSuccessfulState?: string;
+  reasonCategory?: string;
+  retryAfterSeconds?: number;
+  retryJitterMaxSeconds?: number;
+  lastCheckInAt?: string;
+  lastRealtimeAt?: string;
+  assignmentState?: string;
+  configurationDeliveryState?: ConfigDeliveryState;
+  updatedAt?: string;
+}
+
+export interface OnboardingStatusResponse {
+  items: OnboardingStatusItem[];
+  page: number;
+  limit: number;
+  total: number;
+  /** "enabled" when any discovery mode is active; "disabled" otherwise. */
+  capabilityStatus: 'enabled' | 'disabled' | string;
+}
+
+export interface OnboardingStatusFilter {
+  page?: number;
+  limit?: number;
+  state?: OnboardingStateValue;
+  paradigm?: string;
+  deviceType?: string;
+  reasonCategory?: string;
+  serialNumber?: string;
+  macAddress?: string;
+  sysObjectID?: string;
+  from?: string;
+  to?: string;
+}

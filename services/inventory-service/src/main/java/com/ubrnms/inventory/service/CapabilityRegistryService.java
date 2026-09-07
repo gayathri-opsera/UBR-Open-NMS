@@ -77,13 +77,13 @@ public class CapabilityRegistryService {
         for (String deviceId : deviceIds) {
             try {
                 DeviceCapabilityResponse resp = evaluateDevice(deviceId);
-                if (resp.getSupportedOperations().contains(operation)) {
+                if (resp.supportedOperations().contains(operation)) {
                     // Also check protocol chain isn't empty
-                    List<String> chain = resp.getProtocolPriorityByOperation() == null
+                    List<String> chain = resp.protocolPriorityByOperation() == null
                             ? List.of()
-                            : resp.getProtocolPriorityByOperation().getOrDefault(operation, List.of());
+                            : resp.protocolPriorityByOperation().getOrDefault(operation, List.of());
                     // If the profile specifies an explicit empty chain, block delivery
-                    Map<String, List<String>> protocolMap = resp.getProtocolPriorityByOperation();
+                    Map<String, List<String>> protocolMap = resp.protocolPriorityByOperation();
                     if (protocolMap != null && protocolMap.containsKey(operation) && chain.isEmpty()) {
                         ineligible.add(new IneligibleEntry(deviceId,
                                 "Empty protocol chain for operation '" + operation + "' — delivery blocked"));
@@ -91,8 +91,8 @@ public class CapabilityRegistryService {
                         eligible.add(deviceId);
                     }
                 } else {
-                    String reason = resp.getUnsupportedOperations() != null
-                            ? resp.getUnsupportedOperations().getOrDefault(operation,
+                    String reason = resp.unsupportedOperations() != null
+                            ? resp.unsupportedOperations().getOrDefault(operation,
                                     "Operation '" + operation + "' not supported by capability profile")
                             : "Operation '" + operation + "' not supported by capability profile";
                     ineligible.add(new IneligibleEntry(deviceId, reason));

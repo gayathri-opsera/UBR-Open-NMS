@@ -22,6 +22,98 @@ tags:
     description: Data export endpoints
 
 paths:
+  /inventory/onboarding-status:
+    get:
+      tags: [onboarding]
+      summary: List onboarding status for all devices (WO-038)
+      operationId: listOnboardingStatus
+      description: >
+        Returns a paginated, filterable operator-facing onboarding status feed
+        aggregating device bootstrap state, policy gate state, failure reason,
+        and retry guidance. Sensitive authentication material is never returned.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: state
+          in: query
+          description: Filter by consolidated onboardingState
+          schema:
+            type: string
+            enum: [MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD, FAILED, RETRYING,
+                   REDIRECTED, CHECK_IN_RECEIVED, AUTHENTICATED, PENDING, UNKNOWN]
+        - name: paradigm
+          in: query
+          schema: { type: string, enum: [UBR_CALL_HOME, GENERIC_SNMP, GENERIC_CLI, UNKNOWN] }
+        - name: deviceType
+          in: query
+          schema: { type: string, enum: [BTS, CPE, IDU, UNKNOWN] }
+        - name: reasonCategory
+          in: query
+          schema:
+            type: string
+            enum: [AUTH_FAILED, SIGNING_INVALID, ASSIGNMENT_PENDING, CHECKIN_FAILED,
+                   REALTIME_TIMEOUT, GPS_PENDING, NMS_FAILOVER, UNKNOWN]
+        - name: serialNumber
+          in: query
+          schema: { type: string }
+        - name: macAddress
+          in: query
+          schema: { type: string }
+        - name: sysObjectID
+          in: query
+          schema: { type: string, pattern: '^[0-9]+(\.[0-9]+)*$', maxLength: 128 }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Paginated onboarding status feed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, limit, total, capabilityStatus]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OnboardingStatusItem'
+                  page:    { type: integer }
+                  limit:   { type: integer }
+                  total:   { type: integer }
+                  capabilityStatus:
+                    type: string
+                    enum: [enabled, disabled]
+        "400": { $ref: 'components.yaml#/components/responses/ValidationError' }
+        "401": { $ref: 'components.yaml#/components/responses/Unauthorized' }
+        "503": { $ref: 'components.yaml#/components/responses/ServiceUnavailable' }
+
+  /inventory/onboarding-status/{id}:
+    get:
+      tags: [onboarding]
+      summary: Get onboarding status for a single device by inventory ID (WO-038)
+      operationId: getOnboardingStatusById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Onboarding status for the device
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingStatusItem' }
+        "404": { description: Device not found }
+        "401": { $ref: 'components.yaml#/components/responses/Unauthorized' }
+
   /devices:
     get:
       tags: [devices]
@@ -279,6 +371,41 @@ components:
       content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
 
   schemas:
+    OnboardingStatusItem:
+      type: object
+      description: Operator-facing onboarding status for a single device (WO-038)
+      required: [deviceId, serialNumber, onboardingState]
+      properties:
+        deviceId:                { type: string }
+        serialNumber:            { type: string }
+        macAddress:              { type: string }
+        deviceType:              { type: string, enum: [BTS, CPE, IDU, UNKNOWN] }
+        discoveryParadigm:       { type: string }
+        sysObjectID:             { type: string }
+        bootstrapState:
+          type: string
+          enum: [PENDING, AUTHENTICATED, CHECK_IN_RECEIVED, REALTIME_ESTABLISHED, FAILED, UNKNOWN]
+        onboardingState:
+          type: string
+          enum: [MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD, FAILED, RETRYING,
+                 REDIRECTED, CHECK_IN_RECEIVED, AUTHENTICATED, PENDING, UNKNOWN]
+        lastSuccessfulState:     { type: string }
+        reasonCategory:
+          type: string
+          enum: [AUTH_FAILED, SIGNING_INVALID, ASSIGNMENT_PENDING, CHECKIN_FAILED,
+                 REALTIME_TIMEOUT, GPS_PENDING, NMS_FAILOVER, UNKNOWN]
+        retryAfterSeconds:       { type: integer, minimum: 0 }
+        retryJitterMaxSeconds:   { type: integer, minimum: 0 }
+        lastCheckInAt:           { type: string, format: date-time }
+        lastRealtimeAt:          { type: string, format: date-time }
+        assignmentState:
+          type: string
+          enum: [MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD]
+        configurationDeliveryState:
+          type: string
+          enum: [ELIGIBLE, WITHHELD, UNKNOWN]
+        updatedAt:               { type: string, format: date-time }
+
     ErrorResponse:
       $ref: 'components.yaml#/components/schemas/ErrorResponse'
     BirthCertificate:

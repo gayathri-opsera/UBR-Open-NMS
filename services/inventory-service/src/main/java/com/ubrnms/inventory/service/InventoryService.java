@@ -5,6 +5,7 @@ import com.ubrnms.inventory.model.BirthCertificate;
 import com.ubrnms.inventory.model.Device;
 import com.ubrnms.inventory.model.DeviceTag;
 import com.ubrnms.inventory.model.OnboardingAssignmentPolicy;
+import com.ubrnms.inventory.model.OnboardingStatusDTO;
 import com.ubrnms.inventory.repository.BirthCertificateRepository;
 import com.ubrnms.inventory.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
@@ -449,7 +450,173 @@ public class InventoryService {
         }
     }
 
-    // ── private helpers ───────────────────────────────────────────────────────
+    // ── WO-038: Onboarding status aggregation ────────────────────────────────
+
+    /**
+     * Result type for paginated onboarding status queries.
+     *
+     * @param items          page of onboarding status DTOs
+     * @param total          total matching device count (before pagination)
+     * @param capabilityStatus "enabled" when any discovery mode is active; "disabled" otherwise
+     */
+    public record OnboardingStatusResult(
+        List<OnboardingStatusDTO> items,
+        long total,
+        String capabilityStatus
+    ) {}
+
+    /**
+     * Queries and pages device inventory to produce an operator-facing onboarding status feed.
+     *
+     * <p>Applies server-side filtering to avoid unbounded in-memory loads. Sensitive fields
+     * (credentialRef, certificates, HMAC material) are never present in the returned DTOs.
+     *
+     * @param state          filter by consolidated onboardingState
+     * @param paradigm       filter by discoveryParadigm
+     * @param deviceType     filter by deviceType
+     * @param reasonCategory filter by onboardingFailureReason
+     * @param serialNumber   exact match on serialNumber
+     * @param macAddress     exact match on macAddress
+     * @param sysObjectID    exact match on sysObjectID
+     * @param from           lower bound on updatedAt
+     * @param to             upper bound on updatedAt
+     * @param page           zero-based page index
+     * @param limit          page size (1–200)
+     */
+    public OnboardingStatusResult queryOnboardingStatus(
+            String state, String paradigm, String deviceType, String reasonCategory,
+            String serialNumber, String macAddress, String sysObjectID,
+            java.time.Instant from, java.time.Instant to,
+            int page, int limit) {
+
+        // Determine capability status — enabled when any discovery mode is active.
+        String capabilityStatus = "enabled";
+        if (discoveryModePolicyRepo != null) {
+            try {
+                boolean anyEnabled = discoveryModePolicyRepo.findAll().stream()
+                    .anyMatch(p -> p.isEnabled());
+                capabilityStatus = anyEnabled ? "enabled" : "disabled";
+            } catch (Exception ignored) {
+                // If discovery mode policy is unavailable, default to enabled.
+            }
+        }
+
+        // Build the filtered list from the repository.
+        List<Device> candidates;
+        if (serialNumber != null && !serialNumber.isBlank()) {
+            candidates = deviceRepo.findBySerialNumber(serialNumber).map(List::of).orElse(List.of());
+        } else if (macAddress != null && !macAddress.isBlank()) {
+            candidates = deviceRepo.findByMacAddress(macAddress).map(List::of).orElse(List.of());
+        } else {
+            candidates = deviceRepo.findAll();
+        }
+
+        // Apply remaining filters.
+        final String fState         = state;
+        final String fParadigm      = paradigm;
+        final String fDeviceType    = deviceType;
+        final String fReasonCategory= reasonCategory;
+        final String fSysObjectID   = sysObjectID;
+        final java.time.Instant fFrom = from;
+        final java.time.Instant fTo   = to;
+
+        List<OnboardingStatusDTO> filtered = candidates.stream()
+            .filter(d -> fParadigm == null || fParadigm.equalsIgnoreCase(d.getDiscoveryParadigm()))
+            .filter(d -> fDeviceType == null || fDeviceType.equalsIgnoreCase(d.getDeviceType()))
+            .filter(d -> fReasonCategory == null || fReasonCategory.equalsIgnoreCase(d.getOnboardingFailureReason()))
+            .filter(d -> fSysObjectID == null || fSysObjectID.equals(d.getSysObjectID()))
+            .filter(d -> fFrom == null || (d.getUpdatedAt() != null && !d.getUpdatedAt().isBefore(fFrom)))
+            .filter(d -> fTo == null || (d.getUpdatedAt() != null && !d.getUpdatedAt().isAfter(fTo)))
+            .map(this::toOnboardingStatusDTO)
+            .filter(dto -> fState == null || fState.equalsIgnoreCase(dto.getOnboardingState()))
+            .collect(Collectors.toList());
+
+        long total = filtered.size();
+        List<OnboardingStatusDTO> pageItems = filtered.stream()
+            .skip((long) page * limit)
+            .limit(limit)
+            .collect(Collectors.toList());
+
+        return new OnboardingStatusResult(pageItems, total, capabilityStatus);
+    }
+
+    /**
+     * Maps a Device record to an OnboardingStatusDTO.
+     *
+     * <p>Sensitive fields (credentialRef, raw credentials, certificates) are explicitly
+     * excluded. The method is package-visible so the controller can invoke it for
+     * single-device lookups.
+     */
+    public OnboardingStatusDTO toOnboardingStatusDTO(Device device) {
+        String onboardingState = deriveOnboardingState(device);
+        String configDelivery  = deriveConfigDeliveryState(device);
+
+        return OnboardingStatusDTO.builder()
+            .deviceId(device.getId())
+            .serialNumber(device.getSerialNumber())
+            .macAddress(device.getMacAddress())
+            .deviceType(device.getDeviceType())
+            .discoveryParadigm(device.getDiscoveryParadigm())
+            .sysObjectID(device.getSysObjectID())
+            .bootstrapState(device.getBootstrapState())
+            .onboardingState(onboardingState)
+            .lastSuccessfulState(device.getLastSuccessfulBootstrapState())
+            .reasonCategory(device.getOnboardingFailureReason())
+            .retryAfterSeconds(device.getRetryAfterSeconds())
+            .retryJitterMaxSeconds(device.getRetryJitterMaxSeconds())
+            .lastCheckInAt(device.getLastCheckInAt())
+            .lastRealtimeAt(device.getLastRealtimeAt())
+            .assignmentState(device.getOnboardingGateState())
+            .configurationDeliveryState(configDelivery)
+            .updatedAt(device.getUpdatedAt())
+            .build();
+    }
+
+    /**
+     * Derives the consolidated onboardingState string from device gate and bootstrap fields.
+     * Precedence: explicit gate state overrides bootstrap state for assignment/withholding cases.
+     */
+    private String deriveOnboardingState(Device device) {
+        String gateState      = device.getOnboardingGateState();
+        String bootstrapState = device.getBootstrapState();
+        String failureReason  = device.getOnboardingFailureReason();
+        Integer retryAfter    = device.getRetryAfterSeconds();
+
+        if ("CONFIG_WITHHELD".equals(gateState))    return "CONFIG_WITHHELD";
+        if ("PENDING_ASSIGNMENT".equals(gateState)) return "PENDING_ASSIGNMENT";
+
+        if (bootstrapState == null) return "PENDING";
+
+        return switch (bootstrapState) {
+            case "REALTIME_ESTABLISHED" -> "MANAGED";
+            case "CHECK_IN_RECEIVED"    -> "CHECK_IN_RECEIVED";
+            case "AUTHENTICATED"        -> "AUTHENTICATED";
+            case "FAILED" -> {
+                if ("NMS_FAILOVER".equalsIgnoreCase(failureReason)) yield "REDIRECTED";
+                if (retryAfter != null && retryAfter > 0)           yield "RETRYING";
+                yield "FAILED";
+            }
+            case "PENDING" -> "PENDING";
+            default        -> "UNKNOWN";
+        };
+    }
+
+    /**
+     * Derives configuration delivery eligibility from the assignment gate state.
+     * Returns ELIGIBLE, WITHHELD, or UNKNOWN.
+     */
+    private String deriveConfigDeliveryState(Device device) {
+        String gateState = device.getOnboardingGateState();
+        if (gateState == null) return "UNKNOWN";
+        return switch (gateState) {
+            case "MANAGED"             -> "ELIGIBLE";
+            case "PENDING_ASSIGNMENT",
+                 "CONFIG_WITHHELD"     -> "WITHHELD";
+            default                    -> "UNKNOWN";
+        };
+    }
+
+
 
     /**
      * Applies a single field from a discovery event to a device, respecting authority rules.

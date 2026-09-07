@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { Device, DeviceFilter, GpsSearchParams, DeviceOnboardingState, OnboardingStatesResponse } from './devices.types';
+import type { Device, DeviceFilter, GpsSearchParams, DeviceOnboardingState, OnboardingStatesResponse, OnboardingStatusFilter, OnboardingStatusItem, OnboardingStatusResponse } from './devices.types';
 
 /** Safely extract a Device array from any paginated response shape. */
 function extractBatch(data: unknown): Device[] {
@@ -93,6 +93,45 @@ export async function fetchOnboardingStates(stateFilter?: string): Promise<Devic
     return data.items;
   }
   return [];
+}
+
+// ── WO-038: Onboarding Status API ────────────────────────────────────────────
+
+/**
+ * Fetches the paginated onboarding status feed from the inventory service (WO-038).
+ * Returns operator-safe status data — no sensitive authentication material.
+ */
+export async function fetchOnboardingStatus(
+  filter: OnboardingStatusFilter = {},
+): Promise<OnboardingStatusResponse> {
+  const params: Record<string, string | number> = {};
+  if (filter.page !== undefined)         params.page = filter.page;
+  if (filter.limit !== undefined)        params.limit = filter.limit;
+  if (filter.state)                      params.state = filter.state;
+  if (filter.paradigm)                   params.paradigm = filter.paradigm;
+  if (filter.deviceType)                 params.deviceType = filter.deviceType;
+  if (filter.reasonCategory)             params.reasonCategory = filter.reasonCategory;
+  if (filter.serialNumber)               params.serialNumber = filter.serialNumber;
+  if (filter.macAddress)                 params.macAddress = filter.macAddress;
+  if (filter.sysObjectID)                params.sysObjectID = filter.sysObjectID;
+  if (filter.from)                       params.from = filter.from;
+  if (filter.to)                         params.to = filter.to;
+
+  const res = await apiClient.get<OnboardingStatusResponse>(
+    '/inventory/onboarding-status',
+    { params },
+  );
+  return res.data;
+}
+
+/**
+ * Fetches the onboarding status for a single device by its inventory ID (WO-038).
+ */
+export async function fetchOnboardingStatusById(deviceId: string): Promise<OnboardingStatusItem> {
+  const res = await apiClient.get<OnboardingStatusItem>(
+    `/inventory/onboarding-status/${deviceId}`,
+  );
+  return res.data;
 }
 
 export async function downloadDeviceExport(filter: DeviceFilter, format: 'csv' | 'xls'): Promise<void> {
