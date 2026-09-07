@@ -37,28 +37,25 @@ func (h *DiscoveryHandler) WithHMACValidator(v *auth.Validator) *DiscoveryHandle
 // CheckIn handles POST /api/v1/discovery/check-in
 // Uses the canonical southbound error catalog (WO-005) so firmware can react
 // deterministically to every failure category.
-// When an HMAC Validator is attached (WO-015), the X-UBR-Signature, X-UBR-Timestamp,
-// and X-UBR-Nonce headers are validated before any state mutation occurs.
+// When an HMAC Validator is attached (WO-015), the Auth-Info and Auth-Signature
+// headers are validated before any state mutation occurs.  The device identity
+// (MAC address) is extracted from the Auth-Info id= field by the validator and
+// returned for downstream correlation.
 func (h *DiscoveryHandler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	corrID := r.Header.Get("X-Correlation-ID")
 
 	// ── WO-015: HMAC validation before any state mutation ─────────────────────
 	if h.hmacValidator != nil {
-		// Read the raw body bytes first so we can peek the serial number for
-		// per-device secret resolution, then pass the bytes to the validator.
+		// Read the raw body bytes so ValidatePreloaded can check the HMAC.
+		// Device identity now comes from the Auth-Info header — no serial peek needed.
 		rawBody, err := io.ReadAll(r.Body)
 		if err != nil {
 			southbound.InternalError(w, corrID)
 			return
 		}
 
-		// Peek only the serial number — the full decode happens below after validation.
-		var peek struct {
-			SerialNumber string `json:"serialNumber"`
-		}
-		_ = json.Unmarshal(rawBody, &peek) // best-effort; validator handles empty serial
-
-		if !h.hmacValidator.ValidatePreloaded(w, r, peek.SerialNumber, corrID, rawBody) {
+		_, ok := h.hmacValidator.ValidatePreloaded(w, r, corrID, rawBody)
+		if !ok {
 			return // error already written by validator; body rewound on success only
 		}
 		// r.Body has been rewound to rawBody by ValidatePreloaded; the decode below reads it normally.

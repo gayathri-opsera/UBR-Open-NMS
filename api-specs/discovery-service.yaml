@@ -82,24 +82,24 @@ paths:
       security: []
       parameters:
         - in: header
-          name: X-UBR-Signature
+          name: Auth-Info
           required: true
           schema: { type: string }
           description: >
-            HMAC-SHA256 signature over "METHOD\nPATH\nTIMESTAMP\nNONCE\nSHA256(body)".
+            Structured identity header. Format: id=<mac-addr>,timestamp=<unix-epoch-secs>,nonce=<30-char-nonce>.
+            The id field carries the device MAC address (used to look up the per-device HMAC secret).
+            The timestamp must be within ±5 minutes of server time (configurable via HMAC_TIMESTAMP_TOLERANCE_SECS).
+            The nonce must be exactly 30 characters and is stored with a 10-minute TTL for replay protection.
+          example: "id=AA:BB:CC:DD:EE:FF,timestamp=1700000000,nonce=ABCDEFGHIJ1234567890abcdefghij"
+        - in: header
+          name: Auth-Signature
+          required: true
+          schema: { type: string }
+          description: >
+            HMAC-SHA256 hex digest of the canonical message:
+            Auth-Info_header_value + "\n" + request_path + "\n" + raw_body_bytes.
             Computed with the per-device secret provisioned at manufacture time.
-        - in: header
-          name: X-UBR-Timestamp
-          required: true
-          schema: { type: string }
-          description: Unix epoch seconds (string). Must be within ±5 minutes of server time (configurable via HMAC_TIMESTAMP_TOLERANCE_SECS).
-        - in: header
-          name: X-UBR-Nonce
-          required: true
-          schema: { type: string }
-          description: >
-            Unique per-request nonce. Replayed nonces are rejected within a 10-minute window.
-            Store in Redis with TTL=10m.
+          example: "a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
       requestBody:
         required: true
         content:
