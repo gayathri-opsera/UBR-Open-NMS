@@ -1,0 +1,16 @@
+{
+  "_comment": "Fixture: admin user with MFA enabled — mfaVerified=true in JWT claims",
+  "userId": "usr-admin-001",
+  "username": "admin@example.com",
+  "role": "admin",
+  "mfaEnabled": true,
+  "mfaVerified": true,
+  "mfaEnabledAt": "2023-11-01T12:00:00Z",
+  "jwtClaims": {
+    "sub": "usr-admin-001",
+    "role": "admin",
+    "mfaVerified": true,
+    "iat": 1700000000,
+    "exp": 1700003600
+  }
+}

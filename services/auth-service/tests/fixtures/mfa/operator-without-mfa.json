@@ -1,0 +1,20 @@
+{
+  "_comment": "Fixture: operator user without MFA — MFA gate does NOT apply to operator role",
+  "userId": "usr-operator-001",
+  "username": "operator@example.com",
+  "role": "operator",
+  "mfaEnabled": false,
+  "mfaVerified": false,
+  "mfaEnabledAt": null,
+  "jwtClaims": {
+    "sub": "usr-operator-001",
+    "role": "operator",
+    "mfaVerified": false,
+    "iat": 1700000000,
+    "exp": 1700003600
+  },
+  "expectedBehavior": {
+    "sensitiveAdminRoutes": "403 FORBIDDEN — insufficient role (not admin), NOT 403 MFA_REQUIRED",
+    "description": "MFA_REQUIRED check only applies to admin role; operators receive the normal role-based 403 if they lack access"
+  }
+}

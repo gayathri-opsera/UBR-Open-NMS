@@ -1,0 +1,21 @@
+{
+  "_comment": "Fixture: admin user with MFA not enrolled — mfaVerified absent/false in JWT",
+  "userId": "usr-admin-002",
+  "username": "admin-nomfa@example.com",
+  "role": "admin",
+  "mfaEnabled": false,
+  "mfaVerified": false,
+  "mfaEnabledAt": null,
+  "jwtClaims": {
+    "sub": "usr-admin-002",
+    "role": "admin",
+    "mfaVerified": false,
+    "iat": 1700000000,
+    "exp": 1700003600
+  },
+  "expectedBehavior": {
+    "sensitiveAdminRoutes": "403 MFA_REQUIRED — gateway rejects admin tokens without mfaVerified=true",
+    "profilePage": "MFA enrollment banner displayed",
+    "adminPanel": "MFA required notice displayed on Users/System/Audit tabs"
+  }
+}

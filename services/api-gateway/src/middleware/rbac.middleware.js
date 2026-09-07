@@ -36,6 +36,16 @@ const ROUTE_PERMISSIONS = [
 ];
 
 /**
+ * Admin-sensitive routes that require MFA assurance (WO-014 AC#3).
+ * Authenticated admin tokens without mfaVerified=true are rejected with 403 MFA_REQUIRED.
+ */
+const MFA_REQUIRED_ADMIN_ROUTES = [
+  /^\/api\/v1\/users/,
+  /^\/api\/v1\/system\//,
+  /^\/api\/v1\/audit/,
+];
+
+/**
  * Release-1 action permission matrix (WO-007).
  * Each entry maps action → set of roles that may perform it.
  * Deny-by-default: unlisted roles are forbidden.
@@ -104,6 +114,10 @@ function checkActionPermission_mw(action, resourceType) {
  * RBAC enforcement middleware (existing route-level gate).
  * Requires authenticate() to run first (req.user must be set).
  * On 403, now also emits a denied-action audit event (WO-006).
+ *
+ * WO-014 AC#3: Admin-sensitive routes (users, system, audit) additionally
+ * require mfaVerified=true in the token.  An authenticated admin without MFA
+ * assurance receives 403 MFA_REQUIRED — no state mutation occurs.
  */
 function requireRole(req, res, next) {
   if (!req.user) return next();
@@ -127,6 +141,21 @@ function requireRole(req, res, next) {
       break;
     }
   }
+
+  // WO-014 AC#3: reject admin tokens without MFA assurance on sensitive routes
+  if (normalizedRole === 'admin') {
+    const isSensitiveRoute = MFA_REQUIRED_ADMIN_ROUTES.some((pattern) => pattern.test(req.path));
+    if (isSensitiveRoute && req.user.mfaVerified !== true) {
+      const correlationId = (req.headers && req.headers['x-correlation-id']) || uuidv4();
+      emitDeniedAuditEvent('mfa.required', req.user, req.path, correlationId, req);
+      return res.status(403).json({
+        code: 'MFA_REQUIRED',
+        message: 'Admin routes require MFA verification. Please complete MFA challenge before accessing this endpoint.',
+        correlationId,
+      });
+    }
+  }
+
   next();
 }
 
@@ -179,4 +208,5 @@ module.exports = {
   ROUTE_PERMISSIONS,
   ROLE_HIERARCHY,
   ACTION_PERMISSIONS,
+  MFA_REQUIRED_ADMIN_ROUTES,
 };

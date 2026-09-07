@@ -253,6 +253,29 @@ export default function V2ProfilePage() {
         </p>
       </div>
 
+      {/* WO-014 AC#6: MFA enrollment banner for admin users without MFA ─────── */}
+      {!loading && user?.role === 'admin' && status?.mfaEnabled === false && (
+        <div style={{
+          padding: '14px 18px', marginBottom: 20,
+          background: 'rgba(239,68,68,0.08)',
+          border: '1.5px solid rgba(239,68,68,0.35)',
+          borderRadius: 10,
+          display: 'flex', alignItems: 'flex-start', gap: 12,
+        }}>
+          <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>⚠</span>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#ef4444', marginBottom: 4 }}>
+              MFA Required for Admin Accounts
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--vf-text-secondary)', lineHeight: 1.55 }}>
+              Your administrator account does not have two-factor authentication enabled.
+              Admin-sensitive routes (Users, System, Audit) are blocked until MFA is active.
+              Enable MFA below to restore full admin access.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Success toast */}
       {success && (
         <div style={{ marginBottom: 20 }}>

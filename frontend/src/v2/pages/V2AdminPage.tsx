@@ -1254,8 +1254,38 @@ function SecurityTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Main Admin Page
 // ═══════════════════════════════════════════════════════════════════════════════
+// WO-014 AC#6: banner shown to admin users who have not yet completed MFA enrollment
+function MfaRequiredBanner({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <div style={{
+      padding: '12px 16px', marginBottom: 20,
+      background: 'rgba(245,158,11,0.08)',
+      border: '1.5px solid rgba(245,158,11,0.35)',
+      borderRadius: 10,
+      display: 'flex', alignItems: 'flex-start', gap: 12,
+    }}>
+      <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>⚠</span>
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#f59e0b', marginBottom: 3 }}>
+          MFA Enrollment Required
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--vf-text-secondary)', lineHeight: 1.55 }}>
+          This admin panel section requires MFA verification. Please go to{' '}
+          <strong>Security Settings</strong> (your profile) to enable two-factor authentication
+          before accessing Users, System, and Audit endpoints.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function V2AdminPage() {
+  const { user } = useAuth();
   const [tab, setTab] = useState<AdminTab>('users');
+  // Admin tabs that require MFA assurance per WO-014 AC#3
+  const MFA_SENSITIVE_TABS: AdminTab[] = ['users', 'health', 'audit'];
+  const needsMfaBanner = user?.role === 'admin' && !(user as unknown as { mfaVerified?: boolean }).mfaVerified && MFA_SENSITIVE_TABS.includes(tab);
 
   return (
     <div className="vf-page">
@@ -1275,6 +1305,8 @@ export default function V2AdminPage() {
         <TabBtn id="redundancy" active={tab === 'redundancy'} label="Redundancy"     onClick={setTab} />
         <TabBtn id="security"   active={tab === 'security'}   label="Security / SSO" onClick={setTab} />
       </div>
+
+      <MfaRequiredBanner show={needsMfaBanner} />
 
       {tab === 'users'      && <UsersTab />}
       {tab === 'sessions'   && <SessionsTab />}
