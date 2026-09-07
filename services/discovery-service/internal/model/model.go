@@ -3,19 +3,54 @@ package model
 
 import "time"
 
-// CheckInRequest is the device self-registration payload.
+// CheckInRequest is the full UBR device periodic check-in payload (WO-021).
+// All optional commissioning fields (GPS, azimuth) are recorded as pending when absent.
 type CheckInRequest struct {
-	SerialNumber    string    `json:"serialNumber"`
-	MACAddress      string    `json:"macAddress"`
-	IPAddress       string    `json:"ipAddress"`
-	DeviceType      string    `json:"deviceType"`
-	SoftwareVersion string    `json:"softwareVersion"`
-	Latitude        float64   `json:"latitude"`
-	Longitude       float64   `json:"longitude"`
-	Azimuth         float64   `json:"azimuth"`
-	UptimeSeconds   int64     `json:"uptimeSeconds"`
-	Timestamp       time.Time `json:"timestamp"`
-	Signature       string    `json:"signature"` // HMAC-SHA256 hex of canonical request body
+	SerialNumber        string    `json:"serialNumber"`
+	MACAddress          string    `json:"macAddress"`
+	IPAddress           string    `json:"ipAddress"`
+	DeviceType          string    `json:"deviceType"`
+	FirmwareVersion     string    `json:"firmwareVersion,omitempty"`
+	SoftwareVersion     string    `json:"softwareVersion"`
+	OperationalStatus   string    `json:"operationalStatus,omitempty"`  // UP, DOWN, DEGRADED
+	Latitude            float64   `json:"latitude,omitempty"`
+	Longitude           float64   `json:"longitude,omitempty"`
+	Azimuth             float64   `json:"azimuth,omitempty"`
+	UptimeSeconds       int64     `json:"uptimeSeconds"`
+	CapabilityProfileID string    `json:"capabilityProfileId,omitempty"`
+	ConfigVersion       string    `json:"configVersion,omitempty"`
+	Tags                []string  `json:"tags,omitempty"`
+	Timestamp           time.Time `json:"timestamp"`
+	Signature           string    `json:"signature"` // HMAC-SHA256 hex of canonical request body
+}
+
+// CheckInResponse is the response returned to the device after a successful check-in (WO-021).
+type CheckInResponse struct {
+	Result              string `json:"result"`         // "accepted"
+	DeviceID            string `json:"deviceId"`
+	CurrentConfigVersion string `json:"currentConfigVersion,omitempty"`
+	ConfigAction        string `json:"configAction"`   // NO_CHANGE | CONFIG_AVAILABLE | ASSIGNMENT_REQUIRED
+	PendingCommand      *string `json:"pendingCommand,omitempty"`
+	CheckInIntervalSecs int    `json:"checkInIntervalSecs"`
+	EventID             string `json:"eventId"`
+	RetryAfterSecs      int    `json:"retryAfterSecs,omitempty"` // present when CONFIG_AVAILABLE requires retry
+}
+
+// BootstrapState constants for the UBR device onboarding state machine.
+const (
+	BootstrapStatePending          = "PENDING"
+	BootstrapStateCheckInReceived  = "CHECK_IN_RECEIVED"
+	BootstrapStateRealtimeEstablished = "REALTIME_ESTABLISHED"
+	BootstrapStateOnline           = "ONLINE"
+	BootstrapStateOffline          = "OFFLINE"
+)
+
+// SupportedDeviceTypes is the allowlist for UBR call-home check-in (WO-021).
+// Devices with other types must be rejected at the application layer.
+var SupportedDeviceTypes = map[string]bool{
+	"BTS": true,
+	"CPE": true,
+	"IDU": true,
 }
 
 // DiscoveredDevice is the enriched device payload published to Kafka.
@@ -157,4 +192,28 @@ type DiscoveryRun struct {
 	CreatedBy       string
 	CreatedAt       time.Time
 	ValidationNotes string
+}
+
+// ── WO-024: Management port probing ───────────────────────────────────────────
+
+// PortProbeResult holds the result of a single TCP connect probe (WO-024).
+type PortProbeResult struct {
+	Port      int    `json:"port"`
+	Open      bool   `json:"open"`
+	LatencyMs int64  `json:"latencyMs,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// PortProbeResultEvent is published to discovery.port.results after probing
+// all management ports on a live host found by ICMP sweep (WO-024).
+// ManagementProtocol is inferred from open ports:
+//   NETCONF(830) > SNMP(161) > SSH(22) > HTTPS(443) > HTTP(80) > UNKNOWN
+type PortProbeResultEvent struct {
+	EventID            string            `json:"eventId"`
+	RunID              string            `json:"runId"`
+	IP                 string            `json:"ip"`
+	OpenPorts          []int             `json:"openPorts"`
+	PortResults        []PortProbeResult `json:"portResults"`
+	ManagementProtocol string            `json:"managementProtocol"`
+	Timestamp          time.Time         `json:"timestamp"`
 }

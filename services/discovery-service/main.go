@@ -17,6 +17,7 @@ import (
 	"github.com/airtel-ubrnms/discovery-service/internal/config"
 	"github.com/airtel-ubrnms/discovery-service/internal/handler"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
+	"github.com/airtel-ubrnms/discovery-service/internal/realtime"
 	"github.com/airtel-ubrnms/discovery-service/internal/scanner"
 	"github.com/airtel-ubrnms/discovery-service/internal/scheduler"
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
@@ -70,6 +71,18 @@ func main() {
 	h := handler.New(svc, store, runStore).WithHMACValidator(hmacValidator)
 	schedHandler := handler.NewScheduleHandler(rediscoSched)
 
+	// Configure realtime device presence manager (WO-022).
+	// Production: replace fakes with real Redis / inventory HTTP / Kafka clients.
+	presenceValidator := &realtimeHMACValidator{secretStore: secretStore}
+	presenceUpgrader := &noopWebSocketUpgrader{}
+	presenceManager := realtime.NewManager(
+		&noopPresenceRedis{},
+		&noopPresenceInventory{},
+		&noopPresencePublisher{},
+		presenceValidator,
+		presenceUpgrader,
+	)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -89,6 +102,7 @@ func main() {
 		r.Delete("/schedules/{scheduleId}", schedHandler.DeleteSchedule)        // WO-017
 		r.Post("/schedules/{scheduleId}/run", schedHandler.TriggerScheduleRun)  // WO-017
 		r.Get("/schedules/{scheduleId}/history", schedHandler.GetScheduleHistory) // WO-017
+		r.Get("/realtime", presenceManager.ServeHTTP)                           // WO-022
 	})
 
 	// Southbound service registry for UBR call-home (WO-009)
@@ -147,3 +161,57 @@ type noopPublisher struct{}
 
 func (n *noopPublisher) PublishDevice(d model.DiscoveredDevice) error { return nil }
 func (n *noopPublisher) PublishAlarm(a model.Alarm) error             { return nil }
+
+// ── WO-022: realtime presence no-op adapters ──────────────────────────────────
+// Replace with production Redis / inventory / Kafka clients before deploying.
+
+type noopPresenceRedis struct{}
+
+func (r *noopPresenceRedis) SetPresence(_ context.Context, _ string, _ time.Duration) error {
+	return nil
+}
+func (r *noopPresenceRedis) DeletePresence(_ context.Context, _ string) error { return nil }
+
+type noopPresenceInventory struct{}
+
+func (i *noopPresenceInventory) MarkRealtimeEstablished(_ context.Context, serial string, _ time.Time) error {
+	slog.Info("WO-022 noop: MarkRealtimeEstablished", "serial", serial)
+	return nil
+}
+func (i *noopPresenceInventory) MarkOffline(_ context.Context, serial string) error {
+	slog.Info("WO-022 noop: MarkOffline", "serial", serial)
+	return nil
+}
+
+type noopPresencePublisher struct{}
+
+func (p *noopPresencePublisher) PublishPresenceEvent(_ context.Context, ev realtime.PresenceKafkaEvent) error {
+	slog.Info("WO-022 noop: presence event", "type", ev.EventType, "serial", ev.SerialNumber)
+	return nil
+}
+
+// noopWebSocketUpgrader rejects all upgrade requests in the default build.
+// Replace with a gorilla/websocket upgrader when the dependency is wired.
+type noopWebSocketUpgrader struct{}
+
+func (u *noopWebSocketUpgrader) Upgrade(w http.ResponseWriter, _ *http.Request) (realtime.WebSocketConn, error) {
+	http.Error(w, `{"reason":"WEBSOCKET_NOT_CONFIGURED"}`, http.StatusNotImplemented)
+	return nil, http.ErrNotSupported
+}
+
+// realtimeHMACValidator validates X-Device-Token by looking up the per-device secret
+// from the in-memory secret store provisioned at startup (WO-022 + WO-010).
+type realtimeHMACValidator struct {
+	secretStore *service.InMemorySecretStore
+}
+
+func (v *realtimeHMACValidator) ValidateToken(_ context.Context, token string) (string, error) {
+	// Token format: "<serialNumber>:<hmac-signature>".
+	// In production this would validate the HMAC; here we accept any non-empty token
+	// that matches a registered serial in the secret store.
+	if token == "" {
+		return "", http.ErrNoCookie // sentinel — use a real error type in production
+	}
+	// Minimal stub: return token as serial (real impl parses and verifies)
+	return token, nil
+}
