@@ -1,0 +1,25 @@
+{
+  "_comment": "Fixture: topology trigger fails, KPI trigger succeeds — independent outcomes (WO-031)",
+  "scenario": "topology_trigger_failure",
+  "registrationInput": {
+    "runId": "run-031-004",
+    "inventoryDeviceId": "inv-post-004",
+    "ip": "10.50.1.103",
+    "correlationId": "corr-post-004",
+    "discoveryParadigm": "GENERIC_SNMP",
+    "managementProtocols": ["SNMP"],
+    "isRediscovery": false
+  },
+  "injectedError": "kafka_topology_unavailable",
+  "expectedActions": [
+    {
+      "actionType": "INITIAL_KPI_COLLECTION",
+      "expectedStatus": "ACCEPTED"
+    },
+    {
+      "actionType": "INITIAL_TOPOLOGY_WALK",
+      "expectedStatus": "FAILED",
+      "expectedReason": "PUBLISH_FAILED"
+    }
+  ]
+}

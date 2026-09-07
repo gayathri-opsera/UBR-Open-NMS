@@ -1,0 +1,24 @@
+{
+  "_comment": "Fixture: rediscovery with force refresh — both triggers accepted (WO-031)",
+  "scenario": "rediscovery_with_force_refresh",
+  "registrationInput": {
+    "runId": "run-031-005",
+    "inventoryDeviceId": "inv-post-005",
+    "ip": "10.50.1.104",
+    "correlationId": "corr-post-005",
+    "discoveryParadigm": "GENERIC_SNMP",
+    "managementProtocols": ["SNMP"],
+    "isRediscovery": true,
+    "forceRefresh": true
+  },
+  "expectedActions": [
+    {
+      "actionType": "INITIAL_KPI_COLLECTION",
+      "expectedStatus": "ACCEPTED"
+    },
+    {
+      "actionType": "INITIAL_TOPOLOGY_WALK",
+      "expectedStatus": "ACCEPTED"
+    }
+  ]
+}

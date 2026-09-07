@@ -109,3 +109,17 @@ components:
         latitude:   { type: number }
         longitude:  { type: number }
         label:      { type: string }
+
+    # ── WO-031: Initial topology walk trigger ───────────────────────────────
+
+    InitialTopologyWalkStatus:
+      description: >
+        Walk status for a topology node scheduled via the initial-walk trigger (WO-031).
+      type: object
+      properties:
+        deviceId:                { type: string }
+        walkStatus:              { type: string, enum: [PENDING, IN_PROGRESS, COMPLETED, FAILED] }
+        walkSupportedProtocols:  { type: array, items: { type: string } }
+        walkRequestedAt:         { type: string, format: date-time, nullable: true }
+        walkCorrelationId:       { type: string, nullable: true }
+        updatedAt:               { type: string, format: date-time }

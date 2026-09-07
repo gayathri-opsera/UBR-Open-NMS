@@ -51,6 +51,29 @@ public class TopologyNode {
     private String networkId;
     private String organizationId;
 
+    // ── WO-031: Post-registration topology walk request tracking ─────────────
+
+    /**
+     * Timestamp when an initial topology walk was requested for this node (WO-031).
+     * Null if no walk has been requested. Used by the topology poller to pick up
+     * pending walk requests.
+     */
+    @Indexed
+    private Instant walkRequestedAt;
+
+    /** Protocols to use for the pending walk (e.g. SNMP_NEIGHBOR, LLDP). */
+    private List<String> walkSupportedProtocols;
+
+    /** Correlation ID of the initial-walk trigger event. */
+    private String walkCorrelationId;
+
+    /**
+     * Status of the topology walk request.
+     * Values: PENDING, IN_PROGRESS, COMPLETED, FAILED.
+     */
+    @Indexed
+    private String walkStatus;
+
     @LastModifiedDate
     private Instant updatedAt;
 }

@@ -1,0 +1,27 @@
+{
+  "_comment": "Fixture: new generic device — both KPI and topology triggers ACCEPTED (WO-031)",
+  "scenario": "new_generic_device_triggers",
+  "registrationInput": {
+    "runId": "run-031-001",
+    "inventoryDeviceId": "inv-post-001",
+    "ip": "10.50.1.100",
+    "correlationId": "corr-post-001",
+    "sysObjectID": ".1.3.6.1.4.1.9.1.1208",
+    "discoveryParadigm": "GENERIC_SNMP",
+    "driverId": "drv-cisco-snmp-v1",
+    "managementProtocols": ["SNMP"],
+    "isRediscovery": false
+  },
+  "expectedActions": [
+    {
+      "actionType": "INITIAL_KPI_COLLECTION",
+      "expectedStatus": "ACCEPTED",
+      "idempotencyKey": "run-031-001:inv-post-001"
+    },
+    {
+      "actionType": "INITIAL_TOPOLOGY_WALK",
+      "expectedStatus": "ACCEPTED",
+      "idempotencyKey": "run-031-001:inv-post-001"
+    }
+  ]
+}

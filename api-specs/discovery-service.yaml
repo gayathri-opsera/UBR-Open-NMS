@@ -764,3 +764,83 @@ components:
         identityAuthority:    { type: string, enum: [GENERIC] }
         onlineStateAuthority: { type: string, enum: [GENERIC] }
         timestamp:            { type: string, format: date-time }
+
+    # ── WO-031: Post-registration trigger schemas ──────────────────────────────
+
+    PostRegistrationActionResult:
+      description: >
+        Outcome of a single post-registration downstream action
+        (initial KPI collection or initial topology walk).
+      type: object
+      required: [actionType, status, attemptedAt]
+      properties:
+        actionType:
+          type: string
+          enum: [INITIAL_KPI_COLLECTION, INITIAL_TOPOLOGY_WALK]
+        status:
+          type: string
+          enum: [ACCEPTED, SKIPPED, FAILED, PENDING]
+          description: >
+            ACCEPTED — trigger published to downstream service.
+            SKIPPED — trigger suppressed (rediscovery deduplication, no supported protocol, non-generic paradigm).
+            FAILED — trigger publication failed; device IS registered; check Kafka dead-letter queue.
+            PENDING — trigger scheduled but not yet confirmed.
+        reason:
+          type: string
+          nullable: true
+          description: >
+            Operator-visible skip/fail reason. Never contains credentials.
+            Values: REDISCOVERY_DEDUPLICATION, NO_SNMP_MANAGEMENT_PROTOCOL, NO_TOPOLOGY_PROTOCOL,
+            PUBLISH_FAILED, NON_GENERIC_PARADIGM.
+        downstreamReferenceId: { type: string, nullable: true }
+        idempotencyKey:
+          type: string
+          nullable: true
+          description: "Format: runId:deviceId — stable across retries for the same discovery run."
+        attemptedAt:  { type: string, format: date-time }
+        correlationId: { type: string, nullable: true }
+
+    InitialKpiCollectionTriggerEvent:
+      description: >
+        Kafka message published to kpi.initial.collection.trigger after generic device registration.
+        Never includes SNMP community strings or other credential material.
+      type: object
+      required: [eventId, runId, inventoryDeviceId, ip, idempotencyKey, discoveryParadigm, timestamp]
+      properties:
+        eventId:             { type: string, format: uuid }
+        runId:               { type: string, format: uuid }
+        inventoryDeviceId:   { type: string }
+        ip:                  { type: string }
+        correlationId:       { type: string, nullable: true }
+        idempotencyKey:      { type: string, description: "runId:deviceId — prevents duplicate collection jobs" }
+        sysObjectID:         { type: string, nullable: true }
+        discoveryParadigm:   { type: string, enum: [GENERIC_SNMP] }
+        driverId:            { type: string, nullable: true }
+        capabilityProfileId: { type: string, nullable: true }
+        protocolHints:
+          type: array
+          items: { type: string }
+          description: Protocols confirmed open — used to select collection method (SNMP, NETCONF, etc.)
+        isRediscovery:       { type: boolean }
+        timestamp:           { type: string, format: date-time }
+
+    InitialTopologyWalkTriggerEvent:
+      description: >
+        Kafka message published to topology.initial.walk.trigger after generic device registration.
+      type: object
+      required: [eventId, runId, inventoryDeviceId, ip, idempotencyKey, discoveryParadigm, timestamp]
+      properties:
+        eventId:            { type: string, format: uuid }
+        runId:              { type: string, format: uuid }
+        inventoryDeviceId:  { type: string }
+        ip:                 { type: string }
+        correlationId:      { type: string, nullable: true }
+        idempotencyKey:     { type: string }
+        sysObjectID:        { type: string, nullable: true }
+        discoveryParadigm:  { type: string, enum: [GENERIC_SNMP] }
+        supportedProtocols:
+          type: array
+          items: { type: string }
+          description: "Protocols supporting LLDP/CDP walk: SNMP_NEIGHBOR, LLDP"
+        isRediscovery:      { type: boolean }
+        timestamp:          { type: string, format: date-time }

@@ -1,0 +1,27 @@
+{
+  "_comment": "Fixture: existing device rediscovered — both triggers SKIPPED (REDISCOVERY_DEDUPLICATION) (WO-031)",
+  "scenario": "rediscovery_deduplication",
+  "registrationInput": {
+    "runId": "run-031-002",
+    "inventoryDeviceId": "inv-post-002",
+    "ip": "10.50.1.101",
+    "correlationId": "corr-post-002",
+    "sysObjectID": ".1.3.6.1.4.1.9.1.1208",
+    "discoveryParadigm": "GENERIC_SNMP",
+    "managementProtocols": ["SNMP"],
+    "isRediscovery": true,
+    "forceRefresh": false
+  },
+  "expectedActions": [
+    {
+      "actionType": "INITIAL_KPI_COLLECTION",
+      "expectedStatus": "SKIPPED",
+      "expectedReason": "REDISCOVERY_DEDUPLICATION"
+    },
+    {
+      "actionType": "INITIAL_TOPOLOGY_WALK",
+      "expectedStatus": "SKIPPED",
+      "expectedReason": "REDISCOVERY_DEDUPLICATION"
+    }
+  ]
+}

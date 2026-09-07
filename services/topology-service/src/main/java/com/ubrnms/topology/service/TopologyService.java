@@ -120,6 +120,44 @@ public class TopologyService {
         return List.of();
     }
 
+    /**
+     * Schedules an initial LLDP/CDP neighbour walk for a newly registered generic device (WO-031).
+     *
+     * <p>This method marks the topology node as pending a walk and updates the node's
+     * walk-requested timestamp. The actual SNMP LLDP-MIB/CDP-MIB walk is performed
+     * asynchronously by the topology poller scheduler on the next polling cycle.
+     *
+     * <p>Supported protocols: SNMP_NEIGHBOR (LLDP-MIB via SNMP), LLDP (NETCONF YANG).
+     *
+     * @param deviceId          the inventory device ID
+     * @param supportedProtocols protocols available for topology discovery
+     * @param correlationId     correlation ID for traceability
+     */
+    public void scheduleInitialWalk(String deviceId, java.util.List<String> supportedProtocols, String correlationId) {
+        TopologyNode node = nodeRepo.findByDeviceId(deviceId).orElseGet(() -> {
+            // Device may not yet have a topology node if inventory-sync hasn't been processed.
+            // Create a placeholder node so the walk request is not lost.
+            TopologyNode placeholder = new TopologyNode();
+            placeholder.setDeviceId(deviceId);
+            placeholder.setType("UNKNOWN");
+            placeholder.setStatus("online");
+            placeholder.setUpdatedAt(Instant.now());
+            return placeholder;
+        });
+
+        // Record walk request metadata for the poller to pick up.
+        node.setWalkRequestedAt(Instant.now());
+        node.setWalkSupportedProtocols(supportedProtocols);
+        node.setWalkCorrelationId(correlationId);
+        node.setWalkStatus("PENDING");
+        node.setUpdatedAt(Instant.now());
+
+        nodeRepo.save(node);
+
+        log.info("WO-031: initial topology walk scheduled — deviceId={}, protocols={}, correlationId={}",
+            deviceId, supportedProtocols, correlationId);
+    }
+
     private List<TopologyEdge> buildEdges(List<TopologyNode> nodes) {
         Set<String> nodeIds = nodes.stream().map(TopologyNode::getDeviceId).collect(Collectors.toSet());
         List<TopologyEdge> edges = new ArrayList<>();

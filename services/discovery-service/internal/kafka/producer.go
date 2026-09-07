@@ -65,6 +65,18 @@ func (kp *Producer) PublishClassificationResult(evt sharedmodels.GenericDeviceCl
 	return kp.publish(kp.topicClassification, evt.CorrelationID, evt)
 }
 
+// PublishKpiCollectionTrigger publishes an InitialKpiCollectionTriggerEvent (WO-031).
+func (kp *Producer) PublishKpiCollectionTrigger(evt sharedmodels.InitialKpiCollectionTriggerEvent) error {
+	topic := "kpi.initial.collection.trigger"
+	return kp.publish(topic, evt.IdempotencyKey, evt)
+}
+
+// PublishTopologyWalkTrigger publishes an InitialTopologyWalkTriggerEvent (WO-031).
+func (kp *Producer) PublishTopologyWalkTrigger(evt sharedmodels.InitialTopologyWalkTriggerEvent) error {
+	topic := "topology.initial.walk.trigger"
+	return kp.publish(topic, evt.IdempotencyKey, evt)
+}
+
 // PublishInventoryRegistered publishes a GenericInventoryRegisteredEvent (WO-030).
 // Published only after successful inventory persistence; must be called even for
 // DEFERRED results so downstream consumers can track deferred counts.

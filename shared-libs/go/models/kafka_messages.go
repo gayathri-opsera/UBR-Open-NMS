@@ -113,6 +113,67 @@ type InventorySyncMessage struct {
 	SysDescr    string `json:"sysDescr,omitempty"`
 }
 
+// ── WO-031: Post-registration orchestration events ─────────────────────────
+
+// InitialKpiCollectionTriggerEvent is published to kpi.initial.collection.trigger (WO-031).
+// Requests that the KPI collector schedule an immediate one-time collection cycle for
+// a newly registered generic device. Idempotency key prevents duplicate collection jobs
+// on repeated rediscovery runs.
+//
+// Authority: only emitted for GENERIC_SNMP devices; never for UBR call-home devices
+// (which have their own collection scheduling path).
+type InitialKpiCollectionTriggerEvent struct {
+	EventID           string    `json:"eventId"`
+	RunID             string    `json:"runId"`
+	InventoryDeviceID string    `json:"inventoryDeviceId"`
+	IP                string    `json:"ip"`
+	CorrelationID     string    `json:"correlationId"`
+	IdempotencyKey    string    `json:"idempotencyKey"`  // runId:deviceId — prevents duplicate jobs
+	SysObjectID       string    `json:"sysObjectID,omitempty"`
+	DiscoveryParadigm string    `json:"discoveryParadigm"` // always GENERIC_SNMP
+	DriverID          string    `json:"driverId,omitempty"`
+	CapabilityProfileID string  `json:"capabilityProfileId,omitempty"`
+	// ProtocolHints guides the collector on which protocol to use for this device.
+	// Values: SNMP, NETCONF, SSH, HTTP, HTTPS, UNKNOWN.
+	ProtocolHints     []string  `json:"protocolHints,omitempty"`
+	IsRediscovery     bool      `json:"isRediscovery"` // true when device already existed in inventory
+	Timestamp         time.Time `json:"timestamp"`
+}
+
+// InitialTopologyWalkTriggerEvent is published to topology.initial.walk.trigger (WO-031).
+// Requests an initial LLDP/CDP topology walk for a newly registered generic device.
+// Idempotency key prevents duplicate walk jobs on repeated rediscovery runs.
+//
+// Authority: only emitted for GENERIC_SNMP devices with SNMP management access.
+type InitialTopologyWalkTriggerEvent struct {
+	EventID           string    `json:"eventId"`
+	RunID             string    `json:"runId"`
+	InventoryDeviceID string    `json:"inventoryDeviceId"`
+	IP                string    `json:"ip"`
+	CorrelationID     string    `json:"correlationId"`
+	IdempotencyKey    string    `json:"idempotencyKey"` // runId:deviceId
+	SysObjectID       string    `json:"sysObjectID,omitempty"`
+	DiscoveryParadigm string    `json:"discoveryParadigm"` // always GENERIC_SNMP
+	// SupportedProtocols lists protocols available for topology discovery.
+	// An empty slice means topology walk cannot be triggered (SKIPPED).
+	SupportedProtocols []string `json:"supportedProtocols,omitempty"` // LLDP, CDP, SNMP_NEIGHBOR
+	IsRediscovery      bool     `json:"isRediscovery"`
+	Timestamp          time.Time `json:"timestamp"`
+}
+
+// PostRegistrationActionResult records the outcome of a single post-registration
+// action (initial KPI collection or initial topology walk). Embedded in
+// GenericInventoryRegisteredEvent and discovery run result API responses.
+type PostRegistrationActionResult struct {
+	ActionType           string    `json:"actionType"`    // INITIAL_KPI_COLLECTION | INITIAL_TOPOLOGY_WALK
+	Status               string    `json:"status"`        // ACCEPTED | SKIPPED | FAILED | PENDING
+	Reason               string    `json:"reason,omitempty"` // skip/fail reason
+	DownstreamReferenceID string   `json:"downstreamReferenceId,omitempty"`
+	IdempotencyKey       string    `json:"idempotencyKey,omitempty"`
+	AttemptedAt          time.Time `json:"attemptedAt"`
+	CorrelationID        string    `json:"correlationId,omitempty"`
+}
+
 // ICMPSweepResultEvent is published to the discovery.icmp.results Kafka topic (WO-016).
 // It carries per-host ICMP probe outcomes from a discovery run sweep stage.
 type ICMPSweepResultEvent struct {
