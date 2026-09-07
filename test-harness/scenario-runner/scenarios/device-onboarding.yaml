@@ -273,3 +273,128 @@ steps:
     expect_body:
       onboardingGateState: "MANAGED"
       assignmentRequired: false
+
+---
+name: ubr-identity-protection-call-home-first
+description: "WO-032: UBR call-home then generic discovery — UBR identity fields unchanged"
+timeout_seconds: 60
+steps:
+  - name: ubr-device-onboards-via-call-home
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber:       "SN-UBR-CONV-001"
+      macAddress:         "AA:BB:CC:DD:EE:10"
+      deviceType:         "BTS"
+      identityAuthority:  "UBR"
+      onlineStateAuthority: "UBR"
+      bootstrapState:     "REALTIME_ESTABLISHED"
+      discoveryParadigm:  "UBR_CALL_HOME"
+      correlationId:      "corr-wo032-ubr"
+
+  - name: verify-ubr-device-in-inventory
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/SN-UBR-CONV-001"
+    expect_status: 200
+    expect_body:
+      identityAuthority: "UBR"
+      discoveryParadigm: "UBR_CALL_HOME"
+      macAddress: "AA:BB:CC:DD:EE:10"
+
+  - name: generic-discovery-attempts-overwrite
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber:       "SN-UBR-CONV-001"
+      macAddress:         "99:88:77:66:55:44"
+      identityAuthority:  "GENERIC"
+      bootstrapState:     "UNKNOWN"
+      discoveryParadigm:  "GENERIC_SNMP"
+      vendor:             "Cisco"
+      sysObjectID:        "1.3.6.1.4.1.9"
+      correlationId:      "corr-wo032-generic"
+
+  - name: verify-ubr-identity-unchanged
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/SN-UBR-CONV-001"
+    expect_status: 200
+    expect_body:
+      identityAuthority: "UBR"
+      macAddress:        "AA:BB:CC:DD:EE:10"
+      bootstrapState:    "REALTIME_ESTABLISHED"
+      # Enrichment fields should be applied
+      vendor:            "Cisco"
+      sysObjectID:       "1.3.6.1.4.1.9"
+
+  - name: verify-rejection-audit-event-emitted
+    action: kafka_assert_message
+    topic: audit-events
+    timeout_seconds: 10
+    expect_body:
+      action:          "inventory.convergence.overwrite.rejected"
+      outcome:         "rejected"
+      reason:          "UBR_AUTHORITY_PROTECTED"
+      callerParadigm:  "GENERIC_SNMP"
+    expect_body_contains_fields: ["rejectedFields", "correlationId"]
+    expect_body_not_contains_fields: ["credentialRef", "hmacKey"]
+
+---
+name: ubr-identity-protection-generic-first
+description: "WO-032: Generic discovery first then UBR call-home — UBR wins on authority fields"
+timeout_seconds: 60
+steps:
+  - name: generic-device-registers-first
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber:       "SN-UBR-CONV-002"
+      macAddress:         "11:22:33:44:55:66"
+      identityAuthority:  "GENERIC"
+      discoveryParadigm:  "GENERIC_SNMP"
+      vendor:             "Ubiquiti"
+      sysObjectID:        "1.3.6.1.4.1.41112"
+      correlationId:      "corr-wo032-gen-first"
+
+  - name: verify-generic-device-registered
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/SN-UBR-CONV-002"
+    expect_status: 200
+    expect_body:
+      identityAuthority: "GENERIC"
+
+  - name: ubr-device-calls-home
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber:         "SN-UBR-CONV-002"
+      macAddress:           "AA:BB:CC:DD:EE:20"
+      deviceType:           "BTS"
+      identityAuthority:    "UBR"
+      onlineStateAuthority: "UBR"
+      bootstrapState:       "REALTIME_ESTABLISHED"
+      discoveryParadigm:    "UBR_CALL_HOME"
+      correlationId:        "corr-wo032-ubr-second"
+
+  - name: verify-ubr-authority-wins
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/SN-UBR-CONV-002"
+    expect_status: 200
+    expect_body:
+      identityAuthority:    "UBR"
+      macAddress:           "AA:BB:CC:DD:EE:20"
+      bootstrapState:       "REALTIME_ESTABLISHED"
+      discoveryParadigm:    "UBR_CALL_HOME"
+      # Generic enrichment preserved
+      vendor:               "Ubiquiti"
+      sysObjectID:          "1.3.6.1.4.1.41112"
+
+  - name: verify-inventory-sync-includes-authority-metadata
+    action: kafka_assert_message
+    topic: inventory-sync
+    timeout_seconds: 10
+    expect_body:
+      serialNumber:         "SN-UBR-CONV-002"
+      discoveryParadigm:    "UBR_CALL_HOME"
+      identityAuthority:    "UBR"
+      onlineStateAuthority: "UBR"
+    expect_body_contains_fields: ["lastCheckInAt", "lastRealtimeAt"]

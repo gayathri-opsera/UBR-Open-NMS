@@ -103,6 +103,11 @@ public class DeviceEntity {
     /** Correlation ID linking back to the fingerprinting run. */
     @JsonProperty("classificationCorrelationId") private String classificationCorrelationId;
 
+    // ── WO-033 onboarding gate state ──────────────────────────────────────────
+
+    /** Gate state for config delivery eligibility: MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD. */
+    @JsonProperty("onboardingGateState") private String onboardingGateState;
+
     public DeviceEntity() {}
 
     // ── Getters / setters ─────────────────────────────────────────────────────
@@ -202,4 +207,6 @@ public class DeviceEntity {
     public void setClassificationDeferReason(String classificationDeferReason) { this.classificationDeferReason = classificationDeferReason; }
     public String getClassificationCorrelationId() { return classificationCorrelationId; }
     public void setClassificationCorrelationId(String classificationCorrelationId) { this.classificationCorrelationId = classificationCorrelationId; }
+    public String getOnboardingGateState() { return onboardingGateState; }
+    public void setOnboardingGateState(String onboardingGateState) { this.onboardingGateState = onboardingGateState; }
 }

@@ -42,6 +42,9 @@ public class InventoryService {
     private OnboardingPolicyService onboardingPolicyService;
 
     @Autowired(required = false)
+    private InventoryMergePolicyService inventoryMergePolicyService;
+
+    @Autowired(required = false)
     private com.ubrnms.inventory.repository.CapabilityProfileRepository capabilityProfileRepo;
 
     @Value("${kafka.topics.inventory-sync}")
@@ -173,37 +176,51 @@ public class InventoryService {
     }
 
     /**
-     * Authority-aware merge for upsert operations (WO-002).
+     * Authority-aware merge for upsert operations (WO-002, WO-032).
      *
      * <p>UBR call-home is authoritative for identity fields; generic discovery
-     * may only update enrichment fields. Any attempt by a generic caller to
-     * overwrite UBR-protected fields is silently ignored and logged with
-     * correlation context (never logs secret values).
+     * may only update enrichment fields. Rejected overwrites are both logged and
+     * emitted as structured operational/audit events (WO-032 AC4/AC5) by the
+     * {@link InventoryMergePolicyService}.
      *
-     * @param existing      the persisted device record (may be a new empty Device)
-     * @param update        the incoming field map from the discovery event
+     * @param existing       the persisted device record (may be a new empty Device)
+     * @param update         the incoming field map from the discovery event
      * @param callerParadigm the discovery paradigm of the caller (UBR_CALL_HOME or GENERIC_*)
      * @return the merged device, not yet persisted
      */
     public Device mergeWithAuthority(Device existing, Map<String, Object> update, String callerParadigm) {
-        boolean isUbr = "UBR_CALL_HOME".equalsIgnoreCase(callerParadigm);
+        String correlationId = (String) update.getOrDefault("correlationId", "n/a");
+
+        // WO-032: delegate authority evaluation and rejection-event emission to the policy service.
+        // evaluateAndFilter removes blocked fields from the update map in-place and publishes
+        // structured rejection events for each rejected field — no secret material is exposed.
+        if (inventoryMergePolicyService != null) {
+            java.util.Map<String, Object> mutableUpdate = new java.util.HashMap<>(update);
+            inventoryMergePolicyService.evaluateAndFilter(existing, mutableUpdate, callerParadigm, correlationId);
+            update = mutableUpdate;
+        } else {
+            // Fallback: inline protection when service is not wired (e.g. unit tests that don't inject it).
+            boolean isUbr = "UBR_CALL_HOME".equalsIgnoreCase(callerParadigm);
+            java.util.Map<String, Object> safeUpdate = new java.util.HashMap<>();
+            for (Map.Entry<String, Object> entry : update.entrySet()) {
+                String field = entry.getKey();
+                if (!isUbr && UBR_PROTECTED_FIELDS.contains(field)
+                        && "UBR".equalsIgnoreCase(existing.getIdentityAuthority())) {
+                    log.warn(
+                        "Merge policy (fallback): blocked overwrite of protected field '{}' from callerParadigm={}, correlation={}",
+                        field, callerParadigm, correlationId
+                    );
+                    continue;
+                }
+                safeUpdate.put(field, entry.getValue());
+            }
+            update = safeUpdate;
+        }
 
         for (Map.Entry<String, Object> entry : update.entrySet()) {
-            String field = entry.getKey();
             Object value = entry.getValue();
             if (value == null) continue;
-
-            // Generic callers may not overwrite UBR-protected fields
-            if (!isUbr && UBR_PROTECTED_FIELDS.contains(field)
-                    && "UBR".equalsIgnoreCase(existing.getIdentityAuthority())) {
-                log.warn(
-                    "Generic discovery attempted to overwrite UBR-protected field '{}' on device serial=[redacted], correlation={}; preserving existing value",
-                    field, update.getOrDefault("correlationId", "n/a")
-                );
-                continue;
-            }
-
-            applyField(existing, field, value, callerParadigm);
+            applyField(existing, entry.getKey(), value, callerParadigm);
         }
 
         // Assign defaults when first-time creation
@@ -540,10 +557,24 @@ public class InventoryService {
         }
     }
 
+    /**
+     * Emits an inventory-sync event after every successful device persist.
+     *
+     * <p>WO-032: The payload now includes authority metadata fields
+     * (discoveryParadigm, identityAuthority, onlineStateAuthority, bootstrapState,
+     * lastCheckInAt, lastRealtimeAt, sysObjectID) so that topology, alarms, KPI,
+     * and config consumers can apply deterministic convergence without refetching.
+     */
     private void publishInventorySync(Device device) {
         try {
-            String payload = objectMapper.writeValueAsString(device);
-            kafkaTemplate.send(inventorySyncTopic, device.getSerialNumber(), payload);
+            Object payload;
+            if (inventoryMergePolicyService != null) {
+                payload = inventoryMergePolicyService.buildInventorySyncPayload(device);
+            } else {
+                payload = device;
+            }
+            String json = objectMapper.writeValueAsString(payload);
+            kafkaTemplate.send(inventorySyncTopic, device.getSerialNumber(), json);
         } catch (Exception e) {
             log.error("Failed to publish inventory-sync for device serial=[redacted]", e);
         }

@@ -488,3 +488,93 @@ components:
           type: boolean
         approvedBy:
           type: string
+
+    # ── WO-032: Inventory convergence authority schemas ──────────────────────
+
+    InventorySyncEvent:
+      description: >
+        Kafka inventory-sync event payload emitted after every successful device
+        persist. Includes authority metadata so downstream consumers (topology,
+        alarms, KPI, config) can apply deterministic convergence without
+        re-fetching (WO-032).
+      type: object
+      required: [deviceId, serialNumber, discoveryParadigm, identityAuthority, onlineStateAuthority]
+      properties:
+        deviceId:              { type: string }
+        serialNumber:          { type: string }
+        deviceType:            { type: string }
+        macAddress:            { type: string }
+        ipAddress:             { type: string }
+        status:                { type: string }
+        firmwareVersion:       { type: string }
+        softwareVersion:       { type: string }
+        capabilityProfileId:   { type: string }
+        configVersion:         { type: string }
+        onboardingGateState:   { $ref: '#/components/schemas/OnboardingGateState' }
+        # WO-032 authority metadata
+        discoveryParadigm:
+          type: string
+          enum: [UBR_CALL_HOME, GENERIC_SNMP, GENERIC_CLI, UNKNOWN]
+        identityAuthority:
+          type: string
+          enum: [UBR, GENERIC, UNKNOWN]
+        onlineStateAuthority:
+          type: string
+          enum: [UBR, GENERIC, UNKNOWN]
+        bootstrapState:
+          type: string
+          enum: [PENDING, AUTHENTICATED, CHECK_IN_RECEIVED, REALTIME_ESTABLISHED, FAILED, UNKNOWN]
+        lastCheckInAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastRealtimeAt:
+          type: string
+          format: date-time
+          nullable: true
+        sysObjectID:
+          type: string
+          nullable: true
+        schemaVersion:         { type: string }
+        updatedAt:             { type: string, format: date-time, nullable: true }
+
+    InventoryConvergenceRejectionEvent:
+      description: >
+        Structured operational/audit event emitted when a generic discovery caller
+        attempts to overwrite UBR-authoritative identity or online-state fields (WO-032).
+        Never contains credential values, HMAC keys, or secret material.
+      type: object
+      required: [action, actor, resource, outcome, reason, rejectedFields, callerParadigm, timestamp]
+      properties:
+        action:
+          type: string
+          enum: [inventory.convergence.overwrite.rejected]
+        actor:
+          type: object
+          properties:
+            userId:           { type: string }
+            username:         { type: string }
+            role:             { type: string }
+            discoverySource:  { type: string }
+        resource:
+          type: object
+          properties:
+            type: { type: string, enum: [device] }
+            id:   { type: string, description: "Device ID (not serial number)" }
+        outcome:
+          type: string
+          enum: [rejected]
+        reason:
+          type: string
+          enum: [UBR_AUTHORITY_PROTECTED]
+        rejectedFields:
+          type: array
+          items: { type: string }
+          description: >
+            Names of fields that were blocked (e.g. serialNumber, macAddress,
+            bootstrapState). Never includes credential values.
+        callerParadigm:
+          type: string
+          enum: [GENERIC_SNMP, GENERIC_CLI, UNKNOWN_MALFORMED]
+        correlationId:       { type: string }
+        timestamp:           { type: string, format: date-time }
