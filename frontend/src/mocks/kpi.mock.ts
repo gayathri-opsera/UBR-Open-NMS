@@ -5,6 +5,7 @@ import type {
   KpiDataPoint, KpiParam, KpiSeries, TimeRange,
   KpiDrilldownResponse, KpiDrilldownRequest, DrilldownGranularity,
   AvailabilitySummaryResponse,
+  KpiThresholdDefinition, KpiBreachAnnotation,
 } from '../api/kpi.types';
 
 function generateSeries(
@@ -440,3 +441,137 @@ export const MOCK_AVAILABILITY_SUMMARY: AvailabilitySummaryResponse = {
     },
   ],
 };
+
+// ── WO-046: Threshold breach visualization fixtures ───────────────────────────
+
+/** No-threshold scenario: drilldown response with no threshold data. */
+export function getMockKpiDrilldownNoThreshold(): KpiDrilldownResponse {
+  const base = getMockKpiDrilldownBts();
+  return { ...base, thresholds: undefined, activeBreaches: undefined };
+}
+
+/** Warning-threshold scenario: latency above 100ms warn level. */
+export const MOCK_THRESHOLD_LATENCY_WARN: KpiThresholdDefinition = {
+  thresholdId: 'thr-latency-warn',
+  metricName: 'latencyMs',
+  severity: 'WARNING',
+  operator: 'ABOVE',
+  value: 100,
+  unit: 'ms',
+  label: 'Latency Warning',
+};
+
+/** Critical-threshold scenario: latency above 200ms crit level. */
+export const MOCK_THRESHOLD_LATENCY_CRIT: KpiThresholdDefinition = {
+  thresholdId: 'thr-latency-crit',
+  metricName: 'latencyMs',
+  severity: 'CRITICAL',
+  operator: 'ABOVE',
+  value: 200,
+  unit: 'ms',
+  label: 'Latency Critical',
+};
+
+/** Packet-loss warning threshold: above 1%. */
+export const MOCK_THRESHOLD_PACKET_LOSS_WARN: KpiThresholdDefinition = {
+  thresholdId: 'thr-pkt-warn',
+  metricName: 'packetLossPct',
+  severity: 'WARNING',
+  operator: 'ABOVE',
+  value: 1,
+  unit: '%',
+  label: 'Packet Loss Warning',
+};
+
+/** Packet-loss critical threshold: above 5%. */
+export const MOCK_THRESHOLD_PACKET_LOSS_CRIT: KpiThresholdDefinition = {
+  thresholdId: 'thr-pkt-crit',
+  metricName: 'packetLossPct',
+  severity: 'CRITICAL',
+  operator: 'ABOVE',
+  value: 5,
+  unit: '%',
+  label: 'Packet Loss Critical',
+};
+
+/** Availability warning threshold: below 99.5%. */
+export const MOCK_THRESHOLD_AVAIL_WARN: KpiThresholdDefinition = {
+  thresholdId: 'thr-avail-warn',
+  metricName: 'availabilityPct',
+  severity: 'WARNING',
+  operator: 'BELOW',
+  value: 99.5,
+  unit: '%',
+  label: 'Availability Warning',
+};
+
+/** Breach annotation: warning-level breach without an active alarm (alarm cleared). */
+export const MOCK_BREACH_WARN_NO_ALARM: KpiBreachAnnotation = {
+  timestamp: new Date(Date.now() - 600_000).toISOString(),
+  value: 115,
+  thresholdId: 'thr-latency-warn',
+  severity: 'WARNING',
+  relatedAlarmId: 'alm-cleared-001',
+  alarmState: 'CLEARED',
+  alarmLabel: 'Latency Warning — cleared',
+};
+
+/** Breach annotation: critical-level breach with an active alarm. */
+export const MOCK_BREACH_CRIT_WITH_ALARM: KpiBreachAnnotation = {
+  timestamp: new Date(Date.now() - 120_000).toISOString(),
+  value: 245,
+  thresholdId: 'thr-latency-crit',
+  severity: 'CRITICAL',
+  relatedAlarmId: 'alm-active-001',
+  alarmState: 'ACTIVE',
+  alarmLabel: 'CRITICAL: Latency 245ms exceeds 200ms threshold',
+};
+
+/** Breach annotation: breach with no alarm (alarm was suppressed or never created). */
+export const MOCK_BREACH_NO_ALARM: KpiBreachAnnotation = {
+  timestamp: new Date(Date.now() - 300_000).toISOString(),
+  value: 3.2,
+  thresholdId: 'thr-pkt-warn',
+  severity: 'WARNING',
+};
+
+/** Multi-threshold drilldown: latency with warning + critical thresholds and active breaches. */
+export function getMockKpiDrilldownWithBreaches(): KpiDrilldownResponse {
+  const base = getMockKpiDrilldownBts();
+  const allThresholds: KpiThresholdDefinition[] = [
+    MOCK_THRESHOLD_LATENCY_WARN,
+    MOCK_THRESHOLD_LATENCY_CRIT,
+    MOCK_THRESHOLD_PACKET_LOSS_WARN,
+    MOCK_THRESHOLD_PACKET_LOSS_CRIT,
+    MOCK_THRESHOLD_AVAIL_WARN,
+  ];
+  return {
+    ...base,
+    thresholds: allThresholds,
+    activeBreaches: [MOCK_BREACH_WARN_NO_ALARM, MOCK_BREACH_CRIT_WITH_ALARM, MOCK_BREACH_NO_ALARM],
+    series: base.series.map((s) => ({
+      ...s,
+      thresholds: allThresholds.filter((t) => t.metricName === s.metricName),
+      breachAnnotations: [MOCK_BREACH_CRIT_WITH_ALARM].filter((b) =>
+        allThresholds.some((t) => t.thresholdId === b.thresholdId && t.metricName === s.metricName),
+      ),
+    })),
+  };
+}
+
+/** Drilldown where threshold units differ from display units — must not crash. */
+export function getMockKpiDrilldownMismatchedUnits(): KpiDrilldownResponse {
+  const base = getMockKpiDrilldownBts();
+  return {
+    ...base,
+    thresholds: [{
+      thresholdId: 'thr-mismatched',
+      metricName: 'latencyMs',
+      severity: 'WARNING',
+      operator: 'ABOVE',
+      value: 100,
+      unit: 's', // intentional mismatch vs ms display
+      label: 'Latency (s) — unit mismatch test',
+    }],
+  };
+}

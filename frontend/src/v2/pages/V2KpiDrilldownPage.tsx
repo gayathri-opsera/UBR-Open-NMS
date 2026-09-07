@@ -19,6 +19,7 @@ import type {
   KpiDrilldownTableRow, DrilldownGranularity,
 } from '../../api/kpi.types';
 import { validateDrilldownTimeRange } from '../../api/kpi.types';
+import { KpiBreachSummaryPanel } from '../../components/kpi/KpiBreachSummaryPanel';
 import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
@@ -499,6 +500,17 @@ export default function V2KpiDrilldownPage() {
                   {g}
                 </Badge>
               ))}
+            </div>
+          )}
+
+          {/* Breach summary panel — shown when API returns breach annotations */}
+          {data.activeBreaches && data.activeBreaches.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <KpiBreachSummaryPanel
+                breaches={data.activeBreaches}
+                thresholds={data.thresholds ?? []}
+                onAlarmClick={(alarmId) => navigate(`/v2/alarms?id=${alarmId}`)}
+              />
             </div>
           )}
 
