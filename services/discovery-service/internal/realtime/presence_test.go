@@ -146,6 +146,10 @@ func newManager(redis *fakeRedis, inv *fakeInventory, pub *fakePublisher, v *fak
 	return NewManager(redis, inv, pub, v, up)
 }
 
+func newManagerWithCfg(redis *fakeRedis, inv *fakeInventory, pub *fakePublisher, v *fakeValidator, up *fakeUpgrader, cfg PresenceConfig) *Manager {
+	return NewManager(redis, inv, pub, v, up, cfg)
+}
+
 func TestManager_FirstConnect_SetsPresenceAndMarksRealtime(t *testing.T) {
 	redis := newFakeRedis()
 	inv := &fakeInventory{}
@@ -277,6 +281,60 @@ func TestHeartbeatMessage_JSON(t *testing.T) {
 	}
 	if decoded.Type != "heartbeat" || decoded.ServerSeq != 1 {
 		t.Error("heartbeat round-trip failed")
+	}
+}
+
+func TestPresenceConfig_Defaults(t *testing.T) {
+	var cfg PresenceConfig
+	if cfg.pingInterval() != DefaultPingInterval {
+		t.Errorf("expected default ping interval %v, got %v", DefaultPingInterval, cfg.pingInterval())
+	}
+	if cfg.receiveTimeout() != DefaultReceiveTimeout {
+		t.Errorf("expected default receive timeout %v, got %v", DefaultReceiveTimeout, cfg.receiveTimeout())
+	}
+	if cfg.presenceTTL() != DefaultPingInterval*2 {
+		t.Errorf("expected presenceTTL = 2× ping, got %v", cfg.presenceTTL())
+	}
+}
+
+func TestPresenceConfig_Custom(t *testing.T) {
+	cfg := PresenceConfig{PingInterval: 5 * time.Second, ReceiveTimeout: 15 * time.Second}
+	if cfg.pingInterval() != 5*time.Second {
+		t.Error("expected 5s ping interval")
+	}
+	if cfg.receiveTimeout() != 15*time.Second {
+		t.Error("expected 15s receive timeout")
+	}
+	if cfg.presenceTTL() != 10*time.Second {
+		t.Error("expected presenceTTL = 2×5 = 10s")
+	}
+}
+
+func TestManager_WithConfig_UsesConfiguredValues(t *testing.T) {
+	// Verify the manager accepts custom config without panicking.
+	cfg := PresenceConfig{PingInterval: 5 * time.Second, ReceiveTimeout: 10 * time.Second}
+	mgr := newManagerWithCfg(newFakeRedis(), &fakeInventory{}, &fakePublisher{},
+		&fakeValidator{serial: "SN-CFG"}, &fakeUpgrader{conn: newFakeConn()}, cfg)
+	if mgr == nil {
+		t.Fatal("expected non-nil manager")
+	}
+}
+
+func TestIsTimeoutError(t *testing.T) {
+	cases := []struct {
+		err     error
+		timeout bool
+	}{
+		{nil, false},
+		{errors.New("EOF"), false},
+		{errors.New("i/o timeout"), true},
+		{errors.New("context deadline exceeded"), false}, // not a net Timeout()
+		{errors.New("some error"), false},
+	}
+	for _, tc := range cases {
+		if got := isTimeoutError(tc.err); got != tc.timeout {
+			t.Errorf("isTimeoutError(%v) = %v, want %v", tc.err, got, tc.timeout)
+		}
 	}
 }
 

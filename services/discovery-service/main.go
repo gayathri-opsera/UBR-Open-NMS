@@ -75,12 +75,17 @@ func main() {
 	// Production: replace fakes with real Redis / inventory HTTP / Kafka clients.
 	presenceValidator := &realtimeHMACValidator{secretStore: secretStore}
 	presenceUpgrader := &noopWebSocketUpgrader{}
+	presenceCfg := realtime.PresenceConfig{
+		PingInterval:   cfg.PingInterval,
+		ReceiveTimeout: cfg.ReceiveTimeout,
+	}
 	presenceManager := realtime.NewManager(
 		&noopPresenceRedis{},
 		&noopPresenceInventory{},
 		&noopPresencePublisher{},
 		presenceValidator,
 		presenceUpgrader,
+		presenceCfg,
 	)
 
 	r := chi.NewRouter()
@@ -97,6 +102,7 @@ func main() {
 		r.Get("/devices", h.Lookup)
 		r.Post("/scan", h.TriggerScan)
 		r.Post("/runs", h.CreateDiscoveryRun)                                   // WO-011
+		r.Get("/onboarding", h.GetOnboardingStates)                             // WO-026
 		r.Post("/schedules", schedHandler.CreateSchedule)                       // WO-017
 		r.Get("/schedules", schedHandler.ListSchedules)                         // WO-017
 		r.Delete("/schedules/{scheduleId}", schedHandler.DeleteSchedule)        // WO-017

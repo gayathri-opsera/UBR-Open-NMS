@@ -28,16 +28,51 @@ import (
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const (
-	// HeartbeatInterval is how often the server expects a ping from the device.
-	HeartbeatInterval = 30 * time.Second
+	// DefaultPingInterval is the default server-to-device PING cadence (WO-022).
+	// Devices must respond with PONG or any traffic within ReceiveTimeout.
+	DefaultPingInterval = 15 * time.Second
 
-	// PresenceTTL is how long the Redis key lives after the last heartbeat.
-	// Set to 2× HeartbeatInterval to tolerate one missed heartbeat.
-	PresenceTTL = 60 * time.Second
+	// DefaultReceiveTimeout is the maximum silence before the server closes the
+	// connection and marks the device offline (WO-022).
+	// Must exceed DefaultPingInterval so a single missed PING does not evict.
+	DefaultReceiveTimeout = 30 * time.Second
 
 	// PresenceKeyPrefix is the Redis key prefix for presence entries.
 	PresenceKeyPrefix = "nms:presence:"
 )
+
+// PresenceConfig holds configurable knobs for the presence Manager (WO-022).
+// Zero values are replaced with the package defaults on NewManager.
+type PresenceConfig struct {
+	// PingInterval is how often the server sends a heartbeat PING to the device.
+	// Defaults to DefaultPingInterval (15 s).
+	PingInterval time.Duration
+	// ReceiveTimeout is the read deadline applied after each inbound message.
+	// If no message (PONG or any payload) arrives within this window, the
+	// connection is closed and the device is marked offline.
+	// Defaults to DefaultReceiveTimeout (30 s). Must be > PingInterval.
+	ReceiveTimeout time.Duration
+}
+
+func (c *PresenceConfig) pingInterval() time.Duration {
+	if c == nil || c.PingInterval <= 0 {
+		return DefaultPingInterval
+	}
+	return c.PingInterval
+}
+
+func (c *PresenceConfig) receiveTimeout() time.Duration {
+	if c == nil || c.ReceiveTimeout <= 0 {
+		return DefaultReceiveTimeout
+	}
+	return c.ReceiveTimeout
+}
+
+// presenceTTL returns the Redis key TTL: 2× ping interval so one missed ping
+// does not expire the presence before the timeout logic can close the connection.
+func (c *PresenceConfig) presenceTTL() time.Duration {
+	return c.pingInterval() * 2
+}
 
 // ── Dependency interfaces ─────────────────────────────────────────────────────
 
@@ -121,6 +156,7 @@ type Manager struct {
 	publisher PresencePublisher
 	validator PresenceTokenValidator
 	upgrader  WebSocketUpgrader
+	cfg       PresenceConfig
 
 	mu          sync.RWMutex
 	connections map[string]*deviceConn // serialNumber → conn
@@ -134,14 +170,16 @@ type deviceConn struct {
 }
 
 // NewManager creates a new presence Manager.
+// cfg may be nil or zero-valued; defaults are applied per PresenceConfig methods.
 func NewManager(
 	redis PresenceRedis,
 	inventory PresenceInventory,
 	publisher PresencePublisher,
 	validator PresenceTokenValidator,
 	upgrader WebSocketUpgrader,
+	cfg ...PresenceConfig,
 ) *Manager {
-	return &Manager{
+	m := &Manager{
 		redis:       redis,
 		inventory:   inventory,
 		publisher:   publisher,
@@ -149,6 +187,10 @@ func NewManager(
 		upgrader:    upgrader,
 		connections: make(map[string]*deviceConn),
 	}
+	if len(cfg) > 0 {
+		m.cfg = cfg[0]
+	}
+	return m
 }
 
 // ServeHTTP handles the WebSocket upgrade and presence lifecycle for one device.
@@ -225,7 +267,7 @@ func (m *Manager) unregister(serial string) {
 func (m *Manager) onFirstConnect(ctx context.Context, serial, corrID string) {
 	now := time.Now().UTC()
 
-	if err := m.redis.SetPresence(ctx, serial, PresenceTTL); err != nil {
+	if err := m.redis.SetPresence(ctx, serial, m.cfg.presenceTTL()); err != nil {
 		slog.Warn("presence: Redis set failed on first connect", "serial", serial, "error", err)
 	}
 
@@ -275,10 +317,41 @@ func (m *Manager) onDisconnect(ctx context.Context, serial, corrID string) {
 	slog.Info("presence: device disconnected", "serial", serial)
 }
 
-// runLoop drives the heartbeat ticker and processes incoming messages until the connection closes.
+// runLoop drives the PING ticker and processes incoming messages until the connection
+// closes or the receive timeout expires.
+//
+// Liveness model (WO-022):
+//  - Server sends a heartbeat PING every cfg.PingInterval (default 15 s).
+//  - Any inbound message from the device (PONG or payload) resets the receive deadline.
+//  - If no message arrives within cfg.ReceiveTimeout (default 30 s), the connection is
+//    closed deterministically and the device is marked offline with reason TIMEOUT.
 func (m *Manager) runLoop(ctx context.Context, dc *deviceConn) {
-	ticker := time.NewTicker(HeartbeatInterval)
+	pingInterval := m.cfg.pingInterval()
+	receiveTimeout := m.cfg.receiveTimeout()
+
+	ticker := time.NewTicker(pingInterval)
 	defer ticker.Stop()
+
+	// Arm the initial receive deadline. Any inbound traffic resets it.
+	_ = dc.conn.SetReadDeadline(time.Now().Add(receiveTimeout))
+
+	// Read messages in a background goroutine so the select can fire ping ticks
+	// without blocking on ReadMessage.
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	readCh := make(chan readResult, 1)
+
+	go func() {
+		for {
+			_, data, err := dc.conn.ReadMessage()
+			readCh <- readResult{data: data, err: err}
+			if err != nil {
+				return
+			}
+		}
+	}()
 
 	var seq int64
 
@@ -287,37 +360,35 @@ func (m *Manager) runLoop(ctx context.Context, dc *deviceConn) {
 		case <-ctx.Done():
 			return
 
+		case res := <-readCh:
+			if res.err != nil {
+				if isTimeoutError(res.err) {
+					slog.Info("presence: receive timeout — marking offline", "serial", dc.serial,
+						"timeout", receiveTimeout)
+				} else if !isClosedError(res.err) {
+					slog.Debug("presence: read error", "serial", dc.serial, "error", res.err)
+				}
+				return
+			}
+			// Inbound traffic counts as liveness — reset the receive deadline.
+			_ = dc.conn.SetReadDeadline(time.Now().Add(receiveTimeout))
+			var msg DeviceMessage
+			if err := json.Unmarshal(res.data, &msg); err == nil {
+				slog.Debug("presence: received message", "serial", dc.serial, "type", msg.Type)
+			}
+
 		case t := <-ticker.C:
 			seq++
 			hb := HeartbeatMessage{Type: "heartbeat", Timestamp: t.UTC(), ServerSeq: seq}
 			data, _ := json.Marshal(hb)
 			if err := dc.conn.WriteMessage(1 /* TextMessage */, data); err != nil {
-				slog.Debug("presence: heartbeat write failed", "serial", dc.serial, "error", err)
+				slog.Debug("presence: PING write failed — closing", "serial", dc.serial, "error", err)
 				return
 			}
-
-			// Refresh Redis TTL on each heartbeat
-			if err := m.redis.SetPresence(ctx, dc.serial, PresenceTTL); err != nil {
+			// Refresh Redis TTL on each PING so presence survives one missed PONG.
+			if err := m.redis.SetPresence(ctx, dc.serial, m.cfg.presenceTTL()); err != nil {
 				slog.Warn("presence: Redis TTL refresh failed", "serial", dc.serial, "error", err)
 			}
-
-		default:
-			// Non-blocking read: set a short deadline so the select can tick
-			_ = dc.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			_, data, err := dc.conn.ReadMessage()
-			if err != nil {
-				// Timeout is expected — only bail on real close errors
-				if isClosedError(err) {
-					return
-				}
-				continue
-			}
-			var msg DeviceMessage
-			if jsonErr := json.Unmarshal(data, &msg); jsonErr != nil {
-				slog.Debug("presence: unreadable message from device", "serial", dc.serial)
-				continue
-			}
-			slog.Debug("presence: received message", "serial", dc.serial, "type", msg.Type)
 		}
 	}
 }
@@ -331,6 +402,21 @@ func (m *Manager) ConnectedCount() int {
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
+
+// isTimeoutError returns true when err represents a network read deadline expiry.
+// This is distinct from a clean close and signals that the device missed the
+// configured receive timeout without sending any traffic.
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	type netTimeout interface{ Timeout() bool }
+	if t, ok := err.(netTimeout); ok && t.Timeout() {
+		return true
+	}
+	return contains(err.Error(), "i/o timeout") ||
+		contains(err.Error(), "deadline exceeded")
+}
 
 // isClosedError returns true for connection-closed / use-of-closed-network-connection errors.
 func isClosedError(err error) bool {
