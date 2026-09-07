@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -28,6 +29,9 @@ public class ConfigService {
 
     // External device status check — injected via DeviceStatusChecker
     private final DeviceStatusChecker deviceStatusChecker;
+
+    // WO-018: per-device operation concurrency guard
+    private final OperationGuard operationGuard;
 
     @Value("${kafka.topics.config-push:config-push}")
     private String configPushTopic;
@@ -79,52 +83,89 @@ public class ConfigService {
 
     /**
      * Push config to a single device.
+     * - If a conflicting exclusive operation is in flight (WO-018) → return 409.
      * - If device is offline AND it's a firmware/bulk command → queue it.
      * - If device is offline AND it's an individual config command → reject with 503.
      * - If device is online → publish to Kafka.
      */
     public PushResult pushConfig(String deviceId, String templateId, String actor,
                                   boolean isFirmwareOrBulk) {
-        boolean online = deviceStatusChecker.isOnline(deviceId);
-
-        if (!online) {
-            if (isFirmwareOrBulk) {
-                PendingCommand cmd = queueCommand(deviceId, templateId, "CONFIG_PUSH", null, actor);
-                return PushResult.queued(cmd.getId());
-            } else {
-                return PushResult.deviceOffline();
-            }
+        // WO-018: acquire the per-device operation lock before any state change
+        OperationClass opClass = isFirmwareOrBulk ? OperationClass.FIRMWARE_UPGRADE : OperationClass.CONFIG_CHANGE;
+        String tempJobId = UUID.randomUUID().toString();
+        Optional<OperationGuard.InFlightMarker> conflict = operationGuard.acquire(deviceId, opClass, tempJobId, actor);
+        if (conflict.isPresent()) {
+            OperationGuard.InFlightMarker blocker = conflict.get();
+            log.warn("Config push blocked: device={} blocked by class={} job={}",
+                    deviceId, blocker.operationClass, blocker.jobId);
+            return PushResult.operationInFlight(blocker.jobId, blocker.operationClass.name());
         }
 
-        publishConfigPush(deviceId, templateId, null, actor);
-        recordVersion(deviceId, templateId, actor);
-        return PushResult.published();
+        try {
+            boolean online = deviceStatusChecker.isOnline(deviceId);
+
+            if (!online) {
+                if (isFirmwareOrBulk) {
+                    PendingCommand cmd = queueCommand(deviceId, templateId, "CONFIG_PUSH", null, actor);
+                    return PushResult.queued(cmd.getId());
+                } else {
+                    return PushResult.deviceOffline();
+                }
+            }
+
+            publishConfigPush(deviceId, templateId, null, actor);
+            recordVersion(deviceId, templateId, actor);
+            return PushResult.published();
+        } finally {
+            operationGuard.release(deviceId, tempJobId);
+        }
     }
 
     /**
      * Bulk push to a list of device IDs.
+     * WO-018: checks per-device operation guard for each device before dispatch.
      */
     public ConfigJob bulkPush(List<String> deviceIds, String templateId, String actor) {
         ConfigJob job = new ConfigJob();
         job.setId(UUID.randomUUID().toString());
         job.setJobType("BULK_CONFIG");
         job.setTemplateId(templateId);
+        job.setOperationClass(OperationClass.CONFIG_CHANGE.name());
         job.setTotalDevices(deviceIds.size());
         job.setPendingCount(deviceIds.size());
         job.setStatus("RUNNING");
+        job.setRetryable(true);
+        job.setMaxRetries(3);
         job.setStartedAt(Instant.now());
         job.setActor(actor);
         job = jobRepo.save(job);
 
         for (String deviceId : deviceIds) {
-            boolean online = deviceStatusChecker.isOnline(deviceId);
-            if (online) {
-                publishConfigPush(deviceId, templateId, job.getId(), actor);
-                job.getPerDeviceStatus().put(deviceId, "PUBLISHED");
-                job.setSuccessCount(job.getSuccessCount() + 1);
-            } else {
-                queueCommand(deviceId, templateId, "BULK_CONFIG", job.getId(), actor);
-                job.getPerDeviceStatus().put(deviceId, "QUEUED");
+            // WO-018: guard check per device
+            Optional<OperationGuard.InFlightMarker> conflict =
+                    operationGuard.acquire(deviceId, OperationClass.CONFIG_CHANGE, job.getId(), actor);
+            if (conflict.isPresent()) {
+                OperationGuard.InFlightMarker blocker = conflict.get();
+                job.getPerDeviceStatus().put(deviceId, "BLOCKED");
+                job.setConcurrencyState("BLOCKED");
+                job.setBlockedByJobId(blocker.jobId);
+                job.setFailureCount(job.getFailureCount() + 1);
+                log.warn("Bulk push blocked for device={} by job={}", deviceId, blocker.jobId);
+                continue;
+            }
+
+            try {
+                boolean online = deviceStatusChecker.isOnline(deviceId);
+                if (online) {
+                    publishConfigPush(deviceId, templateId, job.getId(), actor);
+                    job.getPerDeviceStatus().put(deviceId, "PUBLISHED");
+                    job.setSuccessCount(job.getSuccessCount() + 1);
+                } else {
+                    queueCommand(deviceId, templateId, "BULK_CONFIG", job.getId(), actor);
+                    job.getPerDeviceStatus().put(deviceId, "QUEUED");
+                }
+            } finally {
+                operationGuard.release(deviceId, job.getId());
             }
             job.setPendingCount(job.getTotalDevices() - job.getSuccessCount() - job.getFailureCount());
         }
@@ -227,13 +268,28 @@ public class ConfigService {
     // ── Result type ────────────────────────────────────────────────
 
     public static class PushResult {
-        public enum Type { PUBLISHED, QUEUED, DEVICE_OFFLINE }
+        public enum Type { PUBLISHED, QUEUED, DEVICE_OFFLINE, OPERATION_IN_FLIGHT }
         public final Type type;
         public final String queuedCommandId;
+        /** Set when type=OPERATION_IN_FLIGHT: the job ID already holding the lock. */
+        public final String existingOperationJobId;
+        /** Set when type=OPERATION_IN_FLIGHT: the operation class already in flight. */
+        public final String existingOperationClass;
 
-        private PushResult(Type type, String id) { this.type = type; this.queuedCommandId = id; }
-        static PushResult published()              { return new PushResult(Type.PUBLISHED, null); }
-        static PushResult queued(String id)        { return new PushResult(Type.QUEUED, id); }
-        static PushResult deviceOffline()          { return new PushResult(Type.DEVICE_OFFLINE, null); }
+        private PushResult(Type type, String id, String existingJobId, String existingClass) {
+            this.type = type;
+            this.queuedCommandId = id;
+            this.existingOperationJobId = existingJobId;
+            this.existingOperationClass = existingClass;
+        }
+
+        static PushResult published()     { return new PushResult(Type.PUBLISHED, null, null, null); }
+        static PushResult queued(String id) { return new PushResult(Type.QUEUED, id, null, null); }
+        static PushResult deviceOffline() { return new PushResult(Type.DEVICE_OFFLINE, null, null, null); }
+
+        /** WO-018: returned when a conflicting exclusive operation is already in flight. */
+        static PushResult operationInFlight(String existingJobId, String existingClass) {
+            return new PushResult(Type.OPERATION_IN_FLIGHT, null, existingJobId, existingClass);
+        }
     }
 }
