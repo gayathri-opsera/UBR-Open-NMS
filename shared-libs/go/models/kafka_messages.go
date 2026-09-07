@@ -67,8 +67,8 @@ type MycomKPIExportMessage struct {
 // sanitized identity and correlation context.
 type SouthboundErrorEvent struct {
 	EventID       string `json:"eventId"`
-	Reason        string `json:"reason"`        // one of the southbound error reason constants
-	Category      string `json:"category"`      // auth_failure | retryable | client_error | server_error
+	Reason        string `json:"reason"`               // one of the southbound error reason constants
+	Category      string `json:"category"`              // auth_failure | retryable | client_error | server_error
 	DeviceSerial  string `json:"deviceSerial,omitempty"` // sanitized, from request context only
 	DeviceIP      string `json:"deviceIp,omitempty"`
 	CorrelationID string `json:"correlationId,omitempty"`
@@ -111,7 +111,8 @@ type InventorySyncMessage struct {
 
 // SouthboundErrorEvent is published to the audit/alarm Kafka topics when a
 // southbound security or protocol error occurs (WO-005).
-// Secrets, HMAC values, and private keys must never appear in this struct.
+// SECURITY: Secrets, HMAC values, private keys, and raw signatures must never
+// appear in this struct. Only sanitised identity and correlation context is included.
 type SouthboundErrorEvent struct {
 	EventID       string    `json:"eventId"`
 	CorrelationID string    `json:"correlationId"`
@@ -126,12 +127,34 @@ type SouthboundErrorEvent struct {
 // ICMPSweepResultEvent is published to the discovery.icmp.results Kafka topic (WO-016).
 // It carries per-host ICMP probe outcomes from a discovery run sweep stage.
 type ICMPSweepResultEvent struct {
-	EventID    string    `json:"eventId"`
-	RunID      string    `json:"runId"`
-	IP         string    `json:"ip"`
-	Status     string    `json:"status"`     // "reachable", "unreachable", "timeout", "error", "cancelled"
-	LatencyMs  int64     `json:"latencyMs,omitempty"`
-	ErrorMsg   string    `json:"errorMsg,omitempty"`
-	SourceLabels []string `json:"sourceLabels,omitempty"`
-	Timestamp  time.Time `json:"timestamp"`
+	EventID      string    `json:"eventId"`
+	RunID        string    `json:"runId"`
+	IP           string    `json:"ip"`
+	Status       string    `json:"status"`     // "reachable", "unreachable", "timeout", "error", "cancelled"
+	LatencyMs    int64     `json:"latencyMs,omitempty"`
+	ErrorMsg     string    `json:"errorMsg,omitempty"`
+	SourceLabels []string  `json:"sourceLabels,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+}
+
+// PortProbeResult holds the result of a TCP connect probe against one port (WO-024).
+type PortProbeResult struct {
+	Port      int    `json:"port"`
+	Open      bool   `json:"open"`
+	LatencyMs int64  `json:"latencyMs,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// PortProbeResultEvent is published to the discovery.port.results Kafka topic (WO-024).
+// One event is emitted per live host after all management ports have been probed.
+// ManagementProtocol is inferred from open ports: NETCONF if 830, SNMP if 161,
+// SSH if 22, HTTP/S if 80/443.
+type PortProbeResultEvent struct {
+	EventID             string            `json:"eventId"`
+	RunID               string            `json:"runId"`
+	IP                  string            `json:"ip"`
+	OpenPorts           []int             `json:"openPorts"`
+	PortResults         []PortProbeResult `json:"portResults"`
+	ManagementProtocol  string            `json:"managementProtocol"` // NETCONF | SNMP | SSH | HTTP | HTTPS | UNKNOWN
+	Timestamp           time.Time         `json:"timestamp"`
 }

@@ -37,7 +37,25 @@
         "config.withheld",
         "credential.ref.accessed",
         "evidence.exported",
-        "evidence.export.denied"
+        "evidence.export.denied",
+        "sso.login.initiated",
+        "sso.login.success",
+        "sso.login.failed",
+        "sso.config.updated",
+        "mfa.enrolled",
+        "mfa.challenge.success",
+        "mfa.challenge.failed",
+        "mfa.disabled",
+        "mfa.backup_code.used",
+        "password.expired",
+        "password.renewed",
+        "password.policy.violated",
+        "password.reset.initiated",
+        "role.changed",
+        "permission.changed",
+        "identity.provider.changed",
+        "access.denied",
+        "access.partial"
       ]
     },
     "resource":   {
