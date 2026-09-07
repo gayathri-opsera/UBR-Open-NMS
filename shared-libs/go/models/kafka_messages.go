@@ -122,3 +122,16 @@ type SouthboundErrorEvent struct {
 	Timestamp     time.Time `json:"timestamp"`
 	ServiceID     string    `json:"serviceId"`
 }
+
+// ICMPSweepResultEvent is published to the discovery.icmp.results Kafka topic (WO-016).
+// It carries per-host ICMP probe outcomes from a discovery run sweep stage.
+type ICMPSweepResultEvent struct {
+	EventID    string    `json:"eventId"`
+	RunID      string    `json:"runId"`
+	IP         string    `json:"ip"`
+	Status     string    `json:"status"`     // "reachable", "unreachable", "timeout", "error", "cancelled"
+	LatencyMs  int64     `json:"latencyMs,omitempty"`
+	ErrorMsg   string    `json:"errorMsg,omitempty"`
+	SourceLabels []string `json:"sourceLabels,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+}
