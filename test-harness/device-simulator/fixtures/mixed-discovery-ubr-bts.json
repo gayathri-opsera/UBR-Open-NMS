@@ -1,0 +1,21 @@
+{
+  "name": "UBR BTS for Mixed Discovery",
+  "deviceType": "BTS",
+  "serialNumber": "SN-MIXED-BTS-001",
+  "macAddress": "AA:BB:CC:DD:01:01",
+  "ipAddress": "10.100.2.10",
+  "model": "ENH500",
+  "softwareVersion": "5.7.0",
+  "location": {
+    "latitude": 37.7749,
+    "longitude": -122.4194,
+    "azimuth": 180
+  },
+  "tags": ["test-harness", "mixed-discovery", "wo-042"],
+  "discoveryParadigm": "UBR_CALL_HOME",
+  "identityAuthority": "UBR",
+  "onlineStateAuthority": "UBR",
+  "expectedBootstrapState": "REALTIME_ESTABLISHED",
+  "expectedOnlineState": "ONLINE",
+  "description": "UBR BTS device for concurrent discovery mode validation"
+}

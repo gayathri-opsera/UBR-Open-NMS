@@ -1,0 +1,265 @@
+# ──────────────────────────────────────────────────────────────────
+# WO-042: Mixed Discovery Mode Validation
+# Validates that UBR call-home and generic SNMP discovery can run
+# concurrently without conflicts, and that UBR authority is preserved.
+# ──────────────────────────────────────────────────────────────────
+name: mixed-discovery-concurrent-modes
+description: "WO-042: Validate UBR call-home and generic discovery run concurrently without authority conflicts"
+timeout_seconds: 180
+
+setup:
+  - action: verify_discovery_modes
+    expect_modes_enabled: ["UBR_CALL_HOME", "GENERIC_SNMP"]
+    fail_if_disabled: true
+
+parallel_stages:
+  - name: concurrent_discovery_execution
+    timeout_seconds: 120
+    tasks:
+      - name: generic_snmp_discovery
+        action: generic_discovery_run
+        fixtures:
+          - "fixtures/mixed-discovery-generic-snmp.json"
+        expect_completion: true
+
+      - name: ubr_call_home_sessions
+        action: ubr_simulator_batch
+        fixtures:
+          - "fixtures/mixed-discovery-ubr-bts.json"
+          - "fixtures/mixed-discovery-ubr-cpe.json"
+          - "fixtures/mixed-discovery-ubr-idu.json"
+        expect_all_states: "OPERATION"
+
+steps:
+  # Wait for all devices to become visible in inventory
+  - name: poll-generic-device-visibility
+    action: poll_inventory_api
+    device_filter:
+      discoveryParadigm: "GENERIC_SNMP"
+      sysObjectID: "1.3.6.1.4.1.9.1.1"
+    min_count: 1
+    timeout_seconds: 30
+    retry_interval: 2
+
+  - name: poll-ubr-devices-visibility
+    action: poll_inventory_api
+    device_filter:
+      discoveryParadigm: "UBR_CALL_HOME"
+    expect_serials:
+      - "SN-MIXED-BTS-001"
+      - "SN-MIXED-CPE-001"
+      - "SN-MIXED-IDU-001"
+    min_count: 3
+    timeout_seconds: 30
+    retry_interval: 2
+
+  # Verify onboarding status for all UBR devices
+  - name: verify-ubr-onboarding-complete
+    action: poll_onboarding_status_api
+    device_serials:
+      - "SN-MIXED-BTS-001"
+      - "SN-MIXED-CPE-001"
+      - "SN-MIXED-IDU-001"
+    expect_state: "MANAGED"
+    expect_bootstrap_state: "REALTIME_ESTABLISHED"
+    timeout_seconds: 30
+
+  # Authority rule assertions: UBR fields must not be overwritten
+  - name: assert-ubr-authority-preserved
+    action: assert_authority_rules
+    devices:
+      - serialNumber: "SN-MIXED-BTS-001"
+        protected_fields:
+          - serialNumber
+          - macAddress
+          - bootstrapState
+          - onlineState
+          - lastRealtimeAt
+        expected_values:
+          identityAuthority: "UBR"
+          onlineStateAuthority: "UBR"
+          discoveryParadigm: "UBR_CALL_HOME"
+          macAddress: "AA:BB:CC:DD:01:01"
+      - serialNumber: "SN-MIXED-CPE-001"
+        protected_fields:
+          - serialNumber
+          - macAddress
+          - bootstrapState
+          - onlineState
+          - lastRealtimeAt
+        expected_values:
+          identityAuthority: "UBR"
+          onlineStateAuthority: "UBR"
+          discoveryParadigm: "UBR_CALL_HOME"
+          macAddress: "AA:BB:CC:DD:02:01"
+      - serialNumber: "SN-MIXED-IDU-001"
+        protected_fields:
+          - serialNumber
+          - macAddress
+          - bootstrapState
+          - onlineState
+          - lastRealtimeAt
+        expected_values:
+          identityAuthority: "UBR"
+          onlineStateAuthority: "UBR"
+          discoveryParadigm: "UBR_CALL_HOME"
+          macAddress: "AA:BB:CC:DD:03:01"
+
+  # Generate summary evidence
+  - name: generate-evidence-summary
+    action: generate_discovery_evidence
+    include_fields:
+      - runId
+      - startedAt
+      - completedAt
+      - enabledModes
+      - deviceCount
+      - timeToManageSeconds
+      - successRate
+      - failedAssertions
+    output_file: "evidence/mixed-discovery-run-${RUN_ID}.json"
+
+assertions:
+  - type: "equals"
+    actual: "${enabled_modes_count}"
+    expected: "2"
+    description: "Both UBR and generic discovery modes enabled"
+
+  - type: "gte"
+    actual: "${devices_managed_count}"
+    expected: "4"
+    description: "At least 4 devices onboarded (1 generic + 3 UBR)"
+
+  - type: "equals"
+    actual: "${ubr_authority_violations}"
+    expected: "0"
+    description: "No UBR authority field overwrites detected"
+
+  - type: "not_empty"
+    actual: "${generic_device_sysObjectID}"
+    description: "Generic device has valid sysObjectID"
+
+cleanup:
+  - action: archive_evidence
+    path: "evidence/mixed-discovery-run-${RUN_ID}.json"
+
+---
+# ──────────────────────────────────────────────────────────────────
+# WO-042 Regression: Fail when discovery mode disabled
+# ──────────────────────────────────────────────────────────────────
+name: mixed-discovery-mode-disabled-failure
+description: "WO-042: Scenario fails cleanly when a required discovery mode is disabled"
+timeout_seconds: 30
+
+steps:
+  - name: check-discovery-modes
+    action: verify_discovery_modes
+    expect_modes_enabled: ["UBR_CALL_HOME", "GENERIC_SNMP"]
+    fail_if_disabled: true
+
+  - name: fail-if-only-one-mode
+    action: assert
+    condition: "${enabled_modes_count} == 2"
+    fail_message: "Mixed discovery requires both UBR_CALL_HOME and GENERIC_SNMP modes enabled"
+
+---
+# ──────────────────────────────────────────────────────────────────
+# WO-042 Regression: Reject generic device without sysObjectID
+# ──────────────────────────────────────────────────────────────────
+name: mixed-discovery-missing-sysobjectid
+description: "WO-042: Generic device without sysObjectID categorized as incomplete fingerprint"
+timeout_seconds: 30
+
+steps:
+  - name: attempt-generic-discovery-no-sysoid
+    action: generic_discovery_run
+    device_data:
+      ipAddress: "10.100.1.99"
+      vendor: "Unknown"
+      # Missing sysObjectID
+    expect_status: "INCOMPLETE_FINGERPRINT"
+    expect_not_accepted: true
+
+  - name: verify-rejection-reason
+    action: assert
+    condition: "${rejection_reason} contains 'sysObjectID'"
+    fail_message: "Rejection reason must mention missing sysObjectID"
+
+---
+# ──────────────────────────────────────────────────────────────────
+# WO-042 Regression: Timeout if UBR realtime not established
+# ──────────────────────────────────────────────────────────────────
+name: mixed-discovery-ubr-realtime-timeout
+description: "WO-042: Device not counted as manageable if realtime fails to establish"
+timeout_seconds: 60
+
+steps:
+  - name: ubr-device-auth-success-realtime-fail
+    action: ubr_simulator_run
+    profile: "fixtures/realtime-no-pong-profile.json"
+    discovery_url: "${DISCOVERY_URL}"
+    expect_final_state: "FAILED"
+    expect_reason: "REALTIME_TIMEOUT"
+
+  - name: verify-device-not-manageable
+    action: poll_onboarding_status_api
+    device_serial: "${PROFILE_SERIAL}"
+    expect_state: "REALTIME_FAILED"
+    expect_manageable: false
+
+---
+# ──────────────────────────────────────────────────────────────────
+# WO-042 Regression: Authority overwrite attempt rejected
+# ──────────────────────────────────────────────────────────────────
+name: mixed-discovery-authority-overwrite-rejected
+description: "WO-042: Generic enrichment attempting to overwrite UBR authority fields is rejected"
+timeout_seconds: 60
+
+steps:
+  - name: ubr-device-calls-home-first
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber: "SN-OVERWRITE-TEST-001"
+      macAddress: "AA:BB:CC:DD:FF:01"
+      deviceType: "BTS"
+      identityAuthority: "UBR"
+      onlineStateAuthority: "UBR"
+      discoveryParadigm: "UBR_CALL_HOME"
+      bootstrapState: "REALTIME_ESTABLISHED"
+
+  - name: verify-ubr-device-registered
+    action: poll_inventory_api
+    device_filter:
+      serialNumber: "SN-OVERWRITE-TEST-001"
+    min_count: 1
+    timeout_seconds: 10
+
+  - name: generic-discovery-attempts-overwrite
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber: "SN-OVERWRITE-TEST-001"
+      macAddress: "99:88:77:66:55:44"  # Attempt to change MAC
+      identityAuthority: "GENERIC"
+      discoveryParadigm: "GENERIC_SNMP"
+      bootstrapState: "UNKNOWN"  # Attempt to change bootstrap state
+
+  - name: verify-ubr-fields-unchanged
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/SN-OVERWRITE-TEST-001"
+    expect_status: 200
+    expect_body:
+      identityAuthority: "UBR"
+      macAddress: "AA:BB:CC:DD:FF:01"
+      bootstrapState: "REALTIME_ESTABLISHED"
+
+  - name: verify-rejection-audit-event
+    action: kafka_assert_message
+    topic: audit-events
+    timeout_seconds: 10
+    expect_body:
+      action: "inventory.convergence.overwrite.rejected"
+      outcome: "rejected"
+      reason: "UBR_AUTHORITY_PROTECTED"
+    expect_body_contains_fields: ["rejectedFields"]

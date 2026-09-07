@@ -1,0 +1,14 @@
+{
+  "name": "Generic SNMP Device for Mixed Discovery",
+  "deviceType": "GENERIC",
+  "ipAddress": "10.100.1.50",
+  "sysObjectID": "1.3.6.1.4.1.9.1.1",
+  "vendor": "Cisco",
+  "model": "Catalyst-2960",
+  "managementPort": 161,
+  "snmpCommunity": "placeholder-community",
+  "discoveryParadigm": "GENERIC_SNMP",
+  "identityAuthority": "GENERIC",
+  "expectedState": "MONITORED",
+  "description": "Generic SNMP device fingerprinted via sysObjectID for concurrent discovery validation"
+}

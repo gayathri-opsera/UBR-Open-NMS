@@ -1,0 +1,21 @@
+{
+  "name": "UBR CPE for Mixed Discovery",
+  "deviceType": "CPE",
+  "serialNumber": "SN-MIXED-CPE-001",
+  "macAddress": "AA:BB:CC:DD:02:01",
+  "ipAddress": "10.100.2.20",
+  "model": "ENH200EXT",
+  "softwareVersion": "5.6.2",
+  "location": {
+    "latitude": 37.7849,
+    "longitude": -122.4094,
+    "azimuth": 90
+  },
+  "tags": ["test-harness", "mixed-discovery", "wo-042"],
+  "discoveryParadigm": "UBR_CALL_HOME",
+  "identityAuthority": "UBR",
+  "onlineStateAuthority": "UBR",
+  "expectedBootstrapState": "REALTIME_ESTABLISHED",
+  "expectedOnlineState": "ONLINE",
+  "description": "UBR CPE device for concurrent discovery mode validation"
+}
