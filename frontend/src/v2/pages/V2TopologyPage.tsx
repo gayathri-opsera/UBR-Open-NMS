@@ -16,8 +16,12 @@ import {
 } from '../../api/topology.api';
 import type {
   TopologyGraph, TopologyNode, TopologyEdge, NodeHealth,
-  LinkHealth, DeviceEvent,
+  LinkHealth, DeviceEvent, DiscoveryParadigm, AlarmSeverityLevel,
 } from '../../api/topology.types';
+import {
+  filterNodes, normalizeSearch, activeFilterChips, hasActiveFilters, emptyFilterCriteria,
+} from '../../components/topology/topologyFilters';
+import type { TopologyFilterCriteria } from '../../components/topology/topologyFilters';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { Select } from '../components/common/Select';
@@ -1154,6 +1158,12 @@ export default function V2TopologyPage() {
 
   const [isBustCache, setIsBustCache] = useState(false);
 
+  // ── WO-043: Investigation filter state ───────────────────────────────────
+  const [alarmSeverity,     setAlarmSeverity]     = useState<AlarmSeverityLevel | ''>('');
+  const [discoveryParadigm, setDiscoveryParadigm] = useState<DiscoveryParadigm | ''>('');
+  const [networkIdFilter,   setNetworkIdFilter]   = useState('');
+  const [tagFilter,         setTagFilter]         = useState('');
+
   const handleRefresh = useCallback(() => {
     setLoading(true);
     setGraph(null);
@@ -1172,15 +1182,30 @@ export default function V2TopologyPage() {
   const nodes = graph?.nodes ?? [];
   const edges = graph?.edges ?? [];
 
-  const filteredNodes = nodes.filter((n) => {
-    if (healthFilter && n.health !== healthFilter) return false;
-    if (typeFilter   && n.deviceType !== typeFilter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (![n.serialNumber, n.ipAddress, n.deviceName, n.macAddress].some((v) => (v ?? '').toLowerCase().includes(q))) return false;
-    }
-    return true;
-  });
+  // ── WO-043: compose filter criteria and delegate to pure helper ────────
+  const filterCriteria: TopologyFilterCriteria = {
+    healthFilter,
+    typeFilter,
+    searchText: search,
+    alarmSeverity,
+    discoveryParadigm,
+    networkId: networkIdFilter,
+    tag: tagFilter,
+  };
+  const { visible: filteredNodes, contextualIds } = filterNodes(nodes, filterCriteria);
+
+  const filtersActive = hasActiveFilters(filterCriteria);
+  const filterChips   = activeFilterChips(filterCriteria);
+
+  const handleClearAllFilters = useCallback(() => {
+    setHealthFilter('');
+    setTypeMode('ALL');
+    setSearch('');
+    setAlarmSeverity('');
+    setDiscoveryParadigm('');
+    setNetworkIdFilter('');
+    setTagFilter('');
+  }, []);
 
   const healthy  = nodes.filter((n) => n.health === 'HEALTHY').length;
   const degraded = nodes.filter((n) => n.health === 'DEGRADED').length;
@@ -1298,34 +1323,126 @@ export default function V2TopologyPage() {
         />
       )}
 
-      {/* Text / health filters */}
+      {/* Text / health / investigation filters (WO-043) */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Text search */}
         <div style={{ position: 'relative' }}>
           <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--vf-text-muted)', fontSize: 13 }}>🔍</span>
           <input
-            placeholder="IP, Serial Number, MAC"
+            placeholder="IP, Serial, MAC, Name"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ padding: '6px 10px 6px 28px', fontSize: 13, background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)', borderRadius: 8, color: 'var(--vf-text-primary)', width: 220 }}
+            onChange={(e) => setSearch(e.target.value.slice(0, 128))}
+            style={{ padding: '6px 10px 6px 28px', fontSize: 13, background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)', borderRadius: 8, color: 'var(--vf-text-primary)', width: 200 }}
           />
           {search && (
             <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vf-text-muted)' }}>×</button>
           )}
         </div>
+
+        {/* Health filter */}
         <Select
-          options={[{ value: '' as HealthFilter, label: 'All health' }, { value: 'HEALTHY' as HealthFilter, label: 'Healthy' }, { value: 'DEGRADED' as HealthFilter, label: 'Degraded' }, { value: 'FAULTY' as HealthFilter, label: 'Faulty' }, { value: 'UNKNOWN' as HealthFilter, label: 'Unknown' }]}
+          options={[
+            { value: '' as HealthFilter, label: 'All health' },
+            { value: 'HEALTHY' as HealthFilter, label: 'Healthy' },
+            { value: 'DEGRADED' as HealthFilter, label: 'Degraded' },
+            { value: 'FAULTY' as HealthFilter, label: 'Faulty' },
+            { value: 'UNKNOWN' as HealthFilter, label: 'Unknown' },
+          ]}
           value={healthFilter}
           onChange={(e) => setHealthFilter(e.target.value as HealthFilter)}
-          style={{ width: 140 }}
+          style={{ width: 130 }}
         />
-        <Button variant="ghost" size="sm" onClick={() => { setHealthFilter(''); setTypeMode('ALL'); setSearch(''); }}>Clear</Button>
+
+        {/* Alarm severity filter */}
+        <Select
+          options={[
+            { value: '', label: 'Any alarm' },
+            { value: 'CRITICAL', label: '🔴 Critical+' },
+            { value: 'MAJOR',    label: '🟠 Major+' },
+            { value: 'MINOR',    label: '🟡 Minor+' },
+            { value: 'WARNING',  label: '🔵 Warning+' },
+          ]}
+          value={alarmSeverity}
+          onChange={(e) => setAlarmSeverity(e.target.value as AlarmSeverityLevel | '')}
+          style={{ width: 130 }}
+        />
+
+        {/* Discovery paradigm filter */}
+        <Select
+          options={[
+            { value: '', label: 'Any paradigm' },
+            { value: 'UBR',     label: 'UBR (call-home)' },
+            { value: 'SNMP',    label: 'SNMP' },
+            { value: 'SSH',     label: 'SSH' },
+            { value: 'NETCONF', label: 'NETCONF' },
+            { value: 'GENERIC', label: 'Generic' },
+          ]}
+          value={discoveryParadigm}
+          onChange={(e) => setDiscoveryParadigm(e.target.value as DiscoveryParadigm | '')}
+          style={{ width: 150 }}
+        />
+
+        {/* Network ID filter */}
+        <input
+          placeholder="Network ID"
+          value={networkIdFilter}
+          onChange={(e) => setNetworkIdFilter(e.target.value.slice(0, 64))}
+          style={{ padding: '6px 10px', fontSize: 13, background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)', borderRadius: 8, color: 'var(--vf-text-primary)', width: 130 }}
+        />
+
+        {/* Tag filter */}
+        <input
+          placeholder="Tag"
+          value={tagFilter}
+          onChange={(e) => setTagFilter(e.target.value.slice(0, 64))}
+          style={{ padding: '6px 10px', fontSize: 13, background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)', borderRadius: 8, color: 'var(--vf-text-primary)', width: 110 }}
+        />
+
+        {filtersActive && (
+          <Button variant="ghost" size="sm" onClick={handleClearAllFilters}>✕ Reset All</Button>
+        )}
       </div>
+
+      {/* Active filter chips (WO-043) */}
+      {filterChips.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', fontWeight: 600, marginRight: 2 }}>Active:</span>
+          {filterChips.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => {
+                if (key === 'healthFilter')      setHealthFilter('');
+                else if (key === 'typeFilter')   setTypeMode('ALL');
+                else if (key === 'searchText')   setSearch('');
+                else if (key === 'alarmSeverity')     setAlarmSeverity('');
+                else if (key === 'discoveryParadigm') setDiscoveryParadigm('');
+                else if (key === 'networkId')    setNetworkIdFilter('');
+                else if (key === 'tag')          setTagFilter('');
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '3px 10px', fontSize: 11, borderRadius: 20,
+                background: 'var(--vf-accent-subtle)', color: 'var(--vf-accent)',
+                border: '1px solid var(--vf-accent)', cursor: 'pointer', fontWeight: 600,
+              }}
+            >
+              {label} <span style={{ opacity: 0.7 }}>×</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Main area */}
       {loading ? (
         <LoadingState label="Loading topology…" />
       ) : !graph || nodes.length === 0 ? (
         <EmptyState title="No topology data" description="No network topology has been discovered yet." />
+      ) : filtersActive && filteredNodes.length === 0 ? (
+        <EmptyState
+          title="No devices match the active filters"
+          description="Try relaxing one or more filters, or reset all filters to view the full topology."
+          action={<Button variant="primary" size="sm" onClick={handleClearAllFilters}>Reset Filters</Button>}
+        />
       ) : (
         <div style={{ display: 'flex', height: contentHeight, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--vf-border-subtle)' }}>
           {/* Visualization */}

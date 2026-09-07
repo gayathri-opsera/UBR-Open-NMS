@@ -1,6 +1,10 @@
 export type NodeType = 'BTS' | 'CPE' | 'IDU' | 'GENERIC';
 export type NodeHealth = 'HEALTHY' | 'DEGRADED' | 'FAULTY' | 'UNKNOWN';
 
+// ── WO-043: Topology investigation filter types ────────────────────────────────
+export type DiscoveryParadigm = 'UBR' | 'SNMP' | 'SSH' | 'NETCONF' | 'GENERIC';
+export type AlarmSeverityLevel = 'CRITICAL' | 'MAJOR' | 'MINOR' | 'WARNING' | 'INFO';
+
 export interface TopologyNode {
   id: string;
   deviceId: string;
@@ -39,6 +43,13 @@ export interface TopologyNode {
   lastObservedAt?: string | null;
   /** Source that determined this health state: 'AVAILABILITY' | 'ALARM' | 'CONNECTIVITY' | 'UNKNOWN' */
   healthSource?: 'AVAILABILITY' | 'ALARM' | 'CONNECTIVITY' | 'UNKNOWN';
+  // ── WO-043: Investigation filter fields ────────────────────────────────────
+  /** Discovery paradigm used to onboard this device: UBR call-home, SNMP, SSH, etc. */
+  discoveryParadigm?: DiscoveryParadigm;
+  /** Operator-assigned tags in "key" or "key:value" format. */
+  tags?: string[];
+  /** Highest alarm severity currently active on this device. */
+  maxAlarmSeverity?: AlarmSeverityLevel;
 }
 
 export interface TopologyEdge {
