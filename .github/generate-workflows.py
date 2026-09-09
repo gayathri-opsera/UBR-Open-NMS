@@ -35,7 +35,7 @@ SETUP_JAVA = """
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"  # WO-006: upgraded to Java 21
           cache: maven"""
 
 SETUP_NODE = """

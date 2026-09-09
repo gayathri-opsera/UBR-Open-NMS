@@ -7,7 +7,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.2.4</version>
+    <version>3.4.2</version>
     <relativePath/>
   </parent>
 
@@ -17,7 +17,7 @@
   <description>UBR NMS Inventory Service — device CRUD, search, birth certificates</description>
 
   <properties>
-    <java.version>17</java.version>
+    <java.version>21</java.version>
     <mapstruct.version>1.5.5.Final</mapstruct.version>
   </properties>
 
@@ -109,6 +109,20 @@
               <artifactId>lombok</artifactId>
             </exclude>
           </excludes>
+        </configuration>
+      </plugin>
+
+      <!--
+        Java 21 reflection hardening (WO-006):
+        --add-opens prevents IllegalAccessError from Mockito/ByteBuddy/CGLIB proxies
+        that use deep reflection into java.base. Required when upgrading from Java 17.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+        <configuration>
+          <argLine>--add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED</argLine>
         </configuration>
       </plugin>
     </plugins>

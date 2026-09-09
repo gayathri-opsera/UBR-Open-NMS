@@ -1,4 +1,7 @@
 spring:
+  threads:
+    virtual:
+      enabled: true  # Java 21 Virtual Threads (WO-006)
   application:
     name: kpi-query-service
   data:
