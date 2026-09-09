@@ -22,17 +22,28 @@ import (
 	"log/slog"
 	"math/rand"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
 )
 
-// Standard SNMP system OIDs used for fingerprinting.
+// Standard MIB-II system group OIDs used for fingerprinting (WO-016).
 const (
 	OIDSysDescr    = ".1.3.6.1.2.1.1.1.0"
 	OIDSysObjectID = ".1.3.6.1.2.1.1.2.0"
+	OIDSysUpTime   = ".1.3.6.1.2.1.1.3.0"
+	OIDSysContact  = ".1.3.6.1.2.1.1.4.0"
+	OIDSysName     = ".1.3.6.1.2.1.1.5.0"
+	OIDSysLocation = ".1.3.6.1.2.1.1.6.0"
 )
+
+// fingerprintOIDs is the full MIB-II system group queried in a single GET.
+var fingerprintOIDs = []string{
+	OIDSysDescr, OIDSysObjectID, OIDSysUpTime,
+	OIDSysContact, OIDSysName, OIDSysLocation,
+}
 
 // validOIDPattern matches a numeric OID string such as ".1.3.6.1.2.1.1.2.0".
 var validOIDPattern = regexp.MustCompile(`^\.?[0-9]+(\.[0-9]+)+$`)
@@ -202,7 +213,7 @@ func (f *SNMPFingerprinter) Fingerprint(ctx context.Context, host, runID, correl
 	)
 	for attempt := 0; attempt <= f.retry.MaxRetries; attempt++ {
 		queryCtx, cancel := context.WithTimeout(ctx, f.timeout)
-		values, queryErr = f.client.GetOIDs(queryCtx, host, []string{OIDSysDescr, OIDSysObjectID})
+		values, queryErr = f.client.GetOIDs(queryCtx, host, fingerprintOIDs)
 		cancel()
 
 		if queryErr == nil {
@@ -270,9 +281,30 @@ func (f *SNMPFingerprinter) Fingerprint(ctx context.Context, host, runID, correl
 	base.Status = model.SNMPFingerprintSuccess
 	base.SysObjectID = normaliseOID(rawOID)
 	base.SysDescr = sysDescr
+	applyMIBIIFields(&base, values)
 	slog.Info("snmp: fingerprint success",
 		"host", host, "runId", runID, "sysObjectID", base.SysObjectID, "retries", retryCount)
 	return base
+}
+
+func applyMIBIIFields(base *model.SNMPFingerprintResult, values map[string]string) {
+	base.SysName = strings.TrimSpace(values[OIDSysName])
+	base.SysContact = strings.TrimSpace(values[OIDSysContact])
+	base.SysLocation = strings.TrimSpace(values[OIDSysLocation])
+	base.SysUpTimeSec = parseSysUpTime(values[OIDSysUpTime])
+}
+
+// parseSysUpTime converts SNMP TimeTicks (hundredths of a second) to whole seconds.
+func parseSysUpTime(raw string) int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	ticks, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return ticks / 100
 }
 
 // FingerprintBatch fingerprints a list of hosts concurrently (up to maxConcurrency at once).

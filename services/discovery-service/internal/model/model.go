@@ -162,9 +162,14 @@ type ScopeEntry struct {
 	Tags            []string `json:"tags,omitempty"`            // Optional tags
 }
 
-// DiscoveryRunRequest is the request payload for POST /api/v1/discovery/runs (WO-011).
+// DiscoveryRunRequest is the request payload for POST /api/v1/discovery/runs (WO-011, WO-027).
 type DiscoveryRunRequest struct {
-	Scope []ScopeEntry `json:"scope"`
+	Scope          []ScopeEntry `json:"scope"`
+	Protocol       string       `json:"protocol,omitempty"`       // SNMP_V1, SNMP_V2C
+	CredentialID   string       `json:"credentialId,omitempty"` // stored credential reference
+	Community      string       `json:"community,omitempty"`      // ephemeral v1/v2c community (never persisted)
+	TimeoutSeconds int          `json:"timeoutSeconds,omitempty"`
+	Retries        int          `json:"retries,omitempty"`
 }
 
 // DiscoveryRunResponse is the successful response for creating a discovery run (WO-011).
@@ -191,6 +196,36 @@ type ScopeValidationError struct {
 	FieldErrors []ValidationError `json:"fieldErrors,omitempty"`
 }
 
+// SweepProgress tracks ICMP sweep progress for a discovery run (WO-016).
+type SweepProgress struct {
+	TotalHosts       int        `json:"totalHosts"`
+	HostsScanned     int        `json:"hostsScanned"`
+	ReachableHosts   int        `json:"reachableHosts"`
+	SweepStartedAt   *time.Time `json:"sweepStartedAt,omitempty"`
+	SweepCompletedAt *time.Time `json:"sweepCompletedAt,omitempty"`
+	SweepDurationMs  int64      `json:"sweepDurationMs,omitempty"`
+	WorkerCount      int        `json:"workerCount,omitempty"`
+}
+
+// DiscoveryHostResult is the per-host API result returned to the UI (WO-001, WO-016).
+type DiscoveryHostResult struct {
+	IP                   string `json:"ip"`
+	IcmpStatus           string `json:"icmpStatus"`
+	SnmpStatus           string `json:"snmpStatus"`
+	Vendor               string `json:"vendor,omitempty"`
+	Model                string `json:"model,omitempty"`
+	GenericDeviceType    string `json:"genericDeviceType,omitempty"`
+	SysObjectID          string `json:"sysObjectID,omitempty"`
+	SysDescr             string `json:"sysDescr,omitempty"`
+	SysName              string `json:"sysName,omitempty"`
+	SysContact           string `json:"sysContact,omitempty"`
+	SysLocation          string `json:"sysLocation,omitempty"`
+	SysUpTimeSeconds     int64  `json:"sysUpTimeSeconds,omitempty"`
+	ClassificationStatus string `json:"classificationStatus"`
+	DeferReason          string `json:"deferReason,omitempty"`
+	CorrelationID        string `json:"correlationId,omitempty"`
+}
+
 // DiscoveryRun represents a stored discovery run record (WO-011).
 type DiscoveryRun struct {
 	ID              string
@@ -198,7 +233,55 @@ type DiscoveryRun struct {
 	Status          string
 	CreatedBy       string
 	CreatedAt       time.Time
+	CompletedAt     *time.Time
 	ValidationNotes string
+	CredentialID    string
+	Protocol        string
+	FailureReason   string
+	Sweep           *SweepProgress
+	Results         []DiscoveryHostResult
+	DevicesFound    int
+}
+
+// DiscoveryRunSummary is the list-row shape for GET /discovery/runs (WO-003).
+type DiscoveryRunSummary struct {
+	RunID           string       `json:"runId"`
+	Status          string       `json:"status"`
+	ScopeSummary    string       `json:"scopeSummary,omitempty"`
+	CreatedAt       time.Time    `json:"createdAt"`
+	CompletedAt     *time.Time   `json:"completedAt,omitempty"`
+	DevicesFound    int          `json:"devicesFound,omitempty"`
+	CreatedBy       string       `json:"createdBy,omitempty"`
+	NormalizedScope []ScopeEntry `json:"normalizedScope,omitempty"`
+}
+
+// DiscoveryRunDetailResponse is returned by GET /discovery/runs/{runId}.
+type DiscoveryRunDetailResponse struct {
+	RunID             string         `json:"runId"`
+	Status            string         `json:"status"`
+	NormalizedScope   []ScopeEntry   `json:"normalizedScope"`
+	CreatedBy         string         `json:"createdBy"`
+	CreatedAt         time.Time      `json:"createdAt"`
+	UpdatedAt         *time.Time     `json:"updatedAt,omitempty"`
+	ValidationSummary string         `json:"validationSummary,omitempty"`
+	Sweep             *SweepProgress `json:"sweep,omitempty"`
+	FailureReason     string         `json:"failureReason,omitempty"`
+	Protocol          string         `json:"protocol,omitempty"`
+	SnmpAttemptCount  int            `json:"snmpAttemptCount,omitempty"`
+	SnmpSuccessCount  int            `json:"snmpSuccessCount,omitempty"`
+}
+
+// PaginatedRunsResponse wraps a page of discovery run summaries.
+type PaginatedRunsResponse struct {
+	Data       []DiscoveryRunSummary `json:"data"`
+	Pagination PaginationMeta        `json:"pagination"`
+}
+
+// PaginationMeta describes list pagination metadata.
+type PaginationMeta struct {
+	Total int `json:"total"`
+	Page  int `json:"page"`
+	Limit int `json:"limit"`
 }
 
 // ── WO-027: SNMP fingerprint models ──────────────────────────────────────────
@@ -237,6 +320,10 @@ type SNMPFingerprintResult struct {
 	Status        SNMPFingerprintStatus `json:"status"`
 	SysObjectID   string                `json:"sysObjectID,omitempty"`
 	SysDescr      string                `json:"sysDescr,omitempty"`
+	SysName       string                `json:"sysName,omitempty"`
+	SysContact    string                `json:"sysContact,omitempty"`
+	SysLocation   string                `json:"sysLocation,omitempty"`
+	SysUpTimeSec  int64                 `json:"sysUpTimeSeconds,omitempty"`
 	// FailureCategory is one of: SNMP_AUTH_FAILED, SNMP_TIMEOUT, SNMP_MALFORMED_OID,
 	// SNMP_MISSING_DESCR, SNMP_UNSUPPORTED_VERSION, SNMP_INTERNAL.
 	// Never includes community strings or credentials.

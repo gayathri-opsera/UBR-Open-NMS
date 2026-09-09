@@ -784,6 +784,18 @@ func (s *DiscoveryRunStore) Get(id string) (*model.DiscoveryRun, bool) {
 	return run, ok
 }
 
+// Update applies an in-place mutation to a stored run. Returns false if the run ID is unknown.
+func (s *DiscoveryRunStore) Update(id string, fn func(*model.DiscoveryRun)) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.runs[id]
+	if !ok {
+		return false
+	}
+	fn(run)
+	return true
+}
+
 // ListRunsParams encapsulates pagination and filter parameters for ListRuns (WO-003).
 type ListRunsParams struct {
 	// Page is 1-indexed page number. Values < 1 default to 1.
@@ -877,14 +889,21 @@ func (s *DiscoveryService) CreateDiscoveryRun(req *model.DiscoveryRunRequest, cr
 		return nil, fieldErrors, err
 	}
 
+	protocol := req.Protocol
+	if protocol == "" {
+		protocol = "SNMP_V2C"
+	}
+
 	// Create discovery run record
 	run := &model.DiscoveryRun{
 		ID:              uuid.NewString(),
 		NormalizedScope: normalized,
-		Status:          "CREATED",
+		Status:          "QUEUED",
 		CreatedBy:       createdBy,
 		CreatedAt:       time.Now().UTC(),
 		ValidationNotes: fmt.Sprintf("Validated %d scope entries", len(normalized)),
+		CredentialID:    req.CredentialID,
+		Protocol:        protocol,
 	}
 
 	// Persist run

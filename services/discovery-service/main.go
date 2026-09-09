@@ -71,7 +71,10 @@ func main() {
 	rediscoSched := scheduler.NewRediscoveryScheduler(schedStore, runStore, sweeper, nil)
 	rediscoSched.Start()
 
-	h := handler.New(svc, store, runStore).WithHMACValidator(hmacValidator)
+	runExecutor := service.NewRunExecutor(runStore, sweeper)
+	h := handler.New(svc, store, runStore).
+		WithHMACValidator(hmacValidator).
+		WithRunExecutor(runExecutor)
 	schedHandler := handler.NewScheduleHandler(rediscoSched)
 
 	// Wire credential CRUD handler (WO-014).
@@ -122,6 +125,8 @@ func main() {
 		r.Post("/scan", h.TriggerScan)
 		r.Get("/runs", h.ListDiscoveryRuns)                                      // WO-003
 		r.Post("/runs", h.CreateDiscoveryRun)                                    // WO-011
+		r.Get("/runs/{runId}", h.GetDiscoveryRun)
+		r.Get("/runs/{runId}/results", h.GetDiscoveryRunResults)
 		r.Get("/onboarding", h.GetOnboardingStates)                              // WO-026
 		r.Post("/schedules", schedHandler.CreateSchedule)                        // WO-017
 		r.Get("/schedules", schedHandler.ListSchedules)                          // WO-017

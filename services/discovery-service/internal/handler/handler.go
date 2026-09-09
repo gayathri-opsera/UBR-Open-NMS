@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/airtel-ubrnms/discovery-service/internal/auth"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
@@ -20,6 +22,7 @@ type DiscoveryHandler struct {
 	svc           *service.DiscoveryService
 	store         *service.DeviceStore
 	runStore      *service.DiscoveryRunStore // WO-011
+	runExecutor   *service.RunExecutor       // async ICMP/SNMP pipeline
 	hmacValidator *auth.Validator            // WO-015: nil disables HMAC validation (dev/test)
 }
 
@@ -32,6 +35,12 @@ func New(svc *service.DiscoveryService, store *service.DeviceStore, runStore *se
 // When set, CheckIn and other signed southbound endpoints require valid HMAC headers.
 func (h *DiscoveryHandler) WithHMACValidator(v *auth.Validator) *DiscoveryHandler {
 	h.hmacValidator = v
+	return h
+}
+
+// WithRunExecutor wires async discovery run execution after create.
+func (h *DiscoveryHandler) WithRunExecutor(e *service.RunExecutor) *DiscoveryHandler {
+	h.runExecutor = e
 	return h
 }
 
@@ -353,7 +362,57 @@ func (h *DiscoveryHandler) ListDiscoveryRuns(w http.ResponseWriter, r *http.Requ
 		Status: status,
 	})
 
-	writeJSON(w, http.StatusOK, result)
+	summaries := make([]model.DiscoveryRunSummary, len(result.Data))
+	for i, r := range result.Data {
+		summaries[i] = service.ToRunSummary(r)
+	}
+
+	writeJSON(w, http.StatusOK, model.PaginatedRunsResponse{
+		Data: summaries,
+		Pagination: model.PaginationMeta{
+			Total: result.Pagination.Total,
+			Page:  result.Pagination.Page,
+			Limit: result.Pagination.Limit,
+		},
+	})
+}
+
+// GetDiscoveryRun handles GET /api/v1/discovery/runs/{runId}.
+func (h *DiscoveryHandler) GetDiscoveryRun(w http.ResponseWriter, r *http.Request) {
+	runID := chi.URLParam(r, "runId")
+	if runID == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "runId path parameter is required")
+		return
+	}
+
+	run, ok := h.runStore.Get(runID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "Discovery run not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, service.ToRunDetail(run))
+}
+
+// GetDiscoveryRunResults handles GET /api/v1/discovery/runs/{runId}/results.
+func (h *DiscoveryHandler) GetDiscoveryRunResults(w http.ResponseWriter, r *http.Request) {
+	runID := chi.URLParam(r, "runId")
+	if runID == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "runId path parameter is required")
+		return
+	}
+
+	run, ok := h.runStore.Get(runID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "Discovery run not found")
+		return
+	}
+
+	results := run.Results
+	if results == nil {
+		results = []model.DiscoveryHostResult{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"results": results})
 }
 
 // CreateDiscoveryRun handles POST /api/v1/discovery/runs (WO-011).
@@ -392,6 +451,11 @@ func (h *DiscoveryHandler) CreateDiscoveryRun(w http.ResponseWriter, r *http.Req
 		// Unexpected internal fault: 500
 		southbound.InternalError(w, corrID)
 		return
+	}
+
+	// Kick off async execution (ICMP sweep + result aggregation).
+	if h.runExecutor != nil {
+		h.runExecutor.Start(response.RunID)
 	}
 
 	// Return 201 Created
