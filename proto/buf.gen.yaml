@@ -1,0 +1,60 @@
+# buf.gen.yaml — Code generation configuration for UBR NMS Protocol Buffers (WO-024).
+#
+# Run `buf generate` from the repo root (or `cd proto && buf generate`) to regenerate
+# all language-specific model classes. The generated output is written into each
+# shared-libs sub-module's generated-src directory.
+#
+# Prerequisites (install once per dev machine / CI agent):
+#   brew install bufbuild/buf/buf
+#   Java: protoc-gen-java is bundled with maven-protobuf-plugin (no extra install)
+#   Go:   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+#   TypeScript: npm install -g ts-proto (or via shared-libs/typescript)
+#   Python: pip install grpcio-tools
+
+version: v1
+
+managed:
+  enabled: true
+  # Java package override — all messages go to com.ubrnms.proto.*
+  java_package_prefix:
+    default: com.ubrnms.proto
+  # Suppress the "optimize for speed" default; lite-runtime is smaller for services
+  java_multiple_files: true
+
+plugins:
+  # ── Java ───────────────────────────────────────────────────────────────────
+  # Generates Protobuf message classes with builder pattern.
+  # Output lands in shared-libs/java/src/generated/java (gitignored, generated at build).
+  - plugin: java
+    out: ../shared-libs/java/src/generated/java
+
+  # ── Go ─────────────────────────────────────────────────────────────────────
+  # Generates *_pb.pb.go files — one per .proto file.
+  # Output lands in shared-libs/go/proto (gitignored, generated via go generate).
+  - plugin: go
+    out: ../shared-libs/go/proto
+    opt:
+      - paths=source_relative
+      - module=github.com/airtel-ubrnms/shared-libs
+
+  # ── TypeScript ─────────────────────────────────────────────────────────────
+  # ts-proto generates idiomatic TypeScript interfaces + encode/decode helpers.
+  # Output lands in shared-libs/typescript/src/generated.
+  - plugin: ts-proto
+    out: ../shared-libs/typescript/src/generated
+    opt:
+      - outputEncodeMethods=false
+      - outputJsonMethods=false
+      - useOptionals=all
+      - stringEnums=true
+      - onlyTypes=true
+
+  # ── Python ─────────────────────────────────────────────────────────────────
+  # grpc_tools.protoc outputs _pb2.py dataclass-compatible classes.
+  # Output lands in shared-libs/python/proto.
+  - plugin: python
+    out: ../shared-libs/python/proto
+
+  # Python type stubs (pyi) for static analysis.
+  - plugin: pyi
+    out: ../shared-libs/python/proto

@@ -7,9 +7,12 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "proto:generate": "buf generate ../../proto --template ../../proto/buf.gen.yaml",
+    "proto:check": "buf lint ../../proto"
   },
   "devDependencies": {
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "ts-proto": "^1.168.2"
   }
 }
