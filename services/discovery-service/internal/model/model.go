@@ -241,7 +241,10 @@ type SNMPFingerprintResult struct {
 	// SNMP_MISSING_DESCR, SNMP_UNSUPPORTED_VERSION, SNMP_INTERNAL.
 	// Never includes community strings or credentials.
 	FailureCategory FingerprintFailureCategory `json:"failureCategory,omitempty"`
-	FingerprintedAt time.Time `json:"fingerprintedAt"`
+	// RetryCount records how many retry attempts were made before this result was produced.
+	// Zero means the first attempt succeeded (or failed permanently).
+	RetryCount      int                        `json:"retryCount,omitempty"`
+	FingerprintedAt time.Time                  `json:"fingerprintedAt"`
 }
 
 // ── WO-026: Bootstrap onboarding state summary ────────────────────────────────

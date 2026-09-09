@@ -82,7 +82,7 @@ func TestFingerprint_MissingCredentials_AuthFailed(t *testing.T) {
 	if res.Status != model.SNMPFingerprintAuthFailed {
 		t.Errorf("expected auth_failed, got %s", res.Status)
 	}
-	if res.FailureCategory != "SNMP_AUTH_FAILED" {
+	if res.FailureCategory != model.FingerprintCategoryAuthFailed {
 		t.Errorf("expected SNMP_AUTH_FAILED category, got %q", res.FailureCategory)
 	}
 }
@@ -96,7 +96,7 @@ func TestFingerprint_Timeout(t *testing.T) {
 	if res.Status != model.SNMPFingerprintTimeout {
 		t.Errorf("expected timeout, got %s", res.Status)
 	}
-	if res.FailureCategory != "SNMP_TIMEOUT" {
+	if res.FailureCategory != model.FingerprintCategoryTimeout {
 		t.Errorf("expected SNMP_TIMEOUT, got %q", res.FailureCategory)
 	}
 }
@@ -192,15 +192,15 @@ func TestValidOIDPattern(t *testing.T) {
 func TestClassifyError(t *testing.T) {
 	cases := []struct {
 		err string
-		cat string
+		cat model.FingerprintFailureCategory
 	}{
-		{"request timeout", "SNMP_TIMEOUT"},
-		{"context deadline exceeded", "SNMP_TIMEOUT"},
-		{"authentication failed", "SNMP_AUTH_FAILED"},
-		{"wrong community string", "SNMP_AUTH_FAILED"},
-		{"unsupported version", "SNMP_UNSUPPORTED_VERSION"},
-		{"malformed response", "SNMP_MALFORMED_OID"},
-		{"unexpected error", "SNMP_INTERNAL"},
+		{"request timeout", model.FingerprintCategoryTimeout},
+		{"context deadline exceeded", model.FingerprintCategoryTimeout},
+		{"authentication failed", model.FingerprintCategoryAuthFailed},
+		{"wrong community string", model.FingerprintCategoryAuthFailed},
+		{"unsupported version", model.FingerprintCategoryUnsupportedVersion},
+		{"malformed response", model.FingerprintCategoryMalformedOID},
+		{"unexpected error", model.FingerprintCategoryInternal},
 	}
 	for _, tc := range cases {
 		if got := classifyError(errors.New(tc.err)); got != tc.cat {
@@ -221,5 +221,153 @@ func TestFingerprintBatch_ReturnsOnePerHost(t *testing.T) {
 	results := fp.FingerprintBatch(context.Background(), hosts, "run-batch", 2)
 	if len(results) != len(hosts) {
 		t.Errorf("expected %d results, got %d", len(hosts), len(results))
+	}
+}
+
+// ── WO-010: Exponential backoff retry tests ───────────────────────────────────
+
+// transientSNMPClient simulates a client that fails with a transient error for
+// the first N calls, then succeeds. Used to test retry logic without real network.
+type transientSNMPClient struct {
+	failsLeft    int
+	transientErr error
+	successValues map[string]string
+}
+
+func (c *transientSNMPClient) GetOIDs(_ context.Context, _ string, _ []string) (map[string]string, error) {
+	if c.failsLeft > 0 {
+		c.failsLeft--
+		return nil, c.transientErr
+	}
+	return c.successValues, nil
+}
+
+// newInstantRetryFP builds a fingerprinter with instant retry delays for fast tests.
+func newInstantRetryFP(client SNMPClient, cred *fakeCred, maxRetries int) *SNMPFingerprinter {
+	fp := NewSNMPFingerprinterWithRetry(client, cred, 100*time.Millisecond, RetryConfig{
+		MaxRetries:   maxRetries,
+		InitialDelay: 1 * time.Millisecond, // effectively instant in tests
+		MaxDelay:     5 * time.Millisecond,
+	})
+	// Override sleepFn so tests run instantly without real waits.
+	fp.sleepFn = func(time.Duration) {}
+	return fp
+}
+
+func TestFingerprint_RetryOnTimeout_SucceedsAfterTransientFailure(t *testing.T) {
+	client := &transientSNMPClient{
+		failsLeft:    1, // fail once, then succeed
+		transientErr: errors.New("request timeout"),
+		successValues: map[string]string{
+			OIDSysDescr:    "Cisco IOS",
+			OIDSysObjectID: ".1.3.6.1.4.1.9.1.1",
+		},
+	}
+	fp := newInstantRetryFP(client, &fakeCred{ref: "ref", found: true}, 2)
+	res := fp.Fingerprint(context.Background(), "10.0.0.1", "run-retry", "")
+
+	if res.Status != model.SNMPFingerprintSuccess {
+		t.Errorf("expected success after retry, got %s (category: %s)", res.Status, res.FailureCategory)
+	}
+	if res.RetryCount != 1 {
+		t.Errorf("expected RetryCount=1, got %d", res.RetryCount)
+	}
+}
+
+func TestFingerprint_NoRetryOnAuthFailure(t *testing.T) {
+	callCount := 0
+	client := &fakeSNMPClient{err: errors.New("authentication failed")}
+	// Wrap to count calls — auth failures must NOT trigger retries.
+	type countingClient struct{ SNMPClient; count *int }
+	// Use a direct counter via closure in a local type.
+	type counterClient struct {
+		inner *fakeSNMPClient
+		calls int
+	}
+
+	// Use transientSNMPClient with permanent auth error as the err instead.
+	tc := &transientSNMPClient{
+		failsLeft:    100, // will always fail
+		transientErr: errors.New("authentication failed"),
+	}
+	_ = callCount
+	_ = client
+
+	fp := newInstantRetryFP(tc, &fakeCred{ref: "ref", found: true}, 2)
+	res := fp.Fingerprint(context.Background(), "10.0.0.1", "run-noretry", "")
+
+	if res.Status != model.SNMPFingerprintAuthFailed {
+		t.Errorf("expected auth_failed, got %s", res.Status)
+	}
+	// Auth failures are not retried — only 1 attempt made.
+	if tc.failsLeft != 99 {
+		t.Errorf("expected exactly 1 SNMP call (failsLeft should be 99), got failsLeft=%d", tc.failsLeft)
+	}
+}
+
+func TestFingerprint_ExhaustsRetries_ReturnsFailed(t *testing.T) {
+	client := &transientSNMPClient{
+		failsLeft:    100, // always fails with timeout
+		transientErr: errors.New("request timeout"),
+	}
+	fp := newInstantRetryFP(client, &fakeCred{ref: "ref", found: true}, 2) // max 2 retries
+	res := fp.Fingerprint(context.Background(), "10.0.0.1", "run-exhausted", "")
+
+	if res.Status != model.SNMPFingerprintTimeout {
+		t.Errorf("expected timeout status after exhausted retries, got %s", res.Status)
+	}
+	if res.RetryCount != 2 {
+		t.Errorf("expected RetryCount=2 (max retries), got %d", res.RetryCount)
+	}
+	// 3 total calls: 1 initial + 2 retries = 3 decrements from 100 → 97.
+	if client.failsLeft != 97 {
+		t.Errorf("expected 3 total SNMP calls, got failsLeft=%d (expected 97)", client.failsLeft)
+	}
+}
+
+func TestFingerprint_NoRetries_SingleAttemptOnFailure(t *testing.T) {
+	client := &transientSNMPClient{
+		failsLeft:    100,
+		transientErr: errors.New("request timeout"),
+	}
+	fp := newInstantRetryFP(client, &fakeCred{ref: "ref", found: true}, 0) // no retries
+	res := fp.Fingerprint(context.Background(), "10.0.0.1", "run-noretry2", "")
+
+	if res.Status != model.SNMPFingerprintTimeout {
+		t.Errorf("expected timeout, got %s", res.Status)
+	}
+	if res.RetryCount != 0 {
+		t.Errorf("expected RetryCount=0, got %d", res.RetryCount)
+	}
+	if client.failsLeft != 99 {
+		t.Errorf("expected exactly 1 call, got failsLeft=%d", client.failsLeft)
+	}
+}
+
+func TestRetryConfig_ZeroInitialDelay_UsesDefault(t *testing.T) {
+	rc := sanitise(RetryConfig{MaxRetries: 1, InitialDelay: 0, MaxDelay: 5 * time.Second})
+	if rc.InitialDelay <= 0 {
+		t.Error("expected InitialDelay to be replaced with a positive default")
+	}
+}
+
+func TestRetryConfig_NegativeMaxRetries_BecomesZero(t *testing.T) {
+	rc := sanitise(RetryConfig{MaxRetries: -3, InitialDelay: time.Second, MaxDelay: 10 * time.Second})
+	if rc.MaxRetries != 0 {
+		t.Errorf("expected MaxRetries to be clamped to 0, got %d", rc.MaxRetries)
+	}
+}
+
+func TestFingerprint_RetryCount_IsZeroOnFirstAttemptSuccess(t *testing.T) {
+	fp := newFP(
+		&fakeSNMPClient{values: map[string]string{
+			OIDSysDescr:    "Device OK",
+			OIDSysObjectID: ".1.3.6.1.4.1.9.1.1",
+		}},
+		&fakeCred{ref: "ref", found: true},
+	)
+	res := fp.Fingerprint(context.Background(), "10.0.0.1", "run-ok", "")
+	if res.RetryCount != 0 {
+		t.Errorf("expected RetryCount=0 on first-attempt success, got %d", res.RetryCount)
 	}
 }
