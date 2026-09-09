@@ -1,10 +1,12 @@
 /**
- * V2 Device Discovery & Onboarding — REQ-001 / REQ-025 / NMS-DIS-01 to DIS-06
+ * V2 Device Discovery & Onboarding — REQ-001 / REQ-004 / REQ-025 / NMS-DIS-01 to DIS-06
  *
  * Tabs:
  *  1. Provisioning Queue — devices awaiting onboarding (status=PROVISIONING)
  *  2. Auth Failures      — alarms from authentication-failed devices (NMS-DIS-05)
  *  3. All Discovered     — complete inventory including ONLINE/OFFLINE (NMS-DIS-02)
+ *  4. SNMP Discovery     — run SNMP-based discovery scans (REQ-004)
+ *  5. Mode Admin         — enable/disable discovery modes (admin only, WO-001)
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -21,16 +23,31 @@ import { LoadingState, EmptyState } from '../components/common/States';
 import { useToast } from '../components/common/Toast';
 import { logger } from '../utils/logger';
 import { apiClient } from '../../api/client';
+import { DiscoveryTriggerForm } from '../components/discovery/DiscoveryTriggerForm';
+import { DiscoveryRunStatusView } from '../components/discovery/DiscoveryRunStatusView';
+import { DiscoveryResultsTable } from '../components/discovery/DiscoveryResultsTable';
+import type { DiscoveryRunResponse } from '../../api/discovery.api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type DiscoveryTab = 'provisioning' | 'auth_failures' | 'all' | 'mode_admin';
+type DiscoveryTab = 'provisioning' | 'auth_failures' | 'all' | 'snmp_discovery' | 'mode_admin';
 
 const TAB_LABELS: Record<DiscoveryTab, string> = {
-  provisioning:  'Provisioning Queue',
-  auth_failures: 'Auth Failures',
-  all:           'All Discovered',
-  mode_admin:    'Mode Admin',
+  provisioning:   'Provisioning Queue',
+  auth_failures:  'Auth Failures',
+  all:            'All Discovered',
+  snmp_discovery: 'SNMP Discovery',
+  mode_admin:     'Mode Admin',
 };
+
+// ── SNMP Discovery workflow view states ───────────────────────────────────────
+type SnmpView = 'form' | 'status' | 'results';
+
+/**
+ * Session storage key for persisting an in-progress run ID across refreshes.
+ * Edge case: user refreshes while a run is in the 'running' state — we restore
+ * the status view rather than losing the context.
+ */
+const SNMP_RUN_SESSION_KEY = 'vf_snmp_active_run_id';
 
 // ── Discovery mode entry shape (WO-001) ──────────────────────────────────────
 interface DiscoveryModeEntry {
@@ -462,7 +479,96 @@ function AllDiscoveredTab() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tab 4 — Mode Administration (admin only, WO-001)
+// Tab 4 — SNMP Discovery (REQ-004)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * SnmpDiscoveryTab manages the three-step SNMP discovery workflow:
+ *   form → status → results
+ *
+ * State is persisted to sessionStorage so the user can refresh without losing
+ * an in-progress run (edge case from WO-025).
+ */
+function SnmpDiscoveryTab() {
+  // Restore run ID from sessionStorage to handle browser refresh mid-run.
+  const restoredRunId = sessionStorage.getItem(SNMP_RUN_SESSION_KEY);
+
+  const [view, setView] = useState<SnmpView>(restoredRunId ? 'status' : 'form');
+  const [activeRunId, setActiveRunId] = useState<string | null>(restoredRunId);
+
+  /**
+   * Called by DiscoveryTriggerForm when a run is successfully created.
+   * Persists runId to sessionStorage so the status view survives a page refresh.
+   */
+  function handleRunCreated(run: DiscoveryRunResponse) {
+    sessionStorage.setItem(SNMP_RUN_SESSION_KEY, run.runId);
+    setActiveRunId(run.runId);
+    setView('status');
+  }
+
+  /**
+   * Called by DiscoveryRunStatusView when the run reaches COMPLETED status.
+   */
+  function handleRunComplete() {
+    // Keep activeRunId so results table can fetch the results.
+    // Clear session storage — the run is done, no need to restore.
+    sessionStorage.removeItem(SNMP_RUN_SESSION_KEY);
+    setView('results');
+  }
+
+  /**
+   * Resets the workflow back to the trigger form.
+   * Used by the "Start New Discovery" button in the results view.
+   */
+  function handleStartNew() {
+    sessionStorage.removeItem(SNMP_RUN_SESSION_KEY);
+    setActiveRunId(null);
+    setView('form');
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Section header */}
+      <div>
+        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--vf-text-primary)' }}>
+          SNMP Network Discovery
+        </h2>
+        <p style={{ fontSize: 13, color: 'var(--vf-text-muted)', margin: '4px 0 0' }}>
+          Scan IP ranges using ICMP sweeps and SNMP fingerprinting to discover and classify network devices.
+        </p>
+      </div>
+
+      {/* Workflow: Form → Status → Results */}
+      {view === 'form' && (
+        <div style={{ maxWidth: 640 }}>
+          <DiscoveryTriggerForm onRunCreated={handleRunCreated} />
+        </div>
+      )}
+
+      {view === 'status' && activeRunId && (
+        <DiscoveryRunStatusView
+          runId={activeRunId}
+          onComplete={handleRunComplete}
+          onBack={handleStartNew}
+        />
+      )}
+
+      {view === 'results' && activeRunId && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button variant="primary" size="sm" onClick={handleStartNew}>
+              Start New Discovery
+            </Button>
+          </div>
+          <DiscoveryResultsTable runId={activeRunId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tab 5 — Mode Administration (admin only, WO-001)
 // ─────────────────────────────────────────────────────────────────────────────
 function ModeAdminTab() {
   const { addToast } = useToast();
@@ -662,17 +768,19 @@ export default function V2DiscoveryPage() {
         borderBottom: '1px solid rgba(77,158,255,0.1)',
         marginBottom: 24, marginLeft: -28, marginRight: -28, paddingLeft: 28,
       }}>
-        <TabBtn id="provisioning"  active={tab === 'provisioning'}  count={stats.provisioning} onClick={setTab} />
-        <TabBtn id="auth_failures" active={tab === 'auth_failures'} count={stats.authFails}    onClick={setTab} />
-        <TabBtn id="all"           active={tab === 'all'}                                      onClick={setTab} />
-        <TabBtn id="mode_admin"    active={tab === 'mode_admin'}                               onClick={setTab} />
+        <TabBtn id="provisioning"   active={tab === 'provisioning'}   count={stats.provisioning} onClick={setTab} />
+        <TabBtn id="auth_failures"  active={tab === 'auth_failures'}  count={stats.authFails}    onClick={setTab} />
+        <TabBtn id="all"            active={tab === 'all'}                                        onClick={setTab} />
+        <TabBtn id="snmp_discovery" active={tab === 'snmp_discovery'}                             onClick={setTab} />
+        <TabBtn id="mode_admin"     active={tab === 'mode_admin'}                                 onClick={setTab} />
       </div>
 
       {/* Tab content */}
-      {tab === 'provisioning'  && <ProvisioningTab />}
-      {tab === 'auth_failures' && <AuthFailuresTab />}
-      {tab === 'all'           && <AllDiscoveredTab />}
-      {tab === 'mode_admin'    && <ModeAdminTab />}
+      {tab === 'provisioning'   && <ProvisioningTab />}
+      {tab === 'auth_failures'  && <AuthFailuresTab />}
+      {tab === 'all'            && <AllDiscoveredTab />}
+      {tab === 'snmp_discovery' && <SnmpDiscoveryTab />}
+      {tab === 'mode_admin'     && <ModeAdminTab />}
     </div>
   );
 }
