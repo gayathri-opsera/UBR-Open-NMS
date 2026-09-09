@@ -7,7 +7,7 @@ import (
 
 	confluent "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
-	sharedmodels "github.com/airtel-ubrnms/shared-libs/go/models"
+	sharedmodels "github.com/airtel-ubrnms/shared-libs/models"
 )
 
 // Producer wraps a Kafka producer with idempotent, acks=all writes.

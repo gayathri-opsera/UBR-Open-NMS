@@ -182,3 +182,79 @@ async def create_schedule(req: ScheduleRequest):
 @app.get("/api/v1/reports/schedules")
 async def list_schedules():
     return await svc.list_schedules()
+
+
+# ── WO-068: CTSO/TSOC Incident Evidence Export ────────────────────────────────
+
+class IncidentEvidenceRequest(BaseModel):
+    alarmId: Optional[str] = None
+    correlationId: Optional[str] = None
+    incidentRef: Optional[str] = None
+    deviceId: Optional[str] = None
+    from_dt: Optional[datetime] = None
+    to_dt: Optional[datetime] = None
+
+
+@app.post("/api/reports/incident-evidence", status_code=202)
+async def request_incident_evidence(req: IncidentEvidenceRequest):
+    """Request CTSO/TSOC incident evidence package (WO-068)."""
+    # Build scope from lookup criteria
+    scope = {}
+    if req.alarmId:
+        scope["alarmId"] = req.alarmId
+    if req.correlationId:
+        scope["correlationId"] = req.correlationId
+    if req.incidentRef:
+        scope["incidentRef"] = req.incidentRef
+    if req.deviceId:
+        scope["deviceId"] = req.deviceId
+
+    # Default time range: last 7 days
+    from_dt = req.from_dt or datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    to_dt = req.to_dt or datetime.now(timezone.utc)
+
+    # Request evidence package
+    report_id = await svc.request_incident_evidence(scope, from_dt, to_dt)
+
+    return {"reportId": report_id, "status": "PENDING"}
+
+
+@app.get("/api/reports/incident-evidence/{report_id}")
+async def get_incident_evidence_status(report_id: str):
+    """Get incident evidence package status and data (WO-068)."""
+    doc = await svc.get_report(report_id)
+    if not doc:
+        raise HTTPException(404, "Evidence package not found")
+
+    response = {
+        "reportId": report_id,
+        "status": doc.get("status"),
+        "completedAt": doc.get("completedAt"),
+        "evidence": doc.get("evidence")
+    }
+
+    return response
+
+
+@app.get("/api/reports/incident-evidence/{report_id}/download")
+async def download_incident_evidence(report_id: str, actor: str = Query(default="system")):
+    """Download incident evidence package as JSON (WO-068)."""
+    doc = await svc.get_report(report_id)
+    if not doc or doc.get("status") != "COMPLETED":
+        raise HTTPException(404, "Evidence package not found or not yet complete")
+
+    import json
+    evidence = doc.get("evidence", {})
+    data = json.dumps(evidence, indent=2).encode()
+
+    # Emit audit event
+    await emit_evidence_export_audit(
+        actor, report_id, "CTSO_TSOC_INCIDENT_EVIDENCE",
+        doc.get("scope", {}), data, "security"
+    )
+
+    return Response(
+        content=data,
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=incident-evidence-{report_id}.json"}
+    )

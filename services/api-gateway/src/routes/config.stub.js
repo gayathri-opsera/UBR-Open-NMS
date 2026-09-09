@@ -359,8 +359,6 @@ router.get('/history/:deviceId', async (req, res) => {
   const legacyLimit = limit;
   try {
     // Build a set of all known aliases for this device
-  try {
-    // Build a set of all known aliases for this device
     const aliases = new Set([deviceIdOrig]);
 
     // 1. Try MongoDB inventory (for manually-created / IDU devices)

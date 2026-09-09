@@ -33,6 +33,9 @@ const V2GroupsPage        = lazy(() => import('./pages/V2GroupsPage'));
 const V2ProfilePage       = lazy(() => import('./pages/V2ProfilePage'));
 const V2NotFoundPage      = lazy(() => import('./pages/V2NotFoundPage'));
 const V2UnifiedOnboardingPage = lazy(() => import('./pages/V2UnifiedOnboardingPage'));
+const V2ReleaseValidationPage = lazy(() => import('./pages/V2ReleaseValidationPage'));
+const V2CompliancePage    = lazy(() => import('./pages/V2CompliancePage'));
+const V2DiscoveryPage     = lazy(() => import('./pages/V2DiscoveryPage'));
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
@@ -106,6 +109,22 @@ export function V2App() {
                   }
                 />
                 <Route path="reports"       element={<V2ReportsPage />} />
+                <Route
+                  path="release-validation"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2ReleaseValidationPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="compliance"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2CompliancePage />
+                    </V2ProtectedRoute>
+                  }
+                />
                 <Route path="groups"        element={<V2GroupsPage />} />
                 <Route
                   path="notifications"
@@ -132,6 +151,7 @@ export function V2App() {
                     </V2ProtectedRoute>
                   }
                 />
+                <Route path="discovery" element={<V2DiscoveryPage />} />
                 <Route path="*" element={<V2NotFoundPage />} />
               </Routes>
             </Suspense>

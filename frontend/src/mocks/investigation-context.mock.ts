@@ -50,7 +50,7 @@ export const mockBtsParentIncident: DeviceInvestigationContext = {
       actualValue: 78,
       severity: 'WARNING',
     },
-  },
+  ],
   topologyNeighbors: [
     {
       deviceId: 'cpe-001',

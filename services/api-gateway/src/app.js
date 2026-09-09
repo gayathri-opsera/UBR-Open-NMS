@@ -153,6 +153,14 @@ function createApp(redisClient) {
   );
   app.use('/api/v1/reports', reportProxy);
 
+  // ── Test Harness proxy (nms-test-harness on port 3009) ────────────────────────
+  const testHarnessProxy = createServiceProxy(
+    process.env.TEST_HARNESS_URL || 'http://nms-test-harness:3009',
+    'test-harness',
+    config,
+  );
+  app.use('/api/test-harness', testHarnessProxy);
+
   app.use((_req, res) => res.status(404).json({ code: 'NOT_FOUND', message: 'Route not found' }));
 
   app.use((err, req, res, _next) => {

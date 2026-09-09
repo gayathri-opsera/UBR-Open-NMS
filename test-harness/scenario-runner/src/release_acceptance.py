@@ -16,7 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from runner import ScenarioResult, StepStatus
+from .runner import ScenarioResult, StepStatus
 
 
 class ReleaseStatus(str, Enum):

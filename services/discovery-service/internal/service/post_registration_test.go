@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
-	sharedmodels "github.com/airtel-ubrnms/shared-libs/go/models"
+	sharedmodels "github.com/airtel-ubrnms/shared-libs/models"
 )
 
 // ── Fake TriggerPublisher ─────────────────────────────────────────────────────

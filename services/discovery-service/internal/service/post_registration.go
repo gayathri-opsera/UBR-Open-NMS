@@ -17,7 +17,7 @@ import (
 	"log/slog"
 	"time"
 
-	sharedmodels "github.com/airtel-ubrnms/shared-libs/go/models"
+	sharedmodels "github.com/airtel-ubrnms/shared-libs/models"
 	"github.com/google/uuid"
 )
 

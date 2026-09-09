@@ -53,7 +53,8 @@ func main() {
 	// Configure HMAC validation middleware (WO-015)
 	// Uses in-memory nonce store; replace with Redis-backed store for multi-instance deployments.
 	nonceStore := auth.NewInMemoryNonceStore(auth.DefaultNonceTTL)
-	hmacValidator := auth.NewValidator(nonceStore, secretStore, auth.ValidatorConfig{
+	secretResolver := &secretStoreAdapter{store: secretStore}
+	hmacValidator := auth.NewValidator(nonceStore, secretResolver, auth.ValidatorConfig{
 		OnFailure: func(corrID, reason, serial string) {
 			slog.Warn("southbound.hmac.failure", "corrID", corrID, "reason", reason)
 		},
@@ -167,6 +168,19 @@ type noopPublisher struct{}
 
 func (n *noopPublisher) PublishDevice(d model.DiscoveredDevice) error { return nil }
 func (n *noopPublisher) PublishAlarm(a model.Alarm) error             { return nil }
+
+// secretStoreAdapter adapts service.SecretStore to auth.SecretResolver
+type secretStoreAdapter struct {
+	store service.SecretStore
+}
+
+func (a *secretStoreAdapter) GetSecretBySerial(serialNumber string) (string, bool, error) {
+	secret, found, err := a.store.GetSecretBySerial(serialNumber)
+	if err != nil || !found {
+		return "", found, err
+	}
+	return secret.SecretValue, true, nil
+}
 
 // ── WO-022: realtime presence no-op adapters ──────────────────────────────────
 // Replace with production Redis / inventory / Kafka clients before deploying.

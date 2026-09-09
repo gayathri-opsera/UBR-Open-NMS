@@ -76,6 +76,24 @@ class ReportService:
     async def list_schedules(self) -> list:
         return await self._schedules_col.find({"status": "ACTIVE"}).to_list(length=200)
 
+    async def request_incident_evidence(self, scope: dict, from_dt: datetime,
+                                       to_dt: datetime) -> str:
+        """Request CTSO/TSOC incident evidence package (WO-068)."""
+        report_id = str(uuid.uuid4())
+        await self._reports_col.insert_one({
+            "_id": report_id,
+            "reportType": "CTSO_TSOC_INCIDENT_EVIDENCE",
+            "scope": scope,
+            "from": from_dt,
+            "to": to_dt,
+            "format": "json",
+            "status": "PENDING",
+            "requestedAt": datetime.now(timezone.utc),
+        })
+        asyncio.create_task(self._generate(report_id, "CTSO_TSOC_INCIDENT_EVIDENCE",
+                                           scope, from_dt, to_dt, "json"))
+        return report_id
+
     # ── Internal generation ───────────────────────────────────────
 
     async def _generate(self, report_id: str, report_type: str,
@@ -102,11 +120,19 @@ class ReportService:
                     ct = "text/csv"
                 row_count = len(rows)
 
-            await self._reports_col.update_one({"_id": report_id}, {"$set": {
-                "status": "DONE", "rowCount": row_count,
-                "data": data, "contentType": ct,
+            update_fields = {
+                "status": "COMPLETED" if report_type == "CTSO_TSOC_INCIDENT_EVIDENCE" else "DONE",
+                "rowCount": row_count,
+                "data": data,
+                "contentType": ct,
                 "completedAt": datetime.now(timezone.utc),
-            }})
+            }
+
+            # For incident evidence, also store the parsed evidence object
+            if report_type == "CTSO_TSOC_INCIDENT_EVIDENCE":
+                update_fields["evidence"] = evidence
+
+            await self._reports_col.update_one({"_id": report_id}, {"$set": update_fields})
         except Exception as exc:
             log.exception("Report generation failed for %s", report_id)
             await self._reports_col.update_one({"_id": report_id}, {"$set": {

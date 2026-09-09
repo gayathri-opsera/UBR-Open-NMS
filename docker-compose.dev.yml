@@ -210,8 +210,8 @@ services:
 
   discovery-service:
     build:
-      context: services/discovery-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/discovery-service/Dockerfile
     container_name: nms-discovery
     restart: unless-stopped
     depends_on:
@@ -402,6 +402,26 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/healthz')"]
       <<: *healthcheck-http
 
+  test-harness:
+    build:
+      context: test-harness/scenario-runner
+      dockerfile: Dockerfile
+    container_name: nms-test-harness
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      PORT: "3009"
+      MONGO_URI: mongodb://mongo:27017/ubrnms
+      LOG_LEVEL: info
+    ports:
+      - "3009:3009"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3009/healthz')"]
+      <<: *healthcheck-http
+
   notification-service:
     build:
       context: services/notification-service
@@ -458,8 +478,6 @@ services:
     restart: unless-stopped
     depends_on:
       auth-service:
-        condition: service_healthy
-      alarm-service:
         condition: service_healthy
     environment:
       <<: *node-env
