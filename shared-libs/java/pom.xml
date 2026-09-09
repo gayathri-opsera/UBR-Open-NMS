@@ -100,7 +100,7 @@
         </configuration>
       </plugin>
 
-      <!--
+      
         protobuf-maven-plugin (WO-024) — compiles .proto files into Java source during
         the generate-sources lifecycle phase. The plugin picks up the platform-correct
         protoc binary automatically via os-maven-plugin.
