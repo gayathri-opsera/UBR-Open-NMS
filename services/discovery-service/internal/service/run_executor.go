@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/airtel-ubrnms/discovery-service/internal/audit"
 	"github.com/airtel-ubrnms/discovery-service/internal/classifier"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
 	"github.com/airtel-ubrnms/discovery-service/internal/scanner"
@@ -19,11 +21,21 @@ type SweepRunner interface {
 type RunExecutor struct {
 	store   *DiscoveryRunStore
 	sweeper SweepRunner
+	audit   audit.Publisher
 }
 
-// NewRunExecutor constructs a RunExecutor.
+// NewRunExecutor constructs a RunExecutor with an optional audit publisher.
+// Pass nil to disable audit events (uses NoopPublisher internally).
 func NewRunExecutor(store *DiscoveryRunStore, sweeper SweepRunner) *RunExecutor {
-	return &RunExecutor{store: store, sweeper: sweeper}
+	return NewRunExecutorWithAudit(store, sweeper, &audit.NoopPublisher{})
+}
+
+// NewRunExecutorWithAudit constructs a RunExecutor with an explicit audit publisher.
+func NewRunExecutorWithAudit(store *DiscoveryRunStore, sweeper SweepRunner, auditPub audit.Publisher) *RunExecutor {
+	if auditPub == nil {
+		auditPub = &audit.NoopPublisher{}
+	}
+	return &RunExecutor{store: store, sweeper: sweeper, audit: auditPub}
 }
 
 // Start launches discovery execution in a background goroutine.
@@ -38,6 +50,9 @@ func (e *RunExecutor) execute(runID string) {
 	if !ok {
 		return
 	}
+
+	// Emit discovery.run.started audit event.
+	e.emitAudit(ctx, "discovery.run.started", runID, "success", "")
 
 	now := time.Now().UTC()
 	e.store.Update(runID, func(r *model.DiscoveryRun) {
@@ -54,6 +69,7 @@ func (e *RunExecutor) execute(runID string) {
 			completed := time.Now().UTC()
 			r.CompletedAt = &completed
 		})
+		e.emitAudit(ctx, "discovery.run.failed", runID, "failure", "ICMP sweep service not configured")
 		return
 	}
 
@@ -67,6 +83,7 @@ func (e *RunExecutor) execute(runID string) {
 			r.FailureReason = err.Error()
 			r.CompletedAt = &completed
 		})
+		e.emitAudit(ctx, "discovery.run.failed", runID, "failure", err.Error())
 		return
 	}
 
@@ -99,6 +116,18 @@ func (e *RunExecutor) execute(runID string) {
 		"runId", runID,
 		"hosts", sweepResult.ScannedCount,
 		"reachable", reachable)
+	e.emitAudit(ctx, "discovery.run.completed", runID, "success",
+		fmt.Sprintf("hosts=%d reachable=%d", sweepResult.ScannedCount, reachable))
+}
+
+// emitAudit publishes an audit event; failures are logged but never propagate
+// so that audit publishing never blocks or breaks the primary discovery flow.
+func (e *RunExecutor) emitAudit(ctx context.Context, action, runID, outcome, detail string) {
+	evt := audit.NewEvent("discovery-service", action, "DiscoveryRun", runID, outcome)
+	evt.Detail = detail
+	if err := e.audit.Publish(ctx, evt); err != nil {
+		slog.Warn("audit publish failed", "action", action, "runId", runID, "err", err)
+	}
 }
 
 func hostResultsFromSweep(sweep *scanner.SweepResult) []model.DiscoveryHostResult {

@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/airtel-ubrnms/discovery-service/internal/audit"
 	"github.com/airtel-ubrnms/discovery-service/internal/auth"
 	"github.com/airtel-ubrnms/discovery-service/internal/config"
 	"github.com/airtel-ubrnms/discovery-service/internal/crypto"
@@ -71,7 +72,21 @@ func main() {
 	rediscoSched := scheduler.NewRediscoveryScheduler(schedStore, runStore, sweeper, nil)
 	rediscoSched.Start()
 
-	runExecutor := service.NewRunExecutor(runStore, sweeper)
+	// Wire Kafka audit publisher (WO-011).
+	// Falls back to no-op if KAFKA_BROKERS is not set so local dev is unaffected.
+	var auditPub audit.Publisher = &audit.NoopPublisher{}
+	if brokers := os.Getenv("KAFKA_BROKERS"); brokers != "" {
+		if kp, err := audit.NewKafkaPublisher(brokers); err != nil {
+			slog.Warn("audit: failed to create Kafka publisher — using noop", "err", err)
+		} else {
+			auditPub = kp
+			slog.Info("audit: Kafka publisher initialised", "brokers", brokers)
+		}
+	} else {
+		slog.Info("audit: KAFKA_BROKERS not set — using no-op publisher")
+	}
+
+	runExecutor := service.NewRunExecutorWithAudit(runStore, sweeper, auditPub)
 	h := handler.New(svc, store, runStore).
 		WithHMACValidator(hmacValidator).
 		WithRunExecutor(runExecutor)
