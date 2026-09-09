@@ -1,0 +1,16 @@
+version: v1
+name: buf.build/ubrnms/schemas
+deps:
+  - buf.build/googleapis/googleapis
+lint:
+  use:
+    - DEFAULT
+  except:
+    # Allow proto files to import google WKTs without the full googleapis module tree.
+    - IMPORT_NO_PUBLIC
+breaking:
+  use:
+    - FILE
+  against:
+    git_ref: main
+    subdir: proto

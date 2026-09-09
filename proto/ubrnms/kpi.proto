@@ -1,0 +1,52 @@
+// kpi.proto — canonical KPIDataPoint schema for UBR NMS (WO-007).
+// Source of truth: shared-libs/json-schemas/kpi-data-point.schema.json.
+
+syntax = "proto3";
+
+package ubrnms.v1;
+
+option go_package = "github.com/airtel-ubrnms/proto/ubrnms/v1;ubrnmsv1";
+option java_package = "com.ubrnms.proto.v1";
+option java_outer_classname = "KpiProto";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+
+// Granularity of a KPI aggregation window.
+enum KpiGranularity {
+  KPI_GRANULARITY_UNKNOWN = 0;
+  KPI_GRANULARITY_RAW = 1;
+  KPI_GRANULARITY_15MIN = 2;
+  KPI_GRANULARITY_1HOUR = 3;
+  KPI_GRANULARITY_DAILY = 4;
+}
+
+// KPIDataPoint — a single KPI measurement from a device.
+message KPIDataPoint {
+  // Device that produced this measurement.
+  string device_id = 1;
+
+  // Device serial number (denormalised for query convenience).
+  string serial_number = 2;
+
+  // Device type at measurement time.
+  string device_type = 3;
+
+  // KPI name (e.g. "uplink_throughput_mbps", "cpu_utilisation_pct").
+  string kpi_name = 4;
+
+  // Measured numeric value.
+  double value = 5;
+
+  // Unit of measurement (e.g. "Mbps", "percent", "dBm").
+  string unit = 6;
+
+  // Poll interval in seconds used to collect this sample.
+  int32 poll_interval = 7;
+
+  // Timestamp of the measurement (device clock, UTC).
+  google.protobuf.Timestamp timestamp = 8;
+
+  // Aggregation granularity of this data point.
+  KpiGranularity granularity = 9;
+}
