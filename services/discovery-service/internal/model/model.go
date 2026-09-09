@@ -212,6 +212,20 @@ const (
 	SNMPFingerprintTimeout    SNMPFingerprintStatus = "timeout"
 	SNMPFingerprintMalformed  SNMPFingerprintStatus = "malformed"
 	SNMPFingerprintPartial    SNMPFingerprintStatus = "partial"    // sysDescr returned but no sysObjectID
+	SNMPFingerprintFailed     SNMPFingerprintStatus = "failed"     // generic failure — see FailureCategory for detail
+)
+
+// FingerprintFailureCategory classifies why an SNMP fingerprint attempt failed.
+// Values align with the comment on SNMPFingerprintResult.FailureCategory.
+type FingerprintFailureCategory string
+
+const (
+	FingerprintCategoryAuthFailed         FingerprintFailureCategory = "SNMP_AUTH_FAILED"
+	FingerprintCategoryTimeout            FingerprintFailureCategory = "SNMP_TIMEOUT"
+	FingerprintCategoryMalformedOID       FingerprintFailureCategory = "SNMP_MALFORMED_OID"
+	FingerprintCategoryMissingDescr       FingerprintFailureCategory = "SNMP_MISSING_DESCR"
+	FingerprintCategoryUnsupportedVersion FingerprintFailureCategory = "SNMP_UNSUPPORTED_VERSION"
+	FingerprintCategoryInternal           FingerprintFailureCategory = "SNMP_INTERNAL"
 )
 
 // SNMPFingerprintResult holds the outcome of querying sysDescr and sysObjectID
@@ -226,7 +240,7 @@ type SNMPFingerprintResult struct {
 	// FailureCategory is one of: SNMP_AUTH_FAILED, SNMP_TIMEOUT, SNMP_MALFORMED_OID,
 	// SNMP_MISSING_DESCR, SNMP_UNSUPPORTED_VERSION, SNMP_INTERNAL.
 	// Never includes community strings or credentials.
-	FailureCategory string `json:"failureCategory,omitempty"`
+	FailureCategory FingerprintFailureCategory `json:"failureCategory,omitempty"`
 	FingerprintedAt time.Time `json:"fingerprintedAt"`
 }
 

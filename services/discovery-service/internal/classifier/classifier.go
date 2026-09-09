@@ -78,6 +78,30 @@ var releaseOneOIDPrefixes = []struct {
 	{".1.3.6.1.4.1.674", OIDMapping{Vendor: "Dell", Model: "PowerEdge", GenericDeviceType: "SERVER", CapabilityProfile: "cap-dell-server-v1", DriverID: "drv-dell-snmp-v1"}},
 	// Linux servers (net-snmp)
 	{".1.3.6.1.4.1.8072.3", OIDMapping{Vendor: "Net-SNMP", Model: "Linux", GenericDeviceType: "SERVER", CapabilityProfile: "cap-linux-server-v1", DriverID: "drv-generic-snmp-v1"}},
+
+	// ── Release-1 expansion (WO-004): additional major network equipment vendors ─
+
+	// Huawei Technologies — routers and switches
+	{".1.3.6.1.4.1.2011.2.23", OIDMapping{Vendor: "Huawei", Model: "Quidway Switch", GenericDeviceType: "SWITCH", CapabilityProfile: "cap-huawei-switch-v1", DriverID: "drv-huawei-snmp-v1"}},
+	{".1.3.6.1.4.1.2011.5.25", OIDMapping{Vendor: "Huawei", Model: "NetEngine Router", GenericDeviceType: "ROUTER", CapabilityProfile: "cap-huawei-router-v1", DriverID: "drv-huawei-snmp-v1"}},
+
+	// Nokia (formerly Alcatel-Lucent) — service routers
+	{".1.3.6.1.4.1.637.61.1", OIDMapping{Vendor: "Nokia", Model: "7750 SR", GenericDeviceType: "ROUTER", CapabilityProfile: "cap-nokia-router-v1", DriverID: "drv-nokia-snmp-v1"}},
+	{".1.3.6.1.4.1.6527", OIDMapping{Vendor: "Nokia", Model: "TiMOS Router", GenericDeviceType: "ROUTER", CapabilityProfile: "cap-nokia-router-v1", DriverID: "drv-nokia-snmp-v1"}},
+
+	// Ericsson — radio network equipment
+	{".1.3.6.1.4.1.193.81", OIDMapping{Vendor: "Ericsson", Model: "MINI-LINK", GenericDeviceType: "ROUTER", CapabilityProfile: "cap-ericsson-router-v1", DriverID: "drv-ericsson-snmp-v1"}},
+	{".1.3.6.1.4.1.193.140", OIDMapping{Vendor: "Ericsson", Model: "Radio Base Station", GenericDeviceType: "ROUTER", CapabilityProfile: "cap-ericsson-rbs-v1", DriverID: "drv-ericsson-snmp-v1"}},
+
+	// ZTE Corporation — switches and transport equipment
+	{".1.3.6.1.4.1.3902.1082", OIDMapping{Vendor: "ZTE", Model: "ZXR10 Switch", GenericDeviceType: "SWITCH", CapabilityProfile: "cap-zte-switch-v1", DriverID: "drv-zte-snmp-v1"}},
+	{".1.3.6.1.4.1.3902.1015", OIDMapping{Vendor: "ZTE", Model: "ZXR10 Router", GenericDeviceType: "ROUTER", CapabilityProfile: "cap-zte-router-v1", DriverID: "drv-zte-snmp-v1"}},
+
+	// MikroTik — RouterOS routers and switches
+	{".1.3.6.1.4.1.14988.1", OIDMapping{Vendor: "MikroTik", Model: "RouterOS", GenericDeviceType: "ROUTER", CapabilityProfile: "cap-mikrotik-router-v1", DriverID: "drv-mikrotik-snmp-v1"}},
+
+	// Arista Networks — data-center switches
+	{".1.3.6.1.4.1.30065.1", OIDMapping{Vendor: "Arista", Model: "EOS Switch", GenericDeviceType: "SWITCH", CapabilityProfile: "cap-arista-switch-v1", DriverID: "drv-arista-snmp-v1"}},
 }
 
 // Classify maps an SNMP fingerprint result to a ClassificationResult.

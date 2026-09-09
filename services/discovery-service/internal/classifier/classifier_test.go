@@ -201,6 +201,161 @@ func TestMerge_DeferredDevice_IncludesDeferReason(t *testing.T) {
 	}
 }
 
+// ── WO-004: Expanded vendor OID mappings ─────────────────────────────────────
+
+func TestClassify_HuaweiSwitch_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.1", "run-wo4-1", ".1.3.6.1.4.1.2011.2.23.1", "Huawei Quidway S5700")
+	result := classifier.Classify(fp, "corr-wo4-1")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s (reason: %s)", result.Status, result.DeferReason)
+	}
+	if result.Vendor != "Huawei" {
+		t.Errorf("expected Huawei, got %s", result.Vendor)
+	}
+	if result.GenericDeviceType != "SWITCH" {
+		t.Errorf("expected SWITCH, got %s", result.GenericDeviceType)
+	}
+	if result.CapabilityProfileID == "" {
+		t.Error("expected non-empty CapabilityProfileID")
+	}
+}
+
+func TestClassify_HuaweiRouter_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.2", "run-wo4-2", ".1.3.6.1.4.1.2011.5.25.100", "Huawei NE40E Router")
+	result := classifier.Classify(fp, "corr-wo4-2")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s", result.Status)
+	}
+	if result.Vendor != "Huawei" {
+		t.Errorf("expected Huawei, got %s", result.Vendor)
+	}
+	if result.GenericDeviceType != "ROUTER" {
+		t.Errorf("expected ROUTER, got %s", result.GenericDeviceType)
+	}
+}
+
+func TestClassify_Nokia7750SR_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.3", "run-wo4-3", ".1.3.6.1.4.1.637.61.1.1", "Nokia 7750 SR-12")
+	result := classifier.Classify(fp, "corr-wo4-3")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s", result.Status)
+	}
+	if result.Vendor != "Nokia" {
+		t.Errorf("expected Nokia, got %s", result.Vendor)
+	}
+	if result.GenericDeviceType != "ROUTER" {
+		t.Errorf("expected ROUTER, got %s", result.GenericDeviceType)
+	}
+}
+
+func TestClassify_NokiaTiMOS_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.4", "run-wo4-4", ".1.3.6.1.4.1.6527.1.1.2.21.1", "TiMOS-B-21.2.R1")
+	result := classifier.Classify(fp, "corr-wo4-4")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s", result.Status)
+	}
+	if result.Vendor != "Nokia" {
+		t.Errorf("expected Nokia, got %s", result.Vendor)
+	}
+}
+
+func TestClassify_EricssonMINILINK_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.5", "run-wo4-5", ".1.3.6.1.4.1.193.81.1", "Ericsson MINI-LINK Traffic Node")
+	result := classifier.Classify(fp, "corr-wo4-5")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s", result.Status)
+	}
+	if result.Vendor != "Ericsson" {
+		t.Errorf("expected Ericsson, got %s", result.Vendor)
+	}
+	if result.GenericDeviceType != "ROUTER" {
+		t.Errorf("expected ROUTER, got %s", result.GenericDeviceType)
+	}
+}
+
+func TestClassify_EricssonRBS_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.6", "run-wo4-6", ".1.3.6.1.4.1.193.140.1", "Ericsson Radio Base Station")
+	result := classifier.Classify(fp, "corr-wo4-6")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s", result.Status)
+	}
+	if result.Vendor != "Ericsson" {
+		t.Errorf("expected Ericsson, got %s", result.Vendor)
+	}
+}
+
+func TestClassify_ZTESwitch_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.7", "run-wo4-7", ".1.3.6.1.4.1.3902.1082.10", "ZTE ZXR10 5960 Switch")
+	result := classifier.Classify(fp, "corr-wo4-7")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s", result.Status)
+	}
+	if result.Vendor != "ZTE" {
+		t.Errorf("expected ZTE, got %s", result.Vendor)
+	}
+	if result.GenericDeviceType != "SWITCH" {
+		t.Errorf("expected SWITCH, got %s", result.GenericDeviceType)
+	}
+}
+
+func TestClassify_ZTERouter_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.8", "run-wo4-8", ".1.3.6.1.4.1.3902.1015.1", "ZTE ZXR10 Router")
+	result := classifier.Classify(fp, "corr-wo4-8")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s", result.Status)
+	}
+	if result.Vendor != "ZTE" {
+		t.Errorf("expected ZTE, got %s", result.Vendor)
+	}
+	if result.GenericDeviceType != "ROUTER" {
+		t.Errorf("expected ROUTER, got %s", result.GenericDeviceType)
+	}
+}
+
+func TestClassify_MikroTikRouter_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.9", "run-wo4-9", ".1.3.6.1.4.1.14988.1.1", "MikroTik RouterOS 6.49")
+	result := classifier.Classify(fp, "corr-wo4-9")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s", result.Status)
+	}
+	if result.Vendor != "MikroTik" {
+		t.Errorf("expected MikroTik, got %s", result.Vendor)
+	}
+	if result.GenericDeviceType != "ROUTER" {
+		t.Errorf("expected ROUTER, got %s", result.GenericDeviceType)
+	}
+}
+
+func TestClassify_AristaSwitch_RecognisedByOID(t *testing.T) {
+	fp := successFingerprint("10.1.0.10", "run-wo4-10", ".1.3.6.1.4.1.30065.1.1", "Arista Networks EOS 4.28")
+	result := classifier.Classify(fp, "corr-wo4-10")
+
+	if result.Status != classifier.ClassificationRecognised {
+		t.Fatalf("expected RECOGNISED, got %s", result.Status)
+	}
+	if result.Vendor != "Arista" {
+		t.Errorf("expected Arista, got %s", result.Vendor)
+	}
+	if result.GenericDeviceType != "SWITCH" {
+		t.Errorf("expected SWITCH, got %s", result.GenericDeviceType)
+	}
+	if result.CapabilityProfileID == "" {
+		t.Error("expected non-empty CapabilityProfileID")
+	}
+	if result.DriverID == "" {
+		t.Error("expected non-empty DriverID")
+	}
+}
+
 // ── OID normalisation edge cases ─────────────────────────────────────────────
 
 func TestClassify_LongestPrefixWins(t *testing.T) {
