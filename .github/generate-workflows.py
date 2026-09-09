@@ -21,7 +21,7 @@ SERVICES = {
     "topology-service":        ("java",   "mvn -B package -DskipTests", "mvn -B test", "", ""),
     "notification-service":    ("nodejs", "npm ci --ignore-scripts",    "npm test -- --coverage", "--coverageThreshold='{\"global\":{\"lines\":80}}'", ""),
     "audit-service":           ("nodejs", "npm ci --ignore-scripts",    "npm test -- --coverage", "--coverageThreshold='{\"global\":{\"lines\":80}}'", ""),
-    "event-collector":         ("java",   "mvn -B package -DskipTests", "mvn -B test", "", ""),
+    "event-collector":         ("go",     "go build ./...",             "go test ./... -cover", "", ""),
     "kpi-collector":           ("go",     "go build ./...",             "go test ./... -cover", "", ""),
     "discovery-service":       ("go",     "go build ./...",             "go test ./... -cover", "", ""),
     "api-gateway":             ("nodejs", "npm ci --ignore-scripts",    "npm test -- --coverage", "--coverageThreshold='{\"global\":{\"lines\":80}}'", ""),
@@ -48,7 +48,7 @@ SETUP_NODE = """
 SETUP_GO = """
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.23"
           cache: true"""
 
 SETUP_PYTHON = """

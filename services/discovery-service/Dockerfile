@@ -1,4 +1,4 @@
-FROM golang:1.22 AS builder
+FROM golang:1.23 AS builder
 WORKDIR /app
 COPY services/discovery-service/go.mod services/discovery-service/go.sum* ./
 COPY shared-libs/go /shared-libs/go

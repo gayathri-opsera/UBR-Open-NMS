@@ -1,6 +1,6 @@
 module github.com/airtel-ubrnms/discovery-service
 
-go 1.22
+go 1.23
 
 require (
 	github.com/airtel-ubrnms/shared-libs v0.0.0
