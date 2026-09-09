@@ -1,14 +1,18 @@
 /**
  * DiscoveryTriggerForm — initiates an SNMP discovery scan.
  *
- * Renders scope input, SNMP protocol selector, community string (masked),
+ * Renders scope input, SNMP protocol selector, credential selector (WO-027),
  * timeout, and retries fields. Validates client-side before calling the API.
  * Notifies parent via `onRunCreated` callback on success.
+ *
+ * WO-027: Community string input is replaced by a credential dropdown backed
+ * by the /api/v1/discovery/credentials endpoint.  If no credentials exist yet,
+ * a fallback community-string input is shown so operators are never blocked.
  *
  * Security: community strings are NEVER logged or stored beyond the form state.
  * They are sent over HTTPS in the request body and are masked in the UI.
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 import { Input } from '../common/Input';
 import { Select } from '../common/Select';
@@ -16,7 +20,9 @@ import { Button } from '../common/Button';
 import { useToast } from '../common/Toast';
 import { ScopeInput } from './ScopeInput';
 import { createDiscoveryRun, parseScopeInput } from '../../../api/discovery.api';
-import type { SnmpProtocol } from '../../../api/discovery.api';
+import type { SnmpProtocol, DiscoveryRunResponse } from '../../../api/discovery.api';
+import { listCredentials } from '../../../api/credentials.api';
+import type { CredentialSummary } from '../../../api/credentials.api';
 import { logger } from '../../utils/logger';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -24,15 +30,27 @@ import { logger } from '../../utils/logger';
 export interface DiscoveryTriggerFormProps {
   /**
    * Called when a discovery run is successfully created.
-   * @param runId The UUID of the new discovery run.
+   * @param run The full response object from the discovery-service.
    */
-  onRunCreated: (runId: string) => void;
+  onRunCreated: (run: DiscoveryRunResponse) => void;
+  /**
+   * Optional pre-populated scope value (e.g. from a "Re-run" action in the
+   * history view).
+   */
+  initialScope?: string;
 }
 
 interface FormState {
   scope: string;
   scopeValid: boolean;
   protocol: SnmpProtocol;
+  /** ID of a stored credential to use; empty string means "use fallback community". */
+  credentialId: string;
+  /**
+   * Fallback community string used only when no credentials are configured
+   * or the operator explicitly chooses "Use direct community string".
+   * SECURITY: never logged; sent HTTPS-only.
+   */
   community: string;
   timeoutSeconds: string;
   retries: string;
@@ -51,21 +69,27 @@ const PROTOCOL_OPTIONS = [
   { value: 'SNMP_V1',  label: 'SNMPv1' },
 ];
 
-const INITIAL_STATE: FormState = {
-  scope:          '',
-  scopeValid:     false,
-  protocol:       'SNMP_V2C',
-  community:      'public',
-  timeoutSeconds: '5',
-  retries:        '2',
-};
+/** Sentinel option value that means "enter community string manually". */
+const FALLBACK_OPTION = '__fallback__';
+
+function buildInitialState(initialScope?: string): FormState {
+  return {
+    scope:          initialScope ?? '',
+    scopeValid:     !!initialScope,
+    protocol:       'SNMP_V2C',
+    credentialId:   '',
+    community:      'public',
+    timeoutSeconds: '5',
+    retries:        '2',
+  };
+}
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
-function validateForm(state: FormState): FormErrors {
+function validateForm(state: FormState, requireCommunity: boolean): FormErrors {
   const errors: FormErrors = {};
 
-  if (!state.community.trim()) {
+  if (requireCommunity && !state.community.trim()) {
     errors.community = 'Community string is required';
   }
 
@@ -82,11 +106,10 @@ function validateForm(state: FormState): FormErrors {
   return errors;
 }
 
-function isFormValid(state: FormState, errors: FormErrors): boolean {
-  return (
-    state.scopeValid &&
-    Object.keys(errors).length === 0
-  );
+function isFormValid(state: FormState, errors: FormErrors, usingFallback: boolean): boolean {
+  if (!state.scopeValid) return false;
+  if (usingFallback && !state.community.trim()) return false;
+  return Object.keys(errors).length === 0;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -96,14 +119,38 @@ function isFormValid(state: FormState, errors: FormErrors): boolean {
  * an SNMP discovery scan. The form is the entry point for the SNMP Discovery
  * tab workflow: Form → Status → Results.
  */
-export function DiscoveryTriggerForm({ onRunCreated }: DiscoveryTriggerFormProps) {
+export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTriggerFormProps) {
   const { addToast } = useToast();
-  const [form, setForm] = useState<FormState>(INITIAL_STATE);
+  const [form, setForm] = useState<FormState>(buildInitialState(initialScope));
   const [touched, setTouched] = useState<Partial<Record<keyof FormState, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  const errors = validateForm(form);
-  const formValid = isFormValid(form, errors);
+  // Credential list state — loaded on mount.
+  const [credentials, setCredentials]         = useState<CredentialSummary[]>([]);
+  const [credentialsLoading, setCredLoading]  = useState(true);
+
+  useEffect(() => {
+    listCredentials()
+      .then((data) => {
+        setCredentials(data);
+        // Auto-select the first credential if any exist.
+        if (data.length > 0) {
+          setForm((prev) => ({ ...prev, credentialId: data[0].id }));
+        }
+      })
+      .catch((err) => {
+        // Non-fatal — fall back to community string input.
+        logger.warn('DiscoveryTriggerForm: failed to load credentials', err);
+      })
+      .finally(() => setCredLoading(false));
+  }, []);
+
+  // Whether the user is using the fallback community string.
+  const usingFallback =
+    credentials.length === 0 || form.credentialId === FALLBACK_OPTION;
+
+  const errors = validateForm(form, usingFallback);
+  const formValid = isFormValid(form, errors, usingFallback);
 
   // ── Field handlers ──────────────────────────────────────────────────────────
 
@@ -128,21 +175,23 @@ export function DiscoveryTriggerForm({ onRunCreated }: DiscoveryTriggerFormProps
       // Mark all fields as touched to reveal any hidden validation errors.
       setTouched({ community: true, timeoutSeconds: true, retries: true });
 
-      const currentErrors = validateForm(form);
-      if (!isFormValid(form, currentErrors)) return;
+      const currentErrors = validateForm(form, usingFallback);
+      if (!isFormValid(form, currentErrors, usingFallback)) return;
 
       setSubmitting(true);
       try {
         const response = await createDiscoveryRun({
           scope:          parseScopeInput(form.scope),
           protocol:       form.protocol,
-          // Security: community is not logged; it is sent HTTPS-only.
-          community:      form.community.trim(),
           timeoutSeconds: parseInt(form.timeoutSeconds, 10),
           retries:        parseInt(form.retries, 10),
+          // Prefer stored credential; fall back to direct community string.
+          ...(usingFallback
+            ? { community: form.community.trim() }
+            : { credentialId: form.credentialId }),
         });
         addToast(`Discovery run ${response.runId} created`, 'success');
-        onRunCreated(response.runId);
+        onRunCreated(response);
       } catch (err: unknown) {
         logger.error('DiscoveryTriggerForm: createDiscoveryRun failed', err);
 
@@ -159,8 +208,18 @@ export function DiscoveryTriggerForm({ onRunCreated }: DiscoveryTriggerFormProps
         setSubmitting(false);
       }
     },
-    [form, onRunCreated, addToast],
+    [form, usingFallback, credentials.length, onRunCreated, addToast],
   );
+
+  // ── Build credential select options ─────────────────────────────────────────
+
+  const credentialOptions = [
+    ...credentials.map((c) => ({
+      value: c.id,
+      label: `${c.name} (SNMP${c.version})`,
+    })),
+    { value: FALLBACK_OPTION, label: '— Enter community string directly —' },
+  ];
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -188,20 +247,46 @@ export function DiscoveryTriggerForm({ onRunCreated }: DiscoveryTriggerFormProps
         fullWidth
       />
 
-      {/* Community string ───────────────────────────────────────────────────── */}
-      <Input
-        label="Community String"
-        type="password"
-        autoComplete="off"
-        placeholder="e.g. public"
-        value={form.community}
-        onChange={handleField('community')}
-        onBlur={() => setTouched((prev) => ({ ...prev, community: true }))}
-        error={touched.community ? errors.community : undefined}
-        hint="SNMPv2c read-only community string. Will be replaced by credential selection in a future release."
-        disabled={submitting}
-        fullWidth
-      />
+      {/* Credential selector (WO-027) ───────────────────────────────────────── */}
+      {credentialsLoading ? (
+        <div style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>
+          Loading credentials…
+        </div>
+      ) : credentials.length > 0 ? (
+        <Select
+          label="SNMP Credential"
+          options={credentialOptions}
+          value={form.credentialId || FALLBACK_OPTION}
+          onChange={handleField('credentialId')}
+          disabled={submitting}
+          fullWidth
+        />
+      ) : null}
+
+      {/* Fallback community string — shown when no credentials or user chose direct entry */}
+      {!credentialsLoading && usingFallback && (
+        <Input
+          label={
+            credentials.length === 0
+              ? 'Community String'
+              : 'Community String (direct entry)'
+          }
+          type="password"
+          autoComplete="off"
+          placeholder="e.g. public"
+          value={form.community}
+          onChange={handleField('community')}
+          onBlur={() => setTouched((prev) => ({ ...prev, community: true }))}
+          error={touched.community ? errors.community : undefined}
+          hint={
+            credentials.length === 0
+              ? 'No stored credentials found. Add credentials in the SNMP Credentials tab.'
+              : 'Security: community is sent HTTPS-only and is never logged.'
+          }
+          disabled={submitting}
+          fullWidth
+        />
+      )}
 
       {/* Timeout and retries ────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

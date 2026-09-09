@@ -11,6 +11,12 @@ vi.mock('../../../api/discovery.api', async (importOriginal) => {
   };
 });
 
+// Mock credentials API — return empty list so the community-string fallback is shown.
+// Tests that specifically need stored credentials can override listCredentials per-case.
+vi.mock('../../../api/credentials.api', () => ({
+  listCredentials: vi.fn().mockResolvedValue([]),
+}));
+
 // Mock the logger to suppress noise in test output.
 vi.mock('../../utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
@@ -36,12 +42,14 @@ beforeEach(() => vi.clearAllMocks());
 // ── Render ────────────────────────────────────────────────────────────────────
 
 describe('DiscoveryTriggerForm — rendering', () => {
-  it('renders all required form fields', () => {
+  it('renders all required form fields', async () => {
     renderWithToast(<DiscoveryTriggerForm onRunCreated={vi.fn()} />);
 
     expect(screen.getByLabelText(/discovery scope/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/snmp protocol/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/community string/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByLabelText(/community string/i)).toBeInTheDocument();
+    });
     expect(screen.getByLabelText(/timeout/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/retries/i)).toBeInTheDocument();
   });
@@ -57,9 +65,9 @@ describe('DiscoveryTriggerForm — rendering', () => {
     expect(button).toBeDisabled();
   });
 
-  it('community string input is masked (type="password")', () => {
+  it('community string input is masked (type="password")', async () => {
     renderWithToast(<DiscoveryTriggerForm onRunCreated={vi.fn()} />);
-    const communityInput = screen.getByLabelText(/community string/i) as HTMLInputElement;
+    const communityInput = await screen.findByLabelText(/community string/i) as HTMLInputElement;
     expect(communityInput.type).toBe('password');
   });
 });
@@ -139,7 +147,8 @@ describe('DiscoveryTriggerForm — successful submission', () => {
     });
 
     await waitFor(() => {
-      expect(onRunCreated).toHaveBeenCalledWith(mockDiscoveryRunResponse.runId);
+      // onRunCreated now receives the full DiscoveryRunResponse (WO-027).
+      expect(onRunCreated).toHaveBeenCalledWith(mockDiscoveryRunResponse);
     });
   });
 
@@ -261,6 +270,7 @@ describe('DiscoveryTriggerForm — edge cases', () => {
   });
 
   it('validates community string is not empty', async () => {
+    // wait for credentials load so fallback community field is visible
     const user = userEvent.setup();
     renderWithToast(<DiscoveryTriggerForm onRunCreated={vi.fn()} />);
 
@@ -269,7 +279,7 @@ describe('DiscoveryTriggerForm — edge cases', () => {
     await user.tab();
 
     // Clear the community string
-    const communityInput = screen.getByLabelText(/community string/i);
+    const communityInput = await screen.findByLabelText(/community string/i);
     await user.clear(communityInput);
     await user.tab();
 
