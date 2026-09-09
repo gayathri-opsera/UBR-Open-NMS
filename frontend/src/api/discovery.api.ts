@@ -112,6 +112,14 @@ export interface DiscoveryResult {
   deferReason?: string;
   /** Opaque correlation ID for tracing this result back to the backend log. */
   correlationId?: string;
+  /** MIB-II sysName (hostname). WO-016 / WO-026 */
+  sysName?: string;
+  /** MIB-II sysContact. */
+  sysContact?: string;
+  /** MIB-II sysLocation. */
+  sysLocation?: string;
+  /** MIB-II sysUpTime in seconds. */
+  sysUpTimeSeconds?: number;
 }
 
 // ── WO-016: Parallel ICMP sweep progress and scheduling ──────────────────────
@@ -207,59 +215,155 @@ export async function getDiscoveryRunResults(runId: string): Promise<DiscoveryRe
 
 // ── WO-017: Discovery schedules ───────────────────────────────────────────────
 
-/** Cron-based schedule for recurring discovery runs (WO-017). */
+/** Rediscovery schedule as returned by the discovery-service (WO-017). */
 export interface DiscoverySchedule {
   scheduleId: string;
+  /** Baseline scope run this schedule re-scans. */
+  scopeRunId: string;
+  /** Human-readable label (maps from backend description). */
   name: string;
   cronExpression: string;
-  scope: ScopeEntry[];
   enabled: boolean;
-  lastRunAt?: string;
+  notifyOnChange?: boolean;
+  /** Scope summary from the baseline run (UI-enriched). */
+  scopeSummary?: string;
+  lastRunId?: string;
   nextRunAt?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface CreateScheduleRequest {
-  name: string;
+  /** Completed discovery run whose scope is re-scanned on schedule. */
+  scopeRunId: string;
   cronExpression: string;
-  scope: ScopeEntry[];
-  enabled?: boolean;
+  /** Display name / description for the schedule. */
+  name?: string;
+  notifyOnChange?: boolean;
 }
 
 /**
  * List all discovery schedules for the current tenant (WO-017).
  */
+/** Raw schedule shape from discovery-service. */
+interface BackendSchedule {
+  id: string;
+  scopeRunId: string;
+  cronExpression: string;
+  enabled: boolean;
+  notifyOnChange?: boolean;
+  description?: string;
+  createdAt: string;
+  updatedAt?: string;
+  nextRunAt?: string;
+  lastRunId?: string;
+}
+
+function mapSchedule(raw: BackendSchedule): DiscoverySchedule {
+  return {
+    scheduleId: raw.id,
+    scopeRunId: raw.scopeRunId,
+    name: raw.description || `Schedule ${raw.id.slice(0, 8)}`,
+    cronExpression: raw.cronExpression,
+    enabled: raw.enabled,
+    notifyOnChange: raw.notifyOnChange,
+    lastRunId: raw.lastRunId,
+    nextRunAt: raw.nextRunAt,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+  };
+}
+
 export async function listDiscoverySchedules(): Promise<DiscoverySchedule[]> {
   try {
-    const res = await apiClient.get<DiscoverySchedule[] | { schedules: DiscoverySchedule[] }>(
+    const res = await apiClient.get<{ schedules: BackendSchedule[] } | BackendSchedule[]>(
       '/discovery/schedules',
     );
     const data = res.data;
-    if (Array.isArray(data)) return data;
-    if (data && 'schedules' in data && Array.isArray(data.schedules)) return data.schedules;
-    return [];
+    const raw = Array.isArray(data) ? data : data?.schedules ?? [];
+    return raw.map(mapSchedule);
   } catch {
     return [];
   }
 }
 
 /**
- * Create a new discovery schedule (WO-017).
+ * Create a new rediscovery schedule (WO-017 / WO-028).
  */
 export async function createSchedule(
   schedule: CreateScheduleRequest,
 ): Promise<DiscoverySchedule> {
-  const res = await apiClient.post<DiscoverySchedule>('/discovery/schedules', schedule);
-  return res.data;
+  const res = await apiClient.post<BackendSchedule>('/discovery/schedules', {
+    scopeRunId: schedule.scopeRunId,
+    cronExpression: schedule.cronExpression,
+    notifyOnChange: schedule.notifyOnChange ?? true,
+    description: schedule.name ?? '',
+  });
+  return mapSchedule(res.data);
 }
 
 /**
- * Manually trigger an immediate run of an existing discovery schedule (WO-017).
+ * Delete a rediscovery schedule (WO-028).
  */
-export async function triggerSchedule(scheduleId: string): Promise<DiscoveryRunResponse> {
-  const res = await apiClient.post<DiscoveryRunResponse>(
-    `/discovery/schedules/${scheduleId}/trigger`,
+export async function deleteSchedule(scheduleId: string): Promise<void> {
+  await apiClient.delete(`/discovery/schedules/${scheduleId}`);
+}
+
+/**
+ * Manually trigger an immediate rediscovery run for a schedule (WO-017).
+ */
+export async function triggerSchedule(scheduleId: string): Promise<{ currentRunId?: string }> {
+  const res = await apiClient.post<{ currentRunId?: string }>(
+    `/discovery/schedules/${scheduleId}/run`,
   );
+  return res.data;
+}
+
+// ── WO-015: Discovery run history list ───────────────────────────────────────
+
+/** Summary row returned by the paginated list endpoint (GET /discovery/runs). */
+export interface DiscoveryRunSummary {
+  runId: string;
+  status: DiscoveryRunStatus;
+  /** Comma-separated summary of scope entries, e.g. "192.168.1.0/24, 10.0.0.1" */
+  scopeSummary?: string;
+  /** ISO-8601 UTC timestamp when the run was created. */
+  createdAt: string;
+  /** ISO-8601 UTC timestamp when the run reached a terminal state. */
+  completedAt?: string;
+  /** Number of devices discovered (present when status is COMPLETED). */
+  devicesFound?: number;
+  /** User or system identity that created the run. */
+  createdBy?: string;
+  /** Scope entries to allow re-running this scan. */
+  normalizedScope?: ScopeEntry[];
+}
+
+/** Paginated wrapper for the run list endpoint. */
+export interface PaginatedRunsResponse {
+  data: DiscoveryRunSummary[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+  };
+}
+
+/**
+ * List past discovery runs with optional pagination and status filter (WO-003 / WO-015).
+ *
+ * @param page  1-indexed page number (default 1).
+ * @param limit Items per page (default 20).
+ * @param status Optional filter, e.g. 'COMPLETED', 'FAILED'.
+ */
+export async function listDiscoveryRuns(
+  page = 1,
+  limit = 20,
+  status?: string,
+): Promise<PaginatedRunsResponse> {
+  const params: Record<string, string | number> = { page, limit };
+  if (status) params.status = status;
+  const res = await apiClient.get<PaginatedRunsResponse>('/discovery/runs', { params });
   return res.data;
 }
 

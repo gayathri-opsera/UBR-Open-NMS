@@ -87,6 +87,10 @@ export const mockResultCiscoSwitch: DiscoveryResult = {
   genericDeviceType:    'SWITCH',
   sysObjectID:          '.1.3.6.1.4.1.9.1.516',
   sysDescr:             'Cisco IOS Software, Catalyst 2960 Software',
+  sysName:              'core-sw-01',
+  sysContact:           'netops@airtel.in',
+  sysLocation:          'DC1 Rack A12',
+  sysUpTimeSeconds:     864000,
   classificationStatus: 'RECOGNISED',
   correlationId:        'corr-001',
 };
@@ -150,11 +154,23 @@ export const mockDiscoveryResults: DiscoveryResult[] = [
 
 export const mockDiscoverySchedule: DiscoverySchedule = {
   scheduleId:       'sched-001',
+  scopeRunId:       'run-test-003',
   name:             'Nightly Core Network Scan',
   cronExpression:   '0 2 * * *',
-  scope:            [{ type: 'CIDR', value: '10.0.0.0/8' }],
   enabled:          true,
-  lastRunAt:        '2026-09-08T02:00:05Z',
   nextRunAt:        '2026-09-09T02:00:00Z',
   createdAt:        '2026-09-01T09:00:00Z',
 };
+
+/** Second Cisco switch with different model for comparison tests (WO-030). */
+export const mockResultCiscoSwitchAlt: DiscoveryResult = {
+  ...mockResultCiscoSwitch,
+  ip:    '192.168.1.12',
+  model: 'Catalyst-3850',
+  sysName: 'core-sw-02',
+};
+
+export const mockComparisonDevices: DiscoveryResult[] = [
+  mockResultCiscoSwitch,
+  mockResultCiscoSwitchAlt,
+];
