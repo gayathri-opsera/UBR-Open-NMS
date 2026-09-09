@@ -6,16 +6,23 @@ import com.ubrnms.inventory.model.Device;
 import com.ubrnms.inventory.model.DeviceTag;
 import com.ubrnms.inventory.model.OnboardingAssignmentPolicy;
 import com.ubrnms.inventory.model.OnboardingStatusDTO;
+import com.ubrnms.inventory.model.PagedResponse;
 import com.ubrnms.inventory.repository.BirthCertificateRepository;
 import com.ubrnms.inventory.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,6 +39,7 @@ public class InventoryService {
     private final BirthCertificateRepository bcRepo;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final MongoTemplate mongoTemplate;
 
     @Autowired(required = false)
     private com.ubrnms.inventory.repository.hierarchy.PreAssignmentRepository preAssignRepo;
@@ -87,19 +95,62 @@ public class InventoryService {
         return deviceRepo.findById(id);
     }
 
-    public List<Device> listDevices(String deviceType, String status, int page, int limit) {
+    /**
+     * Lists devices with database-level filtering and pagination (WO-008).
+     *
+     * <p>Replaces the previous in-memory {@code findAll()} + Stream approach with a
+     * MongoDB {@code Query} so only the requested page is loaded into the JVM heap.
+     *
+     * @param deviceType optional exact match on {@code deviceType} field
+     * @param status     optional exact match on {@code status} field
+     * @param page       zero-based page index; negative values default to 0
+     * @param limit      page size; must be 1–500 (clamped to prevent abuse)
+     * @throws IllegalArgumentException if page or limit is invalid
+     */
+    public PagedResponse<Device> listDevices(String deviceType, String status, int page, int limit) {
         return listDevices(deviceType, status, null, page, limit);
     }
 
-    public List<Device> listDevices(String deviceType, String status, String sysObjectID, int page, int limit) {
-        List<Device> all = deviceRepo.findAll();
-        return all.stream()
-                .filter(d -> deviceType == null || deviceType.equalsIgnoreCase(d.getDeviceType()))
-                .filter(d -> status == null || status.equalsIgnoreCase(d.getStatus()))
-                .filter(d -> sysObjectID == null || sysObjectID.equals(d.getSysObjectID()))
-                .skip((long) page * limit)
-                .limit(limit)
-                .collect(Collectors.toList());
+    /**
+     * Lists devices with an additional optional {@code sysObjectID} filter (WO-008).
+     *
+     * @throws IllegalArgumentException if page is negative or limit is out of 1–500 range
+     */
+    public PagedResponse<Device> listDevices(String deviceType, String status, String sysObjectID, int page, int limit) {
+        // Validate and normalise pagination parameters.
+        if (page < 0) {
+            throw new IllegalArgumentException("page must be >= 0, got: " + page);
+        }
+        if (limit <= 0 || limit > 500) {
+            throw new IllegalArgumentException("limit must be 1–500, got: " + limit);
+        }
+
+        // Build a dynamic Criteria chain — only add predicates for non-null filters.
+        List<Criteria> predicates = new ArrayList<>();
+        if (deviceType != null && !deviceType.isBlank()) {
+            predicates.add(Criteria.where("deviceType").regex("^" + deviceType.trim() + "$", "i"));
+        }
+        if (status != null && !status.isBlank()) {
+            predicates.add(Criteria.where("status").regex("^" + status.trim() + "$", "i"));
+        }
+        if (sysObjectID != null && !sysObjectID.isBlank()) {
+            predicates.add(Criteria.where("sysObjectID").is(sysObjectID.trim()));
+        }
+
+        Query query = new Query();
+        if (!predicates.isEmpty()) {
+            query.addCriteria(new Criteria().andOperator(predicates.toArray(new Criteria[0])));
+        }
+        query.with(Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        // Count query (no skip/limit) for pagination metadata.
+        long total = mongoTemplate.count(query, Device.class);
+
+        // Apply pagination.
+        query.with(PageRequest.of(page, limit));
+        List<Device> data = mongoTemplate.find(query, Device.class);
+
+        return new PagedResponse<>(data, total, page, limit);
     }
 
     public Optional<Device> findBySerial(String serial) {

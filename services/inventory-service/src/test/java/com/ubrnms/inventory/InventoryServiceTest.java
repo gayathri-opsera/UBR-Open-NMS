@@ -3,6 +3,7 @@ package com.ubrnms.inventory;
 import com.ubrnms.inventory.model.BirthCertificate;
 import com.ubrnms.inventory.model.Device;
 import com.ubrnms.inventory.model.DeviceTag;
+import com.ubrnms.inventory.model.PagedResponse;
 import com.ubrnms.inventory.repository.BirthCertificateRepository;
 import com.ubrnms.inventory.repository.DeviceRepository;
 import com.ubrnms.inventory.service.InventoryService;
@@ -12,6 +13,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.kafka.core.KafkaTemplate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -30,6 +33,7 @@ class InventoryServiceTest {
     @Mock private DeviceRepository deviceRepo;
     @Mock private BirthCertificateRepository bcRepo;
     @Mock private KafkaTemplate<String, String> kafkaTemplate;
+    @Mock private MongoTemplate mongoTemplate;
     @InjectMocks private InventoryService service;
 
     @BeforeEach
@@ -128,5 +132,65 @@ class InventoryServiceTest {
         assertThat(result.getSerialNumber()).isEqualTo("SN-005");
         assertThat(result.getStatus()).isEqualTo("ACTIVE");
         verify(kafkaTemplate).send(eq("inventory-sync"), eq("SN-005"), anyString());
+    }
+
+    // ── WO-008: DB-level pagination tests ──────────────────────────────────────
+
+    @Test
+    void listDevices_returnsPaginatedResponse() {
+        Device d = new Device();
+        d.setSerialNumber("SN-P1");
+        when(mongoTemplate.count(any(Query.class), eq(Device.class))).thenReturn(1L);
+        when(mongoTemplate.find(any(Query.class), eq(Device.class))).thenReturn(List.of(d));
+
+        PagedResponse<Device> response = service.listDevices(null, null, 0, 10);
+
+        assertThat(response.getData()).hasSize(1);
+        assertThat(response.getTotalElements()).isEqualTo(1L);
+        assertThat(response.getTotalPages()).isEqualTo(1);
+        assertThat(response.getCurrentPage()).isEqualTo(0);
+    }
+
+    @Test
+    void listDevices_emptyCollection_returnsEmptyResponse() {
+        when(mongoTemplate.count(any(Query.class), eq(Device.class))).thenReturn(0L);
+        when(mongoTemplate.find(any(Query.class), eq(Device.class))).thenReturn(List.of());
+
+        PagedResponse<Device> response = service.listDevices(null, null, 0, 20);
+
+        assertThat(response.getData()).isEmpty();
+        assertThat(response.getTotalElements()).isZero();
+        assertThat(response.getTotalPages()).isZero();
+    }
+
+    @Test
+    void listDevices_negativePage_throwsIllegalArgument() {
+        assertThatThrownBy(() -> service.listDevices(null, null, -1, 10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("page");
+    }
+
+    @Test
+    void listDevices_zeroLimit_throwsIllegalArgument() {
+        assertThatThrownBy(() -> service.listDevices(null, null, 0, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("limit");
+    }
+
+    @Test
+    void listDevices_limitOver500_throwsIllegalArgument() {
+        assertThatThrownBy(() -> service.listDevices(null, null, 0, 501))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("limit");
+    }
+
+    @Test
+    void listDevices_outOfBoundsPage_returnsEmptyData() {
+        when(mongoTemplate.count(any(Query.class), eq(Device.class))).thenReturn(5L);
+        when(mongoTemplate.find(any(Query.class), eq(Device.class))).thenReturn(List.of());
+
+        PagedResponse<Device> response = service.listDevices(null, null, 10, 10);
+        assertThat(response.getData()).isEmpty();
+        assertThat(response.getTotalElements()).isEqualTo(5L);
     }
 }

@@ -3,6 +3,7 @@ package com.ubrnms.inventory.controller;
 import com.ubrnms.inventory.model.BirthCertificate;
 import com.ubrnms.inventory.model.Device;
 import com.ubrnms.inventory.model.DeviceTag;
+import com.ubrnms.inventory.model.PagedResponse;
 import com.ubrnms.inventory.service.ExportService;
 import com.ubrnms.inventory.service.InventoryService;
 import lombok.RequiredArgsConstructor;
@@ -59,8 +60,14 @@ public class InventoryController {
                     .map(ResponseEntity::ok)
                     .orElse(ResponseEntity.notFound().build());
         }
-        // List all devices with optional type/status filters
-        return ResponseEntity.ok(inventoryService.listDevices(deviceType, status, page, limit));
+        // List all devices with optional type/status filters — DB-level pagination (WO-008).
+        try {
+            PagedResponse<Device> paged = inventoryService.listDevices(deviceType, status, page, limit);
+            return ResponseEntity.ok(paged);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", Map.of("code", "INVALID_PAGINATION", "message", e.getMessage())));
+        }
     }
 
     @PostMapping("/search")
