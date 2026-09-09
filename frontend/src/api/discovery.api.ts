@@ -30,8 +30,15 @@ export interface SnmpDiscoveryRunRequest {
   /**
    * Reference ID to a stored SNMP credential (from the credential store).
    * If omitted the backend falls back to the default community "public".
+   * WO-027 will replace direct community input with this field.
    */
   credentialId?: string;
+  /**
+   * SNMP community string for v1/v2c (Phase 1 — before credential store exists).
+   * SECURITY: never logged or stored in plaintext; treated as opaque by the API client.
+   * Replaced by credentialId once the credential store is built (WO-027).
+   */
+  community?: string;
   /** Per-host SNMP GET timeout in seconds (default: 5). */
   timeoutSeconds?: number;
   /** Number of SNMP retries on timeout (default: 2). Auth failures are never retried). */
