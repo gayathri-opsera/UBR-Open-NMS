@@ -15,9 +15,11 @@ import (
 
 	"github.com/airtel-ubrnms/discovery-service/internal/auth"
 	"github.com/airtel-ubrnms/discovery-service/internal/config"
+	"github.com/airtel-ubrnms/discovery-service/internal/crypto"
 	"github.com/airtel-ubrnms/discovery-service/internal/handler"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
 	"github.com/airtel-ubrnms/discovery-service/internal/realtime"
+	"github.com/airtel-ubrnms/discovery-service/internal/repository"
 	"github.com/airtel-ubrnms/discovery-service/internal/scanner"
 	"github.com/airtel-ubrnms/discovery-service/internal/scheduler"
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
@@ -72,6 +74,22 @@ func main() {
 	h := handler.New(svc, store, runStore).WithHMACValidator(hmacValidator)
 	schedHandler := handler.NewScheduleHandler(rediscoSched)
 
+	// Wire credential CRUD handler (WO-014).
+	// Key is loaded from CREDENTIAL_ENCRYPTION_KEY env var; falls back to a dev
+	// placeholder when unset so the service starts in local/test environments.
+	credRepo := repository.NewInMemoryCredentialRepository()
+	var credEncryptor *crypto.Encryptor
+	if encryptor, encErr := crypto.NewEncryptorFromEnv(); encErr == nil {
+		credEncryptor = encryptor
+	} else {
+		slog.Warn("CREDENTIAL_ENCRYPTION_KEY not set; using dev placeholder key — DO NOT use in production")
+		devKey := make([]byte, 32)
+		copy(devKey, "dev-placeholder-key-not-for-prod")
+		credEncryptor, _ = crypto.NewEncryptor(devKey)
+	}
+	credSvc := service.NewCredentialService(credRepo, credEncryptor, nil)
+	credHandler := handler.NewCredentialHandler(credSvc)
+
 	// Configure realtime device presence manager (WO-022).
 	// Production: replace fakes with real Redis / inventory HTTP / Kafka clients.
 	presenceValidator := &realtimeHMACValidator{secretStore: secretStore}
@@ -102,15 +120,22 @@ func main() {
 		r.Post("/check-in", h.CheckIn)
 		r.Get("/devices", h.Lookup)
 		r.Post("/scan", h.TriggerScan)
-		r.Get("/runs", h.ListDiscoveryRuns)                                     // WO-003
-		r.Post("/runs", h.CreateDiscoveryRun)                                   // WO-011
-		r.Get("/onboarding", h.GetOnboardingStates)                             // WO-026
-		r.Post("/schedules", schedHandler.CreateSchedule)                       // WO-017
-		r.Get("/schedules", schedHandler.ListSchedules)                         // WO-017
-		r.Delete("/schedules/{scheduleId}", schedHandler.DeleteSchedule)        // WO-017
-		r.Post("/schedules/{scheduleId}/run", schedHandler.TriggerScheduleRun)  // WO-017
+		r.Get("/runs", h.ListDiscoveryRuns)                                      // WO-003
+		r.Post("/runs", h.CreateDiscoveryRun)                                    // WO-011
+		r.Get("/onboarding", h.GetOnboardingStates)                              // WO-026
+		r.Post("/schedules", schedHandler.CreateSchedule)                        // WO-017
+		r.Get("/schedules", schedHandler.ListSchedules)                          // WO-017
+		r.Delete("/schedules/{scheduleId}", schedHandler.DeleteSchedule)         // WO-017
+		r.Post("/schedules/{scheduleId}/run", schedHandler.TriggerScheduleRun)   // WO-017
 		r.Get("/schedules/{scheduleId}/history", schedHandler.GetScheduleHistory) // WO-017
-		r.Get("/realtime", presenceManager.ServeHTTP)                           // WO-022
+		r.Get("/realtime", presenceManager.ServeHTTP)                            // WO-022
+
+		// SNMP Credential CRUD API (WO-014) — Admin role required for mutations.
+		r.Post("/credentials", credHandler.CreateCredential)
+		r.Get("/credentials", credHandler.ListCredentials)
+		r.Get("/credentials/{credentialId}", credHandler.GetCredential)
+		r.Put("/credentials/{credentialId}", credHandler.UpdateCredential)
+		r.Delete("/credentials/{credentialId}", credHandler.DeleteCredential)
 	})
 
 	// Southbound service registry for UBR call-home (WO-009)

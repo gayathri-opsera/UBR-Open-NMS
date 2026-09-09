@@ -218,6 +218,12 @@ func InternalError(w http.ResponseWriter, correlationID string) {
 		correlationID)
 }
 
+// Forbidden writes a 403 FORBIDDEN response. Used for RBAC authorization failures
+// (e.g., a non-Admin caller attempting to mutate credentials). No retry headers.
+func Forbidden(w http.ResponseWriter, message, correlationID string) {
+	WriteError(w, http.StatusForbidden, "FORBIDDEN", CategoryAuthFailure, message, correlationID)
+}
+
 // ── Utility helpers ───────────────────────────────────────────────────────────
 
 // LookupStatus returns the HTTP status code for a given reason string.
