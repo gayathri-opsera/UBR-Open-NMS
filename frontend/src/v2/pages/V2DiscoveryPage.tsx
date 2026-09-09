@@ -6,7 +6,9 @@
  *  2. Auth Failures      — alarms from authentication-failed devices (NMS-DIS-05)
  *  3. All Discovered     — complete inventory including ONLINE/OFFLINE (NMS-DIS-02)
  *  4. SNMP Discovery     — run SNMP-based discovery scans (REQ-004)
- *  5. Mode Admin         — enable/disable discovery modes (admin only, WO-001)
+ *  5. Run History        — paginated list of past discovery runs (WO-015)
+ *  6. SNMP Credentials   — manage stored SNMP credentials (WO-023)
+ *  7. Mode Admin         — enable/disable discovery modes (admin only, WO-001)
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -26,17 +28,32 @@ import { apiClient } from '../../api/client';
 import { DiscoveryTriggerForm } from '../components/discovery/DiscoveryTriggerForm';
 import { DiscoveryRunStatusView } from '../components/discovery/DiscoveryRunStatusView';
 import { DiscoveryResultsTable } from '../components/discovery/DiscoveryResultsTable';
+import { DiscoveryRunHistory } from '../components/discovery/DiscoveryRunHistory';
+import { CredentialManager } from '../components/discovery/CredentialManager';
+import { DiscoverySchedules } from '../components/discovery/DiscoverySchedules';
 import type { DiscoveryRunResponse } from '../../api/discovery.api';
+import type { DiscoveryRunSummary } from '../../api/discovery.api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type DiscoveryTab = 'provisioning' | 'auth_failures' | 'all' | 'snmp_discovery' | 'mode_admin';
+type DiscoveryTab =
+  | 'provisioning'
+  | 'auth_failures'
+  | 'all'
+  | 'snmp_discovery'
+  | 'run_history'
+  | 'snmp_credentials'
+  | 'schedules'
+  | 'mode_admin';
 
 const TAB_LABELS: Record<DiscoveryTab, string> = {
-  provisioning:   'Provisioning Queue',
-  auth_failures:  'Auth Failures',
-  all:            'All Discovered',
-  snmp_discovery: 'SNMP Discovery',
-  mode_admin:     'Mode Admin',
+  provisioning:     'Provisioning Queue',
+  auth_failures:    'Auth Failures',
+  all:              'All Discovered',
+  snmp_discovery:   'SNMP Discovery',
+  run_history:      'Run History',
+  snmp_credentials: 'SNMP Credentials',
+  schedules:        'Schedules',
+  mode_admin:       'Mode Admin',
 };
 
 // ── SNMP Discovery workflow view states ───────────────────────────────────────
@@ -489,7 +506,12 @@ function AllDiscoveredTab() {
  * State is persisted to sessionStorage so the user can refresh without losing
  * an in-progress run (edge case from WO-025).
  */
-function SnmpDiscoveryTab() {
+interface SnmpDiscoveryTabProps {
+  /** Optional pre-populated scope value (e.g. from "Re-run" in the history tab). */
+  initialScope?: string;
+}
+
+function SnmpDiscoveryTab({ initialScope }: SnmpDiscoveryTabProps) {
   // Restore run ID from sessionStorage to handle browser refresh mid-run.
   const restoredRunId = sessionStorage.getItem(SNMP_RUN_SESSION_KEY);
 
@@ -541,7 +563,7 @@ function SnmpDiscoveryTab() {
       {/* Workflow: Form → Status → Results */}
       {view === 'form' && (
         <div style={{ maxWidth: 640 }}>
-          <DiscoveryTriggerForm onRunCreated={handleRunCreated} />
+          <DiscoveryTriggerForm onRunCreated={handleRunCreated} initialScope={initialScope} />
         </div>
       )}
 
@@ -672,6 +694,10 @@ export default function V2DiscoveryPage() {
   const { addToast } = useToast();
   const [tab, setTab] = useState<DiscoveryTab>('provisioning');
 
+  // Pre-populated scope for the SNMP Discovery trigger form, set when the user
+  // clicks "Re-run" on a completed run in the Run History tab (WO-015).
+  const [rerunScope, setRerunScope] = useState<string | undefined>(undefined);
+
   // KPI counts
   const [stats, setStats] = useState({ provisioning: 0, online: 0, offline: 0, authFails: 0 });
   const [statsLoading, setStatsLoading] = useState(true);
@@ -768,19 +794,36 @@ export default function V2DiscoveryPage() {
         borderBottom: '1px solid rgba(77,158,255,0.1)',
         marginBottom: 24, marginLeft: -28, marginRight: -28, paddingLeft: 28,
       }}>
-        <TabBtn id="provisioning"   active={tab === 'provisioning'}   count={stats.provisioning} onClick={setTab} />
-        <TabBtn id="auth_failures"  active={tab === 'auth_failures'}  count={stats.authFails}    onClick={setTab} />
-        <TabBtn id="all"            active={tab === 'all'}                                        onClick={setTab} />
-        <TabBtn id="snmp_discovery" active={tab === 'snmp_discovery'}                             onClick={setTab} />
-        <TabBtn id="mode_admin"     active={tab === 'mode_admin'}                                 onClick={setTab} />
+        <TabBtn id="provisioning"     active={tab === 'provisioning'}     count={stats.provisioning} onClick={setTab} />
+        <TabBtn id="auth_failures"    active={tab === 'auth_failures'}    count={stats.authFails}    onClick={setTab} />
+        <TabBtn id="all"              active={tab === 'all'}                                          onClick={setTab} />
+        <TabBtn id="snmp_discovery"   active={tab === 'snmp_discovery'}                               onClick={setTab} />
+        <TabBtn id="run_history"      active={tab === 'run_history'}                                  onClick={setTab} />
+        <TabBtn id="snmp_credentials" active={tab === 'snmp_credentials'}                             onClick={setTab} />
+        <TabBtn id="schedules"        active={tab === 'schedules'}                                    onClick={setTab} />
+        <TabBtn id="mode_admin"       active={tab === 'mode_admin'}                                   onClick={setTab} />
       </div>
 
       {/* Tab content */}
       {tab === 'provisioning'   && <ProvisioningTab />}
       {tab === 'auth_failures'  && <AuthFailuresTab />}
       {tab === 'all'            && <AllDiscoveredTab />}
-      {tab === 'snmp_discovery' && <SnmpDiscoveryTab />}
-      {tab === 'mode_admin'     && <ModeAdminTab />}
+      {tab === 'snmp_discovery' && <SnmpDiscoveryTab initialScope={rerunScope} />}
+      {tab === 'run_history'    && (
+        <DiscoveryRunHistory
+          onRerun={(run: DiscoveryRunSummary) => {
+            // Build a comma-separated scope string from the run's normalised scope.
+            const scope = run.normalizedScope
+              ? run.normalizedScope.map((s) => s.value).join(', ')
+              : run.scopeSummary ?? '';
+            setRerunScope(scope || undefined);
+            setTab('snmp_discovery');
+          }}
+        />
+      )}
+      {tab === 'snmp_credentials' && <CredentialManager />}
+      {tab === 'schedules'        && <DiscoverySchedules />}
+      {tab === 'mode_admin'       && <ModeAdminTab />}
     </div>
   );
 }
