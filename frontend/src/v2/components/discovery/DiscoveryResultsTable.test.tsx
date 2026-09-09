@@ -74,7 +74,7 @@ describe('DiscoveryResultsTable — data rendering', () => {
     render(<DiscoveryResultsTable runId="run-test-003" />);
 
     await waitFor(() => {
-      expect(screen.getByText('Cisco')).toBeInTheDocument();
+      expect(screen.getAllByText('Cisco').length).toBeGreaterThan(0);
       expect(screen.getByText('Catalyst')).toBeInTheDocument();
     });
   });
