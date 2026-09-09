@@ -102,6 +102,7 @@ func main() {
 		r.Post("/check-in", h.CheckIn)
 		r.Get("/devices", h.Lookup)
 		r.Post("/scan", h.TriggerScan)
+		r.Get("/runs", h.ListDiscoveryRuns)                                     // WO-003
 		r.Post("/runs", h.CreateDiscoveryRun)                                   // WO-011
 		r.Get("/onboarding", h.GetOnboardingStates)                             // WO-026
 		r.Post("/schedules", schedHandler.CreateSchedule)                       // WO-017

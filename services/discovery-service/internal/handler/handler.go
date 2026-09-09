@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/airtel-ubrnms/discovery-service/internal/auth"
@@ -308,6 +309,51 @@ func (h *DiscoveryHandler) GetOnboardingStates(w http.ResponseWriter, r *http.Re
 
 	_ = corrID
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListDiscoveryRuns handles GET /api/v1/discovery/runs (WO-003).
+// Returns a paginated, optionally status-filtered list of past and ongoing discovery runs.
+//
+// Query parameters:
+//   - page   (int, optional, 1-indexed, default 1) — page number; out-of-range returns empty data
+//   - limit  (int, optional, default 20, max 200)  — items per page
+//   - status (string, optional)                    — filter by run status (e.g. COMPLETED, RUNNING, FAILED)
+func (h *DiscoveryHandler) ListDiscoveryRuns(w http.ResponseWriter, r *http.Request) {
+	corrID := r.Header.Get("X-Correlation-ID")
+
+	q := r.URL.Query()
+
+	// Parse page — must be a positive integer.
+	page := 1
+	if raw := q.Get("page"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 {
+			southbound.BadRequest(w, "page must be a positive integer", corrID)
+			return
+		}
+		page = v
+	}
+
+	// Parse limit — must be a positive integer.
+	limit := 20
+	if raw := q.Get("limit"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 {
+			southbound.BadRequest(w, "limit must be a positive integer", corrID)
+			return
+		}
+		limit = v
+	}
+
+	status := q.Get("status")
+
+	result := h.runStore.ListRuns(service.ListRunsParams{
+		Page:   page,
+		Limit:  limit,
+		Status: status,
+	})
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // CreateDiscoveryRun handles POST /api/v1/discovery/runs (WO-011).

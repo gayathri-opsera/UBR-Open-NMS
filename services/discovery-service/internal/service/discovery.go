@@ -784,6 +784,91 @@ func (s *DiscoveryRunStore) Get(id string) (*model.DiscoveryRun, bool) {
 	return run, ok
 }
 
+// ListRunsParams encapsulates pagination and filter parameters for ListRuns (WO-003).
+type ListRunsParams struct {
+	// Page is 1-indexed page number. Values < 1 default to 1.
+	Page int
+	// Limit is the maximum number of results per page. Values < 1 default to 20;
+	// values > 200 are capped at 200 to bound response size.
+	Limit int
+	// Status filters runs by their status field.
+	// Empty string means no filter (return all statuses).
+	Status string
+}
+
+// ListRunsResult is the paginated response returned by ListRuns (WO-003).
+type ListRunsResult struct {
+	Data       []*model.DiscoveryRun `json:"data"`
+	Pagination Pagination            `json:"pagination"`
+}
+
+// Pagination describes the current pagination position (WO-003).
+type Pagination struct {
+	Total int `json:"total"` // total items matching the filter
+	Page  int `json:"page"`  // current 1-indexed page
+	Limit int `json:"limit"` // page size applied
+}
+
+// ListRuns returns a paginated, optionally filtered slice of discovery runs (WO-003).
+// Runs are returned in creation order (earliest first) for stable pagination.
+//
+// Edge cases handled:
+//   - Page out of bounds: returns empty data slice with correct total.
+//   - Invalid params (page < 1, limit < 1, limit > 200): silently clamped to valid range.
+//   - Empty store: returns total=0 and empty data slice.
+func (s *DiscoveryRunStore) ListRuns(p ListRunsParams) ListRunsResult {
+	// Clamp pagination params to valid ranges.
+	if p.Page < 1 {
+		p.Page = 1
+	}
+	if p.Limit < 1 {
+		p.Limit = 20
+	}
+	if p.Limit > 200 {
+		p.Limit = 200
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Collect matching runs in deterministic (insertion) order.
+	// We sort by RunID to maintain a stable ordering (UUIDs are not time-ordered
+	// but provide a deterministic sequence for in-memory tests).
+	allRuns := make([]*model.DiscoveryRun, 0, len(s.runs))
+	for _, run := range s.runs {
+		if p.Status == "" || run.Status == p.Status {
+			allRuns = append(allRuns, run)
+		}
+	}
+
+	// Sort by creation time ascending for stable pagination.
+	for i := 1; i < len(allRuns); i++ {
+		for j := i; j > 0 && allRuns[j].CreatedAt.Before(allRuns[j-1].CreatedAt); j-- {
+			allRuns[j], allRuns[j-1] = allRuns[j-1], allRuns[j]
+		}
+	}
+
+	total := len(allRuns)
+	start := (p.Page - 1) * p.Limit
+	if start >= total {
+		// Page number exceeds available data — return empty page with correct total.
+		return ListRunsResult{
+			Data:       []*model.DiscoveryRun{},
+			Pagination: Pagination{Total: total, Page: p.Page, Limit: p.Limit},
+		}
+	}
+
+	end := start + p.Limit
+	if end > total {
+		end = total
+	}
+
+	return ListRunsResult{
+		Data:       allRuns[start:end],
+		Pagination: Pagination{Total: total, Page: p.Page, Limit: p.Limit},
+	}
+}
+
 // CreateDiscoveryRun validates scope and creates a discovery run record (WO-011).
 func (s *DiscoveryService) CreateDiscoveryRun(req *model.DiscoveryRunRequest, createdBy string, runStore *DiscoveryRunStore) (*model.DiscoveryRunResponse, []model.ValidationError, error) {
 	// Validate and normalize scope
