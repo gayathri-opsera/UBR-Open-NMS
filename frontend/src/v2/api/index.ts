@@ -17,3 +17,4 @@ export * from '../../api/admin.types';
 export * from '../../api/auth.api';
 export * from '../../api/config.api';
 export * from '../../api/config.types';
+export * from '../../api/discovery.api';
