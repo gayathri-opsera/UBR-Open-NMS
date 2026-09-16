@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_MYCOM_FORWARDER_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-mycom-forwarder
-  newTag: dev-920dd1a0-20260710054919
+  newTag: dev-b8ba8eae-20260916145535
 
 labels:
 - pairs:
