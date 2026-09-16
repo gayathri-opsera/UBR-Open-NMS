@@ -173,6 +173,78 @@ class ProductDefinitionValidationServiceTest {
         assertThat(report.getErrors()).anyMatch(e -> "CREDENTIAL_DETECTED".equals(e.getCode()));
     }
 
+    // ── Credential runtime contract validation (WO-016) ──────────────────────
+
+    @Test
+    void validate_noVaultRefs_credentialContractOptional() {
+        // Standard definition without vault:// references should not require the contract section
+        NormalizedProductDefinition def = buildValid();
+        ValidationReport report = service.validate(def, "d1", "v1", "c1");
+        assertThat(report.getStatus()).isEqualTo("VALID");
+        assertThat(report.getErrors()).noneMatch(e -> "MISSING_CREDENTIAL_RUNTIME_CONTRACT".equals(e.getCode()));
+    }
+
+    @Test
+    void validate_vaultRefWithoutContract_isInvalid() {
+        NormalizedProductDefinition def = buildValid();
+        def.getParameterGroups().get(0).getParameters().get(0)
+                .setApiPath("vault://credentials/device-001/snmp");
+        ValidationReport report = service.validate(def, "d1", "v1", "c1");
+        assertThat(report.getErrors()).anyMatch(e -> "MISSING_CREDENTIAL_RUNTIME_CONTRACT".equals(e.getCode()));
+    }
+
+    @Test
+    void validate_vaultRefWithContract_isValid() {
+        NormalizedProductDefinition def = buildValid();
+        def.getParameterGroups().get(0).getParameters().get(0)
+                .setApiPath("vault://credentials/device-001/snmp");
+        def.setCredentialRuntimeRequirements(
+                NormalizedProductDefinition.CredentialRuntimeRequirements.builder()
+                        .vaultProvider("AES_256_GCM")
+                        .tenantScoped(false)
+                        .requiredSecretPaths(List.of("vault://credentials/device-001/snmp"))
+                        .encryptionAtRest(true)
+                        .keyRotationPolicy("ANNUAL")
+                        .build()
+        );
+        ValidationReport report = service.validate(def, "d1", "v1", "c1");
+        assertThat(report.getErrors()).noneMatch(e -> "MISSING_CREDENTIAL_RUNTIME_CONTRACT".equals(e.getCode()));
+        assertThat(report.getErrors()).noneMatch(e -> "REQUIRED_FIELD".equals(e.getCode())
+                && e.getField().startsWith("credentialRuntimeRequirements"));
+    }
+
+    @Test
+    void validate_vaultRefWithContractMissingProvider_isInvalid() {
+        NormalizedProductDefinition def = buildValid();
+        def.getParameterGroups().get(0).getParameters().get(0)
+                .setApiPath("vault://credentials/device-001");
+        def.setCredentialRuntimeRequirements(
+                NormalizedProductDefinition.CredentialRuntimeRequirements.builder()
+                        .vaultProvider(null)
+                        .requiredSecretPaths(List.of("vault://credentials/device-001"))
+                        .build()
+        );
+        ValidationReport report = service.validate(def, "d1", "v1", "c1");
+        assertThat(report.getErrors()).anyMatch(e ->
+                "REQUIRED_FIELD".equals(e.getCode())
+                && e.getField().contains("vaultProvider"));
+    }
+
+    @Test
+    void validate_vaultRefWithInvalidPathInContract_isInvalid() {
+        NormalizedProductDefinition def = buildValid();
+        def.getParameterGroups().get(0).getParameters().get(0)
+                .setCliCommand("vault://credentials/device-001");
+        def.setCredentialRuntimeRequirements(
+                NormalizedProductDefinition.CredentialRuntimeRequirements.builder()
+                        .vaultProvider("AES_256_GCM")
+                        .requiredSecretPaths(List.of("http://bad-path/credentials"))
+                        .build()
+        );
+        ValidationReport report = service.validate(def, "d1", "v1", "c1");
+        assertThat(report.getErrors()).anyMatch(e -> "INVALID_VAULT_PATH".equals(e.getCode()));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private NormalizedProductDefinition buildValid() {

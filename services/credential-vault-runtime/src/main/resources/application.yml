@@ -1,0 +1,36 @@
+spring:
+  threads:
+    virtual:
+      enabled: true
+  application:
+    name: credential-vault-runtime
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_credvault}
+
+server:
+  port: ${PORT:8094}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+credential-vault:
+  # AES-256-GCM key material is loaded from environment variable — never from config files.
+  # In production: VAULT_MASTER_KEY_B64 must be set to a 256-bit Base64-encoded key.
+  # In local dev: a deterministic test key is used automatically (see BootstrapConfig).
+  environment: ${VAULT_ENV:local}           # local | test | deployed
+  master-key-env-var: VAULT_MASTER_KEY_B64 # env var name holding the Base64-encoded AES key
+  tenant-isolation-enabled: ${VAULT_TENANT_ISOLATION:false}
+  max-credential-path-length: 512
+
+logging:
+  level:
+    com.ubrnms: ${LOG_LEVEL:INFO}
+    # Suppress key material from debug logs even if LOG_LEVEL=DEBUG
+    com.ubrnms.credentialvault.contracts: WARN

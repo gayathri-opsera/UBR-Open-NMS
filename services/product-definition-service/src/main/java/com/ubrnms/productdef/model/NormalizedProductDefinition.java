@@ -43,7 +43,59 @@ public class NormalizedProductDefinition {
 
     private List<ParameterGroup> parameterGroups;
 
+    // ── Credential runtime requirements (WO-016) ──────────────────────────────
+
+    /**
+     * Declares the credential vault runtime contract required by this definition.
+     * Mandatory when any protocol mapping uses vault:// credential references.
+     * Validated by ProductDefinitionValidationService before SUBMITTED→APPROVED transition.
+     */
+    private CredentialRuntimeRequirements credentialRuntimeRequirements;
+
+    // ── Integration dependencies (WO-016) ─────────────────────────────────────
+
+    /**
+     * External services this definition depends on at runtime (e.g. NTP, RADIUS).
+     * Informational — does not block validation but is included in the published registry.
+     */
+    private List<String> integrationDependencies;
+
+    // ── Tenant isolation (WO-016) ─────────────────────────────────────────────
+
+    /**
+     * Tenant-specific scope overrides. When set, this definition is scoped to the
+     * listed tenant IDs only. Null means the definition is available to all tenants.
+     */
+    private List<String> tenantScopeIds;
+
+    // ── Lifecycle hooks (WO-016) ──────────────────────────────────────────────
+
+    /**
+     * Optional callback configurations for lifecycle state transitions.
+     * Keys are lifecycle state values (PUBLISHED, DEPRECATED, ARCHIVED).
+     */
+    private java.util.Map<String, String> lifecycleHooks;
+
     // ── Inner types ───────────────────────────────────────────────────────────
+
+    /**
+     * Credential vault runtime contract fields declared within a Product Definition (WO-016).
+     * Required when any protocol mapping references vault:// credential paths.
+     */
+    @Data
+    @Builder
+    public static class CredentialRuntimeRequirements {
+        /** Required vault provider. Must be AES_256_GCM for production. */
+        private String vaultProvider;
+        /** Whether credentials must be resolved with tenant-scoped vault paths. */
+        private boolean tenantScoped;
+        /** Vault path templates this definition's adapters will resolve at runtime. */
+        private List<String> requiredSecretPaths;
+        /** Whether credentials must be encrypted at rest in the vault. */
+        private boolean encryptionAtRest;
+        /** Key rotation policy — e.g. ANNUAL, QUARTERLY. */
+        private String keyRotationPolicy;
+    }
 
     @Data
     @Builder

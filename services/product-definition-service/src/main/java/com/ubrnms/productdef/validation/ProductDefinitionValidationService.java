@@ -56,6 +56,7 @@ public class ProductDefinitionValidationService {
         validateFingerprints(def, errors, warnings);
         validateProtocols(def, errors, warnings);
         validateParameters(def, errors, warnings);
+        validateCredentialRuntimeContract(def, errors, warnings);
         scanCredentials(def, errors);
 
         String status = errors.isEmpty() ? "VALID" : "INVALID";
@@ -196,6 +197,77 @@ public class ProductDefinitionValidationService {
                 globalParamIdx++;
             }
         }
+    }
+
+    // ── Credential runtime contract (WO-016) ─────────────────────────────────
+
+    /**
+     * Validates the {@code credentialRuntimeRequirements} section when protocol mappings
+     * reference vault:// credential paths.
+     *
+     * <p>If any parameter's CLI command, API path, or gRPC path contains a {@code vault://}
+     * reference, the {@code credentialRuntimeRequirements} section must be present and valid.
+     */
+    private void validateCredentialRuntimeContract(NormalizedProductDefinition def,
+                                                    List<ValidationError> errors,
+                                                    List<ValidationError> warnings) {
+        boolean hasVaultReference = hasVaultReferences(def);
+
+        if (!hasVaultReference) {
+            return; // contract section is optional when no vault references exist
+        }
+
+        NormalizedProductDefinition.CredentialRuntimeRequirements req = def.getCredentialRuntimeRequirements();
+        if (req == null) {
+            errors.add(err("MISSING_CREDENTIAL_RUNTIME_CONTRACT", "credentialRuntimeRequirements",
+                    "Protocol mappings reference vault:// credential paths but credentialRuntimeRequirements section is absent. "
+                    + "Add credentialRuntimeRequirements declaring vaultProvider, tenantScoped, and requiredSecretPaths."));
+            return;
+        }
+
+        if (req.getVaultProvider() == null || req.getVaultProvider().isBlank()) {
+            errors.add(err("REQUIRED_FIELD", "credentialRuntimeRequirements.vaultProvider",
+                    "vaultProvider is required. Supported value: AES_256_GCM"));
+        } else if (!req.getVaultProvider().equals("AES_256_GCM")) {
+            // Only AES_256_GCM is supported; other providers should be flagged as warnings
+            warnings.add(warn("UNSUPPORTED_VAULT_PROVIDER", "credentialRuntimeRequirements.vaultProvider",
+                    "Unsupported vaultProvider '" + req.getVaultProvider()
+                    + "'. Production deployments must use AES_256_GCM."));
+        }
+
+        if (req.getRequiredSecretPaths() == null || req.getRequiredSecretPaths().isEmpty()) {
+            errors.add(err("REQUIRED_FIELD", "credentialRuntimeRequirements.requiredSecretPaths",
+                    "requiredSecretPaths must list at least one vault:// path when credential references are present."));
+        } else {
+            for (int i = 0; i < req.getRequiredSecretPaths().size(); i++) {
+                String path = req.getRequiredSecretPaths().get(i);
+                if (path == null || !path.startsWith("vault://")) {
+                    errors.add(err("INVALID_VAULT_PATH",
+                            "credentialRuntimeRequirements.requiredSecretPaths[" + i + "]",
+                            "Vault paths must start with vault://. Got: " + path));
+                }
+            }
+        }
+    }
+
+    /** Returns true when any protocol mapping in the definition contains a vault:// reference. */
+    private boolean hasVaultReferences(NormalizedProductDefinition def) {
+        if (def.getParameterGroups() == null) return false;
+        for (NormalizedProductDefinition.ParameterGroup group : def.getParameterGroups()) {
+            if (group.getParameters() == null) continue;
+            for (NormalizedProductDefinition.ParameterEntry p : group.getParameters()) {
+                if (containsVaultRef(p.getCliCommand())
+                        || containsVaultRef(p.getApiPath())
+                        || containsVaultRef(p.getGrpcPath())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean containsVaultRef(String value) {
+        return value != null && value.contains("vault://");
     }
 
     // ── Credential scan ───────────────────────────────────────────────────────
