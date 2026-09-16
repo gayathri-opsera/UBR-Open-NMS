@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_KPI_COLLECTOR_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-kpi-collector
-  newTag: dev-d1573382-20260710045629
+  newTag: dev-b8ba8eae-20260916145535
 
 labels:
 - pairs:
