@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Literal, Optional
+from enum import Enum
+from typing import Any, Dict, List, Literal, Optional
 
 from .models import AlarmSeverity, AlarmState, DeviceType
 
@@ -198,6 +199,67 @@ class ConfigWorkerResultMessage:
     error_message: Optional[str] = None
     # Set when status=FALLBACK — the next protocol that should be tried
     fallback_protocol: Optional[str] = None
+
+
+class ProductDefinitionEventType(str, Enum):
+    """Discriminated event types for product-definition.lifecycle topic (WO-018)."""
+    CREATED = "product_definition.created"
+    SUBMITTED = "product_definition.submitted"
+    APPROVED = "product_definition.approved"
+    REJECTED = "product_definition.rejected"
+    PUBLISHED = "product_definition.published"
+    DEPRECATED = "product_definition.deprecated"
+    ARCHIVED = "product_definition.archived"
+    ROLLED_BACK = "product_definition.rolled_back"
+
+
+class ProductDefinitionLifecycleState(str, Enum):
+    """Lifecycle states that appear in the lifecycleState field of lifecycle events."""
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    PUBLISHED = "PUBLISHED"
+    DEPRECATED = "DEPRECATED"
+    ARCHIVED = "ARCHIVED"
+    ROLLED_BACK = "ROLLED_BACK"
+
+
+@dataclass
+class ProductDefinitionActor:
+    """Actor that triggered a Product Definition lifecycle event."""
+    actor_id: str
+    actor_type: Literal["USER", "SERVICE", "SYSTEM"]
+    actor_email: Optional[str] = None
+
+
+@dataclass
+class ProductDefinitionLifecycleEvent:
+    """
+    Kafka message on product-definition.lifecycle topic (WO-018).
+
+    Message key: aggregateId — ensures per-definition event ordering within a partition.
+    Schema: shared-libs/json-schemas/kafka/product-definition-lifecycle.schema.json
+
+    Consumers must filter on event_type and handle unknown values gracefully.
+    The metadata dict carries event-type-specific payload — see schema README for fields.
+
+    Security: This message must never contain credential material, vault key material,
+    or raw secret values. Credential references use vault:// paths only.
+    """
+    event_id: str                                  # UUID — event deduplication key
+    event_type: ProductDefinitionEventType
+    aggregate_id: str                              # definitionId — Kafka message key
+    version: int                                   # monotonic sequence number per aggregate
+    lifecycle_state: ProductDefinitionLifecycleState
+    actor: ProductDefinitionActor
+    timestamp: datetime
+    correlation_id: str
+    version_id: Optional[str] = None               # specific version affected
+    previous_lifecycle_state: Optional[ProductDefinitionLifecycleState] = None
+    causation_id: Optional[str] = None             # ID of the event that caused this one
+    tenant_id: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

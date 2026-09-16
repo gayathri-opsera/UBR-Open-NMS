@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ubr-nms.airtel.internal/schemas/kafka/product-definition-lifecycle.schema.json",
+  "title": "ProductDefinitionLifecycleEvent",
+  "description": "Base schema for all Product Definition lifecycle events on the product-definition.lifecycle topic. Message key is the definitionId to preserve per-definition ordering.",
+  "type": "object",
+  "required": ["eventId", "eventType", "aggregateId", "version", "lifecycleState", "actor", "timestamp", "correlationId"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this event instance. Used for deduplication."
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "product_definition.created",
+        "product_definition.submitted",
+        "product_definition.approved",
+        "product_definition.rejected",
+        "product_definition.published",
+        "product_definition.deprecated",
+        "product_definition.archived",
+        "product_definition.rolled_back"
+      ],
+      "description": "Discriminated event type. Consumers filter on this field."
+    },
+    "aggregateId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The Product Definition identifier this event belongs to. Also used as the Kafka message key."
+    },
+    "versionId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The specific version affected by this event."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonically increasing event sequence number for this aggregate."
+    },
+    "lifecycleState": {
+      "type": "string",
+      "enum": ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "PUBLISHED", "DEPRECATED", "ARCHIVED", "ROLLED_BACK"],
+      "description": "The lifecycle state AFTER this event was applied."
+    },
+    "previousLifecycleState": {
+      "type": "string",
+      "enum": ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "PUBLISHED", "DEPRECATED", "ARCHIVED", "ROLLED_BACK"],
+      "description": "The lifecycle state BEFORE this event was applied. Absent for created events."
+    },
+    "actor": {
+      "type": "object",
+      "required": ["actorId", "actorType"],
+      "properties": {
+        "actorId": { "type": "string", "description": "User ID or service account ID that triggered the event." },
+        "actorType": { "type": "string", "enum": ["USER", "SERVICE", "SYSTEM"] },
+        "actorEmail": { "type": "string", "format": "email" }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp with UTC offset when the event occurred."
+    },
+    "correlationId": {
+      "type": "string",
+      "description": "Traces the originating HTTP request or command across services."
+    },
+    "causationId": {
+      "type": "string",
+      "description": "ID of the event that caused this event. Set when this event results from another event."
+    },
+    "tenantId": {
+      "type": "string",
+      "description": "Tenant scoping identifier. Required for multi-tenant deployments."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Optional event-type-specific payload. See per-event schemas for field definitions.",
+      "properties": {
+        "vendorName": { "type": "string" },
+        "modelName": { "type": "string" },
+        "schemaVersion": { "type": "string" },
+        "contentHash": { "type": "string", "description": "SHA-256 hash of the uploaded file content." },
+        "validationStatus": { "type": "string", "enum": ["VALID", "INVALID", "WARNING"] },
+        "rejectionReason": { "type": "string", "description": "Human-readable rejection reason. Present on rejected events." },
+        "rollbackFromVersionId": { "type": "string", "format": "uuid", "description": "The version that was displaced by rollback. Present on rolled_back events." },
+        "restoredVersionId": { "type": "string", "format": "uuid", "description": "The version restored as published by rollback. Present on rolled_back events." },
+        "publishValidationGatesPassed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of publish validation gate names that passed. Present on approved/published events."
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
