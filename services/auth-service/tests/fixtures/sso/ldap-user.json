@@ -1,0 +1,14 @@
+{
+  "dn": "cn=testoperator,ou=users,dc=airtel,dc=in",
+  "uid": "testoperator",
+  "cn": "Test Operator",
+  "mail": "testoperator@airtel.in",
+  "memberOf": [
+    "cn=nms-operators,ou=groups,dc=airtel,dc=in",
+    "cn=all-users,ou=groups,dc=airtel,dc=in"
+  ],
+  "sAMAccountName": "testoperator",
+  "displayName": "Test Operator",
+  "department": "Network Operations",
+  "objectClass": ["inetOrgPerson", "organizationalPerson", "person", "top"]
+}

@@ -6,7 +6,8 @@
  *  Operator — View only (no Add/Edit/Delete buttons shown)
  *  Viewer   — View only
  */
-import { useCallback, useEffect, useState } from 'react';
+import 'leaflet/dist/leaflet.css';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchDevices, createDevice, updateDevice, deleteDevice, downloadDeviceExport,
@@ -23,7 +24,28 @@ import { useToast } from '../components/common/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { logger } from '../utils/logger';
 
+// ── Geo helpers ───────────────────────────────────────────────────────────────
+/**
+ * Haversine great-circle distance in kilometres.
+ * Used to enforce topology rules:
+ *   - BTS ↔ CPE distance must be < 1 KM (NMS-IV requirement)
+ *   - CPE and its linked IDU must share the same coordinates
+ */
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
+// Model is strictly derived from device type — no other models allowed
+const TYPE_MODEL_MAP: Record<string, string> = { BTS: 'A60', CPE: 'A61', IDU: 'IDU' };
+
 const TYPE_OPTIONS = [
   { value: '', label: 'All types' },
   { value: 'BTS', label: 'BTS' },
@@ -65,19 +87,24 @@ const BLANK_FORM: DeviceFormData = {
 };
 
 function DeviceFormModal({
-  open, onClose, initial, onSave,
+  open, onClose, initial, onSave, allDevices = [],
 }: {
   open: boolean;
   onClose: () => void;
   initial?: Device | null;
   onSave: (data: DeviceFormData) => Promise<void>;
+  /** Full device list — used to enforce topology distance rules. */
+  allDevices?: Device[];
 }) {
-  const [form, setForm] = useState<DeviceFormData>(BLANK_FORM);
-  const [saving, setSaving] = useState(false);
+  const [form, setForm]           = useState<DeviceFormData>(BLANK_FORM);
+  const [saving, setSaving]       = useState(false);
+  // IDU: which CPE to copy coordinates from
+  const [linkedCpeId, setLinkedCpeId] = useState('');
   const { addToast } = useToast();
 
   useEffect(() => {
     if (open) {
+      setLinkedCpeId('');
       setForm(initial ? {
         serialNumber: initial.serialNumber ?? '',
         deviceType:   initial.deviceType ?? 'BTS',
@@ -93,33 +120,150 @@ function DeviceFormModal({
     }
   }, [open, initial]);
 
-  const set = (k: keyof DeviceFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k: keyof DeviceFormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const val = e.target.value;
+    setForm((f) => {
+      const updated = { ...f, [k]: val };
+      // Auto-derive model from device type — BTS→A60, CPE→A61, IDU→IDU
+      if (k === 'deviceType') {
+        updated.model = TYPE_MODEL_MAP[val] ?? val;
+        setLinkedCpeId(''); // reset CPE link when type changes
+      }
+      return updated;
+    });
+  };
 
+  // ── Geo rule helpers ────────────────────────────────────────────────────────
+  const lat = form.latitude  ? parseFloat(form.latitude)  : undefined;
+  const lng = form.longitude ? parseFloat(form.longitude) : undefined;
+  const hasCoords = lat != null && lng != null && !isNaN(lat) && !isNaN(lng);
+
+  const deviceCoords = (d: Device): [number, number] | null => {
+    // Supports both {latitude, longitude} and GeoJSON {location.coordinates:[lng,lat]}
+    const raw = d as unknown as Record<string, unknown>;
+    const la = (raw.latitude as number | undefined) ?? d.location?.coordinates?.[1];
+    const lo = (raw.longitude as number | undefined) ?? d.location?.coordinates?.[0];
+    return (la != null && lo != null) ? [la, lo] : null;
+  };
+
+  /** Rule 1: CPE must be within 1KM of at least one BTS. */
+  const btsProximityInfo = useMemo(() => {
+    if (form.deviceType !== 'CPE' || !hasCoords) return null;
+    const btsDevices = allDevices.filter((d) => d.deviceType === 'BTS');
+    if (btsDevices.length === 0) return { nearestKm: Infinity, nearestSerial: null };
+    let nearestKm = Infinity;
+    let nearestSerial: string | null = null;
+    for (const bts of btsDevices) {
+      const c = deviceCoords(bts);
+      if (!c) continue;
+      const km = haversineKm(lat!, lng!, c[0], c[1]);
+      if (km < nearestKm) { nearestKm = km; nearestSerial = bts.serialNumber; }
+    }
+    return { nearestKm, nearestSerial };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.deviceType, lat, lng, allDevices]);
+
+  const btsTooFar = btsProximityInfo != null && btsProximityInfo.nearestKm > 1;
+
+  /** Rule 2: IDU must share coordinates with its linked CPE. */
+  const cpeList = useMemo(
+    () => allDevices.filter((d) => d.deviceType === 'CPE'),
+    [allDevices],
+  );
+
+  const cpeCoordsMatch = useMemo(() => {
+    if (form.deviceType !== 'IDU' || !linkedCpeId || !hasCoords) return null;
+    const cpe = cpeList.find((d) => d.id === linkedCpeId || d.serialNumber === linkedCpeId);
+    if (!cpe) return null;
+    const c = deviceCoords(cpe);
+    if (!c) return null;
+    const km = haversineKm(lat!, lng!, c[0], c[1]);
+    return { km, cpeSerial: cpe.serialNumber };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.deviceType, linkedCpeId, lat, lng, cpeList]);
+
+  const iduCoordsMismatch = cpeCoordsMatch != null && cpeCoordsMatch.km > 0.01; // >10 m = mismatch
+
+  /** Copy CPE coordinates to IDU form fields. */
+  const handleCopyCpeCoords = (cpeId: string) => {
+    setLinkedCpeId(cpeId);
+    const cpe = cpeList.find((d) => d.id === cpeId || d.serialNumber === cpeId);
+    if (!cpe) return;
+    const c = deviceCoords(cpe);
+    if (c) setForm((f) => ({ ...f, latitude: c[0].toFixed(6), longitude: c[1].toFixed(6) }));
+  };
+
+  // ── Save with rule enforcement ──────────────────────────────────────────────
   const handleSave = async () => {
     if (!form.serialNumber.trim()) { addToast('Serial number is required', 'warning'); return; }
-    if (!form.ipAddress.trim()) { addToast('IP address is required', 'warning'); return; }
+    if (!form.ipAddress.trim())    { addToast('IP address is required', 'warning'); return; }
+
+    // Block CPE save if coordinates are >1KM from every BTS
+    if (btsTooFar) {
+      addToast(
+        `CPE must be within 1 KM of a BTS. Nearest BTS is ${btsProximityInfo!.nearestKm.toFixed(2)} km away.`,
+        'error',
+      );
+      return;
+    }
+
+    // Block IDU save if coordinates diverge from linked CPE
+    if (iduCoordsMismatch) {
+      addToast(
+        `IDU coordinates must match its CPE (${cpeCoordsMatch!.cpeSerial}). Current offset: ${(cpeCoordsMatch!.km * 1000).toFixed(0)} m.`,
+        'error',
+      );
+      return;
+    }
+
     setSaving(true);
     try { await onSave(form); onClose(); }
     catch { /* parent shows toast */ }
     finally { setSaving(false); }
   };
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <Modal open={open} onClose={onClose} title={initial ? 'Edit Device' : 'Add Device'} size="lg">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+        {/* Topology rule info banner */}
+        <div style={{
+          background: 'var(--vf-surface-raised, rgba(255,255,255,0.04))',
+          border: '1px solid var(--vf-border-subtle)',
+          borderRadius: 6, padding: '8px 12px', fontSize: 12,
+          color: 'var(--vf-text-secondary)',
+        }}>
+          <strong style={{ color: 'var(--vf-text-primary)' }}>Topology rules:</strong>
+          {' '}BTS → CPE distance &lt; 1 KM &nbsp;·&nbsp; CPE and IDU must share the same coordinates
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div>
-            <FL>Serial Number *</FL>
-            <input value={form.serialNumber} onChange={set('serialNumber')} placeholder="BTS-A60-000001" style={FIELD} />
-          </div>
           <div>
             <FL>Device Type *</FL>
             <select value={form.deviceType} onChange={set('deviceType')} style={FIELD}>
-              <option value="BTS">BTS</option>
-              <option value="CPE">CPE</option>
-              <option value="IDU">IDU</option>
+              <option value="BTS">BTS — Model A60</option>
+              <option value="CPE">CPE — Model A61</option>
+              <option value="IDU">IDU — Model IDU</option>
             </select>
+          </div>
+          <div>
+            <FL>Model (auto)</FL>
+            <input
+              readOnly value={form.model}
+              style={{ ...FIELD, background: 'var(--vf-surface-raised)', color: 'var(--vf-text-muted)', cursor: 'not-allowed' }}
+            />
+          </div>
+          <div>
+            <FL>Serial Number *</FL>
+            <input
+              value={form.serialNumber} onChange={set('serialNumber')}
+              placeholder={
+                form.deviceType === 'BTS' ? 'BTS-A60-000001' :
+                form.deviceType === 'CPE' ? 'CPE-A61-000001' : 'IDU-000001'
+              }
+              style={FIELD}
+            />
           </div>
           <div>
             <FL>IP Address *</FL>
@@ -128,14 +272,6 @@ function DeviceFormModal({
           <div>
             <FL>MAC Address</FL>
             <input value={form.macAddress} onChange={set('macAddress')} placeholder="AA:BB:CC:DD:EE:FF" style={FIELD} />
-          </div>
-          <div>
-            <FL>Model</FL>
-            <select value={form.model} onChange={set('model')} style={FIELD}>
-              <option value="A60">A60 (BTS)</option>
-              <option value="A61">A61 (CPE)</option>
-              <option value="A60-IDU">A60-IDU</option>
-            </select>
           </div>
           <div>
             <FL>Manufacturer</FL>
@@ -154,6 +290,34 @@ function DeviceFormModal({
               <option value="UNKNOWN">UNKNOWN</option>
             </select>
           </div>
+
+          {/* IDU: link to CPE for coordinate copy */}
+          {form.deviceType === 'IDU' && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <FL>Link to CPE (copies coordinates automatically)</FL>
+              <select
+                value={linkedCpeId}
+                onChange={(e) => handleCopyCpeCoords(e.target.value)}
+                style={FIELD}
+              >
+                <option value="">— Select CPE to sync coordinates —</option>
+                {cpeList.map((cpe) => {
+                  const c = deviceCoords(cpe);
+                  return (
+                    <option key={cpe.id} value={cpe.id}>
+                      {cpe.serialNumber}{c ? ` (${c[0].toFixed(4)}, ${c[1].toFixed(4)})` : ''}
+                    </option>
+                  );
+                })}
+              </select>
+              {linkedCpeId && !iduCoordsMismatch && hasCoords && (
+                <div style={{ marginTop: 5, fontSize: 11, color: '#22c55e' }}>
+                  Coordinates match linked CPE
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <FL>Latitude (GPS)</FL>
             <input type="number" value={form.latitude} onChange={set('latitude')} placeholder="28.6139" style={FIELD} />
@@ -163,6 +327,61 @@ function DeviceFormModal({
             <input type="number" value={form.longitude} onChange={set('longitude')} placeholder="77.2090" style={FIELD} />
           </div>
         </div>
+
+        {/* Rule 1 — CPE proximity warning */}
+        {form.deviceType === 'CPE' && hasCoords && btsProximityInfo && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+            background: btsTooFar ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)',
+            border: `1px solid ${btsTooFar ? '#ef4444' : '#22c55e'}`,
+            borderRadius: 6, padding: '8px 12px', fontSize: 12,
+          }}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>{btsTooFar ? '✗' : '✓'}</span>
+            <div>
+              {btsProximityInfo.nearestSerial
+                ? <>
+                    Nearest BTS: <strong style={{ fontFamily: 'monospace' }}>{btsProximityInfo.nearestSerial}</strong>
+                    {' — '}<strong style={{ color: btsTooFar ? '#ef4444' : '#22c55e' }}>
+                      {btsProximityInfo.nearestKm < 1
+                        ? `${(btsProximityInfo.nearestKm * 1000).toFixed(0)} m away`
+                        : `${btsProximityInfo.nearestKm.toFixed(2)} km away`}
+                    </strong>
+                    {btsTooFar && <span style={{ color: '#ef4444' }}> — must be &lt; 1 KM</span>}
+                  </>
+                : <span style={{ color: '#f59e0b' }}>No BTS devices with coordinates found in inventory</span>
+              }
+            </div>
+          </div>
+        )}
+
+        {/* Rule 2 — IDU coordinate mismatch warning */}
+        {form.deviceType === 'IDU' && linkedCpeId && iduCoordsMismatch && cpeCoordsMatch && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+            background: 'rgba(239,68,68,0.08)', border: '1px solid #ef4444',
+            borderRadius: 6, padding: '8px 12px', fontSize: 12,
+          }}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>✗</span>
+            <div>
+              IDU coordinates differ from CPE <strong style={{ fontFamily: 'monospace' }}>{cpeCoordsMatch.cpeSerial}</strong>
+              {' by '}
+              <strong style={{ color: '#ef4444' }}>
+                {cpeCoordsMatch.km < 1
+                  ? `${(cpeCoordsMatch.km * 1000).toFixed(0)} m`
+                  : `${cpeCoordsMatch.km.toFixed(2)} km`}
+              </strong>
+              . CPE and IDU must share the same coordinates.
+            </div>
+          </div>
+        )}
+
+        {/* Map picker */}
+        <GpsMapPicker
+          lat={lat}
+          lng={lng}
+          onPick={(pickLat, pickLng) => setForm((f) => ({ ...f, latitude: pickLat.toFixed(6), longitude: pickLng.toFixed(6) }))}
+        />
+
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" loading={saving} onClick={handleSave}>
@@ -173,6 +392,122 @@ function DeviceFormModal({
     </Modal>
   );
 }
+
+// ── GPS Map Picker ─────────────────────────────────────────────────────────────
+/**
+ * Inline Leaflet map that lets the user click to pick GPS coordinates.
+ * Uses a simple <iframe> to OpenStreetMap so no extra Leaflet setup is needed;
+ * we layer a transparent overlay to capture click coordinates via the
+ * projection formula instead of relying on Leaflet events.
+ * We use a real Leaflet map created imperatively so we get accurate clicks.
+ */
+function GpsMapPicker({ lat, lng, onPick }: {
+  lat?: number;
+  lng?: number;
+  onPick(lat: number, lng: number): void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const mapRef = useRef<HTMLDivElement>(null);
+  // Store the Leaflet map and marker instances across renders
+  const mapInstanceRef = useRef<{ map: import('leaflet').Map; marker: import('leaflet').Marker | null } | null>(null);
+
+  // Initialise Leaflet imperatively when the panel opens
+  useEffect(() => {
+    if (!expanded || !mapRef.current) return;
+
+    // Dynamically import Leaflet so the bundle isn't bloated for users who never open this
+    import('leaflet').then((mod) => {
+      // Leaflet is CJS — the module IS the namespace, but Vite may wrap it
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Lf = ((mod as any).default ?? mod) as typeof import('leaflet');
+      if (!mapRef.current) return;
+
+      // Clean up any previous map on the same element
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.map.remove();
+        mapInstanceRef.current = null;
+      }
+
+      const centre: [number, number] = lat != null && lng != null ? [lat, lng] : [20.5937, 78.9629]; // India centre fallback
+      const map = Lf.map(mapRef.current, { center: centre, zoom: lat != null ? 12 : 5, zoomControl: true });
+      Lf.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap',
+      }).addTo(map);
+
+      const icon = Lf.divIcon({
+        className: '',
+        html: '<div style="width:14px;height:14px;background:#7c3aed;border:2px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(124,58,237,0.8)"></div>',
+        iconAnchor: [7, 7],
+      });
+
+      let marker: import('leaflet').Marker | null = null;
+      if (lat != null && lng != null) {
+        marker = Lf.marker([lat, lng], { icon }).addTo(map);
+      }
+
+      map.on('click', (e: import('leaflet').LeafletMouseEvent) => {
+        const { lat: clickLat, lng: clickLng } = e.latlng;
+        if (marker) {
+          marker.setLatLng([clickLat, clickLng]);
+        } else {
+          marker = Lf.marker([clickLat, clickLng], { icon }).addTo(map);
+        }
+        mapInstanceRef.current!.marker = marker;
+        onPick(clickLat, clickLng);
+      });
+
+      mapInstanceRef.current = { map, marker };
+    });
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.map.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+
+  // Move marker when lat/lng inputs change
+  useEffect(() => {
+    if (!mapInstanceRef.current || lat == null || lng == null) return;
+    const { map, marker } = mapInstanceRef.current;
+    if (marker) {
+      marker.setLatLng([lat, lng]);
+    }
+    map.setView([lat, lng], map.getZoom());
+  }, [lat, lng]);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'none', border: '1px dashed var(--vf-border-default)',
+          borderRadius: 6, padding: '7px 14px', cursor: 'pointer',
+          color: 'var(--vf-accent)', fontSize: 13, width: '100%',
+        }}>
+        📍 {expanded ? 'Hide map picker' : 'Pick location from map'}
+        {lat != null && lng != null && !expanded && (
+          <span style={{ color: 'var(--vf-text-muted)', fontFamily: 'monospace', fontSize: 12 }}>
+            ({lat.toFixed(4)}, {lng.toFixed(4)})
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div style={{ marginTop: 8, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--vf-border-subtle)', height: 280, position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 6, left: 8, zIndex: 1000, background: 'rgba(0,0,0,0.65)', color: '#fff', fontSize: 11, padding: '3px 8px', borderRadius: 4, pointerEvents: 'none' }}>
+            Click map to set location
+          </div>
+          <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ── Delete Confirmation ───────────────────────────────────────────────────────
 function DeleteConfirmModal({ device, onClose, onDelete }: { device: Device | null; onClose: () => void; onDelete: () => Promise<void> }) {
@@ -511,6 +846,7 @@ export default function V2DevicesPage() {
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
         onSave={handleAdd}
+        allDevices={devices}
       />
 
       {/* Edit Device Modal */}
@@ -519,6 +855,7 @@ export default function V2DevicesPage() {
         onClose={() => setEditDevice(null)}
         initial={editDevice}
         onSave={handleEdit}
+        allDevices={devices}
       />
 
       {/* Delete Confirmation */}

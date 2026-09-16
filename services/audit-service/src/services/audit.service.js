@@ -11,15 +11,21 @@ async function ingestEvent(eventData) {
     action,
     resource,
     resourceId,
-    result,
+    result,        // legacy: SUCCESS | FAILURE
+    outcome,       // WO-006: success | failure | denied | blocked | pending
+    payload,
+    errorMessage,
     sourceIp,
     changeDetails,
     correlationId,
     serviceSource,
+    resourceObj,
+    retentionClass, // WO-008
   } = eventData;
 
-  if (!actor || !action || !resource || !result) {
-    throw new Error('Missing required audit event fields: actor, action, resource, result');
+  // Accept either legacy `result` or WO-006 `outcome`. At least one is required.
+  if (!actor || !action || !resource || (!result && !outcome)) {
+    throw new Error('Missing required audit event fields: actor, action, resource, and result or outcome');
   }
 
   const entry = new AuditEntry({
@@ -28,11 +34,16 @@ async function ingestEvent(eventData) {
     action,
     resource,
     resourceId,
-    result,
+    resourceObj,
+    result: result || null,
+    outcome: outcome || null,
+    payload,
+    errorMessage,
     sourceIp,
     changeDetails,
     correlationId,
     serviceSource,
+    retentionClass: retentionClass || null,
   });
 
   await entry.save();

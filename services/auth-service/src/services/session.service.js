@@ -269,6 +269,7 @@ async function getFailedAttempts(username) {
 
 module.exports = {
   setRedis,
+  getRedis,   // WO-013: exposed for SSO state/nonce storage
   createSession,
   validateAndRotateRefreshToken,
   destroySession,

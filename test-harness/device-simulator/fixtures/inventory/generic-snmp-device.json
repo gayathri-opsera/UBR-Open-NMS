@@ -1,0 +1,23 @@
+{
+  "_comment": "Fixture: generic SNMP-discovered device with sysObjectID and sysDescr (WO-027/WO-028)",
+  "deviceId": "device-generic-001",
+  "serialNumber": "GENERIC-IP-10.50.1.100",
+  "macAddress": "DE:AD:BE:EF:00:01",
+  "ipAddress": "10.50.1.100",
+  "deviceType": "BTS",
+  "model": "Cisco 2960-X",
+  "firmwareVersion": "15.2(7)E3",
+  "status": "online",
+  "region": "SG-SOUTH",
+  "organizationId": "org-002",
+  "schemaVersion": "1.0",
+  "discoveryParadigm": "GENERIC_SNMP",
+  "identityAuthority": "GENERIC",
+  "onlineStateAuthority": "GENERIC",
+  "sysObjectID": ".1.3.6.1.4.1.9.1.1208",
+  "sysDescr": "Cisco IOS Software, C2960X Software (C2960X-UNIVERSALK9-M), Version 15.2(7)E3",
+  "capabilityProfileId": "cap-generic-switch-v1",
+  "credentialRef": "vault/snmp/devices/10.50.1.100",
+  "createdAt": "2026-09-06T14:00:00Z",
+  "updatedAt": "2026-09-07T07:00:00Z"
+}

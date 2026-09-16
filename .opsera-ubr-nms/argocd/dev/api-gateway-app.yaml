@@ -12,7 +12,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/gayathri-opsera/UBR-Open-NMS.git
-    targetRevision: main
+    targetRevision: main-clean
     path: .opsera-ubr-nms/k8s/api-gateway/overlays/dev
   destination:
     name: opsera-usw2-np

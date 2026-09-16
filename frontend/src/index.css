@@ -113,3 +113,19 @@ input, select, textarea { font-family: inherit; }
 .nms-th-sortable:hover {
   color: var(--accent-light) !important;
 }
+
+/* ── Leaflet tooltip reset — ensure our custom content controls styling ── */
+.leaflet-tooltip {
+  background: #ffffff !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 8px !important;
+  padding: 10px 14px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15) !important;
+  color: #111827 !important;
+  font-size: 12px !important;
+  opacity: 1 !important;
+  max-width: 340px !important;
+}
+.leaflet-tooltip::before {
+  display: none !important;
+}

@@ -4,7 +4,18 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const config = require('../config');
 
-const ROLES = Object.freeze(['admin', 'operator', 'user']);
+const ROLES = Object.freeze([
+  'admin',
+  'operator',
+  'user',
+  // WO-025: specialist read-only roles
+  'auditor',
+  // WO-007: additional specialist roles aligned with ACTION_PERMISSIONS matrix
+  'network_engineer',
+  'noc_operator',
+  'compliance',
+  'viewer',
+]);
 
 const userSchema = new mongoose.Schema(
   {
@@ -66,6 +77,52 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    // ── TOTP MFA fields ───────────────────────────────────────────────────────
+    mfaEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    mfaSecret: {
+      type: String,
+      default: null,
+      select: false, // never returned by default queries
+    },
+    mfaPendingSecret: {
+      type: String,
+      default: null,
+      select: false, // temporary secret before the user confirms enrollment
+    },
+    mfaEnabledAt: {
+      type: Date,
+      default: null,
+    },
+    // ── WO-014: Backup codes and admin MFA enforcement ────────────────────────
+    // Backup codes are bcrypt-hashed single-use recovery codes.
+    // SECURITY: raw codes are only shown once at generation time; only hashes are stored.
+    mfaBackupCodes: {
+      type: [String],
+      default: [],
+      select: false, // never returned by default queries
+    },
+    // Tracks whether this user's role requires MFA by policy.
+    // Set to true for admin accounts to enforce enrollment at next login.
+    mfaRequiredByPolicy: {
+      type: Boolean,
+      default: false,
+    },
+    // Set to true when admin resets MFA (forces re-enrollment at next login).
+    mfaResetRequired: {
+      type: Boolean,
+      default: false,
+    },
+
+    // ── WO-019: Local password renewal enforcement ────────────────────────────
+    // Set to true by an administrator to force the user to change their password at next login.
+    passwordResetRequired: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -73,6 +130,9 @@ const userSchema = new mongoose.Schema(
       transform(doc, ret) {
         delete ret.passwordHash;
         delete ret.passwordHistory;
+        delete ret.mfaSecret;
+        delete ret.mfaPendingSecret;
+        delete ret.mfaBackupCodes;
         delete ret.__v;
         return ret;
       },

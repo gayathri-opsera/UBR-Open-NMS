@@ -7,6 +7,8 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth.routes');
+const mfaRoutes  = require('./routes/mfa.routes');
+const ssoRoutes  = require('./routes/sso.routes');
 const userRoutes = require('./routes/users.routes');
 
 // Prometheus metrics
@@ -52,14 +54,21 @@ function createApp() {
     },
   });
   app.use('/api/v1/auth/login', authLimiter);
+  // Apply same brute-force protection to the MFA challenge endpoint
+  app.use('/api/v1/auth/mfa/challenge', authLimiter);
 
   // Health probes.
   app.get('/healthz', (_req, res) => res.status(200).json({ status: 'ok' }));
   app.get('/readyz', (_req, res) => res.status(200).json({ status: 'ok' }));
   app.get('/metrics', metricsEndpoint);
 
+  // Rate-limit SSO callback endpoints to prevent CSRF/replay amplification
+  app.use('/api/v1/auth/sso/callback', authLimiter);
+
   // API routes.
   app.use('/api/v1/auth', authRoutes);
+  app.use('/api/v1/auth/mfa', mfaRoutes);
+  app.use('/api/v1/auth/sso', ssoRoutes);   // WO-013
   app.use('/api/v1/users', userRoutes);
 
   // 404 handler.

@@ -1,0 +1,76 @@
+// alarm.proto — canonical AlarmRecord schema for UBR NMS (WO-007).
+// Source of truth: shared-libs/json-schemas/alarm-record.schema.json.
+
+syntax = "proto3";
+
+package ubrnms.v1;
+
+option go_package = "github.com/airtel-ubrnms/proto/ubrnms/v1;ubrnmsv1";
+option java_package = "com.ubrnms.proto.v1";
+option java_outer_classname = "AlarmProto";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+// Alarm severity — aligned with Netcool/OSS conventions.
+enum AlarmSeverity {
+  ALARM_SEVERITY_UNKNOWN = 0;
+  ALARM_SEVERITY_CRITICAL = 1;
+  ALARM_SEVERITY_MAJOR = 2;
+  ALARM_SEVERITY_MINOR = 3;
+  ALARM_SEVERITY_WARNING = 4;
+  ALARM_SEVERITY_INDETERMINATE = 5;
+  ALARM_SEVERITY_CLEARED = 6;
+}
+
+// Lifecycle state of an alarm.
+enum AlarmState {
+  ALARM_STATE_UNKNOWN = 0;
+  ALARM_STATE_RAISED = 1;
+  ALARM_STATE_ACKNOWLEDGED = 2;
+  ALARM_STATE_CLEARED = 3;
+}
+
+// AlarmRecord — a single alarm in the UBR NMS alarm management system.
+message AlarmRecord {
+  // UUID alarm identifier.
+  string alarm_id = 1;
+
+  // Device that generated this alarm.
+  string device_id = 2;
+
+  // Device type at time of alarm creation.
+  string device_type = 3;
+
+  // Short alarm identifier string (e.g. "LINK_DOWN").
+  string alarm_name = 4;
+
+  // Human-readable description of the alarm condition.
+  string alarm_description = 5;
+
+  AlarmSeverity severity = 6;
+
+  AlarmState state = 7;
+
+  // Correlation group for grouping related alarms.
+  string correlation_group = 8;
+
+  // Root-cause analysis string.
+  string root_cause = 9;
+
+  // Whether an operator has acknowledged this alarm.
+  bool acknowledged = 10;
+
+  // User ID of the operator who acknowledged the alarm.
+  google.protobuf.StringValue acknowledged_by = 11;
+
+  // When the alarm was first raised.
+  google.protobuf.Timestamp raised_at = 12;
+
+  // When the alarm was cleared (null if still active).
+  google.protobuf.Timestamp cleared_at = 13;
+
+  // TTL expiry for automatic cleanup in MongoDB.
+  google.protobuf.Timestamp ttl_expiry = 14;
+}

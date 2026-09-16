@@ -1,0 +1,15 @@
+{
+  "profile_name": "ubr-bts-valid",
+  "description": "Valid UBR BTS device for successful bootstrap simulation",
+  "device_type": "BTS",
+  "serial_number": "SN-BTS-SIM-001",
+  "mac_address": "AA:BB:CC:DD:EE:01",
+  "firmware_version": "fw-2.4.1",
+  "config_version": "cfg-v1",
+  "retry_settings": {
+    "max_attempts": 3,
+    "base_delay_seconds": 5,
+    "jitter_max_seconds": 2
+  },
+  "hmac_secret_placeholder": "PLACEHOLDER_BTS_SECRET_DO_NOT_USE_IN_PRODUCTION"
+}

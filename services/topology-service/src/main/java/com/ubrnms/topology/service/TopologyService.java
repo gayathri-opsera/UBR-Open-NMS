@@ -73,6 +73,34 @@ public class TopologyService {
     }
 
     /**
+     * Removes a topology node and detaches it from its parent's child list.
+     * Called when a DEVICE_DELETED tombstone arrives on the inventory-sync topic.
+     *
+     * @param deviceId the serialNumber / id used as the node key
+     */
+    public void deleteNode(String deviceId) {
+        nodeRepo.findByDeviceId(deviceId).ifPresent(node -> {
+            // Detach from parent's child list so the parent's edge disappears cleanly.
+            if (node.getParentDeviceId() != null) {
+                nodeRepo.findByDeviceId(node.getParentDeviceId()).ifPresent(parent -> {
+                    parent.getChildDeviceIds().remove(deviceId);
+                    nodeRepo.save(parent);
+                });
+            }
+            // Detach children — set their parentDeviceId to null so they become orphan roots
+            // rather than pointing at a deleted node.
+            node.getChildDeviceIds().forEach(childId ->
+                nodeRepo.findByDeviceId(childId).ifPresent(child -> {
+                    child.setParentDeviceId(null);
+                    nodeRepo.save(child);
+                })
+            );
+            nodeRepo.delete(node);
+            log.info("Deleted topology node for deviceId={}", deviceId);
+        });
+    }
+
+    /**
      * Get full topology graph for a network scope.
      */
     public TopologyGraph getTopologyByNetwork(String networkId) {
@@ -118,6 +146,44 @@ public class TopologyService {
             return nodeRepo.findNearLocation(lon, lat, radius);
         }
         return List.of();
+    }
+
+    /**
+     * Schedules an initial LLDP/CDP neighbour walk for a newly registered generic device (WO-031).
+     *
+     * <p>This method marks the topology node as pending a walk and updates the node's
+     * walk-requested timestamp. The actual SNMP LLDP-MIB/CDP-MIB walk is performed
+     * asynchronously by the topology poller scheduler on the next polling cycle.
+     *
+     * <p>Supported protocols: SNMP_NEIGHBOR (LLDP-MIB via SNMP), LLDP (NETCONF YANG).
+     *
+     * @param deviceId          the inventory device ID
+     * @param supportedProtocols protocols available for topology discovery
+     * @param correlationId     correlation ID for traceability
+     */
+    public void scheduleInitialWalk(String deviceId, java.util.List<String> supportedProtocols, String correlationId) {
+        TopologyNode node = nodeRepo.findByDeviceId(deviceId).orElseGet(() -> {
+            // Device may not yet have a topology node if inventory-sync hasn't been processed.
+            // Create a placeholder node so the walk request is not lost.
+            TopologyNode placeholder = new TopologyNode();
+            placeholder.setDeviceId(deviceId);
+            placeholder.setType("UNKNOWN");
+            placeholder.setStatus("online");
+            placeholder.setUpdatedAt(Instant.now());
+            return placeholder;
+        });
+
+        // Record walk request metadata for the poller to pick up.
+        node.setWalkRequestedAt(Instant.now());
+        node.setWalkSupportedProtocols(supportedProtocols);
+        node.setWalkCorrelationId(correlationId);
+        node.setWalkStatus("PENDING");
+        node.setUpdatedAt(Instant.now());
+
+        nodeRepo.save(node);
+
+        log.info("WO-031: initial topology walk scheduled — deviceId={}, protocols={}, correlationId={}",
+            deviceId, supportedProtocols, correlationId);
     }
 
     private List<TopologyEdge> buildEdges(List<TopologyNode> nodes) {

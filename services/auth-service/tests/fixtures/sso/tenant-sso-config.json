@@ -1,0 +1,19 @@
+{
+  "tenantId": "default",
+  "providerType": "oidc",
+  "localFallbackEnabled": true,
+  "oidc": {
+    "discoveryUrl": "https://idp.example.com/.well-known/openid-configuration",
+    "clientId": "ubr-nms-client",
+    "scopes": ["openid", "profile", "email"],
+    "groupsClaim": "groups",
+    "roleMapping": {
+      "nms-admins": "admin",
+      "nms-operators": "operator"
+    }
+  },
+  "saml": null,
+  "ldap": null,
+  "updatedAt": "2023-11-14T00:00:00Z",
+  "updatedBy": "admin"
+}

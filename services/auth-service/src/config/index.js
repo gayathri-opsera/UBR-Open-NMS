@@ -68,4 +68,12 @@ module.exports = {
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
     credentials: true,
   },
+
+  mfa: {
+    // Symmetric secret for signing short-lived MFA challenge tokens.
+    // Must be set via env var in production (min 32 random chars).
+    challengeSecret: process.env.MFA_CHALLENGE_SECRET || 'mfa-challenge-dev-secret-change-in-prod',
+    challengeTtlSeconds: 5 * 60, // 5 minutes
+    appName: 'UBR-NMS',
+  },
 };

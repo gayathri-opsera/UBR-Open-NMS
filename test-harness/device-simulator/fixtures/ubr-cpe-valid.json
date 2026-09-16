@@ -1,0 +1,15 @@
+{
+  "profile_name": "ubr-cpe-valid",
+  "description": "Valid UBR CPE device for successful bootstrap simulation",
+  "device_type": "CPE",
+  "serial_number": "SN-CPE-SIM-001",
+  "mac_address": "BB:CC:DD:EE:FF:02",
+  "firmware_version": "fw-1.9.3",
+  "config_version": "cfg-v1",
+  "retry_settings": {
+    "max_attempts": 3,
+    "base_delay_seconds": 5,
+    "jitter_max_seconds": 2
+  },
+  "hmac_secret_placeholder": "PLACEHOLDER_CPE_SECRET_DO_NOT_USE_IN_PRODUCTION"
+}

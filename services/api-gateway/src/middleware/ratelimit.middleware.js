@@ -36,8 +36,14 @@ function rateLimiter(redisClient) {
       }
       next();
     } catch (err) {
-      logger.error({ msg: 'Rate limiter Redis error — failing open', err: err.message });
-      next();
+      // Fail-closed: deny the request when Redis is unavailable to prevent resource exhaustion.
+      // A short 503 is preferred over 429 to signal temporary infra unavailability rather than
+      // the client exceeding their quota.
+      logger.error({ msg: 'Rate limiter Redis error — failing closed', err: err.message });
+      return res.status(503).json({
+        code: 'RATE_LIMITER_UNAVAILABLE',
+        message: 'Service temporarily unavailable — please retry shortly',
+      });
     }
   };
 }

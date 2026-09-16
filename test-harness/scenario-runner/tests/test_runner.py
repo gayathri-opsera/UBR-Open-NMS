@@ -5,12 +5,15 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../src"))
 
+import asyncio
 import json
 import pytest
+import time
 from runner import (
     load_scenario, parse_scenario, evaluate_assertion, _expand_env, _resolve,
     generate_json_report, generate_html_report,
-    ScenarioResult, StepResult, StepStatus,
+    ScenarioResult, StepResult, StepStatus, ParallelStageResult,
+    execute_parallel_stage, poll_until,
 )
 
 
@@ -200,3 +203,194 @@ def test_json_report_empty():
     report = generate_json_report([])
     assert report["summary"]["total"] == 0
     assert report["summary"]["pass_rate"] == 0
+
+
+# ── Parallel execution tests (WO-042) ─────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_execute_parallel_stage_all_pass():
+    """Test parallel stage execution with all tasks passing."""
+    async def task1(ctx):
+        await asyncio.sleep(0.01)
+        return StepResult(name="task1", status=StepStatus.PASS, duration_ms=10)
+
+    async def task2(ctx):
+        await asyncio.sleep(0.01)
+        return StepResult(name="task2", status=StepStatus.PASS, duration_ms=10)
+
+    result = await execute_parallel_stage(
+        stage_name="test_stage",
+        tasks=[task1, task2],
+        timeout_seconds=5,
+        shared_context={}
+    )
+
+    assert result.status == StepStatus.PASS
+    assert len(result.parallel_steps) == 2
+    assert all(s.status == StepStatus.PASS for s in result.parallel_steps)
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_stage_one_fails():
+    """Test parallel stage execution with one task failing."""
+    async def task1(ctx):
+        await asyncio.sleep(0.01)
+        return StepResult(name="task1", status=StepStatus.PASS, duration_ms=10)
+
+    async def task2(ctx):
+        await asyncio.sleep(0.01)
+        return StepResult(name="task2", status=StepStatus.FAIL, duration_ms=10, error="Task failed")
+
+    result = await execute_parallel_stage(
+        stage_name="test_stage",
+        tasks=[task1, task2],
+        timeout_seconds=5,
+        shared_context={}
+    )
+
+    assert result.status == StepStatus.FAIL
+    assert len(result.parallel_steps) == 2
+    assert result.parallel_steps[0].status == StepStatus.PASS
+    assert result.parallel_steps[1].status == StepStatus.FAIL
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_stage_timeout():
+    """Test parallel stage execution with timeout."""
+    async def slow_task(ctx):
+        await asyncio.sleep(10)  # Longer than timeout
+        return StepResult(name="slow", status=StepStatus.PASS, duration_ms=10000)
+
+    result = await execute_parallel_stage(
+        stage_name="timeout_stage",
+        tasks=[slow_task],
+        timeout_seconds=0.1,
+        shared_context={}
+    )
+
+    assert result.status == StepStatus.FAIL
+    assert any("timeout" in s.error.lower() for s in result.parallel_steps if s.error)
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_stage_shared_context():
+    """Test parallel stage execution with shared context."""
+    async def task_uses_context(ctx):
+        await asyncio.sleep(0.01)
+        value = ctx.get("test_key", "default")
+        return StepResult(name="context_task", status=StepStatus.PASS, duration_ms=10, details=value)
+
+    context = {"test_key": "test_value"}
+    result = await execute_parallel_stage(
+        stage_name="context_stage",
+        tasks=[task_uses_context],
+        timeout_seconds=5,
+        shared_context=context
+    )
+
+    assert result.status == StepStatus.PASS
+    assert result.parallel_steps[0].details == "test_value"
+
+
+def test_poll_until_success():
+    """Test poll_until succeeds when condition becomes true."""
+    attempts = [False, False, True]
+    call_count = [0]
+
+    def check_fn():
+        result = attempts[min(call_count[0], len(attempts) - 1)]
+        call_count[0] += 1
+        return result, "success"
+
+    success, value, message = poll_until(check_fn, timeout_seconds=2, interval_seconds=0.1, description="test condition")
+
+    assert success is True
+    assert value == "success"
+    assert "passed" in message.lower()
+
+
+def test_poll_until_timeout():
+    """Test poll_until times out when condition never becomes true."""
+    def check_fn():
+        return False, "still waiting"
+
+    success, value, message = poll_until(check_fn, timeout_seconds=0.3, interval_seconds=0.1, description="test condition")
+
+    assert success is False
+    assert "still waiting" in str(value)
+    assert "failed" in message.lower()
+
+
+def test_poll_until_exception_handling():
+    """Test poll_until handles exceptions gracefully."""
+    call_count = [0]
+
+    def check_fn():
+        call_count[0] += 1
+        if call_count[0] < 3:
+            raise RuntimeError("Temporary error")
+        return True, "recovered"
+
+    success, value, message = poll_until(check_fn, timeout_seconds=2, interval_seconds=0.1, description="test condition")
+
+    assert success is True
+    assert value == "recovered"
+
+
+def test_poll_until_immediate_success():
+    """Test poll_until succeeds immediately if condition is already true."""
+    def check_fn():
+        return True, "immediate"
+
+    success, value, message = poll_until(check_fn, timeout_seconds=1, interval_seconds=0.1, description="test condition")
+
+    assert success is True
+    assert value == "immediate"
+    assert "passed" in message.lower()
+
+
+# ── Authority rule assertion tests (WO-042) ───────────────────────────────────
+
+def test_parallel_stage_result_passed_property():
+    """Test ParallelStageResult.passed property."""
+    steps_pass = [
+        StepResult(name="s1", status=StepStatus.PASS, duration_ms=10),
+        StepResult(name="s2", status=StepStatus.PASS, duration_ms=10),
+    ]
+    result = ParallelStageResult(name="stage1", parallel_steps=steps_pass, duration_ms=20, status=StepStatus.PASS)
+    assert result.passed is True
+
+    steps_fail = [
+        StepResult(name="s1", status=StepStatus.PASS, duration_ms=10),
+        StepResult(name="s2", status=StepStatus.FAIL, duration_ms=10),
+    ]
+    result_fail = ParallelStageResult(name="stage2", parallel_steps=steps_fail, duration_ms=20, status=StepStatus.FAIL)
+    assert result_fail.passed is False
+
+
+def test_scenario_result_with_parallel_stages():
+    """Test ScenarioResult can contain parallel stages."""
+    steps = [StepResult(name="setup", status=StepStatus.PASS, duration_ms=5)]
+    parallel_steps = [
+        StepResult(name="task1", status=StepStatus.PASS, duration_ms=10),
+        StepResult(name="task2", status=StepStatus.PASS, duration_ms=10),
+    ]
+    parallel_stage = ParallelStageResult(
+        name="concurrent_discovery",
+        parallel_steps=parallel_steps,
+        duration_ms=15,
+        status=StepStatus.PASS
+    )
+
+    result = ScenarioResult(
+        name="mixed-discovery",
+        description="Test mixed discovery",
+        status=StepStatus.PASS,
+        duration_ms=20,
+        steps=steps,
+        parallel_stages=[parallel_stage]
+    )
+
+    assert len(result.parallel_stages) == 1
+    assert result.parallel_stages[0].name == "concurrent_discovery"
+    assert result.parallel_stages[0].passed is True

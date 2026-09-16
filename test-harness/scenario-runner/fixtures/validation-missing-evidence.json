@@ -1,0 +1,9 @@
+{
+  "scenario_name": "configuration-push",
+  "requirement_capability": "Device Configuration Management",
+  "priority": "P0",
+  "status": "FAIL",
+  "duration_ms": 2100.0,
+  "artifact_path": "/non/existent/evidence.json",
+  "error_message": "Evidence file not generated"
+}

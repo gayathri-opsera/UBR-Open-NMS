@@ -1,0 +1,14 @@
+{
+  "sub": "user-001",
+  "email": "admin@example.com",
+  "email_verified": true,
+  "name": "Test Admin",
+  "given_name": "Test",
+  "family_name": "Admin",
+  "groups": ["nms-admins", "nms-operators"],
+  "iss": "https://idp.example.com",
+  "aud": "ubr-nms-client",
+  "iat": 1700000000,
+  "exp": 1700003600,
+  "nonce": "test-nonce-abc123"
+}

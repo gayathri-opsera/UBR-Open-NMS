@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import type { TopologyGraph, TopologyNode, TopologyEdge, NodeType, NodeHealth } from '../../api/topology.types';
+import { nodeHealthColor, healthLabel, isNodeStale } from './topologyHealthComposer';
 
 // Augment TopologyNode with d3 simulation fields (x, y, vx, vy, fx, fy, index)
 type SimNode = TopologyNode & d3.SimulationNodeDatum;
@@ -25,6 +26,7 @@ const NODE_ICON: Record<NodeType, string> = {
   BTS: '🗼',
   CPE: '📡',
   IDU: '🔌',
+  GENERIC: '📶',
 };
 
 export function TopologyGraph2D({ graph, highlightedId, onNodeClick, onNodeHover }: Props): React.ReactElement {
@@ -60,7 +62,7 @@ export function TopologyGraph2D({ graph, highlightedId, onNodeClick, onNodeHover
       .on('zoom', (event) => g.attr('transform', event.transform));
     svg.call(zoom);
 
-    // Links
+    // Links — use WO-036 derived edge health from healthState composition
     const link = g.append('g').selectAll('line')
       .data(links).join('line')
       .attr('stroke', (d) => HEALTH_COLOR[d.health] ?? '#374151')
@@ -75,24 +77,67 @@ export function TopologyGraph2D({ graph, highlightedId, onNodeClick, onNodeHover
       .on('mouseover', (_, d) => onNodeHover(d))
       .on('mouseout', () => onNodeHover(null));
 
+    // WO-036: node border uses composed healthState, falling back to health
     node.append('circle')
       .attr('r', (d) => d.deviceType === 'BTS' ? 18 : d.deviceType === 'IDU' ? 15 : 12)
       .attr('fill', (d) => d.id === highlightedId ? '#60a5fa' : '#0d1b2a')
-      .attr('stroke', (d) => HEALTH_COLOR[d.health])
-      .attr('stroke-width', (d) => d.id === highlightedId ? 4 : 2);
+      .attr('stroke', (d) => nodeHealthColor(d))
+      .attr('stroke-width', (d) => d.id === highlightedId ? 4 : 2)
+      .attr('aria-label', (d) => `${d.serialNumber} — ${healthLabel(d.healthState ?? d.health)}`);
+
+    // WO-036: stale-data indicator — dashed ring when node data is stale
+    node.filter((d) => isNodeStale(d))
+      .append('circle')
+      .attr('r', (d) => (d.deviceType === 'BTS' ? 18 : d.deviceType === 'IDU' ? 15 : 12) + 4)
+      .attr('fill', 'none')
+      .attr('stroke', '#6b7280')
+      .attr('stroke-width', 1)
+      .attr('stroke-dasharray', '3 2')
+      .attr('aria-label', 'Stale data');
 
     node.append('text')
-      .text((d) => NODE_ICON[d.deviceType])
+      .text((d) => NODE_ICON[d.deviceType] ?? '📶')
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'central')
       .style('font-size', (d) => d.deviceType === 'BTS' ? '16px' : d.deviceType === 'IDU' ? '13px' : '11px')
       .style('user-select', 'none');
 
-    // Pending badge
+    // Pending command badge
     node.filter((d) => (d.pendingCommandCount ?? 0) > 0)
       .append('circle')
       .attr('cx', 10).attr('cy', -10).attr('r', 7)
       .attr('fill', '#f59e0b');
+
+    // WO-036: active alarm count badge — red circle with alarm count
+    node.filter((d) => (d.activeAlarmCount ?? 0) > 0)
+      .append('circle')
+      .attr('cx', (d) => d.deviceType === 'BTS' ? 16 : 12)
+      .attr('cy', (d) => d.deviceType === 'BTS' ? -16 : -12)
+      .attr('r', 8)
+      .attr('fill', '#ef4444')
+      .attr('aria-label', (d) => `${d.activeAlarmCount} active alarms`);
+
+    node.filter((d) => (d.activeAlarmCount ?? 0) > 0)
+      .append('text')
+      .text((d) => String(d.activeAlarmCount ?? 0))
+      .attr('x', (d) => d.deviceType === 'BTS' ? 16 : 12)
+      .attr('y', (d) => d.deviceType === 'BTS' ? -16 : -12)
+      .attr('text-anchor', 'middle')
+      .attr('dominant-baseline', 'central')
+      .style('font-size', '9px')
+      .style('fill', '#fff')
+      .style('font-weight', '700')
+      .style('user-select', 'none');
+
+    // WO-036: health state label text below node (short, accessible)
+    node.append('text')
+      .text((d) => healthLabel(d.healthState ?? d.health))
+      .attr('text-anchor', 'middle')
+      .attr('y', (d) => (d.deviceType === 'BTS' ? 18 : 12) + 14)
+      .style('font-size', '9px')
+      .style('fill', (d) => nodeHealthColor(d))
+      .style('user-select', 'none')
+      .attr('aria-hidden', 'false');
 
     // Force simulation
     const sim = d3.forceSimulation<SimNode>(nodes)
@@ -134,6 +179,8 @@ export function TopologyGraph2D({ graph, highlightedId, onNodeClick, onNodeHover
   return (
     <svg
       ref={svgRef}
+      role="img"
+      aria-label="Topology graph with health overlays"
       style={{ width: '100%', height: '100%', background: '#0a1628', borderRadius: 8 }}
     />
   );

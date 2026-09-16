@@ -24,6 +24,13 @@ spec:
       serviceAccountName: ubr-nms
       imagePullSecrets:
         - name: ecr-pull-secret
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: frontend
       containers:
         - name: frontend
           image: PLACEHOLDER_FRONTEND_ECR_URI

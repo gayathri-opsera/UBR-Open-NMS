@@ -127,4 +127,42 @@ class TopologyServiceTest {
         assertThat(cascadedBts.getCascadeHop()).isEqualTo(1);
         assertThat(cascadedBts.getCascadeHop()).isLessThanOrEqualTo(3);
     }
+
+    // ── WO-031: scheduleInitialWalk tests ─────────────────────────────────────
+
+    @Test
+    void scheduleInitialWalk_existingNode_setsWalkPending() {
+        TopologyNode existing = new TopologyNode();
+        existing.setDeviceId("generic-001");
+        existing.setType("SWITCH");
+        when(nodeRepo.findByDeviceId("generic-001")).thenReturn(Optional.of(existing));
+        when(nodeRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.scheduleInitialWalk("generic-001", List.of("SNMP_NEIGHBOR"), "corr-w31-001");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(TopologyNode.class);
+        verify(nodeRepo).save(captor.capture());
+
+        TopologyNode saved = captor.getValue();
+        assertThat(saved.getWalkStatus()).isEqualTo("PENDING");
+        assertThat(saved.getWalkSupportedProtocols()).containsExactly("SNMP_NEIGHBOR");
+        assertThat(saved.getWalkCorrelationId()).isEqualTo("corr-w31-001");
+        assertThat(saved.getWalkRequestedAt()).isNotNull();
+    }
+
+    @Test
+    void scheduleInitialWalk_missingNode_createsPlaceholder() {
+        when(nodeRepo.findByDeviceId("generic-002")).thenReturn(Optional.empty());
+        when(nodeRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.scheduleInitialWalk("generic-002", List.of("SNMP_NEIGHBOR", "LLDP"), "corr-w31-002");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(TopologyNode.class);
+        verify(nodeRepo).save(captor.capture());
+        TopologyNode placeholder = captor.getValue();
+
+        assertThat(placeholder.getDeviceId()).isEqualTo("generic-002");
+        assertThat(placeholder.getWalkStatus()).isEqualTo("PENDING");
+        assertThat(placeholder.getType()).isEqualTo("UNKNOWN");
+    }
 }

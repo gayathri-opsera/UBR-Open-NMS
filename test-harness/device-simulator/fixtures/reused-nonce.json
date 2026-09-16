@@ -1,0 +1,15 @@
+{
+  "_comment": "Fixture: reused nonce (AC2 — nonce replay within TTL window → 462 HMAC_INVALID)",
+  "scenario": "nonce_replay",
+  "expected_status": 462,
+  "expected_error_code": "HMAC_INVALID",
+  "note": "Send this request twice in succession. First request succeeds; second fails with 462.",
+  "headers": {
+    "Auth-Info": "id=AA:BB:CC:DD:EE:FF,timestamp=NOW,nonce=ReplayNonce123456789012345678",
+    "Auth-Signature": "COMPUTE_WITH_SIGN_GO"
+  },
+  "body": {
+    "serialNumber": "SN12345678",
+    "macAddress": "AA:BB:CC:DD:EE:FF"
+  }
+}

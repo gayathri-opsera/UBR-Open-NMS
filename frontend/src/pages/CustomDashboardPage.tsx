@@ -103,10 +103,9 @@ const ALARM_SEV_DATA = [
 ];
 
 const MODEL_DATA = [
-  { label: 'ENH700EXT', value: 4, color: '#3b82f6' },
-  { label: 'ENS620EXT', value: 5, color: '#22c55e' },
-  { label: 'ENS500EXT', value: 3, color: '#a855f7' },
-  { label: 'CB-350AC',  value: 2, color: '#f59e0b' },
+  { label: 'A60', value: 10, color: '#3b82f6' },
+  { label: 'A61', value: 8,  color: '#22c55e' },
+  { label: 'IDU', value: 4,  color: '#f59e0b' },
 ];
 
 const MOCK_ALARMS = [

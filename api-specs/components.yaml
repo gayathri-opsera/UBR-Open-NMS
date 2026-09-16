@@ -120,6 +120,61 @@ components:
         networkId:       { type: string }
         createdAt:       { type: string, format: date-time }
         updatedAt:       { type: string, format: date-time }
+        # WO-002/WO-028: authority and bootstrap fields
+        schemaVersion:          { type: string, example: "1.0" }
+        discoveryParadigm:      { type: string, enum: [UBR_CALL_HOME, GENERIC_SNMP, GENERIC_CLI, UNKNOWN], nullable: true }
+        identityAuthority:      { type: string, enum: [UBR, GENERIC, UNKNOWN], nullable: true }
+        onlineStateAuthority:   { type: string, enum: [UBR, GENERIC, UNKNOWN], nullable: true }
+        bootstrapState:         { type: string, enum: [PENDING, AUTHENTICATED, CHECK_IN_RECEIVED, REALTIME_ESTABLISHED, FAILED, UNKNOWN], nullable: true }
+        lastCheckInAt:          { type: string, format: date-time, nullable: true }
+        lastRealtimeAt:         { type: string, format: date-time, nullable: true }
+        capabilityProfileId:    { type: string, nullable: true }
+        # credentialRef is an opaque identifier only — never the credential value
+        credentialRef:          { type: string, nullable: true }
+        configVersion:          { type: string, nullable: true }
+        # WO-027: SNMP fingerprint fields
+        sysObjectID:            { type: string, pattern: '^\.?[0-9]+(\.[0-9]+)+$', maxLength: 128, nullable: true }
+        sysDescr:               { type: string, maxLength: 512, nullable: true }
+        # WO-026: onboarding state progress fields
+        lastSuccessfulBootstrapState: { type: string, nullable: true }
+        onboardingFailureReason:      { type: string, nullable: true, description: "Categorised failure reason — no auth material" }
+        retryAfterSeconds:            { type: integer, nullable: true }
+        retryJitterMaxSeconds:        { type: integer, nullable: true }
+        assignmentRequired:           { type: boolean, nullable: true }
+        commissioningPendingFields:   { type: string, nullable: true, description: "Comma-separated list of pending fields, e.g. gps,azimuth" }
+        # WO-028: realtime connection tracking
+        realtimeConnectionId:         { type: string, nullable: true }
+        realtimeStatusReason:         { type: string, nullable: true }
+        # WO-030: generic discovery classification results
+        # Authority: these fields are GENERIC-only; never set by UBR call-home discovery.
+        vendor:
+          type: string
+          nullable: true
+          description: Vendor assigned by SNMP fingerprint classification.
+        genericDeviceType:
+          type: string
+          nullable: true
+          enum: [ROUTER, SWITCH, FIREWALL, SERVER, UNKNOWN]
+          description: Generic device category (not UBR deviceType BTS/CPE).
+        driverId:
+          type: string
+          nullable: true
+          example: drv-cisco-snmp-v1
+        classificationStatus:
+          type: string
+          nullable: true
+          enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR]
+          description: Outcome of SNMP fingerprint classification.
+        classificationDeferReason:
+          type: string
+          nullable: true
+          description: >
+            Operator-visible reason when classificationStatus is deferred or errored.
+            Never contains credential or OID material beyond the classification reason code.
+        classificationCorrelationId:
+          type: string
+          nullable: true
+          description: Correlation ID linking back to the fingerprinting run.
 
     AlarmRecord:
       type: object

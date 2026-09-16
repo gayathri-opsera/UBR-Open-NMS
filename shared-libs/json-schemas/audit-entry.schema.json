@@ -17,7 +17,47 @@
         "ipAddress": { "type": "string" }
       }
     },
-    "action":     { "type": "string" },
+    "action": {
+      "type": "string",
+      "description": "Action performed. Includes legacy CRUD and WO-006 extended taxonomy.",
+      "enum": [
+        "CREATE", "READ", "UPDATE", "DELETE",
+        "LOGIN", "LOGOUT", "LOGIN_FAILED",
+        "CONFIG_PUSH", "EXPORT", "ADMIN",
+        "discovery.mode.changed",
+        "discovery.mode.change.denied",
+        "onboarding.attempt",
+        "onboarding.rejected",
+        "onboarding.assignment.override",
+        "southbound.auth.failure",
+        "southbound.hmac.failure",
+        "southbound.mtls.failure",
+        "capability.denied",
+        "capability.policy.read",
+        "config.withheld",
+        "credential.ref.accessed",
+        "evidence.exported",
+        "evidence.export.denied",
+        "sso.login.initiated",
+        "sso.login.success",
+        "sso.login.failed",
+        "sso.config.updated",
+        "mfa.enrolled",
+        "mfa.challenge.success",
+        "mfa.challenge.failed",
+        "mfa.disabled",
+        "mfa.backup_code.used",
+        "password.expired",
+        "password.renewed",
+        "password.policy.violated",
+        "password.reset.initiated",
+        "role.changed",
+        "permission.changed",
+        "identity.provider.changed",
+        "access.denied",
+        "access.partial"
+      ]
+    },
     "resource":   {
       "type": "object",
       "required": ["type", "id"],
@@ -26,9 +66,33 @@
         "id":   { "type": "string" }
       }
     },
-    "payload":    { "type": "object" },
-    "outcome":    { "type": "string", "enum": ["success", "failure", "denied"] },
+    "payload":    {
+      "type": "object",
+      "description": "Contextual data. Sensitive fields (password, token, secret, signature, hmac, privateKey, cert, credential) are redacted before persistence."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["success", "failure", "denied", "blocked", "pending"],
+      "description": "Result of the audited action. 'blocked' = gate prevented execution; 'pending' = async action started."
+    },
     "errorMessage": { "type": ["string", "null"] },
-    "timestamp":  { "type": "string", "format": "date-time" }
+    "timestamp":  { "type": "string", "format": "date-time" },
+    "correlationId": { "type": ["string", "null"] },
+    "serviceSource": { "type": ["string", "null"] },
+    "retentionClass": {
+      "type": ["string", "null"],
+      "enum": ["audit", "security", "onboarding", "alarm_incident",
+               "config_history", "evidence_export", "legacy", null],
+      "description": "Retention class for evidence lifecycle management (WO-008)."
+    },
+    "integrity": {
+      "type": "object",
+      "description": "Optional integrity metadata for evidence export records (WO-008).",
+      "properties": {
+        "checksum":          { "type": "string" },
+        "checksumAlgorithm": { "type": "string" },
+        "exportScope":       { "type": "string" }
+      }
+    }
   }
 }

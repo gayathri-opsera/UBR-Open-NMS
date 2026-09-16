@@ -17,6 +17,15 @@ const groupsStub      = require('./routes/groups.stub');
 const configStub      = require('./routes/config.stub');
 const diagnosticsStub = require('./routes/diagnostics.stub');
 const kpiStub         = require('./routes/kpi.stub');
+const topologyStub    = require('./routes/topology.stub');
+const devicesStub     = require('./routes/devices.stub');
+const dashboardsStub  = require('./routes/dashboards.stub');
+const { createProvisionHandler } = require('./routes/provision.stub');
+const { listIgnored, addIgnored, removeIgnored } = require('./routes/ignore.stub');
+// Alarms stub — serves local alarm data instead of proxying to the external Opsera dev
+// environment.  Without this stub, ALARM_SERVICE_URL (often set to ubr-nms-frontend-dev.
+// agent.opsera.dev) causes a CORS error + 401 for every /api/v1/alarms request.
+const alarmsStub      = require('./routes/alarms.stub');
 
 function createApp(redisClient) {
   const app = express();
@@ -39,15 +48,87 @@ function createApp(redisClient) {
   app.use('/api/v1/notifications/stream', createSseProxy(config.services.notification));
 
   // ── Stub routers for sub-services (mounted BEFORE proxy routes) ──────────────
+  // Alarms stub — intercepts before the external proxy so local dev never hits Opsera dev.
+  app.use('/api/v1/alarms',        alarmsStub);
   app.use('/api/v1/admin',         adminStub);
   app.use('/api/v1/organizations', hierarchyStub);
   app.use('/api/v1/groups',        groupsStub);
+  // Custom dashboards — persisted to MongoDB so they survive browser/device changes
+  app.use('/api/v1/dashboards',    dashboardsStub);
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);
   // Diagnostics stub — Java diagnostics-service returns 503 in local dev
   app.use('/api/v1/diagnostics',   diagnosticsStub);
   // KPI stub — kpi-query-service and kpi-aggregation-service are not yet deployed
   app.use('/api/v1/kpi',           kpiStub);
+  // Topology stub — adds /summary, /link-health, /events, /connections, /search endpoints
+  app.use('/api/v1/topology',      topologyStub);
+  // Device stub — GET merges Java inventory (BTS/CPE) with MongoDB IDU devices;
+  // POST/PUT/DELETE bypass Java inventory (Kafka-dependent writes fail there).
+  app.get('/api/v1/devices',           devicesStub);
+  app.post('/api/v1/devices',          devicesStub);
+  app.put('/api/v1/devices/:id',       devicesStub);
+  app.delete('/api/v1/devices/:id',    devicesStub);
+  app.put('/api/v1/devices/:id/tags',  devicesStub);
+
+  // Discovery provision stub — intercepts POST /api/v1/discovery/runs/:runId/provision
+  // before the discovery-service proxy so SNMP-discovered devices are written to MongoDB
+  // (same store as the devices stub) and immediately appear in inventory + topology.
+  app.post('/api/v1/discovery/runs/:runId/provision', createProvisionHandler(config));
+
+  // Discovery ignore stub — persists admin-suppressed IPs to MongoDB so ignored devices
+  // are filtered out of discovery results and never surfaced in inventory/topology.
+  app.get('/api/v1/discovery/ignore',        listIgnored);
+  app.post('/api/v1/discovery/ignore',       addIgnored);
+  app.delete('/api/v1/discovery/ignore/:ip', removeIgnored);
+
+  // ── Dev-only: deduplicate devices collection by IP address ───────────────────
+  // POST /api/v1/admin/devices/dedup-by-ip
+  // Removes all but the most-recently-updated document per IP from ubrnms.devices.
+  // Safe to call repeatedly (idempotent). Primarily needed after the admin
+  // provisioned the same SNMP device multiple times before the "already provisioned"
+  // guard was in place.
+  app.post('/api/v1/admin/devices/dedup-by-ip', async (req, res) => {
+    const mongoose = require('mongoose');
+    try {
+      const col = mongoose.connection.readyState === 1
+        ? mongoose.connection.db.collection('devices')
+        : null;
+      if (!col) return res.status(503).json({ code: 'DB_UNAVAILABLE', message: 'MongoDB not connected' });
+
+      const all = await col.find({}).toArray();
+
+      // Group docs by ipAddress; keep the one with the latest updatedAt.
+      const byIp = new Map();
+      const noIp = [];
+      for (const d of all) {
+        if (!d.ipAddress) { noIp.push(d); continue; }
+        const prev = byIp.get(d.ipAddress);
+        const dTime   = new Date(d.updatedAt || d.createdAt || 0).getTime();
+        const prevTime = prev ? new Date(prev.updatedAt || prev.createdAt || 0).getTime() : -1;
+        if (!prev || dTime >= prevTime) byIp.set(d.ipAddress, d);
+      }
+
+      // Collect _ids to DELETE (everything NOT in the keeper set).
+      const keepIds = new Set([
+        ...byIp.values(),
+        ...noIp,
+      ].map((d) => String(d._id)));
+      const toDelete = all.filter((d) => !keepIds.has(String(d._id))).map((d) => d._id);
+
+      let removed = 0;
+      if (toDelete.length > 0) {
+        const result = await col.deleteMany({ _id: { $in: toDelete } });
+        removed = result.deletedCount;
+      }
+
+      logger.info(`[dedup] Removed ${removed} duplicate device records (${byIp.size} unique IPs kept)`);
+      return res.json({ removed, kept: keepIds.size, message: `Removed ${removed} duplicate records` });
+    } catch (err) {
+      logger.error('[dedup] Failed:', err.message);
+      return res.status(500).json({ code: 'ERROR', message: err.message });
+    }
+  });
 
   // System health stub — health-monitor service may not be running in local dev
   app.get('/api/v1/system/health', (_req, res) => {
@@ -72,23 +153,15 @@ function createApp(redisClient) {
     });
   });
 
-  // Config-history per device — inventory service doesn't have this route
-  app.get('/api/v1/devices/:deviceId/config-history', (req, res) => {
+  // Config-history per device — delegates to config.stub persistent history
+  app.get('/api/v1/devices/:deviceId/config-history', (req, res, next) => {
     const { deviceId } = req.params;
     if (!deviceId || deviceId === 'undefined') {
       return res.status(400).json({ code: 'BAD_REQUEST', message: 'deviceId is required' });
     }
-    const now = Date.now();
-    const versions = Array.from({ length: 5 }, (_, i) => ({
-      id:         `cv-${deviceId}-${i + 1}`,
-      deviceId,
-      templateId: i === 0 ? 'tpl-default' : `tpl-${i}`,
-      templateName: i === 0 ? 'Default BTS Config' : `Config v${5 - i}`,
-      appliedAt:  new Date(now - i * 86_400_000 * 3).toISOString(),
-      appliedBy:  i % 2 === 0 ? 'admin' : 'operator',
-      status:     i === 0 ? 'ACTIVE' : 'SUPERSEDED',
-    }));
-    res.json(versions);
+    // Rewrite path so the config stub's /history/:deviceId handler picks it up
+    req.url = `/history/${deviceId}`;
+    configStub(req, res, next);
   });
 
   // ── Audit fallback stub — serves sample data when the real service has no entries ──
@@ -146,6 +219,14 @@ function createApp(redisClient) {
     config,
   );
   app.use('/api/v1/reports', reportProxy);
+
+  // ── Test Harness proxy (nms-test-harness on port 3009) ────────────────────────
+  const testHarnessProxy = createServiceProxy(
+    process.env.TEST_HARNESS_URL || 'http://nms-test-harness:3009',
+    'test-harness',
+    config,
+  );
+  app.use('/api/test-harness', testHarnessProxy);
 
   app.use((_req, res) => res.status(404).json({ code: 'NOT_FOUND', message: 'Route not found' }));
 

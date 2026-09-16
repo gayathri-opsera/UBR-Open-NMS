@@ -1,0 +1,15 @@
+{
+  "profile_name": "invalid-signature",
+  "description": "Device that presents a deliberately invalid HMAC signature (negative case)",
+  "device_type": "BTS",
+  "serial_number": "SN-BADSIG-001",
+  "mac_address": "AA:BB:CC:DD:EE:BAD",
+  "firmware_version": "fw-2.4.1",
+  "config_version": "cfg-v1",
+  "negative_case": {
+    "type": "invalid_signature",
+    "expected_status": 462,
+    "expected_reason": "HMAC_INVALID"
+  },
+  "hmac_secret_placeholder": "PLACEHOLDER_WRONG_SECRET_DO_NOT_USE_IN_PRODUCTION"
+}

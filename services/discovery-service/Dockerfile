@@ -1,8 +1,9 @@
-FROM golang:1.22 AS builder
+FROM golang:1.23 AS builder
 WORKDIR /app
-COPY go.mod ./
+COPY services/discovery-service/go.mod services/discovery-service/go.sum* ./
+COPY shared-libs/go /shared-libs/go
 RUN go mod download && go mod tidy || true
-COPY . .
+COPY services/discovery-service .
 RUN go mod tidy && CGO_ENABLED=1 GOOS=linux go build -o discovery-service ./main.go
 
 FROM debian:12-slim

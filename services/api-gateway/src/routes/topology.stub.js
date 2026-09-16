@@ -1,0 +1,528 @@
+'use strict';
+
+const express  = require('express');
+const mongoose = require('mongoose');
+const router   = express.Router();
+
+// ── Inventory service URL (internal Docker network or override) ─────────────
+const INVENTORY_URL = process.env.INVENTORY_SERVICE_URL || 'http://nms-inventory:8082';
+
+// ── MongoDB connection for locally-provisioned devices ───────────────────────
+// The API-gateway provision stub and devices stub write SNMP-discovered devices
+// to the 'devices' collection in ubrnms.  We read them here so provisioned
+// devices appear in topology immediately without waiting for Kafka/Java sync.
+const MONGO_URI    = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms';
+let _mongoDevCol   = null;
+let _mongoConn     = null;
+
+async function getMongoDevices() {
+  try {
+    if (!_mongoDevCol) {
+      // Prefer the shared mongoose connection if already established.
+      if (mongoose.connection.readyState === 1) {
+        _mongoDevCol = mongoose.connection.db.collection('devices');
+      } else {
+        _mongoConn   = await mongoose.createConnection(MONGO_URI, { serverSelectionTimeoutMS: 3000 }).asPromise();
+        _mongoDevCol = _mongoConn.db.collection('devices');
+      }
+    }
+    const docs = await _mongoDevCol.find({}).limit(2000).toArray();
+    return docs;
+  } catch (err) {
+    console.warn('[topology.stub] MongoDB device read failed (non-fatal):', err.message);
+    return [];
+  }
+}
+
+// ── Short in-memory cache so we don't hammer inventory on every request ──────
+let _devCache  = null;
+let _cacheAt   = 0;
+const CACHE_TTL = 30_000; // 30 s
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function toHealth(s) {
+  if (!s) return 'UNKNOWN';
+  const u = String(s).toUpperCase();
+  if (['ONLINE', 'HEALTHY', 'ACTIVE', 'UP', 'RUNNING'].includes(u)) return 'HEALTHY';
+  if (['DEGRADED', 'WARNING', 'WARN'].includes(u))                   return 'DEGRADED';
+  if (['OFFLINE', 'DOWN', 'FAULTY', 'ERROR', 'UNREACHABLE'].includes(u)) return 'FAULTY';
+  return 'UNKNOWN';
+}
+
+function toLinkQuality(health) {
+  if (health === 'HEALTHY')  return 'GOOD';
+  if (health === 'DEGRADED') return 'FAIR';
+  if (health === 'FAULTY')   return 'POOR';
+  return 'DOWN';
+}
+
+function fmtUptime(sec) {
+  if (!sec) return 'N/A';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return `${d}d ${h}h ${m}m`;
+}
+
+// ── Fetch ALL devices from inventory, paginating through all pages ────────────
+// Merges Java inventory (BTS/CPE from production) with MongoDB stub devices
+// (including SNMP-discovered devices provisioned via the gateway stub).
+async function getInventoryDevices(bustCache = false) {
+  const now = Date.now();
+  if (!bustCache && _devCache && now - _cacheAt < CACHE_TTL) return _devCache;
+
+  const PAGE_SIZE = 100;          // inventory service default max per page
+  const MAX_PAGES = 20;           // safety cap — allows up to 2,000 devices
+  let javaDevices = [];
+  let page = 0;
+  let more = true;
+
+  // Attempt to fetch from Java inventory; fall through gracefully on failure.
+  try {
+    while (more && page < MAX_PAGES) {
+      const resp = await fetch(
+        `${INVENTORY_URL}/api/v1/devices?limit=${PAGE_SIZE}&page=${page}`
+      );
+      if (!resp.ok) throw new Error(`Inventory HTTP ${resp.status}`);
+      const body = await resp.json();
+      const batch = Array.isArray(body) ? body : (body.devices ?? body.data ?? body.items ?? []);
+      javaDevices.push(...batch);
+      more = batch.length === PAGE_SIZE;
+      page++;
+    }
+  } catch (err) {
+    console.warn('[topology.stub] Java inventory unavailable, using MongoDB only:', err.message);
+  }
+
+  // Read locally-provisioned devices from MongoDB (written by devices.stub POST handler).
+  // De-duplicate by serialNumber so Java and MongoDB devices don't appear twice.
+  const mongoDevices = await getMongoDevices();
+  const javaSerials  = new Set(javaDevices.map((d) => d.serialNumber).filter(Boolean));
+  const mongoUniq    = mongoDevices.filter((d) => !javaSerials.has(d.serialNumber));
+
+  const all = [...javaDevices, ...mongoUniq];
+  _devCache = all;
+  _cacheAt  = now;
+  return all;
+}
+
+// ── Map an inventory device to a topology node ────────────────────────────────
+// parentNode is passed in a second pass (after buildEdges sets parentDeviceId)
+// so CPE/IDU can inherit coordinates from their BTS when their own GPS is missing.
+function toNode(d, idx, parentNode) {
+  const type   = d.deviceType || d.type || 'CPE';
+  const health = toHealth(d.status || d.health);
+  const id     = d.id || d._id || d.deviceId || `dev-${idx}`;
+  const rssi   = d.rssi ?? (type !== 'IDU' ? -60 - (idx % 20) : null);
+  const snr    = d.snr  ?? (type !== 'IDU' ? 25  - (idx % 10) : null);
+
+  // Fix any GPS coordinate that is outside India (0,0 or wrong continent)
+  let lat = d.latitude, lng = d.longitude;
+  if (!isInsideIndia(lat, lng)) {
+    const fb = fallbackCoord(d, parentNode, idx);
+    lat = fb.lat;
+    lng = fb.lng;
+  }
+
+  return {
+    id,
+    deviceId:        id,
+    deviceName:      d.name || d.deviceName
+                     || (d.serialNumber ? `${type} ${d.serialNumber.slice(-3)}` : `${type} ${101 + idx}`),
+    serialNumber:    d.serialNumber || `${type}-${String(100000 + idx).padStart(6, '0')}`,
+    _connectedBtsSerial: d.connectedBtsSerial || null,
+    _linkedCpeSerial:    d.linkedCpeSerial    || null,
+    type,
+    status:          health,
+    ipAddress:       d.ipAddress  || '0.0.0.0',
+    macAddress:      d.macAddress || '00:00:00:00:00:00',
+    latitude:        lat,
+    longitude:       lng,
+    operatingChannel: d.channel ? `${d.channel} (${d.channelBandwidth || 80} MHz)` : null,
+    rssi,
+    a1Rssi:          d.a1Rssi ?? (rssi != null ? rssi - 3 : null),
+    a2Rssi:          d.a2Rssi ?? (rssi != null ? rssi - 5 : null),
+    snr,
+    ethernetSpeed:   d.ethernetSpeed || (type === 'BTS' ? '1000 Mbps' : '100 Mbps'),
+    duplex:          d.duplex || 'Full',
+    firmwareVersion: d.firmwareVersion || 'v2.3.1',
+    uptime:          fmtUptime(d.uptimeSeconds || d.uptime),
+    cascadeHop:      type === 'BTS' ? 1 : type === 'CPE' ? 2 : 3,
+    pendingCommandCount: 0,
+    networkId:       d.networkId || d.organizationId || `net-${(idx % 3) + 1}`,
+    parentDeviceId:  null,          // filled in during buildEdges()
+    linkQuality:     toLinkQuality(health),
+    // BTS only has direct CPE children — IDUs connect via CPE, not directly to BTS
+    connectedCpeSerials:  d.connectedCpeSerials  || [],
+  };
+}
+
+// ── Wire BTS→CPE and CPE→IDU; enforce GPS rules ───────────────────────────────
+function buildEdges(nodes) {
+  // Index all nodes by serialNumber and by id for O(1) look-ups
+  const bySerial  = {};
+  const nodesById = {};
+  nodes.forEach((n) => {
+    nodesById[n.id] = n;
+    if (n.serialNumber) bySerial[n.serialNumber] = n;
+  });
+  const btsBySerial = {};
+  nodes.forEach((n) => { if (n.type === 'BTS') btsBySerial[n.serialNumber] = n; });
+
+  // 1. Wire CPE → its parent BTS via connectedBtsSerial
+  nodes.forEach((n) => {
+    if (n.type === 'CPE' && n._connectedBtsSerial) {
+      const parent = btsBySerial[n._connectedBtsSerial];
+      if (parent) n.parentDeviceId = parent.id;
+    }
+  });
+
+  // 2. Wire IDU → its linked CPE (never directly to BTS)
+  const allCpes = nodes.filter((n) => n.type === 'CPE');
+  nodes.forEach((n) => {
+    if (n.type !== 'IDU') return;
+    // Priority 1: explicit linkedCpeSerial
+    if (n._linkedCpeSerial) {
+      const cpe = bySerial[n._linkedCpeSerial];
+      if (cpe) { n.parentDeviceId = cpe.id; return; }
+    }
+    // Priority 2: any CPE under the same BTS
+    if (n._connectedBtsSerial) {
+      const sibling = allCpes.find((x) => x._connectedBtsSerial === n._connectedBtsSerial);
+      if (sibling) { n.parentDeviceId = sibling.id; return; }
+    }
+    // Priority 3: nearest CPE by round-robin (never BTS)
+    if (allCpes.length) n.parentDeviceId = allCpes[Math.abs(n.id.charCodeAt(0)) % allCpes.length].id;
+  });
+
+  // 3. Round-robin fallback for CPEs still without a parent BTS
+  const bts = nodes.filter((n) => n.type === 'BTS');
+  nodes.filter((n) => n.type === 'CPE' && !n.parentDeviceId)
+       .forEach((n, i) => {
+         if (bts.length) n.parentDeviceId = bts[i % bts.length].id;
+       });
+
+  // 4. GPS fix: if CPE/IDU coordinate is missing or outside India, place near parent
+  nodes.forEach((n, i) => {
+    if ((n.type === 'CPE' || n.type === 'IDU') && !isInsideIndia(n.latitude, n.longitude)) {
+      const parent = n.parentDeviceId ? nodesById[n.parentDeviceId] : null;
+      const fb = fallbackCoord(n, parent, i);
+      n.latitude  = fb.lat;
+      n.longitude = fb.lng;
+    }
+  });
+
+  // 5. 1 km enforcement: CPE must be within 1 km of its parent BTS
+  nodes.forEach((n, i) => {
+    if (n.type !== 'CPE' || !n.parentDeviceId) return;
+    const parent = nodesById[n.parentDeviceId];
+    if (!parent || !isInsideIndia(parent.latitude, parent.longitude)) return;
+    if (haversine(n.latitude, n.longitude, parent.latitude, parent.longitude) > 1.0) {
+      const jitter = () => (((i * 7919 + 1) % 80) - 40) / 10000; // ±0.004° ≈ ±0.44 km
+      n.latitude  = parent.latitude  + jitter();
+      n.longitude = parent.longitude + jitter();
+    }
+  });
+
+  // 6. IDU must share coordinates with its linked CPE
+  nodes.forEach((n) => {
+    if (n.type !== 'IDU' || !n.parentDeviceId) return;
+    const parent = nodesById[n.parentDeviceId];
+    if (!parent || parent.type !== 'CPE') return;
+    // snap IDU to exact CPE position
+    n.latitude  = parent.latitude;
+    n.longitude = parent.longitude;
+  });
+
+  return [
+    ...nodes.filter((n) => n.type === 'CPE' && n.parentDeviceId).map((c, i) => ({
+      id: `e-cpe-${i}`,
+      sourceDeviceId: c.parentDeviceId,
+      targetDeviceId: c.id,
+      linkType: 'WIRELESS',
+      linkQuality: c.linkQuality,
+      health: c.status,
+    })),
+    // IDU edges: only if parent is a CPE (enforce CPE→IDU, never BTS→IDU)
+    ...nodes
+      .filter((n) => n.type === 'IDU' && n.parentDeviceId && nodesById[n.parentDeviceId]?.type === 'CPE')
+      .map((d, i) => ({
+        id: `e-idu-${i}`,
+        sourceDeviceId: d.parentDeviceId,
+        targetDeviceId: d.id,
+        linkType: 'WIRED',
+        linkQuality: d.linkQuality,
+        health: d.status,
+      })),
+  ];
+}
+
+// ── Indian city anchor points (spread across the subcontinent) ───────────────
+const INDIA_ANCHORS = [
+  // North
+  { lat: 28.6139, lng: 77.2090, name: 'Delhi' },
+  { lat: 28.5355, lng: 77.3910, name: 'Delhi South' },
+  { lat: 30.7333, lng: 76.7794, name: 'Chandigarh' },
+  { lat: 26.9124, lng: 75.7873, name: 'Jaipur' },
+  { lat: 26.8467, lng: 80.9462, name: 'Lucknow' },
+  { lat: 25.3176, lng: 82.9739, name: 'Varanasi' },
+  { lat: 27.1767, lng: 78.0081, name: 'Agra' },
+  // West
+  { lat: 19.0760, lng: 72.8777, name: 'Mumbai' },
+  { lat: 23.0225, lng: 72.5714, name: 'Ahmedabad' },
+  { lat: 21.1458, lng: 79.0882, name: 'Nagpur' },
+  { lat: 18.5204, lng: 73.8567, name: 'Pune' },
+  { lat: 21.1702, lng: 72.8311, name: 'Surat' },
+  // South
+  { lat: 13.0827, lng: 80.2707, name: 'Chennai' },
+  { lat: 12.9716, lng: 77.5946, name: 'Bengaluru' },
+  { lat: 17.3850, lng: 78.4867, name: 'Hyderabad' },
+  { lat: 10.8505, lng: 76.2711, name: 'Kochi' },
+  { lat: 15.3173, lng: 75.7139, name: 'Hubli' },
+  // East
+  { lat: 22.5726, lng: 88.3639, name: 'Kolkata' },
+  { lat: 20.2961, lng: 85.8245, name: 'Bhubaneswar' },
+  { lat: 23.3441, lng: 85.3096, name: 'Ranchi' },
+  { lat: 25.5941, lng: 85.1376, name: 'Patna' },
+  // Northeast
+  { lat: 26.1445, lng: 91.7362, name: 'Guwahati' },
+  { lat: 24.8170, lng: 92.7737, name: 'Silchar' },
+  // Central
+  { lat: 23.2599, lng: 77.4126, name: 'Bhopal' },
+  { lat: 22.7196, lng: 75.8577, name: 'Indore' },
+];
+
+function isInsideIndia(lat, lng) {
+  return lat != null && lng != null && lat > 6 && lat < 38 && lng > 67 && lng < 98
+      && !(lat === 0 && lng === 0);
+}
+
+/** Return a coordinate inside India for a device that lacks valid GPS data.
+ *  BTS get a city anchor.  CPE/IDU get a small jitter around their parent anchor
+ *  that is guaranteed to stay within the 1 km BTS-CPE rule (±0.004° ≈ ±0.44 km). */
+function fallbackCoord(device, parentNode, idx) {
+  if (parentNode && isInsideIndia(parentNode.latitude, parentNode.longitude)) {
+    // Deterministic sub-km jitter so CPE always lands within 1 km of BTS
+    const jitter = () => (((idx * 7919 + 1) % 80) - 40) / 10000; // ±0.004° ≈ ±0.44 km
+    return { lat: parentNode.latitude + jitter(), lng: parentNode.longitude + jitter() };
+  }
+  const anchor = INDIA_ANCHORS[idx % INDIA_ANCHORS.length];
+  const spread = () => (((idx * 6271 + 3) % 80) - 40) / 10000; // ±0.004° ≈ ±0.44 km
+  return { lat: anchor.lat + spread(), lng: anchor.lng + spread() };
+}
+
+// ── Haversine for GPS radius search ──────────────────────────────────────────
+function haversine(la1, ln1, la2, ln2) {
+  const R = 6371;
+  const dL = ((la2 - la1) * Math.PI) / 180;
+  const dN = ((ln2 - ln1) * Math.PI) / 180;
+  const a  = Math.sin(dL / 2) ** 2
+            + Math.cos(la1 * Math.PI / 180) * Math.cos(la2 * Math.PI / 180) * Math.sin(dN / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ── Shared: load + build ──────────────────────────────────────────────────────
+async function loadGraph(bustCache = false) {
+  const raw   = await getInventoryDevices(bustCache);
+  const nodes = raw.map(toNode);
+  const edges = buildEdges(nodes);
+  return { nodes, edges };
+}
+
+// ── GET /api/v1/topology ──────────────────────────────────────────────────────
+router.get('/', async (req, res) => {
+  try {
+    // _t param signals a manual refresh — bypass the 30s cache
+    const bustCache = !!req.query._t;
+    const { nodes, edges } = await loadGraph(bustCache);
+    const { networkId } = req.query;
+    let rN = nodes, rE = edges;
+    if (networkId) {
+      rN = nodes.filter((n) => n.networkId === networkId);
+      const ids = new Set(rN.map((n) => n.id));
+      rE = edges.filter((e) => ids.has(e.sourceDeviceId) && ids.has(e.targetDeviceId));
+    }
+    res.json({ nodes: rN, edges: rE, nodeCount: rN.length, edgeCount: rE.length, _source: 'inventory' });
+  } catch (err) {
+    console.warn('[topology.stub] /topology failed:', err.message);
+    res.status(503).json({ code: 'UNAVAILABLE', message: 'Topology data temporarily unavailable' });
+  }
+});
+
+// ── GET /api/v1/topology/search ───────────────────────────────────────────────
+router.get('/search', async (req, res) => {
+  try {
+    const { nodes } = await loadGraph();
+    const { search, lat, lng, radiusKm } = req.query;
+    let results = nodes;
+    if (search) {
+      const q = String(search).toLowerCase();
+      results = results.filter((d) =>
+        d.serialNumber?.toLowerCase().includes(q) ||
+        d.ipAddress?.toLowerCase().includes(q)    ||
+        d.macAddress?.toLowerCase().includes(q)   ||
+        d.deviceName?.toLowerCase().includes(q)
+      );
+    }
+    if (lat != null && lng != null) {
+      const r = Math.min(parseFloat(radiusKm) || 25, 500); // allow up to 500 km
+      const latF = parseFloat(lat), lngF = parseFloat(lng);
+      results = results.filter(
+        (d) => d.latitude != null && haversine(latF, lngF, d.latitude, d.longitude) <= r,
+      );
+      console.log(`[topology.stub] GPS search (${latF},${lngF}) r=${r}km → ${results.length} hits`);
+    }
+    res.json(results);
+  } catch (err) {
+    console.warn('[topology.stub] /search failed:', err.message);
+    res.status(503).json({ code: 'UNAVAILABLE', message: err.message });
+  }
+});
+
+// ── GET /api/v1/topology/device/:id/connections ───────────────────────────────
+router.get('/device/:deviceId/connections', async (req, res) => {
+  const { deviceId } = req.params;
+  try {
+    const { nodes } = await loadGraph();
+    const d = nodes.find((n) => n.id === deviceId || n.deviceId === deviceId || n.serialNumber === deviceId);
+    if (!d) return res.status(404).json({ code: 'NOT_FOUND', message: 'Device not found' });
+
+    let connected = [];
+    if (d.type === 'BTS') {
+      // Direct CPE children of this BTS
+      connected = nodes.filter((n) => n.type === 'CPE' && n.parentDeviceId === d.id);
+    } else if (d.type === 'CPE') {
+      // Parent BTS + any IDUs that are linked to this CPE
+      const parent = d.parentDeviceId ? nodes.find((n) => n.id === d.parentDeviceId) : null;
+      const idus   = nodes.filter((n) => n.type === 'IDU' && n.parentDeviceId === d.id);
+      connected = [...(parent ? [parent] : []), ...idus];
+    } else {
+      // IDU → show parent CPE
+      if (d.parentDeviceId) {
+        const parent = nodes.find((n) => n.id === d.parentDeviceId);
+        if (parent) connected = [parent];
+      }
+    }
+    res.json(connected);
+  } catch (err) {
+    res.status(503).json({ code: 'UNAVAILABLE', message: err.message });
+  }
+});
+
+// ── GET /api/v1/topology/device/:id/summary ───────────────────────────────────
+router.get('/device/:deviceId/summary', async (req, res) => {
+  const { deviceId } = req.params;
+  try {
+    const { nodes } = await loadGraph();
+    const d = nodes.find((n) => n.id === deviceId || n.deviceId === deviceId || n.serialNumber === deviceId);
+    if (!d) return res.status(404).json({ code: 'NOT_FOUND', message: 'Device not found' });
+
+    res.json({
+      deviceId:       d.deviceId,
+      serialNumber:   d.serialNumber,
+      operatingChannel: d.operatingChannel,
+      rssi:           d.rssi,
+      a1Rssi:         d.a1Rssi,
+      a2Rssi:         d.a2Rssi,
+      snr:            d.snr,
+      firmwareVersion:d.firmwareVersion,
+      ethernetSpeed:  d.ethernetSpeed,
+      duplex:         d.duplex,
+      uptime:         d.uptime,
+      connectedClients: d.type === 'BTS' ? 2 + (d.id.length % 28) : 1,
+      cpuPercent:      10 + (d.id.length % 60),
+      memPercent:      20 + (d.id.length % 50),
+      gpsRelocation:   false,
+      compassDrift:    d.id.length % 8,
+    });
+  } catch (err) {
+    res.status(503).json({ code: 'UNAVAILABLE', message: err.message });
+  }
+});
+
+// ── GET /api/v1/topology/device/:id/link-health ───────────────────────────────
+router.get('/device/:deviceId/link-health', async (req, res) => {
+  const { deviceId } = req.params;
+  try {
+    const { nodes } = await loadGraph();
+    const d = nodes.find((n) => n.id === deviceId || n.deviceId === deviceId || n.serialNumber === deviceId);
+    if (!d) return res.status(404).json({ code: 'NOT_FOUND', message: 'Device not found' });
+
+    res.json({
+      deviceId:       d.deviceId,
+      linkQuality:    d.linkQuality,
+      rssi:           d.rssi,
+      snr:            d.snr,
+      a1Rssi:         d.a1Rssi,
+      a2Rssi:         d.a2Rssi,
+      throughputMbps: 10 + (d.id.length % 490),
+      packetLossPct:  (d.id.length % 50) / 10,
+      latencyMs:      1 + (d.id.length % 29),
+      lastUpdated:    new Date(Date.now() - d.id.length * 1000).toISOString(),
+    });
+  } catch (err) {
+    res.status(503).json({ code: 'UNAVAILABLE', message: err.message });
+  }
+});
+
+// ── GET /api/v1/topology/device/:id/events ────────────────────────────────────
+router.get('/device/:deviceId/events', async (req, res) => {
+  const { deviceId } = req.params;
+  try {
+    const { nodes } = await loadGraph();
+    const d = nodes.find((n) => n.id === deviceId || n.deviceId === deviceId || n.serialNumber === deviceId);
+    if (!d) return res.status(404).json({ code: 'NOT_FOUND', message: 'Device not found' });
+
+    const EVENTS = [
+      'LINK_UP', 'LINK_DOWN', 'RSSI_THRESHOLD', 'SNR_THRESHOLD', 'FIRMWARE_UPDATE',
+      'REBOOT', 'CONFIG_PUSH', 'ALARM_RAISED', 'ALARM_CLEARED', 'GPS_DRIFT',
+    ];
+    const DESCS = {
+      LINK_UP:         'Radio link established',
+      LINK_DOWN:       'Radio link lost',
+      RSSI_THRESHOLD:  `RSSI ${d.rssi ?? -70} dBm crossed threshold`,
+      SNR_THRESHOLD:   `SNR ${d.snr ?? 20} dB below minimum`,
+      FIRMWARE_UPDATE: `Firmware updated to ${d.firmwareVersion}`,
+      REBOOT:          'Device rebooted',
+      CONFIG_PUSH:     'Configuration pushed',
+      ALARM_RAISED:    'Alarm raised: link quality degraded',
+      ALARM_CLEARED:   'Alarm cleared: link quality restored',
+      GPS_DRIFT:       'GPS position drift detected (>10 m)',
+    };
+    const SEVS = ['INFO', 'INFO', 'INFO', 'WARNING', 'MINOR', 'MAJOR', 'CRITICAL'];
+    const { from, to } = req.query;
+    const now    = Date.now();
+    const startMs = from ? new Date(from).getTime() : now - 7 * 86_400_000;
+    const endMs   = to   ? new Date(to).getTime()   : now;
+    const seed    = d.id.length;
+    const count   = 8 + (seed % 12);
+
+    const events = Array.from({ length: count }, (_, i) => {
+      const et = EVENTS[(seed + i * 3) % EVENTS.length];
+      return {
+        id:           `evt-${deviceId}-${i}`,
+        deviceId:     d.deviceId,
+        timestamp:    new Date(startMs + ((seed + i * 7) % 1000) * ((endMs - startMs) / 1000)).toISOString(),
+        eventType:    et,
+        severity:     SEVS[(seed + i * 2) % SEVS.length],
+        description:  DESCS[et] || et,
+        acknowledged: i > 2,
+      };
+    }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    res.json(events);
+  } catch (err) {
+    res.status(503).json({ code: 'UNAVAILABLE', message: err.message });
+  }
+});
+
+// ── Cache management export ───────────────────────────────────────────────────
+// Called by provision.stub.js after writing a new device to MongoDB so the next
+// topology request reflects the change immediately without the 30s cache delay.
+function bustTopologyCache() {
+  _devCache = null;
+  _cacheAt  = 0;
+}
+
+module.exports        = router;
+module.exports.bustTopologyCache = bustTopologyCache;

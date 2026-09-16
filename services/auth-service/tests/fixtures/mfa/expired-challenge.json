@@ -1,0 +1,22 @@
+{
+  "_comment": "Fixture: MFA challenge that has expired — used to test TOTP window validation",
+  "userId": "usr-admin-003",
+  "username": "admin-expired@example.com",
+  "role": "admin",
+  "mfaEnabled": true,
+  "mfaVerified": false,
+  "challengeIssuedAt": "2020-01-01T00:00:00Z",
+  "challengeExpiresAt": "2020-01-01T00:05:00Z",
+  "totpCode": "123456",
+  "jwtClaims": {
+    "sub": "usr-admin-003",
+    "role": "admin",
+    "mfaVerified": false,
+    "iat": 1700000000,
+    "exp": 1700003600
+  },
+  "expectedBehavior": {
+    "mfaVerifyEndpoint": "401 INVALID_OTP — TOTP code outside acceptable time window",
+    "description": "Used to verify the auth-service rejects expired TOTP codes"
+  }
+}

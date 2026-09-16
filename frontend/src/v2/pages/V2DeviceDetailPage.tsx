@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { fetchDevices, updateDevice } from '../../api/devices.api';
-import { fetchDeviceKpi } from '../../api/kpi.api';
+import { fetchDevices, updateDevice, deleteDevice } from '../../api/devices.api';
+import { fetchDeviceKpi, fetchDeviceAvailabilitySummary } from '../../api/kpi.api';
 import { timeRangeToGranularity, timeRangeToMs, KPI_PARAMS } from '../../api/kpi.types';
 import { pushDeviceParam, getVersionHistory } from '../../api/config.api';
+import { apiClient } from '../../api/client';
 import { extractDeviceLogs } from '../../api/diagnostics.api';
 import type { LogEntry } from '../../api/diagnostics.api';
 import type { Device } from '../../api/devices.types';
 import type { KpiSeries } from '../../api/kpi.types';
+import type { DeviceAvailabilitySummary } from '../../api/kpi.types';
+import { AvailabilityBadge } from '../../components/kpi/AvailabilityBadge';
 import { Tabs, TabPanel } from '../components/common/Tabs';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
@@ -35,6 +38,24 @@ const TABS = [
   { id: 'history',   label: 'Config History' },
 ];
 
+/** Normalise tag objects from any backend format to { key, value } pairs. */
+function normaliseTags(raw: unknown): Array<{ key: string; value: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((t) => {
+    if (typeof t === 'string') {
+      const [k, ...rest] = t.split(':');
+      return { key: k ?? t, value: rest.join(':') };
+    }
+    if (t && typeof t === 'object') {
+      const obj = t as Record<string, string>;
+      if ('key' in obj) return { key: String(obj.key), value: String(obj.value ?? '') };
+      const [k, v] = Object.entries(obj)[0] ?? ['tag', ''];
+      return { key: k, value: String(v) };
+    }
+    return { key: String(t), value: '' };
+  });
+}
+
 export default function V2DeviceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -45,16 +66,24 @@ export default function V2DeviceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [kpiData, setKpiData] = useState<KpiSeries[]>([]);
   const [kpiLoading, setKpiLoading] = useState(false);
+  const [availabilitySummary, setAvailabilitySummary] = useState<DeviceAvailabilitySummary | null>(null);
   const [tab, setTab] = useState('summary');
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Device>>({});
   const [editSaving, setEditSaving] = useState(false);
+  const [confirmDeprovision, setConfirmDeprovision] = useState(false);
+  const [deprovisioning, setDeprovisioning] = useState(false);
+
+  // Canonical device identifier — falls back through all possible ID fields.
+  // device.deviceId is often undefined for Java-service devices that only return 'id'.
+  const devId: string = device?.deviceId || device?.serialNumber || device?.id || id || '';
 
   useEffect(() => {
     if (!id) return;
     fetchDevices()
       .then((devices) => {
-        const d = devices.find((x) => x.id === id || x.deviceId === id);
+        // Match by any identifier so topology (which navigates with serial) links correctly
+        const d = devices.find((x) => x.id === id || x.deviceId === id || x.serialNumber === id);
         setDevice(d ?? null);
       })
       .catch((e) => logger.error('Device fetch failed', e))
@@ -62,15 +91,22 @@ export default function V2DeviceDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    if (!device || tab !== 'summary') return;
+    if (!device || !devId || tab !== 'summary') return;
     setKpiLoading(true);
     const to = new Date().toISOString();
     const from = new Date(Date.now() - timeRangeToMs('24h')).toISOString();
-    fetchDeviceKpi(device.deviceId, [...KPI_PARAMS], timeRangeToGranularity('24h'), from, to)
+    fetchDeviceKpi(devId, [...KPI_PARAMS], timeRangeToGranularity('24h'), from, to)
       .then(setKpiData)
       .catch((e) => logger.warn('KPI fetch failed', { error: e }))
       .finally(() => setKpiLoading(false));
-  }, [device, tab]);
+    // Load availability summary alongside KPI data (WO-041)
+    fetchDeviceAvailabilitySummary({ deviceId: devId, deviceType: device.deviceType })
+      .then((resp) => {
+        const first = resp.devices?.[0];
+        if (first) setAvailabilitySummary(first);
+      })
+      .catch((e) => logger.warn('Availability summary fetch failed', { error: e }));
+  }, [device, tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openEdit = () => {
     setEditForm({
@@ -90,7 +126,7 @@ export default function V2DeviceDetailPage() {
     if (!device) return;
     setEditSaving(true);
     try {
-      const updated = await updateDevice(device.deviceId || device.id, editForm);
+      const updated = await updateDevice(devId, editForm);
       setDevice((prev) => prev ? { ...prev, ...updated } : prev);
       addToast('Device updated', 'success');
       setEditOpen(false);
@@ -122,6 +158,52 @@ export default function V2DeviceDetailPage() {
         <div className="vf-page-actions">
           <Badge variant="default">{device.firmwareVersion}</Badge>
           <Button variant="ghost" size="sm" onClick={openEdit}>✏ Edit Device</Button>
+          {/* Deprovision — removes device from managed inventory */}
+          {!confirmDeprovision ? (
+            <button
+              onClick={() => setConfirmDeprovision(true)}
+              style={{
+                padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', background: 'rgba(239,68,68,0.08)',
+                border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444',
+              }}
+            >
+              🗑 Deprovision
+            </button>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 11, color: '#ef4444', fontWeight: 600 }}>Confirm?</span>
+              <button
+                onClick={() => setConfirmDeprovision(false)}
+                style={{ padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer', background: 'var(--vf-surface-raised)', border: '1px solid var(--vf-border-subtle)', color: 'var(--vf-text-muted)' }}
+              >Cancel</button>
+              <button
+                disabled={deprovisioning}
+                onClick={async () => {
+                  setDeprovisioning(true);
+                  try {
+                    await deleteDevice(devId);
+                    addToast(`🗑 ${device.serialNumber} removed from inventory`, 'success');
+                    navigate(fromTopology ? '/v2/topology' : '/v2/devices');
+                  } catch (e) {
+                    logger.error('DeviceDetail: deprovision failed', e);
+                    addToast('Failed to deprovision device. Please try again.', 'error');
+                    setConfirmDeprovision(false);
+                  } finally {
+                    setDeprovisioning(false);
+                  }
+                }}
+                style={{
+                  padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                  cursor: deprovisioning ? 'default' : 'pointer',
+                  background: deprovisioning ? '#999' : '#ef4444',
+                  border: 'none', color: '#fff',
+                }}
+              >
+                {deprovisioning ? '⏳ Removing…' : 'Yes, Remove'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -131,9 +213,11 @@ export default function V2DeviceDetailPage() {
         <span><strong style={{ color: 'var(--vf-text-muted)' }}>MAC:</strong> <span style={{ fontFamily: 'var(--vf-font-mono)' }}>{device.macAddress}</span></span>
         <span><strong style={{ color: 'var(--vf-text-muted)' }}>Model:</strong> {device.manufacturer} {device.model}</span>
         {device.networkId && <span><strong style={{ color: 'var(--vf-text-muted)' }}>Network:</strong> {device.networkId}</span>}
-        {device.tags?.length ? (
-          <span style={{ display: 'flex', gap: 4 }}>
-            {device.tags.map((t) => <Badge key={`${t.key}:${t.value}`} variant="default">{t.key}:{t.value}</Badge>)}
+        {normaliseTags(device.tags).length > 0 ? (
+          <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {normaliseTags(device.tags).map((t, i) => (
+              <Badge key={`tag-${i}-${t.key}`} variant="default">{t.key}{t.value ? `:${t.value}` : ''}</Badge>
+            ))}
           </span>
         ) : null}
       </div>
@@ -192,19 +276,34 @@ export default function V2DeviceDetailPage() {
             <div style={{ padding: 24 }}><Spinner /></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 16 }}>
+              {/* WO-041: Availability health badge */}
+              {availabilitySummary && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 6 }}>
+                      Operational Health
+                    </div>
+                    <AvailabilityBadge
+                      summary={availabilitySummary}
+                      showReason
+                      showTimestamp
+                    />
+                  </div>
+                </div>
+              )}
               <div className="vf-kpi-grid">
-                {kpiData.map((series) => {
+                {kpiData.map((series, ki) => {
                   const last = series.data[series.data.length - 1];
                   return (
-                    <MetricCard key={series.param} label={series.param} value={last ? last.avg.toFixed(1) : '—'} />
+                    <MetricCard key={`kpi-${ki}-${series.param}`} label={series.param} value={last ? last.avg.toFixed(1) : '—'} />
                   );
                 })}
               </div>
               {kpiData.length > 0 && (
                 <Card title="24h KPI Trends">
                   <div className="vf-grid vf-grid--2">
-                    {kpiData.slice(0, 6).map((series) => (
-                      <KpiMiniChart key={series.param} series={series} />
+                    {kpiData.slice(0, 6).map((series, ki) => (
+                      <KpiMiniChart key={`mini-${ki}-${series.param}`} series={series} />
                     ))}
                   </div>
                 </Card>
@@ -212,7 +311,7 @@ export default function V2DeviceDetailPage() {
             </div>
           )}
         </TabPanel>
-        <TabPanel id="wireless">  <WirelessConfigTab deviceId={device.deviceId} /></TabPanel>
+        <TabPanel id="wireless">  <WirelessConfigTab deviceId={devId} /></TabPanel>
         <TabPanel id="network">   <NetworkConfigTab device={device} addToast={addToast} /></TabPanel>
         <TabPanel id="ethernet">  <EthernetConfigTab device={device} addToast={addToast} /></TabPanel>
         <TabPanel id="qos">       <QoSConfigTab device={device} addToast={addToast} /></TabPanel>
@@ -251,6 +350,7 @@ function PushButton({ onClick, loading, label = 'Apply' }: { onClick: () => void
 
 // ── Network Config Tab ────────────────────────────────────────────────────────
 function NetworkConfigTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [ipMode, setIpMode] = useState<string>('DHCP');
   const [ip, setIp]         = useState('');
   const [mask, setMask]     = useState('');
@@ -261,7 +361,7 @@ function NetworkConfigTab({ device, addToast }: { device: Device; addToast: AddT
   const apply = async () => {
     setSaving(true);
     try {
-      await pushDeviceParam(device.deviceId, { ipMode, staticIp: ip, staticSubnet: mask, staticGateway: gw, dnsServer: dns });
+      await pushDeviceParam(devId, { ipMode, staticIp: ip, staticSubnet: mask, staticGateway: gw, dnsServer: dns });
       addToast('Network config pushed', 'success');
     } catch (e) { logger.error('Network push failed', e); addToast('Failed to push network config', 'error'); }
     finally { setSaving(false); }
@@ -299,6 +399,7 @@ function NetworkConfigTab({ device, addToast }: { device: Device; addToast: AddT
 
 // ── Ethernet Config Tab ───────────────────────────────────────────────────────
 function EthernetConfigTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [speed, setSpeed]     = useState('auto');
   const [portUp, setPortUp]   = useState(true);
   const [port, setPort]       = useState('eth0');
@@ -307,7 +408,7 @@ function EthernetConfigTab({ device, addToast }: { device: Device; addToast: Add
   const apply = async () => {
     setSaving(true);
     try {
-      await pushDeviceParam(device.deviceId, { speedDuplex: speed, portUpDown: portUp ? 'up' : 'down', portId: port });
+      await pushDeviceParam(devId, { speedDuplex: speed, portUpDown: portUp ? 'up' : 'down', portId: port });
       addToast('Ethernet config pushed', 'success');
     } catch (e) { logger.error('Ethernet push failed', e); addToast('Failed to push ethernet config', 'error'); }
     finally { setSaving(false); }
@@ -345,12 +446,12 @@ function EthernetConfigTab({ device, addToast }: { device: Device; addToast: Add
         <div style={{ display: 'flex', gap: 8 }}>
           <PushButton onClick={apply} loading={saving} />
           <Button variant="ghost" size="sm" onClick={async () => {
-            try { await pushDeviceParam(device.deviceId, { wifiRestart: true }); addToast('WiFi restart triggered', 'success'); }
+            try { await pushDeviceParam(devId, { wifiRestart: true }); addToast('WiFi restart triggered', 'success'); }
             catch { addToast('Failed to trigger WiFi restart', 'error'); }
           }}>WiFi Restart</Button>
           <Button variant="ghost" size="sm" onClick={async () => {
             if (!window.confirm('Reboot this device?')) return;
-            try { await pushDeviceParam(device.deviceId, { deviceReboot: true }); addToast('Device reboot triggered', 'success'); }
+            try { await pushDeviceParam(devId, { deviceReboot: true }); addToast('Device reboot triggered', 'success'); }
             catch { addToast('Failed to trigger reboot', 'error'); }
           }}>Reboot Device</Button>
         </div>
@@ -361,6 +462,7 @@ function EthernetConfigTab({ device, addToast }: { device: Device; addToast: Add
 
 // ── QoS Config Tab ────────────────────────────────────────────────────────────
 function QoSConfigTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [profile, setProfile]   = useState('default');
   const [ulLimit, setUlLimit]   = useState('');
   const [dlLimit, setDlLimit]   = useState('');
@@ -369,7 +471,7 @@ function QoSConfigTab({ device, addToast }: { device: Device; addToast: AddToast
   const apply = async () => {
     setSaving(true);
     try {
-      await pushDeviceParam(device.deviceId, { qosProfile: profile, ulBandwidthLimit: ulLimit ? Number(ulLimit) : 0, dlBandwidthLimit: dlLimit ? Number(dlLimit) : 0 });
+      await pushDeviceParam(devId, { qosProfile: profile, ulBandwidthLimit: ulLimit ? Number(ulLimit) : 0, dlBandwidthLimit: dlLimit ? Number(dlLimit) : 0 });
       addToast('QoS config pushed', 'success');
     } catch (e) { logger.error('QoS push failed', e); addToast('Failed to push QoS config', 'error'); }
     finally { setSaving(false); }
@@ -399,6 +501,7 @@ function QoSConfigTab({ device, addToast }: { device: Device; addToast: AddToast
 
 // ── VLAN Config Tab ───────────────────────────────────────────────────────────
 function VlanConfigTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [vlanId, setVlanId]       = useState('');
   const [vlanMode, setVlanMode]   = useState<'single' | 'double'>('single');
   const [outerVlan, setOuterVlan] = useState('');
@@ -409,7 +512,7 @@ function VlanConfigTab({ device, addToast }: { device: Device; addToast: AddToas
     if (vlanId && (Number(vlanId) < 1 || Number(vlanId) > 4094)) { addToast('VLAN ID must be 1–4094', 'error'); return; }
     setSaving(true);
     try {
-      await pushDeviceParam(device.deviceId, { vlanId: Number(vlanId), vlanPriority: Number(priority), vlanMode, outerVlanId: vlanMode === 'double' ? Number(outerVlan) : 0 });
+      await pushDeviceParam(devId, { vlanId: Number(vlanId), vlanPriority: Number(priority), vlanMode, outerVlanId: vlanMode === 'double' ? Number(outerVlan) : 0 });
       addToast('VLAN config pushed', 'success');
     } catch (e) { logger.error('VLAN push failed', e); addToast('Failed to push VLAN config', 'error'); }
     finally { setSaving(false); }
@@ -440,16 +543,19 @@ function VlanConfigTab({ device, addToast }: { device: Device; addToast: AddToas
 
 // ── GPS Tab ───────────────────────────────────────────────────────────────────
 function GpsTab({ device }: { device: Device }) {
-  if (!device.location) {
+  // Resolve coordinates from multiple possible sources
+  const lat = device.latitude ?? device.location?.coordinates?.[1];
+  const lng = device.longitude ?? device.location?.coordinates?.[0];
+
+  if (lat == null || lng == null) {
     return <div style={{ paddingTop: 24 }}><EmptyState title="No GPS data" description="This device has no GPS coordinates on record." /></div>;
   }
-  const [lng, lat] = device.location.coordinates;
   const mapUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}`;
   return (
     <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <MetricCard label="Latitude"  value={lat.toFixed(6)} />
-        <MetricCard label="Longitude" value={lng.toFixed(6)} />
+        <MetricCard label="Latitude"  value={Number(lat).toFixed(6)} />
+        <MetricCard label="Longitude" value={Number(lng).toFixed(6)} />
         {(device.birthCertificate?.azimuth) != null && <MetricCard label="Azimuth" value={`${device.birthCertificate?.azimuth}°`} />}
         {(device.birthCertificate?.tilt) != null    && <MetricCard label="Tilt"    value={`${device.birthCertificate?.tilt}°`} />}
       </div>
@@ -465,13 +571,16 @@ function GpsTab({ device }: { device: Device }) {
 function BirthCertTab({ device, addToast }: { device: Device; addToast: AddToast }) {
   const [cert, setCert]       = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
-  const apiClient = { post: async (url: string, body: unknown) => { const r = await fetch(`/api/v1${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('nms_token') ?? ''}` }, body: JSON.stringify(body) }); if (!r.ok) throw new Error(r.statusText); return r.json(); } };
 
   const capture = async () => {
     setLoading(true);
     try {
-      const res = await apiClient.post('/nms/bts-capture-birth-certificate', { sno: device.serialNumber });
-      setCert(res.birthCertificate ?? res);
+      // Use the shared apiClient so the Bearer token is attached automatically
+      const res = await apiClient.post<{ birthCertificate?: Record<string, unknown> }>(
+        '/nms/bts-capture-birth-certificate',
+        { sno: device.serialNumber }
+      );
+      setCert(res.data.birthCertificate ?? (res.data as unknown as Record<string, unknown>));
       addToast('Birth certificate captured', 'success');
     } catch (e) { logger.error('Birth cert failed', e); addToast('Failed to capture birth certificate', 'error'); }
     finally { setLoading(false); }
@@ -502,8 +611,8 @@ function BirthCertTab({ device, addToast }: { device: Device; addToast: AddToast
         <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '18px 20px' }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 14 }}>Birth Certificate</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
-            {Object.entries(cert).map(([k, v]) => (
-              <div key={k}>
+            {Object.entries(cert).map(([k, v], ci) => (
+              <div key={`cert-${ci}-${k}`}>
                 <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{CERT_LABELS[k] ?? k}</div>
                 <div style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 14, fontWeight: 600, color: 'var(--vf-accent)' }}>{String(v)}</div>
               </div>
@@ -517,7 +626,7 @@ function BirthCertTab({ device, addToast }: { device: Device; addToast: AddToast
 
 // ── Tags Tab (NMS-IV-06) ──────────────────────────────────────────────────────
 function TagsTab({ device, addToast, onDeviceUpdate }: { device: Device; addToast: AddToast; onDeviceUpdate: (d: Device) => void }) {
-  const [tags, setTags]       = useState<Array<{ key: string; value: string }>>([...(device.tags ?? [])]);
+  const [tags, setTags]       = useState<Array<{ key: string; value: string }>>(() => normaliseTags(device.tags));
   const [newKey, setNewKey]   = useState('');
   const [newVal, setNewVal]   = useState('');
   const [saving, setSaving]   = useState(false);
@@ -594,6 +703,7 @@ function TagsTab({ device, addToast, onDeviceUpdate }: { device: Device; addToas
 
 // ── Logs Tab ──────────────────────────────────────────────────────────────────
 function LogsTab({ device, addToast }: { device: Device; addToast: AddToast }) {
+  const devId = device.deviceId || device.serialNumber || device.id || '';
   const [logs, setLogs]     = useState<LogEntry[]>([]);
   const [level, setLevel]   = useState('');
   const [lines, setLines]   = useState(200);
@@ -602,12 +712,12 @@ function LogsTab({ device, addToast }: { device: Device; addToast: AddToast }) {
   const run = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await extractDeviceLogs({ deviceId: device.deviceId, lines, level: (level || undefined) as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | undefined });
+      const result = await extractDeviceLogs({ deviceId: devId, lines, level: (level || undefined) as 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | undefined });
       setLogs(result);
       if (result.length) addToast(`${result.length} log entries retrieved`, 'success');
     } catch (e) { logger.error('Log extraction failed', e); addToast('Failed to extract logs', 'error'); }
     finally { setLoading(false); }
-  }, [device.deviceId, level, lines, addToast]);
+  }, [devId, level, lines, addToast]);
 
   const levelColor: Record<string, string> = { ERROR: '#f87171', WARN: '#fbbf24', INFO: '#60a5fa', DEBUG: 'var(--vf-text-muted)' };
 
@@ -658,38 +768,131 @@ function LogsTab({ device, addToast }: { device: Device; addToast: AddToast }) {
 }
 
 // ── Config History Tab ────────────────────────────────────────────────────────
+
+/** Human-readable labels for common pushed parameter keys */
+const PARAM_LABELS: Record<string, string> = {
+  ipMode: 'IP Mode', staticIp: 'Static IP', staticSubnet: 'Subnet', staticGateway: 'Gateway',
+  dnsServer: 'DNS Server', speedDuplex: 'Speed/Duplex', portUpDown: 'Port State', portId: 'Port',
+  wifiRestart: 'WiFi Restart', deviceReboot: 'Device Reboot',
+  qosProfile: 'QoS Profile', ulBandwidthLimit: 'UL Limit (Mbps)', dlBandwidthLimit: 'DL Limit (Mbps)',
+  vlanId: 'VLAN ID', vlanPriority: 'Priority', vlanMode: 'VLAN Mode', outerVlanId: 'Outer VLAN',
+  firmwareVersion: 'Firmware Version', firmwareUrl: 'Firmware URL',
+  ssid: 'SSID', channel: 'Channel', txPower: 'TX Power (dBm)', encryption: 'Encryption',
+  ddrsStatus: 'DDRS', spatialStream: 'Spatial Stream',
+  templateId: 'Template',
+};
+
 function ConfigHistoryTab({ device }: { device: Device }) {
   const [history, setHistory] = useState<Awaited<ReturnType<typeof getVersionHistory>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]   = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!device.deviceId) { setLoading(false); return; }
-    getVersionHistory(device.deviceId)
-      .then(setHistory)
+  const deviceId = device.deviceId || device.serialNumber || device.id;
+
+  const load = useCallback(() => {
+    if (!deviceId) { setLoading(false); return; }
+    setLoading(true);
+    getVersionHistory(deviceId)
+      .then((h) => setHistory(Array.isArray(h) ? h : []))
       .catch(() => setHistory([]))
       .finally(() => setLoading(false));
-  }, [device.deviceId]);
+  }, [deviceId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const statusColor = (s?: string) =>
+    s === 'PUSHED' || s === 'ACTIVE' ? 'var(--vf-success)' :
+    s === 'FAILED' ? 'var(--vf-danger)' :
+    'var(--vf-text-muted)';
 
   if (loading) return <div style={{ paddingTop: 24 }}><LoadingState label="Loading config history…" /></div>;
-  if (!history.length) return <div style={{ paddingTop: 24 }}><EmptyState title="No config history" description="No configuration changes have been recorded for this device." /></div>;
 
   return (
     <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {history.map((v, i) => (
-        <div key={v.id ?? i} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 8, padding: '12px 16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Badge variant="default">v{v.versionNumber}</Badge>
-            <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>by {v.actor} · {new Date(v.appliedAt).toLocaleString()}</span>
+      {/* Header row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>
+          {history.length} push record{history.length !== 1 ? 's' : ''} for {deviceId}
+        </span>
+        <button onClick={load}
+          style={{ background: 'none', border: '1px solid var(--vf-border-subtle)', borderRadius: 5, padding: '4px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--vf-text-secondary)' }}>
+          ↻ Refresh
+        </button>
+      </div>
+
+      {history.length === 0 ? (
+        <div style={{ paddingTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+          <div style={{ fontSize: 32 }}>📋</div>
+          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--vf-text-primary)' }}>No config history yet</div>
+          <div style={{ fontSize: 13, color: 'var(--vf-text-muted)', textAlign: 'center', maxWidth: 460 }}>
+            Every time you push a config from any of the tabs below, it will appear here in real time.
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {Object.entries(v.newValues).map(([k, val]) => (
-              <div key={k} style={{ fontSize: 11, background: 'var(--vf-elevated)', padding: '3px 8px', borderRadius: 4 }}>
-                <span style={{ color: 'var(--vf-text-muted)' }}>{k}:</span> <span style={{ fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-accent)' }}>{val}</span>
+          <div style={{ background: 'var(--vf-elevated)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '16px 24px', marginTop: 8, width: '100%', maxWidth: 480 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--vf-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>To see history</div>
+            {['1. Go to any config tab (Network, Wireless, QoS, VLAN, Ethernet)',
+              '2. Change a value (e.g. set IP Mode → DHCP, add a DNS server)',
+              '3. Click Apply — a toast will confirm success',
+              '4. Return here and click ↻ Refresh'].map((step, si) => (
+              <div key={si} style={{ display: 'flex', gap: 10, marginBottom: 8, fontSize: 13, color: 'var(--vf-text-secondary)' }}>
+                <span style={{ color: 'var(--vf-accent)', fontWeight: 700, flexShrink: 0 }}>{si + 1}.</span>
+                <span>{step.replace(/^\d+\. /, '')}</span>
               </div>
             ))}
           </div>
         </div>
-      ))}
+      ) : (
+        history.map((v, i) => {
+          const key = v.id ?? String(i);
+          const isOpen = expanded === key;
+          const params = Object.entries(v.newValues ?? {}).filter(([, val]) => val !== '' && val !== 'undefined');
+          return (
+            <div key={key} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+              {/* Summary row */}
+              <div
+                onClick={() => setExpanded(isOpen ? null : key)}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer', userSelect: 'none' }}>
+                <span style={{ background: 'var(--vf-elevated)', borderRadius: 4, padding: '2px 8px', fontFamily: 'var(--vf-font-mono)', fontSize: 11, fontWeight: 700 }}>
+                  #{v.versionNumber ?? (history.length - i)}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--vf-text-primary)', flex: 1 }}>
+                  {(v as { templateId?: string }).templateId === 'inline' || !(v as { templateId?: string }).templateId
+                    ? `Manual push — ${params.length} param${params.length !== 1 ? 's' : ''}`
+                    : `Template: ${(v as { templateId?: string }).templateId}`}
+                </span>
+                <span style={{ fontSize: 11, color: statusColor((v as { status?: string }).status), fontWeight: 700 }}>
+                  {(v as { status?: string }).status ?? 'PUSHED'}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', minWidth: 140, textAlign: 'right' }}>
+                  {v.actor} · {new Date(v.appliedAt).toLocaleString()}
+                </span>
+                <span style={{ color: 'var(--vf-text-dim)', fontSize: 14 }}>{isOpen ? '▾' : '▸'}</span>
+              </div>
+
+              {/* Expanded parameters */}
+              {isOpen && (
+                <div style={{ borderTop: '1px solid var(--vf-border-subtle)', padding: '14px 16px', background: 'var(--vf-elevated)' }}>
+                  {params.length === 0 ? (
+                    <span style={{ color: 'var(--vf-text-dim)', fontSize: 12 }}>No parameter data recorded for this push.</span>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+                      {params.map(([k, val], pi) => (
+                        <div key={`param-${pi}-${k}`} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 6, padding: '8px 12px' }}>
+                          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 4 }}>
+                            {PARAM_LABELS[k] ?? k}
+                          </div>
+                          <div style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--vf-accent)', wordBreak: 'break-all' }}>
+                            {val === 'true' ? '✓ enabled' : val === 'false' ? '✗ disabled' : val}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }

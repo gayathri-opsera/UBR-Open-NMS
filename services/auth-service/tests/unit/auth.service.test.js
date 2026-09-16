@@ -15,6 +15,7 @@ describe('auth.service — login', () => {
   const mockUser = {
     _id: { toString: () => 'user-id-1' },
     role: 'operator',
+    mfaEnabled: false,
     passwordHash: 'hashed',
     isLockedOut: jest.fn(() => false),
     verifyPassword: jest.fn(async () => true),
@@ -30,7 +31,10 @@ describe('auth.service — login', () => {
     sessionService.recordFailedAttempt.mockResolvedValue({ locked: false, attempts: 1 });
     jwtService.generateAccessToken.mockReturnValue('access-token');
     jwtService.generateRefreshToken.mockReturnValue('refresh-token');
+    jwtService.generateMfaChallengeToken.mockReturnValue('mfa-challenge-token');
+    // Default: findOne returns user (LDAP shadow), findById returns user (MFA check)
     User.findOne.mockResolvedValue(mockUser);
+    User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue(mockUser) });
     User.findByIdAndUpdate.mockResolvedValue({});
   });
 
@@ -71,12 +75,42 @@ describe('auth.service — login', () => {
   });
 
   test('account locked when failed attempts at maximum', async () => {
-    sessionService.getFailedAttempts.mockResolvedValue(5);
+    // config.password.maxFailedAttempts defaults to 100 (MAX_FAILED_ATTEMPTS env)
+    sessionService.getFailedAttempts.mockResolvedValue(100);
 
     await expect(authService.login('alice', 'any', '10.0.0.1', 'ua')).rejects.toMatchObject({
       code: 'ACCOUNT_LOCKED',
     });
     expect(ldapService.authenticate).not.toHaveBeenCalled();
+  });
+
+  test('MFA enabled — returns mfaRequired + mfaToken instead of accessToken', async () => {
+    ldapService.authenticate.mockResolvedValue({ dn: 'uid=alice', mail: 'alice@test.com' });
+    ldapService.isOpen.mockReturnValue(false);
+    // Simulate user with MFA enabled
+    const mfaUser = { ...mockUser, mfaEnabled: true };
+    User.findOne.mockResolvedValue(mfaUser);
+    User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue(mfaUser) });
+
+    const result = await authService.login('alice', 'Password1!', '10.0.0.1', 'ua');
+
+    expect(result.mfaRequired).toBe(true);
+    expect(result.mfaToken).toBe('mfa-challenge-token');
+    expect(result.mfaTokenExpiresIn).toBe(300);
+    // Must NOT return full access token
+    expect(result.accessToken).toBeUndefined();
+    expect(result.refreshToken).toBeUndefined();
+    // Session must NOT be created yet
+    expect(sessionService.createSession).not.toHaveBeenCalled();
+  });
+
+  test('MFA disabled — returns accessToken directly (no MFA gate)', async () => {
+    ldapService.authenticate.mockResolvedValue({ dn: 'uid=alice', mail: 'alice@test.com' });
+    ldapService.isOpen.mockReturnValue(false);
+    // Default mockUser has mfaEnabled: false
+    const result = await authService.login('alice', 'Password1!', '10.0.0.1', 'ua');
+    expect(result.accessToken).toBe('access-token');
+    expect(result.mfaRequired).toBeUndefined();
   });
 
   test('session limit exceeded propagates correctly', async () => {

@@ -1,0 +1,70 @@
+[
+  {
+    "profileId": "ubr-bts-r1",
+    "deviceType": "BTS",
+    "discoveryParadigm": "UBR_CALL_HOME",
+    "supportedOperations": [
+      "firmware.upgrade",
+      "config.push",
+      "reboot",
+      "status.read",
+      "kpi.collect"
+    ],
+    "protocolPriorityByOperation": {
+      "config.push": ["NETCONF", "CLI"]
+    },
+    "releaseEligible": true,
+    "unsupportedReasons": {}
+  },
+  {
+    "profileId": "ubr-cpe-r1",
+    "deviceType": "CPE",
+    "discoveryParadigm": "UBR_CALL_HOME",
+    "supportedOperations": [
+      "firmware.upgrade",
+      "config.push",
+      "reboot",
+      "status.read",
+      "kpi.collect"
+    ],
+    "protocolPriorityByOperation": {
+      "config.push": ["TR069", "CLI"]
+    },
+    "releaseEligible": true,
+    "unsupportedReasons": {}
+  },
+  {
+    "profileId": "ubr-idu-r1",
+    "deviceType": "IDU",
+    "discoveryParadigm": "UBR_CALL_HOME",
+    "supportedOperations": [
+      "config.push",
+      "status.read",
+      "kpi.collect"
+    ],
+    "protocolPriorityByOperation": {
+      "config.push": ["NETCONF", "CLI"]
+    },
+    "releaseEligible": true,
+    "unsupportedReasons": {
+      "firmware.upgrade": "Not supported for IDU devices in release 1",
+      "reboot": "Not supported for IDU devices in release 1"
+    }
+  },
+  {
+    "profileId": "generic-snmp-r1",
+    "deviceType": null,
+    "discoveryParadigm": "GENERIC_SNMP",
+    "supportedOperations": [
+      "status.read",
+      "kpi.collect"
+    ],
+    "protocolPriorityByOperation": {},
+    "releaseEligible": true,
+    "unsupportedReasons": {
+      "firmware.upgrade": "Not supported for generic SNMP discovery in release 1",
+      "config.push": "Not supported for generic SNMP discovery in release 1",
+      "reboot": "Not supported for generic SNMP discovery in release 1"
+    }
+  }
+]

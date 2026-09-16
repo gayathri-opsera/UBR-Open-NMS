@@ -21,8 +21,11 @@ router.post('/events', async (req, res) => {
 
 // GET /api/v1/audit/logs — query with filters
 router.get('/logs', async (req, res) => {
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Admin role required' } });
+  const role = (req.user?.role || '').toLowerCase();
+  // WO-025: auditor and compliance roles may read audit logs (read-only evidence access)
+  const allowedReadRoles = ['admin', 'compliance', 'auditor'];
+  if (!allowedReadRoles.includes(role)) {
+    return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Admin, compliance, or auditor role required' } });
   }
   try {
     const { actor, action, resource, startTime, endTime, correlationId, offset, limit } = req.query;
@@ -36,8 +39,13 @@ router.get('/logs', async (req, res) => {
 
 // GET /api/v1/audit/logs/export — CSV export
 router.get('/logs/export', async (req, res) => {
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Admin role required' } });
+  const role = (req.user?.role || '').toLowerCase();
+  // WO-025: auditor and compliance roles may export approved audit evidence.
+  // Admin may export without restriction; auditor and compliance exports are
+  // subject to the same sanitization and authorization checks as audit queries.
+  const allowedExportRoles = ['admin', 'compliance', 'auditor'];
+  if (!allowedExportRoles.includes(role)) {
+    return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Admin, compliance, or auditor role required' } });
   }
   try {
     const { actor, action, resource, startTime, endTime } = req.query;
@@ -47,7 +55,7 @@ router.get('/logs/export', async (req, res) => {
     );
 
     const { Parser } = require('json2csv');
-    const fields = ['actor', 'timestamp', 'action', 'resource', 'resourceId', 'result', 'sourceIp', 'correlationId', 'serviceSource'];
+    const fields = ['actor', 'timestamp', 'action', 'resource', 'resourceId', 'result', 'sourceIp', 'correlationId', 'serviceSource', 'retentionClass'];
     const parser = new Parser({ fields });
     const csv = parser.parse(records);
 
@@ -60,4 +68,62 @@ router.get('/logs/export', async (req, res) => {
   }
 });
 
+/**
+ * Retention policy catalog (WO-008).
+ * Application-level definitions — not infrastructure retention rules.
+ * Accessible to admin, compliance, and auditor roles.
+ */
+const RETENTION_POLICIES = [
+  {
+    retentionClass: 'audit',
+    displayName: 'Audit Log',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['admin_action', 'login', 'logout'],
+  },
+  {
+    retentionClass: 'security',
+    displayName: 'Security Evidence',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['southbound.auth.failure', 'southbound.hmac.failure', 'capability.denied'],
+  },
+  {
+    retentionClass: 'onboarding',
+    displayName: 'Onboarding Record',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['onboarding.attempt', 'onboarding.rejected'],
+  },
+  {
+    retentionClass: 'alarm_incident',
+    displayName: 'Alarm Incident',
+    minimumRetentionDays: 180,
+    applicableRecordTypes: ['alarm_raised', 'alarm_cleared'],
+  },
+  {
+    retentionClass: 'config_history',
+    displayName: 'Configuration History',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['config.push', 'config.rollback'],
+  },
+  {
+    retentionClass: 'evidence_export',
+    displayName: 'Evidence Export',
+    minimumRetentionDays: 365,
+    applicableRecordTypes: ['evidence.exported'],
+  },
+];
+
+// GET /api/v1/audit/retention-policies — retention policy catalog (WO-008)
+router.get('/retention-policies', (req, res) => {
+  const role = (req.user?.role || '').toLowerCase();
+  const allowed = ['admin', 'compliance', 'auditor'];
+  if (!allowed.includes(role)) {
+    return res.status(403).json({
+      status: 'error',
+      error: { code: 'FORBIDDEN', message: 'Admin, compliance, or auditor role required' },
+    });
+  }
+  res.json({ status: 'ok', data: RETENTION_POLICIES });
+});
+
 module.exports = router;
+module.exports.RETENTION_POLICIES = RETENTION_POLICIES;

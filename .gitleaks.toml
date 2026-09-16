@@ -1,0 +1,30 @@
+# Gitleaks configuration for UBR Open NMS
+# Docs: https://github.com/gitleaks/gitleaks#configuration
+# NOTE: [[rules]] ADDS detection rules. Use [allowlist] to suppress false positives.
+
+title = "UBR NMS Gitleaks Config"
+
+[extend]
+# Use all default gitleaks detection rules as the base
+useDefault = true
+
+[allowlist]
+description = "Suppress false positives in UBR NMS repository"
+
+# ── Historical commits ───────────────────────────────────────────────────────
+# These commits pre-date the .gitignore fix that removed dev/jwt_private.pem.
+# The private key has been deleted from HEAD in commit 0564622.
+commits = [
+  "af3ea909a1c60f1593118819f831c215934dc9b6",
+]
+
+# ── Paths to ignore completely ────────────────────────────────────────────────
+# shared-libs/test-fixtures/ — all files are synthetic mock data, not real secrets.
+#   birth-certificates.json contains "-----BEGIN PUBLIC KEY-----" as test fixture data
+#   with placeholder values (e.g., "OmocK==") — not a real key.
+# dev/ — gitignored since commit 0564622; real JWT keys are now in GitHub Secrets.
+paths = [
+  '''shared-libs/test-fixtures/''',
+  '''dev/''',
+  '''scripts/seed\.js''',
+]

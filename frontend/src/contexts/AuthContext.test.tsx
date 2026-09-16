@@ -51,6 +51,7 @@ describe('AuthContext', () => {
 
   it('authenticates after successful login', async () => {
     vi.mocked(authApi.login).mockResolvedValue({
+      mfaRequired: false,
       tokens: { accessToken: 'tok', refreshToken: 'ref', expiresAt: Date.now() + 900_000 },
       user: { id: '1', username: 'alice', email: 'alice@x.com', role: 'Operator', fullName: 'Alice' },
     });
@@ -77,6 +78,7 @@ describe('AuthContext', () => {
 
   it('clears user on logout', async () => {
     vi.mocked(authApi.login).mockResolvedValue({
+      mfaRequired: false,
       tokens: { accessToken: 'tok', refreshToken: 'ref', expiresAt: Date.now() + 900_000 },
       user: { id: '1', username: 'alice', email: 'alice@x.com', role: 'Operator', fullName: 'Alice' },
     });

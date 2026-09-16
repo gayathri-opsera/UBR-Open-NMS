@@ -22,6 +22,98 @@ tags:
     description: Data export endpoints
 
 paths:
+  /inventory/onboarding-status:
+    get:
+      tags: [onboarding]
+      summary: List onboarding status for all devices (WO-038)
+      operationId: listOnboardingStatus
+      description: >
+        Returns a paginated, filterable operator-facing onboarding status feed
+        aggregating device bootstrap state, policy gate state, failure reason,
+        and retry guidance. Sensitive authentication material is never returned.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: state
+          in: query
+          description: Filter by consolidated onboardingState
+          schema:
+            type: string
+            enum: [MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD, FAILED, RETRYING,
+                   REDIRECTED, CHECK_IN_RECEIVED, AUTHENTICATED, PENDING, UNKNOWN]
+        - name: paradigm
+          in: query
+          schema: { type: string, enum: [UBR_CALL_HOME, GENERIC_SNMP, GENERIC_CLI, UNKNOWN] }
+        - name: deviceType
+          in: query
+          schema: { type: string, enum: [BTS, CPE, IDU, UNKNOWN] }
+        - name: reasonCategory
+          in: query
+          schema:
+            type: string
+            enum: [AUTH_FAILED, SIGNING_INVALID, ASSIGNMENT_PENDING, CHECKIN_FAILED,
+                   REALTIME_TIMEOUT, GPS_PENDING, NMS_FAILOVER, UNKNOWN]
+        - name: serialNumber
+          in: query
+          schema: { type: string }
+        - name: macAddress
+          in: query
+          schema: { type: string }
+        - name: sysObjectID
+          in: query
+          schema: { type: string, pattern: '^[0-9]+(\.[0-9]+)*$', maxLength: 128 }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Paginated onboarding status feed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, limit, total, capabilityStatus]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OnboardingStatusItem'
+                  page:    { type: integer }
+                  limit:   { type: integer }
+                  total:   { type: integer }
+                  capabilityStatus:
+                    type: string
+                    enum: [enabled, disabled]
+        "400": { $ref: 'components.yaml#/components/responses/ValidationError' }
+        "401": { $ref: 'components.yaml#/components/responses/Unauthorized' }
+        "503": { $ref: 'components.yaml#/components/responses/ServiceUnavailable' }
+
+  /inventory/onboarding-status/{id}:
+    get:
+      tags: [onboarding]
+      summary: Get onboarding status for a single device by inventory ID (WO-038)
+      operationId: getOnboardingStatusById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Onboarding status for the device
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OnboardingStatusItem' }
+        "404": { description: Device not found }
+        "401": { $ref: 'components.yaml#/components/responses/Unauthorized' }
+
   /devices:
     get:
       tags: [devices]
@@ -42,6 +134,10 @@ paths:
         - name: organizationId
           in: query
           schema: { type: string }
+        - name: sysObjectID
+          in: query
+          description: Filter by SNMP sysObjectID — returns only generic-discovery devices matching this OID
+          schema: { type: string, pattern: '^[0-9]+(\.[0-9]+)*$', maxLength: 128 }
       responses:
         "200":
           description: Paginated device list
@@ -164,6 +260,98 @@ paths:
         "200": { description: Birth certificate, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/BirthCertificate' } } } }
         "404": { $ref: '#/components/responses/NotFound' }
 
+  # ── WO-030: Generic device registration from SNMP classification ─────────────
+
+  /devices/generic:
+    post:
+      tags: [devices]
+      summary: Upsert a generic SNMP-discovered device from classification payload (WO-030)
+      operationId: registerGenericDevice
+      description: >
+        Accepts a classification payload from discovery-service and upserts the device
+        into inventory. Authority rules are enforced server-side — UBR call-home
+        identity fields are never overwritten. Payloads with classificationStatus of
+        DEFERRED_UNSUPPORTED or CLASSIFICATION_ERROR are not persisted as managed devices
+        and return HTTP 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenericDeviceRegistrationRequest' }
+      responses:
+        "201":
+          description: Device registered successfully
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenericDeviceRegistrationResponse' }
+        "422":
+          description: Deferred — device not registered because classification is out of scope or errored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenericDeviceRegistrationResponse' }
+        "400":
+          description: Validation error (e.g. malformed sysObjectID)
+          content:
+            application/json:
+              schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /capabilities/profiles:
+    get:
+      tags: [capabilities]
+      summary: List all capability profiles
+      operationId: listCapabilityProfiles
+      responses:
+        "200":
+          description: All capability profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CapabilityProfile' }
+
+  /capabilities/devices/{deviceId}:
+    parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [capabilities]
+      summary: Get capability evaluation for a device
+      operationId: getDeviceCapability
+      responses:
+        "200":
+          description: Device capability response
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceCapabilityResponse' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /capabilities/evaluate:
+    post:
+      tags: [capabilities]
+      summary: Bulk operation eligibility check
+      operationId: evaluateCapabilities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceIds, operation]
+              properties:
+                deviceIds: { type: array, items: { type: string } }
+                operation: { type: string }
+      responses:
+        "200":
+          description: Bulk evaluation result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkEvaluationResult' }
+        "400": { $ref: '#/components/responses/ValidationError' }
+
 components:
   securitySchemes:
     BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -183,6 +371,41 @@ components:
       content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } }
 
   schemas:
+    OnboardingStatusItem:
+      type: object
+      description: Operator-facing onboarding status for a single device (WO-038)
+      required: [deviceId, serialNumber, onboardingState]
+      properties:
+        deviceId:                { type: string }
+        serialNumber:            { type: string }
+        macAddress:              { type: string }
+        deviceType:              { type: string, enum: [BTS, CPE, IDU, UNKNOWN] }
+        discoveryParadigm:       { type: string }
+        sysObjectID:             { type: string }
+        bootstrapState:
+          type: string
+          enum: [PENDING, AUTHENTICATED, CHECK_IN_RECEIVED, REALTIME_ESTABLISHED, FAILED, UNKNOWN]
+        onboardingState:
+          type: string
+          enum: [MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD, FAILED, RETRYING,
+                 REDIRECTED, CHECK_IN_RECEIVED, AUTHENTICATED, PENDING, UNKNOWN]
+        lastSuccessfulState:     { type: string }
+        reasonCategory:
+          type: string
+          enum: [AUTH_FAILED, SIGNING_INVALID, ASSIGNMENT_PENDING, CHECKIN_FAILED,
+                 REALTIME_TIMEOUT, GPS_PENDING, NMS_FAILOVER, UNKNOWN]
+        retryAfterSeconds:       { type: integer, minimum: 0 }
+        retryJitterMaxSeconds:   { type: integer, minimum: 0 }
+        lastCheckInAt:           { type: string, format: date-time }
+        lastRealtimeAt:          { type: string, format: date-time }
+        assignmentState:
+          type: string
+          enum: [MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD]
+        configurationDeliveryState:
+          type: string
+          enum: [ELIGIBLE, WITHHELD, UNKNOWN]
+        updatedAt:               { type: string, format: date-time }
+
     ErrorResponse:
       $ref: 'components.yaml#/components/schemas/ErrorResponse'
     BirthCertificate:
@@ -225,6 +448,7 @@ components:
         serialNumber:   { type: string }
         deviceType:     { $ref: 'components.yaml#/components/schemas/DeviceType' }
         tags:           { type: array, items: { $ref: 'components.yaml#/components/schemas/DeviceTag' } }
+        sysObjectID:    { type: string, pattern: '^[0-9]+(\.[0-9]+)*$', maxLength: 128, description: 'Filter by SNMP sysObjectID (generic devices only)' }
         gpsRadius:
           type: object
           properties:
@@ -233,3 +457,251 @@ components:
             radiusKm:   { type: number, default: 5 }
         offset: { type: integer, default: 0 }
         limit:  { type: integer, default: 50, maximum: 1000 }
+
+    CapabilityProfile:
+      type: object
+      properties:
+        profileId:            { type: string }
+        deviceType:           { type: ["string", "null"] }
+        discoveryParadigm:    { type: string }
+        supportedOperations:  { type: array, items: { type: string } }
+        protocolPriorityByOperation: { type: object, additionalProperties: { type: array, items: { type: string } } }
+        releaseEligible:      { type: boolean }
+        unsupportedReasons:   { type: object, additionalProperties: { type: string } }
+
+    DeviceCapabilityResponse:
+      type: object
+      properties:
+        deviceId:              { type: string }
+        capabilityProfileId:   { type: ["string", "null"] }
+        supportedOperations:   { type: array, items: { type: string } }
+        unsupportedOperations: { type: object, additionalProperties: { type: string } }
+        protocolPriorityByOperation: { type: object, additionalProperties: { type: array, items: { type: string } } }
+        releaseEligible:       { type: boolean }
+        reason:                { type: ["string", "null"] }
+
+    BulkEvaluationResult:
+      type: object
+      properties:
+        eligible:   { type: array, items: { type: string } }
+        ineligible:
+          type: array
+          items:
+            type: object
+            properties:
+              deviceId: { type: string }
+              reason:   { type: string }
+
+    # ── WO-030: Generic device registration endpoint ──────────────────────────
+
+    GenericDeviceRegistrationRequest:
+      description: >
+        Classification payload from discovery-service used to upsert a generic SNMP-discovered
+        device. Authority rules are enforced server-side: UBR call-home identity fields are
+        never overwritten. DEFERRED_UNSUPPORTED payloads are not persisted as managed devices.
+      type: object
+      required: [ip, classificationStatus, discoveryParadigm, identityAuthority, onlineStateAuthority]
+      properties:
+        ip:                   { type: string, description: "Management IP of the discovered device" }
+        runId:                { type: string, format: uuid }
+        correlationId:        { type: string, nullable: true }
+        classificationStatus:
+          type: string
+          enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR]
+        deferReason:          { type: string, nullable: true }
+        vendor:               { type: string, nullable: true }
+        model:                { type: string, nullable: true }
+        genericDeviceType:    { type: string, enum: [ROUTER, SWITCH, FIREWALL, SERVER, UNKNOWN], nullable: true }
+        capabilityProfileId:  { type: string, nullable: true }
+        driverId:             { type: string, nullable: true }
+        sysObjectID:
+          type: string
+          nullable: true
+          pattern: '^\.?[0-9]+(\.[0-9]+)+$'
+          maxLength: 128
+        sysDescr:             { type: string, nullable: true, maxLength: 512 }
+        discoveryParadigm:    { type: string, enum: [GENERIC_SNMP] }
+        identityAuthority:    { type: string, enum: [GENERIC] }
+        onlineStateAuthority: { type: string, enum: [GENERIC] }
+
+    GenericDeviceRegistrationResponse:
+      description: Result of a generic device registration attempt.
+      type: object
+      required: [registrationStatus, classificationStatus]
+      properties:
+        registrationStatus:
+          type: string
+          enum: [REGISTERED, DEFERRED, ERROR]
+          description: >
+            REGISTERED — device is now a managed inventory record.
+            DEFERRED — device was not registered (classification out of scope).
+            ERROR — registration failed; caller should retry.
+        deviceId:
+          type: string
+          nullable: true
+          description: Inventory device ID, populated when registrationStatus is REGISTERED.
+        classificationStatus:
+          type: string
+          enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR]
+        deferReason:
+          type: string
+          nullable: true
+          description: Operator-visible reason for DEFERRED or ERROR status.
+
+    # ── WO-033: Onboarding Assignment Gate policy ─────────────────────────────
+
+    OnboardingAssignmentPolicyResponse:
+      description: >
+        Current state of the onboarding assignment gate policy.
+        When enabled=false (default) all valid call-home devices are automatically moved to
+        MANAGED state after authentication and check-in.
+        When enabled=true devices without a hierarchy assignment are held in PENDING_ASSIGNMENT
+        state until an operator approves them via the /approve-assignment endpoint.
+      type: object
+      required: [enabled, defaultBehavior, description, updatedBy, updatedAt]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the assignment gate is currently active.
+        defaultBehavior:
+          type: string
+          enum: [AUTO_MANAGED, PENDING_ASSIGNMENT]
+          description: >
+            AUTO_MANAGED — devices onboard without needing operator assignment (gate disabled).
+            PENDING_ASSIGNMENT — devices are held until assigned (gate enabled).
+        description:
+          type: string
+          description: Human-readable description of the current policy state.
+        updatedBy:
+          type: string
+          nullable: true
+          description: User ID of the admin who last changed the policy.
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        changeReason:
+          type: string
+          nullable: true
+
+    OnboardingAssignmentPolicyUpdateRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+        reason:
+          type: string
+          description: Human-readable reason for the policy change (for audit trail).
+
+    OnboardingGateState:
+      description: >
+        Onboarding gate lifecycle state of a device (WO-033).
+        MANAGED — device is fully onboarded and eligible for config delivery.
+        PENDING_ASSIGNMENT — gate is enabled and device has no hierarchy assignment.
+        CONFIG_WITHHELD — config delivery explicitly withheld by operator.
+      type: string
+      enum: [MANAGED, PENDING_ASSIGNMENT, CONFIG_WITHHELD]
+
+    DeviceAssignmentApprovalResponse:
+      type: object
+      required: [deviceId, onboardingGateState, approvedBy]
+      properties:
+        deviceId:
+          type: string
+        onboardingGateState:
+          $ref: '#/components/schemas/OnboardingGateState'
+        assignmentRequired:
+          type: boolean
+        approvedBy:
+          type: string
+
+    # ── WO-032: Inventory convergence authority schemas ──────────────────────
+
+    InventorySyncEvent:
+      description: >
+        Kafka inventory-sync event payload emitted after every successful device
+        persist. Includes authority metadata so downstream consumers (topology,
+        alarms, KPI, config) can apply deterministic convergence without
+        re-fetching (WO-032).
+      type: object
+      required: [deviceId, serialNumber, discoveryParadigm, identityAuthority, onlineStateAuthority]
+      properties:
+        deviceId:              { type: string }
+        serialNumber:          { type: string }
+        deviceType:            { type: string }
+        macAddress:            { type: string }
+        ipAddress:             { type: string }
+        status:                { type: string }
+        firmwareVersion:       { type: string }
+        softwareVersion:       { type: string }
+        capabilityProfileId:   { type: string }
+        configVersion:         { type: string }
+        onboardingGateState:   { $ref: '#/components/schemas/OnboardingGateState' }
+        # WO-032 authority metadata
+        discoveryParadigm:
+          type: string
+          enum: [UBR_CALL_HOME, GENERIC_SNMP, GENERIC_CLI, UNKNOWN]
+        identityAuthority:
+          type: string
+          enum: [UBR, GENERIC, UNKNOWN]
+        onlineStateAuthority:
+          type: string
+          enum: [UBR, GENERIC, UNKNOWN]
+        bootstrapState:
+          type: string
+          enum: [PENDING, AUTHENTICATED, CHECK_IN_RECEIVED, REALTIME_ESTABLISHED, FAILED, UNKNOWN]
+        lastCheckInAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastRealtimeAt:
+          type: string
+          format: date-time
+          nullable: true
+        sysObjectID:
+          type: string
+          nullable: true
+        schemaVersion:         { type: string }
+        updatedAt:             { type: string, format: date-time, nullable: true }
+
+    InventoryConvergenceRejectionEvent:
+      description: >
+        Structured operational/audit event emitted when a generic discovery caller
+        attempts to overwrite UBR-authoritative identity or online-state fields (WO-032).
+        Never contains credential values, HMAC keys, or secret material.
+      type: object
+      required: [action, actor, resource, outcome, reason, rejectedFields, callerParadigm, timestamp]
+      properties:
+        action:
+          type: string
+          enum: [inventory.convergence.overwrite.rejected]
+        actor:
+          type: object
+          properties:
+            userId:           { type: string }
+            username:         { type: string }
+            role:             { type: string }
+            discoverySource:  { type: string }
+        resource:
+          type: object
+          properties:
+            type: { type: string, enum: [device] }
+            id:   { type: string, description: "Device ID (not serial number)" }
+        outcome:
+          type: string
+          enum: [rejected]
+        reason:
+          type: string
+          enum: [UBR_AUTHORITY_PROTECTED]
+        rejectedFields:
+          type: array
+          items: { type: string }
+          description: >
+            Names of fields that were blocked (e.g. serialNumber, macAddress,
+            bootstrapState). Never includes credential values.
+        callerParadigm:
+          type: string
+          enum: [GENERIC_SNMP, GENERIC_CLI, UNKNOWN_MALFORMED]
+        correlationId:       { type: string }
+        timestamp:           { type: string, format: date-time }

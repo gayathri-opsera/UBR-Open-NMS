@@ -49,7 +49,12 @@ export async function createUser(user: Partial<NmsUser> & { password: string }):
     permissions: {},
   };
   const res = await apiClient.post('/users', body);
-  return unwrap<NmsUser>(res.data);
+  const raw = unwrap<NmsUser>(res.data);
+  // Normalize MongoDB _id → id so table row renders without a page refresh
+  if (!raw.id && (raw as unknown as { _id: string })._id) {
+    (raw as unknown as { id: string }).id = (raw as unknown as { _id: string })._id;
+  }
+  return raw;
 }
 
 export async function updateUser(id: string, patch: Partial<NmsUser>): Promise<NmsUser> {
@@ -127,6 +132,25 @@ export async function fetchAuditLog(params?: { limit?: number; actor?: string; a
   }
 }
 
+/**
+ * Export audit log as CSV.
+ * Available to admin, compliance, and auditor roles (WO-025).
+ * Returns the raw CSV blob URL for browser download.
+ */
+export async function exportAuditLog(params?: { actor?: string; action?: string; startTime?: string; endTime?: string }): Promise<string> {
+  const queryParams: Record<string, string> = {};
+  if (params?.actor)     queryParams.actor     = params.actor;
+  if (params?.action)    queryParams.action    = params.action;
+  if (params?.startTime) queryParams.startTime = params.startTime;
+  if (params?.endTime)   queryParams.endTime   = params.endTime;
+
+  const res = await apiClient.get('/audit/logs/export', {
+    params: queryParams,
+    responseType: 'blob',
+  });
+  return URL.createObjectURL(res.data as Blob);
+}
+
 // ── Backup & Restore ────────────────────────────────────────────────────────
 export async function fetchBackups(): Promise<BackupRecord[]> {
   try {
@@ -190,4 +214,53 @@ export async function forceSyncRedundancy(): Promise<void> {
 }
 export async function triggerManualSwitchover(): Promise<void> {
   await apiClient.post('/admin/redundancy/switchover');
+}
+
+// ── SSO Configuration — GET/PUT /api/v1/auth/sso/config (admin only) ────────
+// AC#1 / WO-013: admin-only API to read and update tenant authentication mode.
+// Secrets (client_secret, bind password, etc.) are never returned by GET.
+
+export interface SsoOidcConfig {
+  discoveryUrl: string;
+  clientId: string;
+  scopes?: string[];
+  groupsClaim?: string;
+  roleMapping?: Record<string, string>;
+}
+
+export interface SsoSamlConfig {
+  entryPoint: string;
+  issuer: string;
+  cert?: string;
+}
+
+export interface SsoLdapConfig {
+  ldapUrl: string;
+  baseDn: string;
+  bindDn?: string;
+}
+
+export interface TenantSsoConfig {
+  tenantId: string;
+  providerType: 'local' | 'ldap' | 'oidc' | 'saml';
+  localFallbackEnabled?: boolean;
+  oidc?: SsoOidcConfig;
+  saml?: SsoSamlConfig;
+  ldap?: SsoLdapConfig;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export async function getSsoConfig(): Promise<TenantSsoConfig | null> {
+  try {
+    const res = await apiClient.get('/auth/sso/config');
+    return unwrap<TenantSsoConfig>(res.data);
+  } catch {
+    return null;
+  }
+}
+
+export async function updateSsoConfig(config: Partial<TenantSsoConfig>): Promise<TenantSsoConfig> {
+  const res = await apiClient.put('/auth/sso/config', config);
+  return unwrap<TenantSsoConfig>(res.data);
 }

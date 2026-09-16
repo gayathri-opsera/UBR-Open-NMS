@@ -30,4 +30,20 @@ public class PendingCommand {
     private Instant createdAt;
     private Instant deliveredAt;
     private String actor;
+
+    // ── WO-049: Delivery routing metadata ─────────────────────────────────────
+    /**
+     * Delivery channel that selected this pending command for UBR call-home delivery.
+     * UBR_REALTIME | UBR_CHECKIN
+     */
+    private String deliveryChannel;
+
+    /** Config version snapshot identifier used when queuing for diff / audit purposes. */
+    private String configVersion;
+
+    /** Idempotency key forwarded from the confirmed job for dedup during delivery. */
+    private String idempotencyKey;
+
+    /** Whether a realtime force-check-in nudge was sent alongside queuing (WO-049). */
+    private boolean realtimeNudgeSent;
 }

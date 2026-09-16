@@ -1,0 +1,16 @@
+{
+  "profile_name": "nms-failover",
+  "description": "Simulates NMS_FAILOVER redirect during discovery (negative/edge case)",
+  "device_type": "BTS",
+  "serial_number": "SN-FAILOVER-001",
+  "mac_address": "DD:EE:FF:AA:BB:FA",
+  "firmware_version": "fw-2.4.1",
+  "config_version": "cfg-v1",
+  "negative_case": {
+    "type": "nms_failover",
+    "expected_status": 302,
+    "expected_reason": "NMS_FAILOVER",
+    "expected_state": "REDIRECTED"
+  },
+  "hmac_secret_placeholder": "PLACEHOLDER_FAILOVER_SECRET_DO_NOT_USE_IN_PRODUCTION"
+}

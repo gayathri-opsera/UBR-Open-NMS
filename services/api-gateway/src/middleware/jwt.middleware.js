@@ -10,6 +10,7 @@ const logger = require('../utils/logger');
 const PUBLIC_PATHS = new Set([
   '/api/v1/auth/login',
   '/api/v1/auth/refresh',
+  '/api/v1/auth/mfa/challenge', // MFA OTP submit — authenticated via mfaToken, not Bearer
   '/api/v1/notifications/stream',
   '/healthz',
   '/readyz',

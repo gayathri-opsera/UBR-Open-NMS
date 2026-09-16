@@ -55,13 +55,15 @@ describe('ratelimit.middleware', () => {
     expect(next).toHaveBeenCalled();
   });
 
-  it('fails open when Redis throws', async () => {
+  it('fails closed (503) when Redis throws', async () => {
     const redis = { multi: () => ({ zremrangebyscore: jest.fn().mockReturnThis(), zadd: jest.fn().mockReturnThis(), zcard: jest.fn().mockReturnThis(), pexpire: jest.fn().mockReturnThis(), exec: jest.fn().mockRejectedValue(new Error('redis error')) }) };
     const middleware = rateLimiter(redis);
     const req = { user: { sub: 'user-001' }, headers: {} };
-    const res = { set: jest.fn() };
+    const res = { set: jest.fn(), status: jest.fn().mockReturnThis(), json: jest.fn() };
     const next = jest.fn();
     await middleware(req, res, next);
-    expect(next).toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'RATE_LIMITER_UNAVAILABLE' }));
   });
 });

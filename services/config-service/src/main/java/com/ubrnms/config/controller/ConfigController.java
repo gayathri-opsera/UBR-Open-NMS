@@ -2,6 +2,11 @@ package com.ubrnms.config.controller;
 
 import com.ubrnms.config.model.*;
 import com.ubrnms.config.service.ConfigService;
+import com.ubrnms.config.service.ConfigService.ConfirmationResult;
+import com.ubrnms.config.service.InventorySearchClient;
+import com.ubrnms.config.service.RollbackService;
+import com.ubrnms.config.service.TargetResolverService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +21,8 @@ import java.util.Map;
 public class ConfigController {
 
     private final ConfigService configService;
+    private final TargetResolverService targetResolverService;
+    private final RollbackService rollbackService;
 
     // ── Templates ──────────────────────────────────────────────────
 
@@ -71,6 +78,19 @@ public class ConfigController {
                     "error", Map.of(
                             "code", "DEVICE_OFFLINE",
                             "message", "Device offline — command not queued. Individual configuration commands require an active device connection.")));
+            case OPERATION_IN_FLIGHT -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "status", "error",
+                    "error", Map.of(
+                            "code", "OPERATION_IN_FLIGHT",
+                            "existingJobId", result.existingOperationJobId,
+                            "existingOperationClass", result.existingOperationClass,
+                            "message", "A conflicting operation is already in progress for this device.")));
+            case DELIVERY_WITHHELD -> ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+                    "status", "error",
+                    "error", Map.of(
+                            "code", "DELIVERY_WITHHELD",
+                            "reason", result.withheldReason,
+                            "message", "Configuration delivery withheld — device is not yet approved for config delivery.")));
         };
     }
 
@@ -80,6 +100,128 @@ public class ConfigController {
             @RequestParam String templateId,
             @RequestParam(required = false, defaultValue = "") String actor) {
         return ResponseEntity.accepted().body(configService.bulkPush(deviceIds, templateId, actor));
+    }
+
+    // ── Target preview (WO-039) ────────────────────────────────────────────────
+
+    /**
+     * Non-mutating target resolution endpoint.
+     *
+     * <p>Accepts structured filters and returns the resolved device set with
+     * delivery channel classification, before any configuration is executed.
+     * No device state is modified; no commands are enqueued.
+     *
+     * POST /api/v1/config/targets/preview
+     */
+    @PostMapping("/targets/preview")
+    public ResponseEntity<?> previewTargets(
+            @Valid @RequestBody ConfigTargetPreviewRequest request,
+            @RequestHeader(name = "X-Actor-Role", required = false, defaultValue = "operator") String actorRole) {
+        try {
+            targetResolverService.validateRequest(request);
+            ConfigTargetPreviewResponse preview = targetResolverService.resolveTargets(request, actorRole);
+            return ResponseEntity.ok(preview);
+        } catch (TargetResolverService.ValidationException ex) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "status", "error",
+                "error", Map.of(
+                    "code", "INVALID_FILTERS",
+                    "field", ex.field,
+                    "message", ex.getMessage()
+                )
+            ));
+        } catch (InventorySearchClient.InventoryServiceException ex) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "status", "error",
+                "error", Map.of(
+                    "code", "INVENTORY_UNAVAILABLE",
+                    "message", "Cannot reach inventory service — retry shortly",
+                    "retryAfterSeconds", 30
+                )
+            ));
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "status", "error",
+                "error", Map.of(
+                    "code", "RESOLVER_FAILURE",
+                    "message", "Target resolution failed — contact support if issue persists"
+                )
+            ));
+        }
+    }
+
+    // ── Confirm execution (WO-045) ─────────────────────────────────────────────
+
+    /**
+     * Explicit confirmation gate for configuration execution.
+     *
+     * <p>Validates a previously generated target preview and creates an accepted
+     * async job only when:
+     * <ul>
+     *   <li>The actor has network_engineer or admin role</li>
+     *   <li>The preview exists and has not expired</li>
+     *   <li>The expected target count matches the current preview</li>
+     * </ul>
+     *
+     * POST /api/v1/config/actions/confirm
+     */
+    @PostMapping("/actions/confirm")
+    public ResponseEntity<?> confirmExecution(
+            @Valid @RequestBody ConfirmExecutionRequest request,
+            @RequestHeader(name = "X-Actor-Role", required = false, defaultValue = "") String actorRole,
+            @RequestHeader(name = "X-Actor", required = false, defaultValue = "unknown") String actor) {
+
+        ConfirmationResult result = configService.confirmExecution(request, actorRole, actor);
+
+        return switch (result.outcome) {
+            case ACCEPTED -> ResponseEntity.accepted().body(Map.of(
+                "jobId",         result.job.getId(),
+                "status",        result.job.getStatus(),
+                "acceptedAt",    result.job.getConfirmedAt().toString(),
+                "acceptedBy",    result.job.getConfirmedBy(),
+                "targetCount",   result.job.getTotalDevices(),
+                "previewId",     result.job.getPreviewId(),
+                "trackingUrl",   "/api/v1/config/jobs/" + result.job.getId() + "/status"
+            ));
+            case DUPLICATE_IDEMPOTENCY_KEY -> ResponseEntity.ok().body(Map.of(
+                "jobId",         result.job.getId(),
+                "status",        result.job.getStatus(),
+                "acceptedAt",    result.job.getConfirmedAt().toString(),
+                "acceptedBy",    result.job.getConfirmedBy(),
+                "targetCount",   result.job.getTotalDevices(),
+                "previewId",     result.job.getPreviewId(),
+                "trackingUrl",   "/api/v1/config/jobs/" + result.job.getId() + "/status",
+                "note",          "Idempotent: returning existing accepted job"
+            ));
+            case PREVIEW_NOT_FOUND -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                "status", "error",
+                "error",  Map.of(
+                    "code",    "PREVIEW_NOT_FOUND",
+                    "message", result.conflictDetail
+                )
+            ));
+            case PREVIEW_EXPIRED -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "status", "error",
+                "error",  Map.of(
+                    "code",    "PREVIEW_EXPIRED",
+                    "message", result.conflictDetail
+                )
+            ));
+            case TARGET_COUNT_MISMATCH -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "status", "error",
+                "error",  Map.of(
+                    "code",    "TARGET_COUNT_MISMATCH",
+                    "message", result.conflictDetail
+                )
+            ));
+            case UNAUTHORIZED -> ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                "status", "error",
+                "error",  Map.of(
+                    "code",    "FORBIDDEN",
+                    "message", result.conflictDetail
+                )
+            ));
+        };
     }
 
     @GetMapping("/jobs/{jobId}/status")
@@ -95,5 +237,72 @@ public class ConfigController {
                 "totalDevices", job.getTotalDevices(),
                 "perDeviceStatus", job.getPerDeviceStatus()
         ));
+    }
+
+    // ── Config rollback (WO-052) ───────────────────────────────────────────────
+
+    /**
+     * POST /api/v1/config/history/{deviceId}/{versionId}/rollback
+     *
+     * Initiates a rollback of a failed configuration change.
+     * Only permitted when the targeted version is rollback-eligible and
+     * a prior APPLIED version exists as the restore target.
+     * Operator confirmation via 'reason' is required.
+     */
+    @PostMapping("/history/{deviceId}/{versionId}/rollback")
+    public ResponseEntity<?> rollbackVersion(
+            @PathVariable String deviceId,
+            @PathVariable String versionId,
+            @RequestBody RollbackRequest request) {
+
+        if (request.getReason() == null || request.getReason().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "REASON_REQUIRED",
+                            "message", "A non-empty 'reason' is required to initiate rollback.")));
+        }
+
+        String actor = request.getActor() != null ? request.getActor() : "system";
+        RollbackService.RollbackResult result =
+                rollbackService.initiateRollback(deviceId, versionId, request.getReason(), actor);
+
+        return switch (result.outcome) {
+            case ACCEPTED -> ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of(
+                    "status",        "accepted",
+                    "rollbackJobId", result.rollbackJob.getId(),
+                    "jobStatus",     result.rollbackJob.getStatus(),
+                    "startedAt",     result.rollbackJob.getStartedAt().toString(),
+                    "trackingUrl",   "/api/v1/config/jobs/" + result.rollbackJob.getId() + "/status"
+            ));
+            case VERSION_NOT_FOUND -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "VERSION_NOT_FOUND",
+                            "message", result.ineligibilityReason)));
+            case NOT_ROLLBACK_ELIGIBLE -> ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "NOT_ROLLBACK_ELIGIBLE",
+                            "message", result.ineligibilityReason)));
+            case NO_PRIOR_GOOD_VERSION -> ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "NO_PRIOR_GOOD_VERSION",
+                            "message", result.ineligibilityReason)));
+            case OPERATION_IN_FLIGHT -> ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "status", "error",
+                    "error",  Map.of(
+                            "code",    "OPERATION_IN_FLIGHT",
+                            "message", result.ineligibilityReason)));
+            case AUDIT_PUBLISH_FAILED -> ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of(
+                    "status",        "accepted",
+                    "rollbackJobId", result.rollbackJob.getId(),
+                    "jobStatus",     result.rollbackJob.getStatus(),
+                    "startedAt",     result.rollbackJob.getStartedAt().toString(),
+                    "trackingUrl",   "/api/v1/config/jobs/" + result.rollbackJob.getId() + "/status",
+                    "warning",       "Audit event could not be published. Rollback job is running."
+            ));
+        };
     }
 }

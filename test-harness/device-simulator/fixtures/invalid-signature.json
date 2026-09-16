@@ -1,0 +1,14 @@
+{
+  "_comment": "Fixture: wrong HMAC signature (AC2 — signature mismatch → 462 HMAC_INVALID)",
+  "scenario": "signature_mismatch",
+  "expected_status": 462,
+  "expected_error_code": "HMAC_INVALID",
+  "headers": {
+    "Auth-Info": "id=AA:BB:CC:DD:EE:FF,timestamp=NOW,nonce=ABCDEFGHIJ1234567890abcdefghij",
+    "Auth-Signature": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "body": {
+    "serialNumber": "SN12345678",
+    "macAddress": "AA:BB:CC:DD:EE:FF"
+  }
+}

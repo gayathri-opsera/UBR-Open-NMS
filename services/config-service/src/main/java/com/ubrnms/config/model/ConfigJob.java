@@ -6,10 +6,12 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
-/** Bulk config push job tracking. */
+/** Bulk config push job tracking with per-device operation concurrency state (WO-018). */
 @Data
 @NoArgsConstructor
 @Document(collection = "config_jobs")
@@ -27,6 +29,57 @@ public class ConfigJob {
     private Instant startedAt;
     private Instant completedAt;
     private String actor;
+
+    // ── WO-018: Concurrency and retry visibility fields ────────────────────────
+    /** Operation class for concurrency guard (e.g. CONFIG_CHANGE, FIRMWARE_UPGRADE). */
+    private String operationClass;
+    /** Number of retry attempts made for this job. */
+    private int retryCount;
+    /** Maximum retry attempts before exhaustion. */
+    private int maxRetries = 3;
+    /** When the next retry attempt is allowed (null when not in retry state). */
+    private Instant nextRetryAt;
+    /** Whether this job can be retried after a transient failure. */
+    private boolean retryable;
+    /** Human-readable reason for the last dispatch or execution failure. */
+    private String lastFailureReason;
+    /** Set when all retries are exhausted; the job is dead-lettered for manual review. */
+    private Instant exhaustedAt;
+    /** Current concurrency state: RUNNING, BLOCKED, QUEUED, RETRYING, EXHAUSTED */
+    private String concurrencyState;
+    /** The job ID that is blocking this operation (when concurrencyState=BLOCKED). */
+    private String blockedByJobId;
+
+    // ── WO-045: Confirmation gate fields ──────────────────────────────────────
+    /**
+     * Preview ID this job was created from.
+     * Links the accepted job back to the target resolver preview for audit purposes.
+     */
+    private String previewId;
+    /** PENDING | CONFIRMED | DENIED — lifecycle of the confirmation step. */
+    private String confirmationStatus;
+    /** Username or service account that confirmed execution. */
+    private String confirmedBy;
+    /** Timestamp when execution was confirmed. */
+    private Instant confirmedAt;
+    /** Target count that the operator confirmed — must match the preview at execution time. */
+    private int expectedTargetCount;
+    /** Optional external approval reference (ticket number, change record, etc.). */
+    private String approvalReference;
+    /** Whether the operator acknowledged warnings present in the preview. */
+    private boolean acceptedWarnings;
+    /** Client-supplied idempotency key — duplicate confirmation returns the existing job. */
+    private String idempotencyKey;
+
+    // ── WO-049: Per-device delivery routing fields ────────────────────────────
+    /**
+     * Per-device delivery records — one entry per target in the confirmed job.
+     * Authoritative source for operator-visible per-device status, channel, and attempts.
+     */
+    private List<PerDeviceDeliveryRecord> perDeviceDelivery = new ArrayList<>();
+
+    /** Count of targets whose currentState is QUEUED (offline, pending check-in). */
+    private int queuedCount;
 
     public int getProgressPercent() {
         if (totalDevices == 0) return 100;

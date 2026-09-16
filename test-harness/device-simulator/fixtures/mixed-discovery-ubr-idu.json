@@ -1,0 +1,21 @@
+{
+  "name": "UBR IDU for Mixed Discovery",
+  "deviceType": "IDU",
+  "serialNumber": "SN-MIXED-IDU-001",
+  "macAddress": "AA:BB:CC:DD:03:01",
+  "ipAddress": "10.100.2.30",
+  "model": "ENH1750",
+  "softwareVersion": "5.8.1",
+  "location": {
+    "latitude": 37.7649,
+    "longitude": -122.4294,
+    "azimuth": 270
+  },
+  "tags": ["test-harness", "mixed-discovery", "wo-042"],
+  "discoveryParadigm": "UBR_CALL_HOME",
+  "identityAuthority": "UBR",
+  "onlineStateAuthority": "UBR",
+  "expectedBootstrapState": "REALTIME_ESTABLISHED",
+  "expectedOnlineState": "ONLINE",
+  "description": "UBR IDU device for concurrent discovery mode validation"
+}

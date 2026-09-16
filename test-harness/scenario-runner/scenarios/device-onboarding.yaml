@@ -5,6 +5,7 @@
 name: device-onboarding
 description: "End-to-end device onboarding: check-in → inventory → Mobinet"
 timeout_seconds: 120
+priority: P0  # WO-065: Release acceptance priority
 
 setup:
   - action: reset_stub
@@ -46,3 +47,445 @@ steps:
 cleanup:
   - action: reset_stub
     stub: mobinet
+
+# ──────────────────────────────────────────────────────────────────
+# WO-029: Southbound error semantics — negative-path fixtures
+# Each scenario validates exact status code, reason string, action,
+# and header presence for every southbound error category.
+# ──────────────────────────────────────────────────────────────────
+
+---
+name: southbound-error-bad-request
+description: "WO-029: Malformed check-in body returns 400 BAD_REQUEST with reason, category, action"
+timeout_seconds: 30
+steps:
+  - name: bad-request-check-in
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body: "this is not valid json"
+    headers:
+      Content-Type: "application/json"
+      X-Correlation-ID: "scen-wo029-bad-001"
+    expect_status: 400
+    expect_body:
+      reason: "BAD_REQUEST"
+      category: "client_error"
+      action: "fix_request"
+    expect_header_present: ["Content-Type"]
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max", "Location"]
+
+---
+name: southbound-error-hmac-invalid
+description: "WO-029: Invalid HMAC signature returns 462 HMAC_INVALID with re_authenticate action"
+timeout_seconds: 30
+steps:
+  - name: hmac-invalid-check-in
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body:
+      serialNumber: "BADHMAC12345678"
+      macAddress: "AA:BB:CC:DD:EE:FF"
+      ipAddress: "10.0.0.1"
+      deviceType: "BTS"
+      softwareVersion: "1.0.0"
+      signature: "invalidsignature"
+    headers:
+      X-Correlation-ID: "scen-wo029-hmac-001"
+    expect_status: 462
+    expect_body:
+      reason: "HMAC_INVALID"
+      category: "auth_failure"
+      action: "re_authenticate"
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max", "Location"]
+
+---
+name: southbound-error-rate-limited
+description: "WO-029: Rate-limited request returns 429 with Retry-After and X-Retry-Jitter-Max headers"
+timeout_seconds: 30
+steps:
+  - name: trigger-rate-limit
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body:
+      serialNumber: "RATELIMIT123456"
+      macAddress: "AA:BB:CC:DD:EE:02"
+      ipAddress: "10.0.0.2"
+      deviceType: "CPE"
+      softwareVersion: "1.0.0"
+      signature: "ratelimited"
+    headers:
+      X-Simulate-Rate-Limit: "true"
+      X-Correlation-ID: "scen-wo029-rate-001"
+    expect_status: 429
+    expect_body:
+      reason: "RATE_LIMITED"
+      category: "retryable"
+      action: "retry_with_backoff"
+    expect_header_present: ["Retry-After", "X-Retry-Jitter-Max"]
+    expect_header_absent: ["Location"]
+
+---
+name: southbound-error-nms-failover
+description: "WO-029: NMS failover returns 302 NMS_FAILOVER with Location header and connect_to_alternate action"
+timeout_seconds: 30
+steps:
+  - name: trigger-failover
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    headers:
+      X-Simulate-Failover: "true"
+      X-Correlation-ID: "scen-wo029-failover-001"
+    expect_status: 302
+    expect_body:
+      reason: "NMS_FAILOVER"
+      category: "redirect"
+      action: "connect_to_alternate"
+    expect_header_present: ["Location"]
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max"]
+
+---
+name: southbound-error-service-unavailable
+description: "WO-029: Service unavailable returns 503 with Retry-After headers"
+timeout_seconds: 30
+steps:
+  - name: service-unavailable
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    headers:
+      X-Simulate-Unavailable: "true"
+      X-Correlation-ID: "scen-wo029-svcdown-001"
+    expect_status: 503
+    expect_body:
+      reason: "SERVICE_UNAVAILABLE"
+      category: "retryable"
+      action: "retry_with_backoff"
+    expect_header_present: ["Retry-After", "X-Retry-Jitter-Max"]
+
+---
+name: southbound-error-internal-error
+description: "WO-029: Internal error returns 500 INTERNAL_ERROR without secrets or stack traces"
+timeout_seconds: 30
+steps:
+  - name: trigger-internal-error
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body:
+      serialNumber: "INTERNAL12345678"
+      macAddress: "AA:BB:CC:DD:EE:03"
+      ipAddress: "10.0.0.3"
+      deviceType: "IDU"
+      softwareVersion: "1.0.0"
+      signature: "internalerror"
+    headers:
+      X-Simulate-Internal-Error: "true"
+      X-Correlation-ID: "scen-wo029-int-001"
+    expect_status: 500
+    expect_body:
+      reason: "INTERNAL_ERROR"
+      category: "server_error"
+      action: "contact_support"
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max", "Location"]
+    expect_body_absent_pattern: ["panic", "goroutine", "stack", "trace", "sql", "mongo"]
+
+---
+name: onboarding-gate-policy-read
+description: "WO-033: GET /api/v1/admin/onboarding/policy returns policy with all required fields"
+timeout_seconds: 30
+steps:
+  - name: get-policy
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/admin/onboarding/policy"
+    headers:
+      X-Caller-Role: "admin"
+      X-Caller-Id: "test-admin"
+    expect_status: 200
+    expect_body_fields: ["enabled", "defaultBehavior", "description", "updatedBy", "updatedAt"]
+
+---
+name: onboarding-gate-policy-update-enable
+description: "WO-033: PUT /api/v1/admin/onboarding/policy enables the gate; admin only"
+timeout_seconds: 30
+steps:
+  - name: enable-gate
+    action: http_put
+    url: "${INVENTORY_URL}/api/v1/admin/onboarding/policy"
+    body:
+      enabled: true
+      reason: "scenario-runner WO-033 test"
+    headers:
+      X-Caller-Role: "admin"
+      X-Caller-Id: "test-admin"
+    expect_status: 200
+    expect_body:
+      enabled: true
+      defaultBehavior: "PENDING_ASSIGNMENT"
+
+---
+name: onboarding-gate-policy-update-non-admin-denied
+description: "WO-033: PUT /api/v1/admin/onboarding/policy returns 403 for non-admin callers"
+timeout_seconds: 30
+steps:
+  - name: non-admin-update-attempt
+    action: http_put
+    url: "${INVENTORY_URL}/api/v1/admin/onboarding/policy"
+    body:
+      enabled: false
+    headers:
+      X-Caller-Role: "engineer"
+      X-Caller-Id: "test-engineer"
+    expect_status: 403
+    expect_body_fields: ["error"]
+
+---
+name: onboarding-gate-pending-assignment-device-config-withheld
+description: "WO-033: Config push to PENDING_ASSIGNMENT device is withheld with explicit reason"
+timeout_seconds: 30
+steps:
+  - name: enable-gate
+    action: http_put
+    url: "${INVENTORY_URL}/api/v1/admin/onboarding/policy"
+    body:
+      enabled: true
+      reason: "scenario-runner test"
+    headers:
+      X-Caller-Role: "admin"
+      X-Caller-Id: "test-admin"
+    expect_status: 200
+  - name: check-config-eligibility
+    action: http_get
+    url: "${CONFIG_URL}/api/v1/devices/${PENDING_DEVICE_ID}/onboarding-gate"
+    expect_status: 200
+    expect_body:
+      eligible: false
+    expect_body_fields: ["withheldReason"]
+
+---
+name: onboarding-gate-approve-assignment
+description: "WO-033: Admin can approve PENDING_ASSIGNMENT device, moving it to MANAGED"
+timeout_seconds: 30
+steps:
+  - name: approve-device
+    action: http_post
+    url: "${INVENTORY_URL}/api/v1/admin/devices/${PENDING_DEVICE_SERIAL}/approve-assignment"
+    headers:
+      X-Caller-Role: "admin"
+      X-Caller-Id: "test-admin"
+    expect_status: 200
+    expect_body:
+      onboardingGateState: "MANAGED"
+      assignmentRequired: false
+
+---
+name: ubr-identity-protection-call-home-first
+description: "WO-032: UBR call-home then generic discovery — UBR identity fields unchanged"
+timeout_seconds: 60
+steps:
+  - name: ubr-device-onboards-via-call-home
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber:       "SN-UBR-CONV-001"
+      macAddress:         "AA:BB:CC:DD:EE:10"
+      deviceType:         "BTS"
+      identityAuthority:  "UBR"
+      onlineStateAuthority: "UBR"
+      bootstrapState:     "REALTIME_ESTABLISHED"
+      discoveryParadigm:  "UBR_CALL_HOME"
+      correlationId:      "corr-wo032-ubr"
+
+  - name: verify-ubr-device-in-inventory
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/SN-UBR-CONV-001"
+    expect_status: 200
+    expect_body:
+      identityAuthority: "UBR"
+      discoveryParadigm: "UBR_CALL_HOME"
+      macAddress: "AA:BB:CC:DD:EE:10"
+
+  - name: generic-discovery-attempts-overwrite
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber:       "SN-UBR-CONV-001"
+      macAddress:         "99:88:77:66:55:44"
+      identityAuthority:  "GENERIC"
+      bootstrapState:     "UNKNOWN"
+      discoveryParadigm:  "GENERIC_SNMP"
+      vendor:             "Cisco"
+      sysObjectID:        "1.3.6.1.4.1.9"
+      correlationId:      "corr-wo032-generic"
+
+  - name: verify-ubr-identity-unchanged
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/SN-UBR-CONV-001"
+    expect_status: 200
+    expect_body:
+      identityAuthority: "UBR"
+      macAddress:        "AA:BB:CC:DD:EE:10"
+      bootstrapState:    "REALTIME_ESTABLISHED"
+      # Enrichment fields should be applied
+      vendor:            "Cisco"
+      sysObjectID:       "1.3.6.1.4.1.9"
+
+  - name: verify-rejection-audit-event-emitted
+    action: kafka_assert_message
+    topic: audit-events
+    timeout_seconds: 10
+    expect_body:
+      action:          "inventory.convergence.overwrite.rejected"
+      outcome:         "rejected"
+      reason:          "UBR_AUTHORITY_PROTECTED"
+      callerParadigm:  "GENERIC_SNMP"
+    expect_body_contains_fields: ["rejectedFields", "correlationId"]
+    expect_body_not_contains_fields: ["credentialRef", "hmacKey"]
+
+---
+name: ubr-identity-protection-generic-first
+description: "WO-032: Generic discovery first then UBR call-home — UBR wins on authority fields"
+timeout_seconds: 60
+steps:
+  - name: generic-device-registers-first
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber:       "SN-UBR-CONV-002"
+      macAddress:         "11:22:33:44:55:66"
+      identityAuthority:  "GENERIC"
+      discoveryParadigm:  "GENERIC_SNMP"
+      vendor:             "Ubiquiti"
+      sysObjectID:        "1.3.6.1.4.1.41112"
+      correlationId:      "corr-wo032-gen-first"
+
+  - name: verify-generic-device-registered
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/SN-UBR-CONV-002"
+    expect_status: 200
+    expect_body:
+      identityAuthority: "GENERIC"
+
+  - name: ubr-device-calls-home
+    action: kafka_publish
+    topic: device-discovered
+    body:
+      serialNumber:         "SN-UBR-CONV-002"
+      macAddress:           "AA:BB:CC:DD:EE:20"
+      deviceType:           "BTS"
+      identityAuthority:    "UBR"
+      onlineStateAuthority: "UBR"
+      bootstrapState:       "REALTIME_ESTABLISHED"
+      discoveryParadigm:    "UBR_CALL_HOME"
+      correlationId:        "corr-wo032-ubr-second"
+
+  - name: verify-ubr-authority-wins
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/SN-UBR-CONV-002"
+    expect_status: 200
+    expect_body:
+      identityAuthority:    "UBR"
+      macAddress:           "AA:BB:CC:DD:EE:20"
+      bootstrapState:       "REALTIME_ESTABLISHED"
+      discoveryParadigm:    "UBR_CALL_HOME"
+      # Generic enrichment preserved
+      vendor:               "Ubiquiti"
+      sysObjectID:          "1.3.6.1.4.1.41112"
+
+  - name: verify-inventory-sync-includes-authority-metadata
+    action: kafka_assert_message
+    topic: inventory-sync
+    timeout_seconds: 10
+    expect_body:
+      serialNumber:         "SN-UBR-CONV-002"
+      discoveryParadigm:    "UBR_CALL_HOME"
+      identityAuthority:    "UBR"
+      onlineStateAuthority: "UBR"
+    expect_body_contains_fields: ["lastCheckInAt", "lastRealtimeAt"]
+
+---
+# ──────────────────────────────────────────────────────────────────
+# WO-035: UBR Protocol Simulator — success path (BOOT → OPERATION)
+# Validates the full UBR call-home lifecycle against mocked endpoints.
+# ──────────────────────────────────────────────────────────────────
+name: ubr-simulator-full-bootstrap
+description: "WO-035: Simulator runs BOOT→DISCOVERY→AUTH→CHECK_IN→REALTIME→OPERATION"
+timeout_seconds: 120
+
+steps:
+  - name: seed-kv-registry
+    action: http_put
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services/auth"
+    body:
+      url: "${DISCOVERY_URL}/api/v1/discovery/auth"
+    expect_status: 200
+
+  - name: run-ubr-simulator
+    action: ubr_simulator_run
+    profile: "fixtures/ubr-bts-valid.json"
+    discovery_url: "${DISCOVERY_URL}"
+    expect_final_state: "OPERATION"
+    expect_transitions_include:
+      - "BOOT"
+      - "DISCOVERY"
+      - "AUTHENTICATION"
+      - "CHECK_IN"
+      - "REALTIME"
+      - "OPERATION"
+
+---
+name: ubr-simulator-hmac-invalid
+description: "WO-035: Simulator handles HMAC_INVALID (462) during authentication"
+timeout_seconds: 60
+
+steps:
+  - name: run-ubr-simulator-bad-hmac
+    action: ubr_simulator_run
+    profile: "fixtures/invalid-signature-profile.json"
+    discovery_url: "${DISCOVERY_URL}"
+    expect_final_state: "FAILED"
+    expect_reason: "HMAC_INVALID"
+    expect_retryable: false
+
+---
+name: ubr-simulator-nms-failover-redirect
+description: "WO-035: Simulator handles 302 NMS_FAILOVER during discovery"
+timeout_seconds: 60
+
+steps:
+  - name: run-ubr-simulator-failover
+    action: ubr_simulator_run
+    profile: "fixtures/nms-failover-profile.json"
+    discovery_url: "${DISCOVERY_URL}"
+    expect_final_state: "REDIRECTED"
+    expect_reason: "NMS_FAILOVER"
+    expect_transitions_include:
+      - "BOOT"
+      - "DISCOVERY"
+      - "REDIRECTED"
+
+---
+name: ubr-simulator-realtime-timeout
+description: "WO-035: Simulator reports REALTIME_TIMEOUT when WebSocket receives no PONG"
+timeout_seconds: 60
+
+steps:
+  - name: run-ubr-simulator-no-pong
+    action: ubr_simulator_run
+    profile: "fixtures/realtime-no-pong-profile.json"
+    discovery_url: "${DISCOVERY_URL}"
+    expect_final_state: "FAILED"
+    expect_reason: "REALTIME_TIMEOUT"
+    expect_retryable: true
+
+---
+name: ubr-simulator-rate-limited-uses-retry-headers
+description: "WO-035: Simulator applies Retry-After and X-Retry-Jitter-Max from response"
+timeout_seconds: 60
+
+steps:
+  - name: trigger-rate-limit-on-discovery
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    headers:
+      X-Simulate-Rate-Limit: "true"
+      X-Correlation-ID: "scen-wo035-rate-001"
+    expect_status: 429
+    expect_header_present: ["Retry-After", "X-Retry-Jitter-Max"]

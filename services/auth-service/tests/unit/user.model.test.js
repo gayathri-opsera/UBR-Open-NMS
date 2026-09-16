@@ -38,10 +38,25 @@ describe('validatePasswordComplexity', () => {
 });
 
 describe('ROLES', () => {
-  test('contains exactly admin, operator, user', () => {
+  // WO-025: auditor and other specialist roles added to ROLES
+  test('contains admin, operator, user', () => {
     expect(ROLES).toContain('admin');
     expect(ROLES).toContain('operator');
     expect(ROLES).toContain('user');
-    expect(ROLES.length).toBe(3);
+  });
+
+  test('contains auditor role (WO-025)', () => {
+    expect(ROLES).toContain('auditor');
+  });
+
+  test('contains all specialist roles from ACTION_PERMISSIONS matrix', () => {
+    expect(ROLES).toContain('network_engineer');
+    expect(ROLES).toContain('noc_operator');
+    expect(ROLES).toContain('compliance');
+    expect(ROLES).toContain('viewer');
+  });
+
+  test('has at least 8 roles', () => {
+    expect(ROLES.length).toBeGreaterThanOrEqual(8);
   });
 });

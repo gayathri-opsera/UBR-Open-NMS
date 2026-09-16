@@ -1,0 +1,327 @@
+# ──────────────────────────────────────────────────────────────────
+# WO-048: Southbound Contract Tests
+# Validates exact device-facing wire contract for UBR firmware
+# ──────────────────────────────────────────────────────────────────
+name: southbound-discovery-registry-contract
+description: "WO-048: Discovery registry returns exact Consul-style KV format with required service keys"
+timeout_seconds: 30
+
+steps:
+  - name: discovery-registry-exact-path
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    expect_status: 200
+    expect_body_structure:
+      - type: array
+      - items_have_keys: ["LockIndex", "Key", "Flags", "Value", "CreateIndex", "ModifyIndex"]
+
+  - name: verify-required-service-keys
+    action: assert_kv_keys
+    required_keys:
+      - "services/auth"
+      - "services/checkin"
+      - "services/realtime"
+    kv_response: "${DISCOVERY_REGISTRY_RESPONSE}"
+
+  - name: verify-base64-metadata
+    action: assert_base64_json
+    kv_key: "services/auth"
+    expect_fields: ["url", "version"]
+
+---
+name: southbound-mtls-cert-invalid
+description: "WO-048: Invalid mTLS certificate returns 495 MTLS_CERT_INVALID"
+timeout_seconds: 30
+
+steps:
+  - name: trigger-mtls-cert-invalid
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/auth"
+    mtls_cert: "invalid-cert-context"
+    expect_status: 495
+    expect_body:
+      reason: "MTLS_CERT_INVALID"
+      category: "auth_failure"
+      action: "contact_support"
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max", "Location"]
+
+---
+name: southbound-mtls-no-cert
+description: "WO-048: Missing client certificate returns 496 MTLS_NO_CERT"
+timeout_seconds: 30
+
+steps:
+  - name: trigger-mtls-no-cert
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/auth"
+    mtls_cert: null
+    expect_status: 496
+    expect_body:
+      reason: "MTLS_NO_CERT"
+      category: "auth_failure"
+      action: "contact_support"
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max", "Location"]
+
+---
+name: southbound-hmac-invalid-signature
+description: "WO-048: Invalid HMAC signature returns 462 HMAC_INVALID"
+timeout_seconds: 30
+
+steps:
+  - name: check-in-invalid-hmac
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body:
+      serialNumber: "HMAC-TEST-001"
+      macAddress: "AA:BB:CC:DD:EE:FF"
+      deviceType: "BTS"
+      softwareVersion: "1.0.0"
+      signature: "invalid-signature-string"
+    headers:
+      Auth-Info: "serial=HMAC-TEST-001,nonce=test123,timestamp=1234567890"
+      Auth-Signature: "invalid-signature"
+    expect_status: 462
+    expect_body:
+      reason: "HMAC_INVALID"
+      category: "auth_failure"
+      action: "re_authenticate"
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max"]
+
+---
+name: southbound-hmac-stale-timestamp
+description: "WO-048: Stale timestamp returns 462 with STALE_TIMESTAMP reason"
+timeout_seconds: 30
+
+steps:
+  - name: check-in-stale-timestamp
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body_from_fixture: "fixtures/stale-timestamp-profile.json"
+    expect_status: 462
+    expect_body:
+      reason: "HMAC_INVALID"
+      category: "auth_failure"
+      detail: "timestamp_stale"
+
+---
+name: southbound-nonce-replay
+description: "WO-048: Replayed nonce is rejected with HMAC_INVALID"
+timeout_seconds: 60
+
+steps:
+  - name: first-check-in-with-nonce
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body_from_fixture: "fixtures/valid-request.json"
+    expect_status: 200
+
+  - name: replay-same-nonce
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body_from_fixture: "fixtures/reused-nonce.json"
+    expect_status: 462
+    expect_body:
+      reason: "HMAC_INVALID"
+      detail: "nonce_replayed"
+
+---
+name: southbound-rate-limited-with-retry-headers
+description: "WO-048: Rate limit returns 429 with Retry-After and X-Retry-Jitter-Max"
+timeout_seconds: 30
+
+steps:
+  - name: trigger-rate-limit
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    headers:
+      X-Simulate-Rate-Limit: "true"
+    body:
+      serialNumber: "RATE-TEST-001"
+      macAddress: "AA:BB:CC:DD:EE:01"
+      deviceType: "CPE"
+      softwareVersion: "1.0.0"
+    expect_status: 429
+    expect_body:
+      reason: "RATE_LIMITED"
+      category: "retryable"
+      action: "retry_with_backoff"
+    expect_header_present: ["Retry-After", "X-Retry-Jitter-Max"]
+    expect_header_numeric: ["Retry-After", "X-Retry-Jitter-Max"]
+
+---
+name: southbound-nms-failover-with-location
+description: "WO-048: Failover returns 302 NMS_FAILOVER with Location header"
+timeout_seconds: 30
+
+steps:
+  - name: trigger-failover
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    headers:
+      X-Simulate-Failover: "true"
+    expect_status: 302
+    expect_body:
+      reason: "NMS_FAILOVER"
+      category: "redirect"
+      action: "connect_to_alternate"
+    expect_header_present: ["Location"]
+    expect_header_absent: ["Retry-After", "X-Retry-Jitter-Max"]
+    assert_location_is_discovery_endpoint: true
+
+---
+name: southbound-service-unavailable-retryable
+description: "WO-048: Service unavailable returns 503 with retry headers"
+timeout_seconds: 30
+
+steps:
+  - name: trigger-service-unavailable
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    headers:
+      X-Simulate-Unavailable: "true"
+    body:
+      serialNumber: "SVC-UNAVAIL-001"
+      macAddress: "AA:BB:CC:DD:EE:02"
+      deviceType: "IDU"
+      softwareVersion: "1.0.0"
+    expect_status: 503
+    expect_body:
+      reason: "SERVICE_UNAVAILABLE"
+      category: "retryable"
+      action: "retry_with_backoff"
+    expect_header_present: ["Retry-After", "X-Retry-Jitter-Max"]
+
+---
+name: southbound-internal-error-no-secrets
+description: "WO-048: Internal error returns 500 without secret leakage"
+timeout_seconds: 30
+
+steps:
+  - name: trigger-internal-error
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    headers:
+      X-Simulate-Internal-Error: "true"
+    body:
+      serialNumber: "INT-ERR-001"
+      macAddress: "AA:BB:CC:DD:EE:03"
+      deviceType: "BTS"
+      softwareVersion: "1.0.0"
+    expect_status: 500
+    expect_body:
+      reason: "INTERNAL_ERROR"
+      category: "server_error"
+      action: "contact_support"
+    expect_body_absent_pattern: ["password", "secret", "key", "token", "credential", "panic", "stack", "trace"]
+
+---
+name: southbound-realtime-online-gating
+description: "WO-048: Online state requires established WSS session"
+timeout_seconds: 60
+
+steps:
+  - name: check-in-without-realtime
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    body:
+      serialNumber: "WSS-GATE-001"
+      macAddress: "AA:BB:CC:DD:EE:04"
+      deviceType: "BTS"
+      softwareVersion: "1.0.0"
+    expect_status: 200
+
+  - name: verify-not-online-yet
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/WSS-GATE-001"
+    expect_status: 200
+    expect_body:
+      onlineState: "OFFLINE"
+      bootstrapState: "CHECK_IN_RECEIVED"
+
+  - name: establish-wss-session
+    action: wss_connect
+    url: "${REALTIME_URL}/ws/devices/WSS-GATE-001"
+    expect_pong_response: true
+
+  - name: verify-now-online
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/WSS-GATE-001"
+    expect_status: 200
+    expect_body:
+      onlineState: "ONLINE"
+      bootstrapState: "REALTIME_ESTABLISHED"
+
+---
+name: southbound-realtime-timeout-offline
+description: "WO-048: WSS timeout marks device offline"
+timeout_seconds: 90
+
+steps:
+  - name: establish-wss-then-go-silent
+    action: wss_connect
+    url: "${REALTIME_URL}/ws/devices/WSS-TIMEOUT-001"
+    send_ping: false
+    wait_for_timeout: 60
+
+  - name: verify-marked-offline
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/serial/WSS-TIMEOUT-001"
+    expect_status: 200
+    expect_body:
+      onlineState: "OFFLINE"
+      offlineReason: "REALTIME_TIMEOUT"
+
+---
+name: southbound-contract-registry-missing-realtime-key
+description: "WO-048 Edge: Registry missing services/realtime fails validation"
+timeout_seconds: 30
+
+steps:
+  - name: get-incomplete-registry
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    mock_response_omit_key: "services/realtime"
+    expect_contract_violation: true
+    expect_error: "Required service key 'services/realtime' missing from registry"
+
+---
+name: southbound-contract-error-without-reason-body
+description: "WO-048 Edge: Non-2xx without reason body fails validation"
+timeout_seconds: 30
+
+steps:
+  - name: trigger-error-no-body
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    mock_error_no_body: true
+    expect_status: 500
+    expect_contract_violation: true
+    expect_error: "Error response missing required 'reason' field"
+
+---
+name: southbound-contract-retryable-missing-headers
+description: "WO-048 Edge: Retryable error without retry headers fails validation"
+timeout_seconds: 30
+
+steps:
+  - name: trigger-retryable-no-headers
+    action: http_post
+    url: "${DISCOVERY_URL}/api/v1/discovery/check-in"
+    mock_retryable_no_headers: true
+    expect_status: 429
+    expect_contract_violation: true
+    expect_error: "Retryable error missing Retry-After or X-Retry-Jitter-Max headers"
+
+---
+name: southbound-contract-failover-missing-location
+description: "WO-048 Edge: Failover without Location fails validation"
+timeout_seconds: 30
+
+steps:
+  - name: trigger-failover-no-location
+    action: http_get
+    url: "${DISCOVERY_URL}/discovery/v1/kv/services?recurse=1"
+    mock_failover_no_location: true
+    expect_status: 302
+    expect_contract_violation: true
+    expect_error: "NMS_FAILOVER response missing Location header"

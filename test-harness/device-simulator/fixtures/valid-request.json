@@ -1,0 +1,16 @@
+{
+  "_comment": "Fixture: valid signed check-in request (AC6 — happy path)",
+  "headers": {
+    "Auth-Info": "id=AA:BB:CC:DD:EE:FF,timestamp=1700000000,nonce=ABCDEFGHIJ1234567890abcdefghij",
+    "Auth-Signature": "COMPUTE_WITH_SIGN_GO"
+  },
+  "body": {
+    "serialNumber": "SN12345678",
+    "macAddress": "AA:BB:CC:DD:EE:FF",
+    "ipAddress": "192.168.1.100",
+    "deviceType": "BTS",
+    "firmwareVersion": "3.1.0",
+    "configVersion": "cfg-001",
+    "uptimeSeconds": 3600
+  }
+}

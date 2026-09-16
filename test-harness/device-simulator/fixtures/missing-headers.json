@@ -1,0 +1,12 @@
+{
+  "_comment": "Fixture: missing Auth-Info and/or Auth-Signature headers (AC2 → 462 HMAC_INVALID)",
+  "scenario": "missing_headers",
+  "expected_status": 462,
+  "expected_error_code": "HMAC_INVALID",
+  "note": "Do not include Auth-Info or Auth-Signature headers in the request.",
+  "headers": {},
+  "body": {
+    "serialNumber": "SN12345678",
+    "macAddress": "AA:BB:CC:DD:EE:FF"
+  }
+}

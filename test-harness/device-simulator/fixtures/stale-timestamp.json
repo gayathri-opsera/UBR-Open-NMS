@@ -1,0 +1,14 @@
+{
+  "_comment": "Fixture: stale timestamp (AC2 — timestamp > tolerance window → 462 HMAC_INVALID)",
+  "scenario": "stale_timestamp",
+  "expected_status": 462,
+  "expected_error_code": "HMAC_INVALID",
+  "headers": {
+    "Auth-Info": "id=AA:BB:CC:DD:EE:FF,timestamp=1000000000,nonce=ABCDEFGHIJ1234567890abcdefghij",
+    "Auth-Signature": "any-value-timestamp-checked-first"
+  },
+  "body": {
+    "serialNumber": "SN12345678",
+    "macAddress": "AA:BB:CC:DD:EE:FF"
+  }
+}

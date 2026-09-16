@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>UBR Open NMS — Architecture</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{
+  background:#fff;
+  font-family:"Segoe UI",Roboto,Arial,sans-serif;
+  display:flex;align-items:flex-start;justify-content:center;
+  min-height:100vh;padding:24px;
+}
+.canvas{position:relative;width:1440px;height:1240px;flex-shrink:0;background:#fff;}
+
+.zone{
+  position:absolute;
+  border:1.5px dashed #0078d4;
+  background:rgba(0,120,212,.022);
+  z-index:1;
+}
+.zone-lbl{
+  position:absolute;top:-11px;left:12px;
+  background:#fff;padding:0 6px;
+  font-size:10.5px;font-weight:700;color:#0078d4;
+  letter-spacing:.04em;white-space:nowrap;
+}
+.nd{
+  position:absolute;
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  width:88px;z-index:10;
+}
+.ni{
+  width:56px;height:56px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;
+}
+.nn{font-size:11.5px;font-weight:600;color:#202124;text-align:center;line-height:1.3;max-width:88px;}
+.ns{font-size:10px;color:#5f6368;text-align:center;line-height:1.25;max-width:88px;}
+.person{position:absolute;z-index:10;display:flex;flex-direction:column;align-items:center;gap:5px;}
+.person-lbl{font-size:12.5px;font-weight:600;color:#202124;}
+.arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:8;}
+.albl{
+  position:absolute;z-index:15;
+  font-size:9.5px;color:#5f6368;
+  background:rgba(255,255,255,.93);padding:1px 4px;
+  white-space:nowrap;
+}
+.rlist{position:absolute;z-index:10;display:flex;flex-direction:column;gap:6px;}
+.ritem{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 10px;
+  background:#fff;border:1px solid #e0e0e0;
+  font-size:11px;font-weight:500;color:#202124;
+  white-space:nowrap;
+}
+/* Deployment option header inside ingress zone */
+.opt-hdr{
+  position:absolute;z-index:10;
+  font-size:9.5px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;
+  padding:2px 6px;border-radius:3px;
+}
+/* Deployment legend card */
+.legend{
+  position:absolute;z-index:10;
+  left:20px;top:22px;
+  border:1px solid #e0e0e0;
+  background:#fff;
+  padding:12px 14px;
+  width:272px;
+  font-size:10px;color:#202124;line-height:1.7;
+}
+.legend-title{font-size:10.5px;font-weight:700;color:#0078d4;margin-bottom:6px;}
+.fn{
+  position:absolute;bottom:8px;right:10px;width:510px;
+  font-size:9px;color:#6b7280;line-height:1.6;
+  border-top:1px solid #e5e7eb;padding-top:5px;
+}
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<!-- ══════════════════════════════════
+     SVG ARROW OVERLAY  (viewBox = 1440 × 1240)
+══════════════════════════════════ -->
+<svg class="arrows" viewBox="0 0 1440 1240" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="10" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0,0 L10,5 L0,10z" fill="#3c4043"/>
+  </marker>
+  <marker id="ahb" viewBox="0 0 10 10" refX="10" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0,0 L10,5 L0,10z" fill="#0078d4"/>
+  </marker>
+</defs>
+
+<!-- ─── User → Client applications ─── -->
+<path d="M 1020 68 L 800 68 V 116"  fill="none" stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+<path d="M 1020 68 L 940 68 V 116"  fill="none" stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+<path d="M 1020 68 H 1080 V 116"    fill="none" stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+<path d="M 1020 68 H 1220 V 116"    fill="none" stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+
+<!-- ─── Browser → Gateway/Ingress zone ─── -->
+<path d="M 800 172 V 364"
+      fill="none" stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+<!-- Mobile → Ingress (dashed) -->
+<path d="M 940 172 V 364"
+      fill="none" stroke="#3c4043" stroke-width="1.2"
+      stroke-dasharray="5,3" marker-end="url(#ah)"/>
+
+<!-- ─── Ingress/LB → API Gateway ─── -->
+<path d="M 450 496 V 514"
+      fill="none" stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+
+<!-- ─── Ingress zone option divider ─── -->
+<line x1="670" y1="370" x2="670" y2="492"
+      stroke="#b0bec5" stroke-width="1.2" stroke-dasharray="4,3"/>
+
+<!-- ─── Frontend SPA → API Gateway ─── -->
+<line x1="300" y1="670" x2="320" y2="670"
+      stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+
+<!-- ─── API Gateway → Auth Service ─── -->
+<line x1="450" y1="824" x2="450" y2="844"
+      stroke="#0078d4" stroke-width="1.5" marker-end="url(#ahb)"/>
+
+<!-- ─── API Gateway → Microservices ─── -->
+<line x1="580" y1="676" x2="600" y2="676"
+      stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+
+<!-- ─── Microservices → Network Equipment (config / NETCONF / SSH) ─── -->
+<line x1="1020" y1="588" x2="1040" y2="588"
+      stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+<!-- Network Equipment → Microservices (SNMP traps / Syslog, dashed) -->
+<line x1="1040" y1="614" x2="1020" y2="614"
+      stroke="#3c4043" stroke-width="1.2"
+      stroke-dasharray="5,3" marker-end="url(#ah)"/>
+
+<!-- ─── Microservices → External Integrations ─── -->
+<line x1="1020" y1="850" x2="1040" y2="850"
+      stroke="#0078d4" stroke-width="1.5" marker-end="url(#ahb)"/>
+
+<!-- ─── Microservices → Data Infrastructure ─── -->
+<line x1="810" y1="1004" x2="810" y2="1060"
+      stroke="#3c4043" stroke-width="1.5" marker-end="url(#ah)"/>
+
+<!-- ─── Auth Service → Data Infrastructure (sessions / cache, dashed) ─── -->
+<path d="M 450 1029 L 540 1060"
+      fill="none" stroke="#3c4043" stroke-width="1.2"
+      stroke-dasharray="4,3" marker-end="url(#ah)"/>
+</svg>
+
+<!-- ── Arrow labels ── -->
+<div class="albl" style="left:810px;top:255px">HTTPS / TLS termination</div>
+<div class="albl" style="left:456px;top:501px">HTTP (proxied)</div>
+<div class="albl" style="left:301px;top:657px">REST</div>
+<div class="albl" style="left:413px;top:830px">/auth/* routes</div>
+<div class="albl" style="left:582px;top:663px">REST · circuit breaker</div>
+<div class="albl" style="left:1022px;top:573px">NETCONF / SSH / TR-069</div>
+<div class="albl" style="left:1022px;top:617px">SNMP traps · Syslog events</div>
+<div class="albl" style="left:1022px;top:837px">alarm · KPI forwarding</div>
+<div class="albl" style="left:814px;top:1030px">events · R/W</div>
+<div class="albl" style="left:454px;top:1042px">sessions · cache</div>
+
+<!-- ══════════════════════════════════
+     DEPLOYMENT LEGEND  (top-left)
+══════════════════════════════════ -->
+<div class="legend">
+  <div class="legend-title">Deployment Options</div>
+  <div>
+    <b>Option A — VM / Docker Compose</b><br/>
+    &nbsp;&nbsp;Load balancer: <b>HAProxy</b><br/>
+    &nbsp;&nbsp;Services: Docker containers on bare-metal / VM<br/>
+    <br/>
+    <b>Option B — Kubernetes On-Premises</b><br/>
+    &nbsp;&nbsp;Ingress: <b>NGINX Gateway Fabric</b> (K8s Gateway API)<br/>
+    &nbsp;&nbsp;Services: K8s pods (fully connected, air-gapped, or hybrid)
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     NOC ENGINEER (person)   cx = 1020
+══════════════════════════════════ -->
+<div class="person" style="left:1001px;top:20px">
+  <svg width="38" height="46" viewBox="0 0 38 46">
+    <circle cx="19" cy="13" r="11" fill="none" stroke="#202124" stroke-width="2"/>
+    <path d="M2 45 C2 30 36 30 36 45" fill="none" stroke="#202124" stroke-width="2" stroke-linecap="round"/>
+  </svg>
+  <span class="person-lbl">NOC Engineer</span>
+</div>
+
+<!-- ══════════════════════════════════
+     ZONE 1 — CLIENT APPLICATIONS
+     left=720 top=76 w=700 h=268
+══════════════════════════════════ -->
+<div class="zone" style="left:720px;top:76px;width:700px;height:268px">
+  <span class="zone-lbl">Client applications</span>
+</div>
+
+<div class="nd" style="left:760px;top:116px">
+  <div class="ni" style="background:#e3f2fd">
+    <svg width="34" height="28" viewBox="0 0 36 28">
+      <rect x="2" y="2" width="32" height="20" rx="2" fill="none" stroke="#0078d4" stroke-width="1.6"/>
+      <path d="M0 22 H36" stroke="#0078d4" stroke-width="1.4"/>
+      <path d="M12 26 H24" stroke="#0078d4" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">Browser</div>
+  <div class="ns">React SPA</div>
+</div>
+
+<div class="nd" style="left:900px;top:116px">
+  <div class="ni" style="background:#e8f5e9">
+    <svg width="22" height="34" viewBox="0 0 24 36">
+      <rect x="2" y="2" width="20" height="32" rx="4" fill="none" stroke="#188038" stroke-width="1.6"/>
+      <circle cx="12" cy="28" r="2.5" fill="#188038"/>
+      <path d="M8 7 H16" stroke="#188038" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">Mobile</div>
+  <div class="ns">App</div>
+</div>
+
+<div class="nd" style="left:1040px;top:116px">
+  <div class="ni" style="background:#fff8e1">
+    <svg width="34" height="28" viewBox="0 0 36 28">
+      <rect x="2" y="2" width="32" height="24" rx="2" fill="none" stroke="#f59e0b" stroke-width="1.5"/>
+      <path d="M8 22 V16 M13 22 V12 M20 22 V14 M27 22 V8"
+            stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">Reports</div>
+  <div class="ns">PDF · XLSX · CSV</div>
+</div>
+
+<div class="nd" style="left:1180px;top:116px">
+  <div class="ni" style="background:#fce4ec">
+    <svg width="34" height="28" viewBox="0 0 36 28">
+      <rect x="2" y="4" width="32" height="20" rx="2" fill="none" stroke="#c62828" stroke-width="1.5"/>
+      <path d="M7 12 H29 M7 18 H22" stroke="#c62828" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">NOC Console</div>
+  <div class="ns">Alarm · Topology</div>
+</div>
+
+<!-- Row 2 -->
+<div class="nd" style="left:840px;top:238px">
+  <div class="ni" style="background:#f3e5f5">
+    <svg width="30" height="28" viewBox="0 0 30 30">
+      <path d="M5 24 C5 13 25 13 25 24 L25 26 H5Z" fill="none" stroke="#9c27b0" stroke-width="1.5"/>
+      <path d="M9 26 C9 30 21 30 21 26"            fill="none" stroke="#9c27b0" stroke-width="1.3"/>
+      <circle cx="15" cy="7" r="3.5" fill="none" stroke="#9c27b0" stroke-width="1.4"/>
+    </svg>
+  </div>
+  <div class="nn">SSE alerts</div>
+  <div class="ns">Real-time push</div>
+</div>
+
+<div class="nd" style="left:1080px;top:238px">
+  <div class="ni" style="background:#eceff1">
+    <svg width="34" height="28" viewBox="0 0 34 28">
+      <circle cx="8"  cy="14" r="4.5" fill="none" stroke="#455a64" stroke-width="1.4"/>
+      <circle cx="26" cy="7"  r="4.5" fill="none" stroke="#455a64" stroke-width="1.4"/>
+      <circle cx="26" cy="21" r="4.5" fill="none" stroke="#455a64" stroke-width="1.4"/>
+      <path d="M12.5 14 H21.5 M23 9.5 L14 13 M23 18.5 L14 15" stroke="#455a64" stroke-width="1.3"/>
+    </svg>
+  </div>
+  <div class="nn">Netcool · SIEM</div>
+  <div class="ns">API consumers</div>
+</div>
+
+<!-- ══════════════════════════════════
+     ZONE 2 — GATEWAY / INGRESS LAYER
+     left=320 top=364 w=700 h=132  (bottom=496)
+     Option A (HAProxy) | Option B (NGINX)
+══════════════════════════════════ -->
+<div class="zone" style="left:320px;top:364px;width:700px;height:132px;border-color:#546e7a;background:rgba(84,110,122,.025)">
+  <span class="zone-lbl" style="color:#546e7a">Gateway / Ingress Layer — choose deployment option</span>
+</div>
+
+<!-- Option A label -->
+<div class="opt-hdr" style="left:338px;top:376px;color:#e65100;background:#fff3e0">
+  Option A &nbsp;·&nbsp; VM / Docker Compose
+</div>
+
+<!-- HAProxy -->
+<div class="nd" style="left:396px;top:404px">
+  <div class="ni" style="background:#fff3e0">
+    <svg width="38" height="34" viewBox="0 0 38 34">
+      <!-- HAProxy shape: shield with H -->
+      <path d="M19 2 L35 8 V20 C35 28 27 33 19 34 C11 33 3 28 3 20 V8 Z"
+            fill="#ff6f00" opacity=".15"/>
+      <path d="M19 2 L35 8 V20 C35 28 27 33 19 34 C11 33 3 28 3 20 V8 Z"
+            fill="none" stroke="#e65100" stroke-width="1.6"/>
+      <path d="M12 12 V22 M26 12 V22 M12 17 H26"
+            stroke="#e65100" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">HAProxy</div>
+  <div class="ns">Load balancer<br/>Port 80 / 443</div>
+</div>
+
+<!-- Option B label -->
+<div class="opt-hdr" style="left:688px;top:376px;color:#1565c0;background:#e3f2fd">
+  Option B &nbsp;·&nbsp; Kubernetes On-Premises
+</div>
+
+<!-- NGINX Gateway Fabric -->
+<div class="nd" style="left:806px;top:404px">
+  <div class="ni" style="background:#e8f5e9">
+    <svg width="38" height="34" viewBox="0 0 38 34">
+      <rect x="3" y="3" width="32" height="28" rx="3"
+            fill="#1b5e20" opacity=".1"/>
+      <rect x="3" y="3" width="32" height="28" rx="3"
+            fill="none" stroke="#2e7d32" stroke-width="1.6"/>
+      <path d="M10 24 L18 10 L18 24 M18 10 L28 24 L28 10"
+            stroke="#2e7d32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M3 18 H35" stroke="#2e7d32" stroke-width="1" stroke-dasharray="3,2" opacity=".5"/>
+    </svg>
+  </div>
+  <div class="nn">NGINX Gateway</div>
+  <div class="ns">Gateway Fabric<br/>K8s Gateway API</div>
+</div>
+
+<!-- ══════════════════════════════════
+     ZONE 3 — FRONTEND / OPERATIONS CONSOLE
+     left=20 top=514 w=280 h=400  (bottom=914)
+══════════════════════════════════ -->
+<div class="zone" style="left:20px;top:514px;width:280px;height:400px">
+  <span class="zone-lbl">Operations Console · React SPA / TypeScript</span>
+</div>
+
+<div class="nd" style="left:116px;top:558px">
+  <div class="ni" style="background:#e3f2fd">
+    <svg width="38" height="34" viewBox="0 0 42 38">
+      <polygon points="21,3 39,34 3,34" fill="none" stroke="#0078d4" stroke-width="1.6"/>
+      <polygon points="21,11 32,31 10,31" fill="#61dafb" opacity=".3"/>
+    </svg>
+  </div>
+  <div class="nn">React + Vite</div>
+  <div class="ns">TypeScript · D3.js</div>
+</div>
+
+<div class="rlist" style="left:36px;top:660px;width:248px">
+  <div class="ritem">
+    <svg width="15" height="15" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="6" fill="none" stroke="#0078d4" stroke-width="1.3"/>
+      <circle cx="8" cy="8" r="3" fill="none" stroke="#0078d4" stroke-width="1.1"/>
+    </svg>
+    Topology view (D3 graph)
+  </div>
+  <div class="ritem">
+    <svg width="15" height="15" viewBox="0 0 16 16">
+      <path d="M2 12 L5 8 L8 10 L11 5 L14 7"
+            fill="none" stroke="#f44336" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+    Alarm console
+  </div>
+  <div class="ritem">
+    <svg width="15" height="15" viewBox="0 0 16 16">
+      <rect x="2" y="8" width="2" height="6" fill="#34a853"/>
+      <rect x="6" y="5" width="2" height="9" fill="#34a853"/>
+      <rect x="10" y="3" width="2" height="11" fill="#34a853"/>
+      <rect x="14" y="1" width="2" height="13" fill="#34a853"/>
+    </svg>
+    KPI dashboard
+  </div>
+  <div class="ritem">
+    <svg width="15" height="15" viewBox="0 0 16 16">
+      <rect x="2" y="2" width="12" height="12" rx="2"
+            fill="none" stroke="#f59e0b" stroke-width="1.2"/>
+      <path d="M5 6h6M5 9h4" stroke="#f59e0b" stroke-width="1.1" stroke-linecap="round"/>
+    </svg>
+    Config manager
+  </div>
+  <div class="ritem">
+    <svg width="15" height="15" viewBox="0 0 16 16">
+      <path d="M4 4h8v8H4z" fill="none" stroke="#7b1fa2" stroke-width="1.2"/>
+      <path d="M6 7h4M6 9.5h3" stroke="#7b1fa2" stroke-width="1.1" stroke-linecap="round"/>
+    </svg>
+    Inventory + Reports
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     ZONE 4 — API GATEWAY
+     left=320 top=514 w=260 h=310  (bottom=824)
+══════════════════════════════════ -->
+<div class="zone" style="left:320px;top:514px;width:260px;height:310px">
+  <span class="zone-lbl">API Gateway · Node.js / Express · Port 3010</span>
+</div>
+
+<div class="nd" style="left:406px;top:558px">
+  <div class="ni" style="background:#e8f5e9">
+    <svg width="36" height="36" viewBox="0 0 38 38">
+      <path d="M19 3 L35 12 V26 L19 35 L3 26 V12 Z"
+            fill="#34a853" opacity=".15"/>
+      <path d="M19 3 L35 12 V26 L19 35 L3 26 V12 Z"
+            fill="none" stroke="#34a853" stroke-width="1.6"/>
+      <path d="M19 14 V22 M19 25 V27" stroke="#34a853" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">API Gateway</div>
+  <div class="ns">9 route domains</div>
+</div>
+
+<div class="rlist" style="left:334px;top:652px;width:240px">
+  <div class="ritem">
+    <svg width="15" height="15" viewBox="0 0 16 16">
+      <path d="M8 2 L13 5 V11 L8 14 L3 11 V5 Z"
+            fill="none" stroke="#0078d4" stroke-width="1.2"/>
+    </svg>
+    JWT RS256 · RBAC (3 roles)
+  </div>
+  <div class="ritem">
+    <svg width="15" height="15" viewBox="0 0 16 16">
+      <rect x="2" y="2" width="12" height="12" rx="2"
+            fill="none" stroke="#f59e0b" stroke-width="1.2"/>
+      <path d="M5 8h6" stroke="#f59e0b" stroke-width="1.2"/>
+    </svg>
+    Rate limit · 100 req / 60 s
+  </div>
+  <div class="ritem">
+    <svg width="15" height="15" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="5" fill="none" stroke="#f44336" stroke-width="1.2"/>
+      <path d="M8 5v3l2 1.5" stroke="#f44336" stroke-width="1.1" stroke-linecap="round"/>
+    </svg>
+    Circuit breaker 80% / 30 s
+  </div>
+  <div class="ritem">
+    <svg width="15" height="15" viewBox="0 0 16 16">
+      <path d="M2 4h12M4 8h8M6 12h4" stroke="#5f6368" stroke-width="1.2" stroke-linecap="round"/>
+    </svg>
+    Helmet · CORS · logging
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     ZONE 5 — AUTH SERVICE
+     left=320 top=844 w=260 h=185  (bottom=1029)
+══════════════════════════════════ -->
+<div class="zone" style="left:320px;top:844px;width:260px;height:185px">
+  <span class="zone-lbl">Auth Service · LDAP + JWT RS256</span>
+</div>
+
+<div class="nd" style="left:330px;top:882px">
+  <div class="ni" style="background:#fce4ec">
+    <svg width="34" height="34" viewBox="0 0 36 36">
+      <path d="M18 3 L31 9 V20 C31 27 25 32 18 34 C11 32 5 27 5 20 V9 Z"
+            fill="none" stroke="#e91e63" stroke-width="1.6"/>
+      <circle cx="18" cy="16" r="4" fill="none" stroke="#e91e63" stroke-width="1.4"/>
+      <path d="M10 30 C10 23 26 23 26 30" fill="none" stroke="#e91e63" stroke-width="1.4"/>
+    </svg>
+  </div>
+  <div class="nn">Auth Service</div>
+  <div class="ns">Node.js</div>
+</div>
+
+<div class="nd" style="left:462px;top:882px">
+  <div class="ni" style="background:#e8eaed">
+    <svg width="32" height="36" viewBox="0 0 32 38">
+      <rect x="4" y="4" width="24" height="30" rx="2"
+            fill="none" stroke="#5f6368" stroke-width="1.5"/>
+      <path d="M9 13h14M9 19h14M9 25h9"
+            stroke="#5f6368" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">LDAP</div>
+  <div class="ns">Directory server</div>
+</div>
+
+<div style="position:absolute;left:334px;top:978px;z-index:10;
+            font-size:10px;color:#5f6368;line-height:1.6">
+  → MongoDB (sessions)<br/>
+  → Redis (token cache · lockout)
+</div>
+
+<!-- ══════════════════════════════════
+     ZONE 6 — MICROSERVICES PLATFORM
+     left=600 top=514 w=420 h=490  (bottom=1004)
+     Generic — runs on Docker or K8s
+══════════════════════════════════ -->
+<div class="zone" style="left:600px;top:514px;width:420px;height:490px">
+  <span class="zone-lbl">Microservices Platform · containerised (Docker or K8s)</span>
+</div>
+
+<!-- Cols: cx=670 → left=626 | cx=810 → left=766 | cx=950 → left=906 -->
+
+<!-- ── Row 1 top=560 ── -->
+<div class="nd" style="left:626px;top:560px">
+  <div class="ni" style="background:#ffebee">
+    <svg width="32" height="32" viewBox="0 0 30 32">
+      <path d="M15 3 C7 3 3 9 3 15 C3 23 15 30 15 30 C15 30 27 23 27 15 C27 9 23 3 15 3Z"
+            fill="none" stroke="#f44336" stroke-width="1.5"/>
+      <path d="M15 11 V18 M15 21 V23" stroke="#f44336" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">Alarm</div>
+  <div class="ns">Java / Spring</div>
+</div>
+
+<div class="nd" style="left:766px;top:560px">
+  <div class="ni" style="background:#e8f5e9">
+    <svg width="32" height="32" viewBox="0 0 32 32">
+      <rect x="4" y="4" width="24" height="24" rx="3"
+            fill="none" stroke="#34a853" stroke-width="1.5"/>
+      <path d="M9 16 L13 20 L23 10"
+            stroke="#34a853" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <div class="nn">Inventory</div>
+  <div class="ns">Java / Spring</div>
+</div>
+
+<div class="nd" style="left:906px;top:560px">
+  <div class="ni" style="background:#e0f7fa">
+    <svg width="32" height="32" viewBox="0 0 30 32">
+      <rect x="3" y="6" width="24" height="20" rx="2"
+            fill="none" stroke="#00bcd4" stroke-width="1.5"/>
+      <path d="M7 11 H23 M7 17 H17 M7 23 H13"
+            stroke="#00bcd4" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">Event Collector</div>
+  <div class="ns">Go · SNMP/Syslog</div>
+</div>
+
+<!-- ── Row 2 top=672 ── -->
+<div class="nd" style="left:626px;top:672px">
+  <div class="ni" style="background:#e3f2fd">
+    <svg width="32" height="32" viewBox="0 0 30 30">
+      <path d="M3 24 L8 14 L13 18 L18 10 L23 13 L27 5"
+            fill="none" stroke="#2196f3" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <div class="nn">KPI Query</div>
+  <div class="ns">Node.js</div>
+</div>
+
+<div class="nd" style="left:766px;top:672px">
+  <div class="ni" style="background:#e0f2f1">
+    <svg width="32" height="32" viewBox="0 0 30 30">
+      <circle cx="15" cy="15" r="11" fill="none" stroke="#009688" stroke-width="1.5"/>
+      <circle cx="15" cy="15" r="5.5" fill="none" stroke="#009688" stroke-width="1.3"/>
+      <circle cx="15" cy="15" r="2"   fill="#009688"/>
+    </svg>
+  </div>
+  <div class="nn">Topology</div>
+  <div class="ns">Go 1.22</div>
+</div>
+
+<div class="nd" style="left:906px;top:672px">
+  <div class="ni" style="background:#e8eaf6">
+    <svg width="32" height="32" viewBox="0 0 30 30">
+      <path d="M15 4 L28 22 H2 Z" fill="none" stroke="#3f51b5" stroke-width="1.5"/>
+      <path d="M9 18 L13 10 L17 18"  fill="none" stroke="#3f51b5" stroke-width="1.2"/>
+      <path d="M15 22 V27" stroke="#3f51b5" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">KPI Aggregation</div>
+  <div class="ns">Java / Spring</div>
+</div>
+
+<!-- ── Row 3 top=784 ── -->
+<div class="nd" style="left:626px;top:784px">
+  <div class="ni" style="background:#eceff1">
+    <svg width="32" height="32" viewBox="0 0 30 30">
+      <circle cx="15" cy="15" r="11" fill="none" stroke="#607d8b" stroke-width="1.5"/>
+      <circle cx="15" cy="15" r="4.5" fill="none" stroke="#607d8b" stroke-width="1.3"/>
+      <path d="M15 4V7 M15 23V26 M4 15H7 M23 15H26" stroke="#607d8b" stroke-width="1.4"/>
+    </svg>
+  </div>
+  <div class="nn">Discovery</div>
+  <div class="ns">Go · mTLS</div>
+</div>
+
+<div class="nd" style="left:766px;top:784px">
+  <div class="ni" style="background:#fff3e0">
+    <svg width="32" height="32" viewBox="0 0 30 30">
+      <rect x="2" y="8" width="26" height="14" rx="2"
+            fill="none" stroke="#ff9800" stroke-width="1.5"/>
+      <path d="M2 14 H28 M10 14 V22 M20 14 V22" stroke="#ff9800" stroke-width="1.2"/>
+    </svg>
+  </div>
+  <div class="nn">Config Push</div>
+  <div class="ns">Python · NETCONF</div>
+</div>
+
+<div class="nd" style="left:906px;top:784px">
+  <div class="ni" style="background:#f3e5f5">
+    <svg width="32" height="32" viewBox="0 0 30 30">
+      <path d="M6 22 C6 12 24 12 24 22 L24 24 H6Z" fill="none" stroke="#9c27b0" stroke-width="1.5"/>
+      <path d="M10 24 C10 28 20 28 20 24"          fill="none" stroke="#9c27b0" stroke-width="1.3"/>
+      <circle cx="15" cy="6" r="3.5" fill="none" stroke="#9c27b0" stroke-width="1.4"/>
+    </svg>
+  </div>
+  <div class="nn">Notification</div>
+  <div class="ns">Node.js · SSE</div>
+</div>
+
+<!-- ── Row 4 top=896 ── -->
+<div class="nd" style="left:626px;top:896px">
+  <div class="ni" style="background:#ede7f6">
+    <svg width="32" height="32" viewBox="0 0 30 30">
+      <path d="M7 4 H18 L24 10 V26 H7 Z"
+            fill="none" stroke="#673ab7" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M18 4 V10 H24" fill="none" stroke="#673ab7" stroke-width="1.5"/>
+      <path d="M11 15 H21 M11 19 H18 M11 23 H16"
+            stroke="#673ab7" stroke-width="1.2" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">Report Service</div>
+  <div class="ns">Python / FastAPI</div>
+</div>
+
+<!-- ══════════════════════════════════
+     ZONE 7 — DATA INFRASTRUCTURE
+     left=320 top=1060 w=700 h=100  (bottom=1160)
+══════════════════════════════════ -->
+<div class="zone" style="left:320px;top:1060px;width:700px;height:100px">
+  <span class="zone-lbl">Data Infrastructure</span>
+</div>
+
+<!-- Kafka -->
+<div class="nd" style="left:348px;top:1076px;width:100px">
+  <div class="ni" style="background:#ffebee;height:44px;border-radius:7px">
+    <svg width="44" height="22" viewBox="0 0 44 22">
+      <rect x="2"  y="7" width="13" height="8" rx="1.5" fill="#d32f2f" opacity=".55"/>
+      <rect x="17" y="2" width="13" height="8" rx="1.5" fill="#d32f2f" opacity=".8"/>
+      <rect x="29" y="11" width="13" height="8" rx="1.5" fill="#d32f2f"/>
+    </svg>
+  </div>
+  <div class="nn" style="font-size:10.5px">Apache Kafka</div>
+</div>
+
+<!-- MongoDB -->
+<div class="nd" style="left:498px;top:1076px;width:100px">
+  <div class="ni" style="background:#e8f5e9;height:44px;border-radius:7px">
+    <svg width="30" height="28" viewBox="0 0 28 28">
+      <ellipse cx="14" cy="6" rx="10" ry="4"
+               fill="#4caf50" opacity=".25" stroke="#4caf50" stroke-width="1.2"/>
+      <path d="M4 6 V20 C4 23 8 25 14 25 C20 25 24 23 24 20 V6"
+            fill="none" stroke="#4caf50" stroke-width="1.2"/>
+      <path d="M4 13 C4 16 8 18 14 18 C20 18 24 16 24 13"
+            fill="none" stroke="#4caf50" stroke-width="1.1"/>
+    </svg>
+  </div>
+  <div class="nn" style="font-size:10.5px">MongoDB 7.0</div>
+</div>
+
+<!-- ScyllaDB -->
+<div class="nd" style="left:648px;top:1076px;width:100px">
+  <div class="ni" style="background:#e3f2fd;height:44px;border-radius:7px">
+    <svg width="30" height="26" viewBox="0 0 28 26">
+      <rect x="3" y="3" width="22" height="20" rx="2"
+            fill="#1565c0" opacity=".18" stroke="#1565c0" stroke-width="1.2"/>
+      <path d="M7 9H21M7 13H21M7 18H14"
+            stroke="#1565c0" stroke-width="1.2" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn" style="font-size:10.5px">ScyllaDB</div>
+</div>
+
+<!-- Redis -->
+<div class="nd" style="left:798px;top:1076px;width:100px">
+  <div class="ni" style="background:#ffebee;height:44px;border-radius:7px">
+    <svg width="30" height="26" viewBox="0 0 28 26">
+      <ellipse cx="14" cy="6" rx="10" ry="4"
+               fill="#f44336" opacity=".25" stroke="#f44336" stroke-width="1.2"/>
+      <path d="M4 6 V20 C4 22 8 24 14 24 C20 24 24 22 24 20 V6"
+            fill="none" stroke="#f44336" stroke-width="1.2"/>
+    </svg>
+  </div>
+  <div class="nn" style="font-size:10.5px">Redis 7.0</div>
+</div>
+
+<!-- ══════════════════════════════════
+     ZONE 8 — NETWORK EQUIPMENT
+     left=1040 top=514 w=380 h=270  (bottom=784)
+══════════════════════════════════ -->
+<div class="zone" style="left:1040px;top:514px;width:380px;height:270px">
+  <span class="zone-lbl">Network Equipment · BTS / CPE / IDU</span>
+</div>
+
+<div class="nd" style="left:1086px;top:558px">
+  <div class="ni" style="background:#fff8e1">
+    <svg width="32" height="38" viewBox="0 0 30 40">
+      <path d="M15 2 V34" stroke="#ff6f00" stroke-width="2" stroke-linecap="round"/>
+      <path d="M5 11 C5 5 10 3 15 2 C20 3 25 5 25 11"
+            fill="none" stroke="#ff6f00" stroke-width="1.5"/>
+      <path d="M8 16 C8 11 11 9 15 9 C19 9 22 11 22 16"
+            fill="none" stroke="#ff6f00" stroke-width="1.4"/>
+      <rect x="12" y="34" width="6" height="6" rx="1"
+            fill="#ff6f00" opacity=".3" stroke="#ff6f00" stroke-width="1.2"/>
+    </svg>
+  </div>
+  <div class="nn">BTS / gNB</div>
+  <div class="ns">4G / 5G tower</div>
+</div>
+
+<div class="nd" style="left:1286px;top:558px">
+  <div class="ni" style="background:#e0f2f1">
+    <svg width="34" height="28" viewBox="0 0 36 28">
+      <rect x="2" y="6" width="32" height="16" rx="2"
+            fill="none" stroke="#00695c" stroke-width="1.5"/>
+      <path d="M2 14 H36 M11 6 V22 M25 6 V22" stroke="#00695c" stroke-width="1.2"/>
+      <circle cx="18" cy="20" r="2.5" fill="#00695c" opacity=".4"/>
+    </svg>
+  </div>
+  <div class="nn">CPE</div>
+  <div class="ns">Customer Premises</div>
+</div>
+
+<div class="nd" style="left:1086px;top:680px">
+  <div class="ni" style="background:#e3f2fd">
+    <svg width="36" height="26" viewBox="0 0 38 26">
+      <rect x="2" y="4" width="34" height="18" rx="2"
+            fill="none" stroke="#1976d2" stroke-width="1.5"/>
+      <path d="M2 12 H40" stroke="#1976d2" stroke-width="1.2"/>
+      <rect x="5" y="6"  width="7" height="4" rx="1" fill="#1976d2" opacity=".3"/>
+      <rect x="27" y="6" width="7" height="4" rx="1" fill="#1976d2" opacity=".3"/>
+    </svg>
+  </div>
+  <div class="nn">IDU</div>
+  <div class="ns">Indoor Unit</div>
+</div>
+
+<div class="nd" style="left:1286px;top:680px">
+  <div class="ni" style="background:#eceff1">
+    <svg width="34" height="32" viewBox="0 0 32 32">
+      <circle cx="16" cy="16" r="11" fill="none" stroke="#455a64" stroke-width="1.5"/>
+      <circle cx="16" cy="16" r="5.5" fill="none" stroke="#455a64" stroke-width="1.3"/>
+      <path d="M16 5V9 M16 23V27 M5 16H9 M23 16H27" stroke="#455a64" stroke-width="1.4"/>
+    </svg>
+  </div>
+  <div class="nn">KPI Collector</div>
+  <div class="ns">Go · SNMP poll</div>
+</div>
+
+<!-- ══════════════════════════════════
+     ZONE 9 — EXTERNAL INTEGRATIONS
+     left=1040 top=804 w=380 h=240  (bottom=1044)
+══════════════════════════════════ -->
+<div class="zone" style="left:1040px;top:804px;width:380px;height:240px">
+  <span class="zone-lbl">External Integrations</span>
+</div>
+
+<div class="nd" style="left:1086px;top:848px">
+  <div class="ni" style="background:#eceff1">
+    <svg width="34" height="28" viewBox="0 0 36 28">
+      <rect x="2" y="4" width="32" height="20" rx="2"
+            fill="none" stroke="#37474f" stroke-width="1.5"/>
+      <path d="M7 11H29M7 17H23" stroke="#37474f" stroke-width="1.3" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="nn">IBM Netcool</div>
+  <div class="ns">Alarm export</div>
+</div>
+
+<div class="nd" style="left:1286px;top:848px">
+  <div class="ni" style="background:#e3f2fd">
+    <svg width="32" height="28" viewBox="0 0 30 30">
+      <path d="M3 24 L8 14 L13 18 L18 8 L23 12 L27 4"
+            fill="none" stroke="#0d47a1" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <div class="nn">Ericsson MyComm</div>
+  <div class="ns">KPI export</div>
+</div>
+
+<div class="nd" style="left:1086px;top:960px">
+  <div class="ni" style="background:#fce4ec">
+    <svg width="32" height="26" viewBox="0 0 30 26">
+      <rect x="2" y="4" width="26" height="16" rx="2"
+            fill="none" stroke="#c62828" stroke-width="1.4"/>
+      <path d="M2 10 L15 18 L28 10" fill="none" stroke="#c62828" stroke-width="1.4"/>
+    </svg>
+  </div>
+  <div class="nn">Syslog / SIEM</div>
+  <div class="ns">Audit events</div>
+</div>
+
+<div class="nd" style="left:1286px;top:960px">
+  <div class="ni" style="background:#e8f5e9">
+    <svg width="32" height="28" viewBox="0 0 30 28">
+      <rect x="4" y="2" width="22" height="24" rx="3"
+            fill="none" stroke="#2e7d32" stroke-width="1.4"/>
+      <circle cx="15" cy="10" r="3.5" fill="none" stroke="#2e7d32" stroke-width="1.3"/>
+      <path d="M9 24 C9 17 21 17 21 24" fill="none" stroke="#2e7d32" stroke-width="1.3"/>
+    </svg>
+  </div>
+  <div class="nn">Mobinet</div>
+  <div class="ns">Inventory sync</div>
+</div>
+
+<!-- ══════════════════════════════════
+     FOOTNOTES
+══════════════════════════════════ -->
+<div class="fn">
+  (1) Option A (VM/Docker): HAProxy handles TLS termination and load-balancing across Docker-hosted service containers.<br/>
+  (2) Option B (K8s on-prem): NGINX Gateway Fabric handles TLS, routing, and K8s Gateway API — air-gapped, fully connected, or hybrid modes supported.<br/>
+  (3) Auth Service: LDAP-first with MongoDB fallback; locks after 3 failed attempts.<br/>
+  (4) Topology Service currently proxied via in-memory stub (2,000-device cap) in dev; real Go service available via circuit-breaker proxy.<br/>
+  (5) Dashed arrows = async/event-driven &nbsp;·&nbsp; Solid arrows = synchronous REST/auth.
+</div>
+
+</div><!-- .canvas -->
+</body>
+</html>

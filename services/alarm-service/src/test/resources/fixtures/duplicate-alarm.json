@@ -1,0 +1,14 @@
+{
+  "alarmId": "dup-alarm-001",
+  "deviceId": "cpe-010",
+  "deviceType": "CPE",
+  "alarmType": "INTERFACE_DOWN",
+  "alarmName": "Interface Down",
+  "severity": "MAJOR",
+  "source": "SNMP",
+  "sourceSystem": "SNMP_POLLER",
+  "description": "Duplicate alarm for deduplication testing",
+  "networkId": "net-002",
+  "correlationId": "corr-dup-001",
+  "eventId": "evt-dup-001"
+}

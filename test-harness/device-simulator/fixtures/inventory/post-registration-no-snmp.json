@@ -1,0 +1,26 @@
+{
+  "_comment": "Fixture: generic device without SNMP — both triggers SKIPPED (NO_SNMP) (WO-031)",
+  "scenario": "no_snmp_management_protocol",
+  "registrationInput": {
+    "runId": "run-031-003",
+    "inventoryDeviceId": "inv-post-003",
+    "ip": "10.50.1.102",
+    "correlationId": "corr-post-003",
+    "sysObjectID": "",
+    "discoveryParadigm": "GENERIC_SNMP",
+    "managementProtocols": ["HTTP", "HTTPS"],
+    "isRediscovery": false
+  },
+  "expectedActions": [
+    {
+      "actionType": "INITIAL_KPI_COLLECTION",
+      "expectedStatus": "SKIPPED",
+      "expectedReason": "NO_SNMP_MANAGEMENT_PROTOCOL"
+    },
+    {
+      "actionType": "INITIAL_TOPOLOGY_WALK",
+      "expectedStatus": "SKIPPED",
+      "expectedReason": "NO_TOPOLOGY_PROTOCOL"
+    }
+  ]
+}

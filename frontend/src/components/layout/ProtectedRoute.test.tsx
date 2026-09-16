@@ -19,7 +19,10 @@ describe('ProtectedRoute', () => {
       isAuthenticated,
       isLoading: false,
       user: isAuthenticated ? { id: '1', username: 'u', email: 'e', role: role as never, fullName: 'F' } : null,
+      mfaChallenge: null,
       login: vi.fn(),
+      completeMfaChallenge: vi.fn(),
+      cancelMfaChallenge: vi.fn(),
       logout: vi.fn(),
     });
   }

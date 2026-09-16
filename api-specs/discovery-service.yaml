@@ -9,6 +9,8 @@ info:
 servers:
   - url: /api/v1
     description: Via API Gateway
+  - url: /discovery/v1
+    description: Southbound UBR call-home (direct to discovery service, mTLS)
 
 security:
   - BearerAuth: []
@@ -46,12 +48,58 @@ paths:
         "200": { description: Scan status, content: { application/json: { schema: { $ref: '#/components/schemas/ScanJob' } } } }
         "404": { description: Not found, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
 
+  # ── WO-011: Generic discovery scope intake ───────────────────────────────
+  /discovery/runs:
+    post:
+      tags: [discovery]
+      summary: Create a generic discovery run with validated scope (operator+)
+      operationId: createDiscoveryRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoveryRunRequest' }
+      responses:
+        "201":
+          description: Discovery run created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscoveryRunResponse' }
+        "400":
+          description: Validation error (malformed CIDR, invalid IP, empty scope, duplicates, size limit exceeded)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScopeValidationError' }
+        "401": { description: Unauthenticated request }
+        "403": { description: Insufficient permissions (requires operator+ role) }
+        "500": { description: Internal server error }
+
   /discovery/check-in:
     post:
       tags: [discovery]
-      summary: Device self-registration at first boot (mTLS endpoint)
+      summary: Device self-registration at first boot (mTLS + HMAC-signed endpoint — WO-015)
       operationId: deviceCheckIn
       security: []
+      parameters:
+        - in: header
+          name: Auth-Info
+          required: true
+          schema: { type: string }
+          description: >
+            Structured identity header. Format: id=<mac-addr>,timestamp=<unix-epoch-secs>,nonce=<30-char-nonce>.
+            The id field carries the device MAC address (used to look up the per-device HMAC secret).
+            The timestamp must be within ±5 minutes of server time (configurable via HMAC_TIMESTAMP_TOLERANCE_SECS).
+            The nonce must be exactly 30 characters and is stored with a 10-minute TTL for replay protection.
+          example: "id=AA:BB:CC:DD:EE:FF,timestamp=1700000000,nonce=ABCDEFGHIJ1234567890abcdefghij"
+        - in: header
+          name: Auth-Signature
+          required: true
+          schema: { type: string }
+          description: >
+            HMAC-SHA256 hex digest of the canonical message:
+            Auth-Info_header_value + "\n" + request_path + "\n" + raw_body_bytes.
+            Computed with the per-device secret provisioned at manufacture time.
+          example: "a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
       requestBody:
         required: true
         content:
@@ -59,8 +107,270 @@ paths:
             schema: { $ref: 'components.yaml#/components/schemas/BirthCertificate' }
       responses:
         "201": { description: Device registered and birth certificate stored, content: { application/json: { schema: { $ref: '#/components/schemas/CheckInResponse' } } } }
-        "400": { description: Invalid payload or HMAC failure, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "400": { description: Malformed payload or missing required fields, content: { application/json: { schema: { $ref: '#/components/schemas/SouthboundErrorBody' } } } }
+        "401":
+          description: >
+            HMAC signature invalid. Possible causes: wrong secret, expired timestamp (>±5 min),
+            replayed nonce, or tampered body. Emits southbound.hmac.failure audit event.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
         "409": { description: Device already registered, content: { application/json: { schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' } } } }
+        "403": { description: Discovery mode disabled, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryModeDisabledError' } } } }
+        "429":
+          description: Rate limited — include Retry-After and X-Retry-Jitter-Max headers
+          headers:
+            Retry-After:        { schema: { type: integer }, description: Seconds to wait before retrying }
+            X-Retry-Jitter-Max: { schema: { type: integer }, description: Max jitter seconds to add to retry delay }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "462":
+          description: HMAC-SHA256 integrity check failed — no retry headers (auth failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "495":
+          description: mTLS certificate invalid — no retry headers (auth failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "496":
+          description: No mTLS certificate presented — no retry headers (auth failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "302":
+          description: NMS failover redirect — follow Location header
+          headers:
+            Location: { schema: { type: string, format: uri }, description: Alternate NMS discovery endpoint }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "503":
+          description: Service temporarily unavailable — retry with Retry-After
+          headers:
+            Retry-After:        { schema: { type: integer } }
+            X-Retry-Jitter-Max: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+
+  # ── WO-009: Southbound service registry for UBR call-home ─────────────────
+  /kv/services:
+    get:
+      tags: [southbound]
+      summary: Southbound service registry for UBR call-home bootstrap (mTLS only)
+      operationId: getServiceRegistry
+      description: >
+        Returns Consul-style KV entries with base64-encoded service metadata for
+        authentication, check-in, event, and realtime WebSocket services. UBR devices
+        use this endpoint during bootstrap to discover service locations without hardcoded URLs.
+      security: []
+      parameters:
+        - name: recurse
+          in: query
+          required: true
+          description: Must be "1" per firmware contract
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: Service registry KV array (Consul-style)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KVEntry' }
+        "400":
+          description: Bad request (recurse != 1 or malformed query)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "503":
+          description: Service registry configuration incomplete
+          headers:
+            Retry-After:        { schema: { type: integer } }
+            X-Retry-Jitter-Max: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+
+  # ── WO-010: Device authentication for per-device HMAC secrets ────────────
+  /device:
+    post:
+      tags: [southbound]
+      summary: Device authentication endpoint for UBR call-home (mTLS only)
+      operationId: authenticateDevice
+      description: >
+        Issues a unique per-device HMAC secret to authorized UBR devices. Devices exchange
+        serial number and MAC address for a signing secret used in subsequent call-home requests.
+        Unauthorized or removed devices receive HTTP 404 with no secret disclosure.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeviceAuthRequest' }
+      responses:
+        "200":
+          description: Device authenticated successfully, secret issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceAuthResponse' }
+        "400":
+          description: Bad request (malformed payload or validation failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "404":
+          description: Device not found or not authorized
+          content:
+            application/json:
+              schema: { $ref: 'components.yaml#/components/schemas/ErrorResponse' }
+        "503":
+          description: Authentication service unavailable (secret store failure)
+          headers:
+            Retry-After:        { schema: { type: integer } }
+            X-Retry-Jitter-Max: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SouthboundErrorBody' }
+
+  /discovery/modes:
+    get:
+      tags: [discovery]
+      summary: Get current discovery mode state for both modes (any authenticated role)
+      operationId: getDiscoveryModes
+      responses:
+        "200":
+          description: Current discovery mode policies
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscoveryModesResponse' }
+        "401": { description: Unauthorized }
+
+  /discovery/modes/{mode}:
+    parameters:
+      - name: mode
+        in: path
+        required: true
+        schema: { type: string, enum: [UBR_CALL_HOME, GENERIC_DISCOVERY] }
+    put:
+      tags: [discovery]
+      summary: Update discovery mode policy (admin only)
+      operationId: updateDiscoveryMode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateDiscoveryModeRequest' }
+      responses:
+        "200": { description: Updated policy, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryModeEntry' } } } }
+        "400": { description: Malformed rolloutLevel or missing reason }
+        "403": { description: Non-admin caller or denied audit event }
+
+  # ── WO-017: Rediscovery schedules ────────────────────────────────────────────
+  /discovery/schedules:
+    get:
+      tags: [discovery]
+      summary: List all rediscovery schedules (operator+)
+      operationId: listRediscoverySchedules
+      responses:
+        "200":
+          description: List of schedules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schedules:
+                    type: array
+                    items: { $ref: '#/components/schemas/RediscoverySchedule' }
+    post:
+      tags: [discovery]
+      summary: Create a rediscovery schedule (operator+)
+      operationId: createRediscoverySchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRediscoveryScheduleRequest' }
+      responses:
+        "201":
+          description: Schedule created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RediscoverySchedule' }
+        "400": { description: Invalid cron expression or missing scope }
+        "409": { description: A schedule for this scope already exists }
+
+  /discovery/schedules/{scheduleId}:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [discovery]
+      summary: Delete a rediscovery schedule (operator+)
+      operationId: deleteRediscoverySchedule
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Schedule not found }
+
+  /discovery/schedules/{scheduleId}/run:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [discovery]
+      summary: Manually trigger a scheduled rediscovery run (operator+)
+      operationId: triggerRediscoveryRun
+      responses:
+        "202":
+          description: Run triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId: { type: string, format: uuid }
+        "404": { description: Schedule not found }
+
+  /discovery/schedules/{scheduleId}/history:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [discovery]
+      summary: Get history of past rediscovery runs for a schedule (operator+)
+      operationId: getRediscoveryHistory
+      responses:
+        "200":
+          description: Run history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items: { $ref: '#/components/schemas/RediscoveryHistoryEntry' }
+        "404": { description: Schedule not found }
 
 components:
   securitySchemes:
@@ -91,3 +401,544 @@ components:
         deviceId:   { type: string, format: uuid }
         registered: { type: boolean }
         message:    { type: string }
+
+    DiscoveryModeEntry:
+      type: object
+      properties:
+        enabled:        { type: boolean }
+        rolloutLevel:   { type: string, enum: [disabled, beta, production] }
+        betaSignoffRef: { type: ["string", "null"] }
+        updatedBy:      { type: ["string", "null"] }
+        updatedAt:      { type: ["string", "null"], format: date-time }
+        reason:         { type: ["string", "null"] }
+
+    DiscoveryModesResponse:
+      type: object
+      properties:
+        genericDiscovery: { $ref: '#/components/schemas/DiscoveryModeEntry' }
+        ubrCallHome:      { $ref: '#/components/schemas/DiscoveryModeEntry' }
+
+    UpdateDiscoveryModeRequest:
+      type: object
+      required: [reason]
+      properties:
+        enabled:        { type: boolean }
+        rolloutLevel:   { type: string, enum: [disabled, beta, production] }
+        betaSignoffRef: { type: string }
+        reason:         { type: string, minLength: 1 }
+
+    DiscoveryModeDisabledError:
+      type: object
+      properties:
+        error:   { type: string, example: DISCOVERY_MODE_DISABLED }
+        mode:    { type: string }
+        message: { type: string }
+
+    # ── WO-011: Generic discovery scope intake models ────────────────────────
+    ScopeEntry:
+      description: Single discovery target (CIDR, IP, or seed device)
+      type: object
+      required: [type, value]
+      properties:
+        type:            { type: string, enum: [CIDR, IP, SEED] }
+        value:           { type: string, example: "192.168.1.0/24" }
+        label:           { type: string, example: "Office Network" }
+        managementPorts: { type: array, items: { type: integer }, example: [22, 161] }
+        tags:            { type: array, items: { type: string }, example: ["production", "core"] }
+
+    DiscoveryRunRequest:
+      description: Request payload for creating a discovery run
+      type: object
+      required: [scope]
+      properties:
+        scope: { type: array, items: { $ref: '#/components/schemas/ScopeEntry' }, minItems: 1 }
+
+    DiscoveryRunResponse:
+      description: Successful discovery run creation response
+      type: object
+      required: [runId, status, normalizedScope, createdBy, createdAt, validationSummary]
+      properties:
+        runId:             { type: string, format: uuid }
+        status:            { type: string, enum: [CREATED, QUEUED] }
+        normalizedScope:   { type: array, items: { $ref: '#/components/schemas/ScopeEntry' } }
+        createdBy:         { type: string, example: "user@example.com" }
+        createdAt:         { type: string, format: date-time }
+        validationSummary: { type: string, example: "Validated 3 scope entries" }
+
+    ScopeValidationError:
+      description: Validation error response for invalid scope
+      type: object
+      required: [status, reason, message]
+      properties:
+        status:  { type: string, example: "error" }
+        reason:  { type: string, example: "VALIDATION_ERROR" }
+        message: { type: string, example: "invalid discovery scope" }
+        fieldErrors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:   { type: string, example: "scope[0].value" }
+              message: { type: string, example: "invalid CIDR notation: 192.168.1/24" }
+
+    # ── WO-010: Device authentication models ─────────────────────────────────
+    DeviceAuthRequest:
+      description: Request payload for device authentication (WO-010)
+      type: object
+      required: [serialNumber, macAddress, deviceType]
+      properties:
+        serialNumber:    { type: string, minLength: 8, maxLength: 32, example: "UBR-BTS-12345678" }
+        macAddress:      { type: string, pattern: "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", example: "AA:BB:CC:DD:EE:FF" }
+        deviceType:      { type: string, enum: [BTS, CPE, IDU], example: "BTS" }
+        firmwareVersion: { type: string, example: "v2.3.1" }
+
+    DeviceAuthResponse:
+      description: Successful authentication response with per-device secret (WO-010)
+      type: object
+      required: [deviceId, serialNumber, macAddress, secret, issuedAt, keyVersion]
+      properties:
+        deviceId:     { type: string, format: uuid }
+        serialNumber: { type: string }
+        macAddress:   { type: string }
+        secret:       { type: string, description: "HMAC signing secret (NEVER log this value)" }
+        issuedAt:     { type: string, format: date-time }
+        expiresAt:    { type: string, format: date-time, nullable: true }
+        keyVersion:   { type: integer, minimum: 1 }
+
+    # ── WO-009: Service registry models ─────────────────────────────────────
+    KVEntry:
+      description: Consul-style KV entry for service registry
+      type: object
+      required: [LockIndex, Key, Flags, Value, CreateIndex, ModifyIndex]
+      properties:
+        LockIndex:   { type: integer, example: 0 }
+        Key:         { type: string, example: "services/auth" }
+        Flags:       { type: integer, example: 0 }
+        Value:       { type: string, description: Base64-encoded ServiceMetadata JSON }
+        CreateIndex: { type: integer }
+        ModifyIndex: { type: integer }
+
+    ServiceMetadata:
+      description: Decoded Value payload for each service (base64-encoded in KVEntry.Value)
+      type: object
+      required: [scheme, address]
+      properties:
+        scheme:       { type: string, enum: [http, https, ws, wss] }
+        address:      { type: string, description: "host:port or IPv6 literal [::1]:port" }
+        auth_path:    { type: string, example: "/api/v1/auth/device" }
+        checkin_path: { type: string, example: "/api/v1/checkin" }
+        event_path:   { type: string, example: "/api/v1/events" }
+        ws_path:      { type: string, example: "/ws/v1/realtime" }
+
+    # ── WO-005: Southbound error shapes ─────────────────────────────────────
+    SouthboundErrorBody:
+      description: >
+        Canonical error response body returned by discovery-service southbound endpoints.
+        Auth failures (462, 495, 496) never carry retry hints.
+        Retryable errors (429, 503) include Retry-After and X-Retry-Jitter-Max response headers.
+        Failover (302) includes a Location header pointing to the alternate NMS endpoint.
+        Secrets, HMAC values, and private keys must never appear in this body.
+      type: object
+      required: [reason, category, message, correlationId, timestamp]
+      properties:
+        reason:
+          type: string
+          enum:
+            - BAD_REQUEST
+            - MTLS_CERT_INVALID
+            - MTLS_NO_CERT
+            - HMAC_INVALID
+            - RATE_LIMITED
+            - NMS_FAILOVER
+            - INTERNAL_ERROR
+            - SERVICE_UNAVAILABLE
+        category:
+          type: string
+          enum: [auth_failure, retryable, redirect, client_error, server_error]
+        message:        { type: string }
+        correlationId:  { type: string, description: Request correlation ID for log tracing }
+        timestamp:      { type: string, format: date-time }
+
+    SouthboundErrorEvent:
+      description: >
+        Kafka message published to audit/alarm topics when a southbound security
+        or protocol error occurs. Must never include secrets, HMAC values, or keys.
+      type: object
+      required: [eventId, correlationId, errorReason, errorCategory, httpStatus, timestamp, serviceId]
+      properties:
+        eventId:        { type: string, format: uuid }
+        correlationId:  { type: string }
+        deviceSerial:   { type: string, description: Sanitised device identity only — no credentials }
+        errorReason:    { type: string }
+        errorCategory:  { type: string }
+        httpStatus:     { type: integer }
+        timestamp:      { type: string, format: date-time }
+        serviceId:      { type: string }
+
+    # ── WO-017: Rediscovery schedule models ────────────────────────────────────
+
+    CreateRediscoveryScheduleRequest:
+      type: object
+      required: [cronExpression, scopeRunId]
+      properties:
+        cronExpression:  { type: string, example: "0 2 * * *", description: Standard 5-field cron expression }
+        scopeRunId:      { type: string, format: uuid, description: Discovery run ID whose scope will be re-executed }
+        notifyOnChange:  { type: boolean, default: true, description: Emit audit event when changes are detected }
+        disabled:        { type: boolean, default: false }
+
+    RediscoverySchedule:
+      type: object
+      properties:
+        scheduleId:     { type: string, format: uuid }
+        cronExpression: { type: string }
+        scopeRunId:     { type: string, format: uuid }
+        notifyOnChange: { type: boolean }
+        disabled:       { type: boolean }
+        createdAt:      { type: string, format: date-time }
+        updatedAt:      { type: string, format: date-time }
+        lastRunAt:      { type: string, format: date-time, nullable: true }
+
+    DeviceChange:
+      type: object
+      properties:
+        ip:        { type: string }
+        changeType: { type: string, enum: [added, removed, modified] }
+        before:    { type: object, additionalProperties: true }
+        after:     { type: object, additionalProperties: true }
+
+    RediscoveryHistoryEntry:
+      type: object
+      properties:
+        runId:          { type: string, format: uuid }
+        scheduleId:     { type: string, format: uuid }
+        triggeredAt:    { type: string, format: date-time }
+        completedAt:    { type: string, format: date-time, nullable: true }
+        status:         { type: string, enum: [running, completed, failed] }
+        hostsScanned:   { type: integer }
+        changesDetected: { type: integer }
+        changes:
+          type: array
+          items: { $ref: '#/components/schemas/DeviceChange' }
+
+    # ── WO-030: Generic device classification and registration schemas ─────────
+
+    GenericDeviceClassificationResult:
+      description: >
+        Classification outcome from SNMP fingerprint data for a single discovered host.
+        classificationStatus drives registration eligibility.
+        DEFERRED_UNSUPPORTED and CLASSIFICATION_ERROR devices must not become managed records.
+      type: object
+      required: [classificationStatus, discoveryParadigm, identityAuthority, onlineStateAuthority]
+      properties:
+        classificationStatus:
+          type: string
+          enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR]
+          description: Outcome of OID / sysDescr classification.
+        deferReason:
+          type: string
+          nullable: true
+          description: >
+            Operator-visible reason for deferral. Never contains credential material.
+            Values: OID_NOT_IN_RELEASE_SCOPE, INSUFFICIENT_FINGERPRINT_EVIDENCE,
+            FINGERPRINT_TIMEOUT, FINGERPRINT_AUTH_FAILED, CLASSIFICATION_ERROR.
+        vendor:         { type: string, nullable: true, example: "Cisco" }
+        model:          { type: string, nullable: true, example: "Catalyst 2960-X" }
+        genericDeviceType:
+          type: string
+          nullable: true
+          enum: [ROUTER, SWITCH, FIREWALL, SERVER, UNKNOWN]
+          description: Generic device category — not the same as UBR deviceType (BTS/CPE).
+        capabilityProfileId:
+          type: string
+          nullable: true
+          example: cap-cisco-switch-v1
+        driverId:
+          type: string
+          nullable: true
+          example: drv-cisco-snmp-v1
+        sysObjectID:
+          type: string
+          nullable: true
+          description: SNMP sysObjectID fingerprint evidence (never used as a credential).
+        sysDescr:
+          type: string
+          nullable: true
+          description: SNMP sysDescr fingerprint evidence.
+        discoveryParadigm:
+          type: string
+          enum: [GENERIC_SNMP]
+          description: Always GENERIC_SNMP for this endpoint.
+        identityAuthority:
+          type: string
+          enum: [GENERIC]
+          description: Always GENERIC — UBR call-home identity is never overwritten.
+        onlineStateAuthority:
+          type: string
+          enum: [GENERIC]
+          description: Always GENERIC for generic-discovered devices.
+        correlationId:
+          type: string
+          nullable: true
+          description: Correlation ID linking back to the fingerprinting run.
+
+    GenericRegistrationResult:
+      description: >
+        Outcome of a single generic device registration attempt in inventory.
+        REGISTERED means the device is now a managed inventory record.
+        DEFERRED means the device was not registered (classification failed or is out of scope).
+        EVENT_PUBLISH_FAILED means the device was registered but downstream Kafka notification failed.
+      type: object
+      required: [registrationStatus, classificationStatus]
+      properties:
+        registrationStatus:
+          type: string
+          enum: [REGISTERED, DEFERRED, ERROR]
+        classificationStatus:
+          type: string
+          enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR]
+        inventoryDeviceId:
+          type: string
+          nullable: true
+          description: Inventory device ID assigned on REGISTERED status.
+        deferReason:
+          type: string
+          nullable: true
+        correlationId:  { type: string, nullable: true }
+        eventPublishFailed:
+          type: boolean
+          description: >
+            True when the device was registered but the downstream Kafka event
+            publication failed. The device IS registered; operators should
+            check Kafka dead-letter queues for reconciliation.
+
+    GenericDeviceClassifiedEvent:
+      description: >
+        Kafka message published to discovery.classification.results after SNMP fingerprint
+        classification. Authority metadata is always GENERIC_SNMP. Credential material
+        must never appear in this schema.
+      type: object
+      required: [eventId, runId, ip, classificationStatus, discoveryParadigm, identityAuthority, onlineStateAuthority, timestamp]
+      properties:
+        eventId:              { type: string, format: uuid }
+        runId:                { type: string, format: uuid }
+        ip:                   { type: string }
+        correlationId:        { type: string, nullable: true }
+        classificationStatus: { type: string, enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR] }
+        deferReason:          { type: string, nullable: true }
+        vendor:               { type: string, nullable: true }
+        model:                { type: string, nullable: true }
+        genericDeviceType:    { type: string, nullable: true }
+        capabilityProfileId:  { type: string, nullable: true }
+        driverId:             { type: string, nullable: true }
+        sysObjectID:          { type: string, nullable: true }
+        sysDescr:             { type: string, nullable: true }
+        discoveryParadigm:    { type: string, enum: [GENERIC_SNMP] }
+        identityAuthority:    { type: string, enum: [GENERIC] }
+        onlineStateAuthority: { type: string, enum: [GENERIC] }
+        timestamp:            { type: string, format: date-time }
+
+    GenericInventoryRegisteredEvent:
+      description: >
+        Kafka message published to inventory.device.registered after inventory persistence.
+        Emitted for both REGISTERED and DEFERRED outcomes for full observability.
+      type: object
+      required: [eventId, runId, registrationStatus, classificationStatus, discoveryParadigm, identityAuthority, onlineStateAuthority, timestamp]
+      properties:
+        eventId:              { type: string, format: uuid }
+        runId:                { type: string, format: uuid }
+        inventoryDeviceId:    { type: string, nullable: true }
+        ip:                   { type: string }
+        correlationId:        { type: string, nullable: true }
+        registrationStatus:   { type: string, enum: [REGISTERED, DEFERRED, ERROR] }
+        classificationStatus: { type: string, enum: [RECOGNISED, DEFERRED_UNSUPPORTED, CLASSIFICATION_ERROR] }
+        deferReason:          { type: string, nullable: true }
+        vendor:               { type: string, nullable: true }
+        model:                { type: string, nullable: true }
+        genericDeviceType:    { type: string, nullable: true }
+        capabilityProfileId:  { type: string, nullable: true }
+        driverId:             { type: string, nullable: true }
+        sysObjectID:          { type: string, nullable: true }
+        sysDescr:             { type: string, nullable: true }
+        discoveryParadigm:    { type: string, enum: [GENERIC_SNMP] }
+        identityAuthority:    { type: string, enum: [GENERIC] }
+        onlineStateAuthority: { type: string, enum: [GENERIC] }
+        timestamp:            { type: string, format: date-time }
+
+    # ── WO-031: Post-registration trigger schemas ──────────────────────────────
+
+    PostRegistrationActionResult:
+      description: >
+        Outcome of a single post-registration downstream action
+        (initial KPI collection or initial topology walk).
+      type: object
+      required: [actionType, status, attemptedAt]
+      properties:
+        actionType:
+          type: string
+          enum: [INITIAL_KPI_COLLECTION, INITIAL_TOPOLOGY_WALK]
+        status:
+          type: string
+          enum: [ACCEPTED, SKIPPED, FAILED, PENDING]
+          description: >
+            ACCEPTED — trigger published to downstream service.
+            SKIPPED — trigger suppressed (rediscovery deduplication, no supported protocol, non-generic paradigm).
+            FAILED — trigger publication failed; device IS registered; check Kafka dead-letter queue.
+            PENDING — trigger scheduled but not yet confirmed.
+        reason:
+          type: string
+          nullable: true
+          description: >
+            Operator-visible skip/fail reason. Never contains credentials.
+            Values: REDISCOVERY_DEDUPLICATION, NO_SNMP_MANAGEMENT_PROTOCOL, NO_TOPOLOGY_PROTOCOL,
+            PUBLISH_FAILED, NON_GENERIC_PARADIGM.
+        downstreamReferenceId: { type: string, nullable: true }
+        idempotencyKey:
+          type: string
+          nullable: true
+          description: "Format: runId:deviceId — stable across retries for the same discovery run."
+        attemptedAt:  { type: string, format: date-time }
+        correlationId: { type: string, nullable: true }
+
+    InitialKpiCollectionTriggerEvent:
+      description: >
+        Kafka message published to kpi.initial.collection.trigger after generic device registration.
+        Never includes SNMP community strings or other credential material.
+      type: object
+      required: [eventId, runId, inventoryDeviceId, ip, idempotencyKey, discoveryParadigm, timestamp]
+      properties:
+        eventId:             { type: string, format: uuid }
+        runId:               { type: string, format: uuid }
+        inventoryDeviceId:   { type: string }
+        ip:                  { type: string }
+        correlationId:       { type: string, nullable: true }
+        idempotencyKey:      { type: string, description: "runId:deviceId — prevents duplicate collection jobs" }
+        sysObjectID:         { type: string, nullable: true }
+        discoveryParadigm:   { type: string, enum: [GENERIC_SNMP] }
+        driverId:            { type: string, nullable: true }
+        capabilityProfileId: { type: string, nullable: true }
+        protocolHints:
+          type: array
+          items: { type: string }
+          description: Protocols confirmed open — used to select collection method (SNMP, NETCONF, etc.)
+        isRediscovery:       { type: boolean }
+        timestamp:           { type: string, format: date-time }
+
+    InitialTopologyWalkTriggerEvent:
+      description: >
+        Kafka message published to topology.initial.walk.trigger after generic device registration.
+      type: object
+      required: [eventId, runId, inventoryDeviceId, ip, idempotencyKey, discoveryParadigm, timestamp]
+      properties:
+        eventId:            { type: string, format: uuid }
+        runId:              { type: string, format: uuid }
+        inventoryDeviceId:  { type: string }
+        ip:                 { type: string }
+        correlationId:      { type: string, nullable: true }
+        idempotencyKey:     { type: string }
+        sysObjectID:        { type: string, nullable: true }
+        discoveryParadigm:  { type: string, enum: [GENERIC_SNMP] }
+        supportedProtocols:
+          type: array
+          items: { type: string }
+          description: "Protocols supporting LLDP/CDP walk: SNMP_NEIGHBOR, LLDP"
+        isRediscovery:      { type: boolean }
+        timestamp:          { type: string, format: date-time }
+
+    # ── WO-029: Southbound protocol error response ─────────────────────────────
+    # All southbound-facing endpoints (registry, authentication, check-in, realtime)
+    # return this exact shape for every non-2xx response.
+    # Firmware must key on `reason` and `action` to make safe retry/re-auth decisions.
+    # SECURITY: No credential values, HMAC signatures, certificate data, or stack traces
+    # may appear in any field of this response.
+
+    SouthboundErrorResponse:
+      description: >
+        Canonical UBR southbound error response.
+        Every non-2xx southbound endpoint response conforms to this shape.
+        Firmware uses `reason` + `action` for retry/re-auth routing.
+      type: object
+      required: [reason, category, action, message, correlationId, timestamp]
+      properties:
+        reason:
+          type: string
+          description: Machine-readable error reason constant.
+          enum:
+            - BAD_REQUEST
+            - MTLS_CERT_INVALID
+            - MTLS_NO_CERT
+            - HMAC_INVALID
+            - RATE_LIMITED
+            - NMS_FAILOVER
+            - INTERNAL_ERROR
+            - SERVICE_UNAVAILABLE
+        category:
+          type: string
+          description: >
+            Error category for routing decisions.
+            auth_failure — no retry; device must re-enroll.
+            retryable — apply Retry-After + jitter before next attempt.
+            redirect — connect to Location header endpoint.
+            client_error — fix the request before retrying.
+            server_error — contact NMS support.
+          enum: [auth_failure, retryable, redirect, client_error, server_error]
+        action:
+          type: string
+          description: Recommended next action for firmware.
+          enum:
+            - fix_request
+            - re_authenticate
+            - retry_with_backoff
+            - connect_to_alternate
+            - contact_support
+        message:
+          type: string
+          description: >
+            Human-readable error description.
+            NEVER contains credential values, signatures, secrets, or stack traces.
+        correlationId:
+          type: string
+          description: Request correlation identifier for operator troubleshooting.
+        timestamp:
+          type: string
+          format: date-time
+          description: UTC time the error was generated.
+      example:
+        reason: HMAC_INVALID
+        category: auth_failure
+        action: re_authenticate
+        message: "HMAC-SHA256 message integrity check failed. Device must re-enrol to obtain a new credential."
+        correlationId: "req-abc-123"
+        timestamp: "2026-09-07T08:00:00Z"
+
+  # ── WO-029: Southbound retry and failover response headers ─────────────────
+  # Applied to 429 RATE_LIMITED and 503 SERVICE_UNAVAILABLE responses only.
+  # Auth failures (462, 495, 496) and 5xx errors MUST NOT include these headers.
+  headers:
+    RetryAfter:
+      description: >
+        Number of seconds the device must wait before retrying (WO-029).
+        Present on 429 and 503 responses only.
+        Default: 15 seconds.
+      schema:
+        type: integer
+        minimum: 1
+        example: 15
+    XRetryJitterMax:
+      description: >
+        Maximum random jitter seconds the device should add to Retry-After (WO-029).
+        Present on 429 and 503 responses only.
+        Default: 30 seconds.
+      schema:
+        type: integer
+        minimum: 0
+        example: 30
+    LocationFailover:
+      description: >
+        Alternate Discovery Service endpoint URL for NMS_FAILOVER (302) responses (WO-029).
+        Points to GET /discovery/v1/kv/services?recurse=1 on the standby NMS instance.
+        Firmware MUST validate the URL before connecting.
+      schema:
+        type: string
+        format: uri
+        example: "https://nms-standby.ubrnms.internal/discovery/v1/kv/services?recurse=1"

@@ -75,3 +75,59 @@ describe('rbac.middleware — requireRole', () => {
     expect(res.status).toHaveBeenCalledWith(403);
   });
 });
+
+// ── WO-025: Auditor role permission tests ─────────────────────────────────────
+describe('rbac.middleware — ACTION_PERMISSIONS (WO-025 auditor)', () => {
+  const { checkActionPermission, ACTION_PERMISSIONS } = rbacMiddleware;
+
+  test('auditor may read audit evidence', () => {
+    expect(checkActionPermission('audit.evidence.read', { role: 'auditor' })).toBe(true);
+  });
+
+  test('auditor may export audit evidence', () => {
+    expect(checkActionPermission('audit.evidence.export', { role: 'auditor' })).toBe(true);
+  });
+
+  test('auditor may read inventory', () => {
+    expect(checkActionPermission('inventory.read', { role: 'auditor' })).toBe(true);
+  });
+
+  test('auditor may read alarms', () => {
+    expect(checkActionPermission('alarm.read', { role: 'auditor' })).toBe(true);
+  });
+
+  test('auditor may read config history', () => {
+    expect(checkActionPermission('config.history.read', { role: 'auditor' })).toBe(true);
+  });
+
+  test('auditor is denied user management', () => {
+    expect(checkActionPermission('user.manage', { role: 'auditor' })).toBe(false);
+  });
+
+  test('auditor is denied MFA reset', () => {
+    expect(checkActionPermission('user.mfa.reset', { role: 'auditor' })).toBe(false);
+  });
+
+  test('auditor is denied IDP config management', () => {
+    expect(checkActionPermission('idp.config.manage', { role: 'auditor' })).toBe(false);
+  });
+
+  test('auditor is denied config execution', () => {
+    expect(checkActionPermission('config.execute', { role: 'auditor' })).toBe(false);
+  });
+
+  test('auditor is denied discovery mode management', () => {
+    expect(checkActionPermission('discovery.mode.manage', { role: 'auditor' })).toBe(false);
+  });
+
+  test('admin may perform all listed actions', () => {
+    Object.keys(ACTION_PERMISSIONS).forEach((action) => {
+      expect(checkActionPermission(action, { role: 'admin' })).toBe(true);
+    });
+  });
+
+  test('unknown action is denied by default', () => {
+    expect(checkActionPermission('unknown.action.xyz', { role: 'auditor' })).toBe(false);
+    expect(checkActionPermission('unknown.action.xyz', { role: 'admin' })).toBe(false);
+  });
+});

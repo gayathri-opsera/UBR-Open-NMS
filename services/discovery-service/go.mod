@@ -1,9 +1,14 @@
 module github.com/airtel-ubrnms/discovery-service
 
-go 1.22
+go 1.23
 
 require (
+	github.com/airtel-ubrnms/shared-libs v0.0.0
 	github.com/confluentinc/confluent-kafka-go/v2 v2.4.0
 	github.com/go-chi/chi/v5 v5.0.12
 	github.com/google/uuid v1.6.0
+	github.com/gosnmp/gosnmp v1.37.0
+	github.com/robfig/cron/v3 v3.0.1
 )
+
+replace github.com/airtel-ubrnms/shared-libs => ../../shared-libs/go

@@ -1,0 +1,16 @@
+{
+  "alarmId": "mtls-alarm-001",
+  "deviceId": "unknown-cert-subject",
+  "deviceType": "UNKNOWN",
+  "alarmType": "SOUTHBOUND_AUTH_FAILURE",
+  "alarmName": "mTLS certificate invalid on southbound interface",
+  "severity": "CRITICAL",
+  "source": "SOUTHBOUND",
+  "sourceSystem": "DISCOVERY_SERVICE",
+  "errorCategory": "auth_failure",
+  "errorReason": "MTLS_CERT_INVALID",
+  "httpStatus": 495,
+  "description": "Southbound error: reason=MTLS_CERT_INVALID category=auth_failure httpStatus=495",
+  "correlationId": "corr-mtls-001",
+  "eventId": "evt-mtls-001"
+}

@@ -16,7 +16,6 @@ import { apiClient } from '../../api/client';
 
 type DashboardScope = 'BTS' | 'CPE' | 'BOTH';
 type ChartType = 'numeric' | 'line' | 'bar' | 'pie' | 'alarm';
-type WidgetScope = 'BTS' | 'CPE' | 'BOTH';
 type DataSource =
   | 'total_devices'   | 'online_devices'  | 'offline_devices'
   | 'active_alarms'   | 'critical_alarms' | 'alarm_rate'
@@ -29,7 +28,6 @@ interface Widget {
   title: string;
   chartType: ChartType;
   dataSource: DataSource;
-  scope: WidgetScope;
   span: 1 | 2;
 }
 
@@ -71,10 +69,9 @@ const ALARM_SEV_DATA = [
 ];
 
 const MODEL_DATA = [
-  { label: 'ENH700EXT', value: 4, color: '#3b82f6' },
-  { label: 'ENS620EXT', value: 5, color: '#22c55e' },
-  { label: 'ENS500EXT', value: 3, color: '#a855f7' },
-  { label: 'CB-350AC',  value: 2, color: '#f59e0b' },
+  { label: 'A60', value: 10, color: '#3b82f6' },
+  { label: 'A61', value: 8,  color: '#22c55e' },
+  { label: 'IDU', value: 4,  color: '#f59e0b' },
 ];
 
 const MOCK_ALARMS = [
@@ -89,19 +86,34 @@ const SCOPE_COLOR: Record<DashboardScope, string> = { BTS: '#3b82f6', CPE: '#22c
 
 // ── Widget renderer components ────────────────────────────────────────────────
 
-function NumericWidget({ widget, stats }: { widget: Widget; stats: Stats }) {
+function NumericWidget({ widget, stats, dashScope }: { widget: Widget; stats: Stats; dashScope: DashboardScope }) {
+  // Pick the right stat key based on dashboard scope
+  const scopedKey = (base: string) => {
+    if (dashScope === 'BTS') return `bts_${base}`;
+    if (dashScope === 'CPE') return `cpe_${base}`;
+    return base;
+  };
+
   const defaults: Record<DataSource, number> = {
     total_devices: 14, online_devices: 11, offline_devices: 3,
     active_alarms: 3, critical_alarms: 1, alarm_rate: 2,
     device_availability: 79, throughput_trend: 0, cpu_utilization: 0,
     alarm_severity: 0, devices_by_model: 0, devices_by_type: 0, alarm_list: 0,
   };
-  const val = stats[widget.dataSource] ?? defaults[widget.dataSource] ?? 0;
+
+  // Try scoped key first, fallback to base key, then default
+  const val = stats[scopedKey(widget.dataSource)]
+    ?? stats[widget.dataSource]
+    ?? defaults[widget.dataSource]
+    ?? 0;
+
   const isAlarm  = widget.dataSource === 'active_alarms' || widget.dataSource === 'critical_alarms';
   const isOff    = widget.dataSource === 'offline_devices';
   const color    = isAlarm && val > 0 ? '#fca5a5' : isOff && val > 0 ? '#fdba74' : '#86efac';
+
+  const onlineKey  = dashScope === 'BTS' ? 'bts_online_devices' : dashScope === 'CPE' ? 'cpe_online_devices' : 'online_devices';
   const subtitle = widget.dataSource === 'total_devices'
-    ? `${Math.round(((stats['online_devices'] ?? 11) / Math.max(val, 1)) * 100)}% online`
+    ? `${Math.round(((stats[onlineKey] ?? stats['online_devices'] ?? 11) / Math.max(val, 1)) * 100)}% online`
     : widget.dataSource === 'device_availability' ? `${val}% avg`
     : '';
   return (
@@ -213,13 +225,12 @@ function AlarmWidget() {
 
 // ── WidgetCard ─────────────────────────────────────────────────────────────────
 
-function WidgetCard({ widget, stats, onRemove, onResize, onScopeChange }: {
-  widget: Widget; stats: Stats;
+function WidgetCard({ widget, stats, dashScope, onRemove, onResize }: {
+  widget: Widget; stats: Stats; dashScope: DashboardScope;
   onRemove(): void; onResize(): void;
-  onScopeChange(scope: WidgetScope): void;
 }) {
-  const scopeColors: Record<WidgetScope, string> = { BTS: '#3b82f6', CPE: '#22c55e', BOTH: '#a855f7' };
-  const typeIcon: Record<ChartType, string> = { numeric: '#', line: '📈', bar: '📊', pie: '🥧', alarm: '🔔' };
+  const typeIcon: Record<ChartType, string> = { numeric: '🔢', line: '📈', bar: '📊', pie: '🥧', alarm: '🔔' };
+  const scopeColor = SCOPE_COLOR[dashScope];
 
   return (
     <div style={{
@@ -237,22 +248,14 @@ function WidgetCard({ widget, stats, onRemove, onResize, onScopeChange }: {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
         <div>
           <div style={{ color: 'var(--vf-text-primary)', fontWeight: 600, fontSize: 13 }}>{widget.title}</div>
-          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
             <span style={{ background: 'var(--vf-elevated)', border: '1px solid var(--vf-border-subtle)', color: 'var(--vf-text-muted)', padding: '1px 6px', borderRadius: 3, fontSize: 9, fontWeight: 600 }}>
               {typeIcon[widget.chartType]} {widget.chartType.toUpperCase()}
             </span>
-            {/* Widget scope toggle */}
-            {(['BTS', 'CPE', 'BOTH'] as WidgetScope[]).map((s) => (
-              <button key={s} onClick={() => onScopeChange(s)}
-                style={{
-                  background: widget.scope === s ? scopeColors[s] : 'var(--vf-elevated)',
-                  border: `1px solid ${widget.scope === s ? scopeColors[s] : 'var(--vf-border-subtle)'}`,
-                  color: widget.scope === s ? '#fff' : 'var(--vf-text-secondary)',
-                  padding: '1px 6px', borderRadius: 3, fontSize: 9, fontWeight: 700, cursor: 'pointer',
-                }}>
-                {s}
-              </button>
-            ))}
+            {/* Dashboard scope badge (read-only, inherits from dashboard) */}
+            <span style={{ background: `${scopeColor}22`, border: `1px solid ${scopeColor}`, color: scopeColor, padding: '1px 6px', borderRadius: 3, fontSize: 9, fontWeight: 700 }}>
+              {dashScope}
+            </span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
@@ -267,7 +270,7 @@ function WidgetCard({ widget, stats, onRemove, onResize, onScopeChange }: {
 
       {/* Body */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 140 }}>
-        {widget.chartType === 'numeric' && <NumericWidget widget={widget} stats={stats} />}
+        {widget.chartType === 'numeric' && <NumericWidget widget={widget} stats={stats} dashScope={dashScope} />}
         {widget.chartType === 'line'    && <LineWidget data={widget.dataSource === 'throughput_trend' ? THROUGHPUT : DAILY_AVAIL} />}
         {widget.chartType === 'pie'     && <PieWidget />}
         {widget.chartType === 'bar'     && <BarWidget />}
@@ -296,107 +299,129 @@ const DATA_SOURCES: { value: DataSource; label: string; types: ChartType[] }[] =
 
 const CHART_ICONS: Record<ChartType, string> = { numeric: '🔢', line: '📈', bar: '📊', pie: '🥧', alarm: '🔔' };
 
-function AddWidgetDialog({ dashScope, onAdd, onClose }: {
+function AddWidgetDialog({ dashScope, onAddMany, onClose }: {
   dashScope: DashboardScope;
-  onAdd(w: Omit<Widget, 'id'>): void;
+  onAddMany(widgets: Omit<Widget, 'id'>[]): void;
   onClose(): void;
 }) {
-  const [src, setSrc]         = useState<DataSource>('total_devices');
-  const [title, setTitle]     = useState('');
-  const [scope, setScope]     = useState<WidgetScope>(dashScope === 'BOTH' ? 'BOTH' : dashScope as WidgetScope);
-  const srcInfo               = DATA_SOURCES.find((d) => d.value === src)!;
-  const [chartType, setChartType] = useState<ChartType>(srcInfo.types[0]);
+  // selected: map from DataSource → chosen ChartType
+  const [selected, setSelected] = useState<Map<DataSource, ChartType>>(new Map());
 
-  const handleSrcChange = (v: DataSource) => {
-    setSrc(v);
-    const info = DATA_SOURCES.find((d) => d.value === v)!;
-    setChartType(info.types[0]);
+  const toggle = (ds: DataSource) => {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(ds)) {
+        next.delete(ds);
+      } else {
+        const info = DATA_SOURCES.find((d) => d.value === ds)!;
+        next.set(ds, info.types[0]);
+      }
+      return next;
+    });
   };
 
-  const inp: React.CSSProperties = {
-    background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)',
-    borderRadius: 4, color: 'var(--vf-text-primary)', padding: '6px 10px', fontSize: 13, width: '100%',
+  const setChartTypeFor = (ds: DataSource, ct: ChartType) => {
+    setSelected((prev) => new Map(prev).set(ds, ct));
   };
+
+  const handleAdd = () => {
+    if (selected.size === 0) return;
+    const widgets: Omit<Widget, 'id'>[] = [];
+    selected.forEach((chartType, dataSource) => {
+      const label = DATA_SOURCES.find((d) => d.value === dataSource)?.label ?? dataSource;
+      widgets.push({ title: label, chartType, dataSource, span: 1 });
+    });
+    onAddMany(widgets);
+  };
+
+  const scopeLabel = dashScope === 'BTS' ? 'BTS devices only' : dashScope === 'CPE' ? 'CPE devices only' : 'All devices (BTS + CPE)';
+  const scopeColor = SCOPE_COLOR[dashScope];
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 12, padding: 28, width: 480, boxShadow: '0 24px 64px rgba(0,0,0,0.5)' }}>
-        <div style={{ color: 'var(--vf-text-primary)', fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Add Widget</div>
-        <div style={{ color: 'var(--vf-text-muted)', fontSize: 13, marginBottom: 20 }}>Configure data source, chart type, and scope for this widget.</div>
+      <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 12, padding: 28, width: 560, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(0,0,0,0.5)' }}>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 22 }}>
-
-          {/* Data source */}
-          <div>
-            <label style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 }}>Data Source</label>
-            <select style={inp} value={src} onChange={(e) => handleSrcChange(e.target.value as DataSource)}>
-              {DATA_SOURCES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-            </select>
-          </div>
-
-          {/* Chart type */}
-          <div>
-            <label style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 }}>Chart Type</label>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
-              {(Object.keys(CHART_ICONS) as ChartType[]).map((t) => {
-                const avail = srcInfo.types.includes(t);
-                return (
-                  <button key={t} disabled={!avail} onClick={() => setChartType(t)}
-                    style={{
-                      background: chartType === t ? 'var(--vf-accent-subtle)' : 'none',
-                      border: `1px solid ${chartType === t ? 'var(--vf-accent)' : 'var(--vf-border-strong)'}`,
-                      color: chartType === t ? 'var(--vf-accent)' : avail ? 'var(--vf-text-secondary)' : 'var(--vf-text-dim)',
-                      padding: '5px 14px', borderRadius: 5, cursor: avail ? 'pointer' : 'not-allowed',
-                      fontSize: 12, fontWeight: 600, opacity: avail ? 1 : 0.35,
-                    }}>
-                    {CHART_ICONS[t]} {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Scope (BTS / CPE / Both) */}
-          <div>
-            <label style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 }}>Widget Scope</label>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {(['BTS', 'CPE', 'BOTH'] as WidgetScope[]).map((s) => {
-                const c = SCOPE_COLOR[s as DashboardScope];
-                return (
-                  <button key={s} onClick={() => setScope(s)}
-                    style={{
-                      background: scope === s ? `${c}22` : 'none',
-                      border: `1px solid ${scope === s ? c : 'var(--vf-border-strong)'}`,
-                      color: scope === s ? c : 'var(--vf-text-secondary)',
-                      padding: '5px 16px', borderRadius: 5, cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                    }}>
-                    {s}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ color: 'var(--vf-text-dim)', fontSize: 11, marginTop: 4 }}>
-              {scope === 'BTS' ? 'Shows BTS device data only.' : scope === 'CPE' ? 'Shows CPE device data only.' : 'Aggregates both BTS and CPE data.'}
-            </div>
-          </div>
-
-          {/* Custom title */}
-          <div>
-            <label style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 }}>Widget Title <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional)</span></label>
-            <input style={inp} value={title} onChange={(e) => setTitle(e.target.value)}
-              placeholder={DATA_SOURCES.find((d) => d.value === src)?.label ?? ''} />
+        {/* Header */}
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ color: 'var(--vf-text-primary)', fontWeight: 700, fontSize: 17 }}>Add Widgets</div>
+          <div style={{ color: 'var(--vf-text-muted)', fontSize: 13, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            Select one or more widgets to add. Data scope:
+            <span style={{ background: `${scopeColor}22`, border: `1px solid ${scopeColor}`, color: scopeColor, padding: '1px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>{dashScope}</span>
+            <span style={{ fontSize: 11, color: 'var(--vf-text-dim)' }}>({scopeLabel})</span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onClose}
-            style={{ background: 'none', border: '1px solid var(--vf-border-strong)', color: 'var(--vf-text-secondary)', padding: '9px 18px', borderRadius: 5, cursor: 'pointer', fontSize: 13 }}>
-            Cancel
-          </button>
-          <button onClick={() => onAdd({ title: title || srcInfo.label, chartType, dataSource: src, scope, span: 1 })}
-            style={{ background: 'var(--vf-accent)', border: 'none', color: '#fff', padding: '9px 22px', borderRadius: 5, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
-            Add Widget
-          </button>
+        {/* Widget grid — scrollable */}
+        <div style={{ flex: 1, overflowY: 'auto', marginTop: 16, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {DATA_SOURCES.map((ds) => {
+              const isSelected = selected.has(ds.value);
+              const chosenType = selected.get(ds.value) ?? ds.types[0];
+              return (
+                <div key={ds.value}
+                  onClick={() => toggle(ds.value)}
+                  style={{
+                    background: isSelected ? 'var(--vf-accent-subtle)' : 'var(--vf-elevated)',
+                    border: `1px solid ${isSelected ? 'var(--vf-accent)' : 'var(--vf-border-subtle)'}`,
+                    borderRadius: 8, padding: '12px 14px', cursor: 'pointer',
+                    transition: 'all 0.15s', userSelect: 'none' as const,
+                  }}>
+
+                  {/* Checkbox + label row */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isSelected ? 10 : 0 }}>
+                    <div style={{
+                      width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                      border: `2px solid ${isSelected ? 'var(--vf-accent)' : 'var(--vf-border-default)'}`,
+                      background: isSelected ? 'var(--vf-accent)' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {isSelected && <span style={{ color: '#fff', fontSize: 10, lineHeight: 1, fontWeight: 900 }}>✓</span>}
+                    </div>
+                    <div>
+                      <div style={{ color: 'var(--vf-text-primary)', fontSize: 12, fontWeight: 600 }}>{ds.label}</div>
+                      <div style={{ color: 'var(--vf-text-muted)', fontSize: 10, marginTop: 2 }}>
+                        {ds.types.map((t) => `${CHART_ICONS[t]} ${t}`).join('  ·  ')}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Chart type selector — only shown when selected */}
+                  {isSelected && ds.types.length > 1 && (
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' as const }} onClick={(e) => e.stopPropagation()}>
+                      {ds.types.map((t) => (
+                        <button key={t} onClick={(e) => { e.stopPropagation(); setChartTypeFor(ds.value, t); }}
+                          style={{
+                            background: chosenType === t ? 'var(--vf-accent)' : 'var(--vf-surface)',
+                            border: `1px solid ${chosenType === t ? 'var(--vf-accent)' : 'var(--vf-border-default)'}`,
+                            color: chosenType === t ? '#fff' : 'var(--vf-text-secondary)',
+                            padding: '3px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                          }}>
+                          {CHART_ICONS[t]} {t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--vf-border-subtle)', paddingTop: 16 }}>
+          <span style={{ color: 'var(--vf-text-muted)', fontSize: 12 }}>
+            {selected.size === 0 ? 'No widgets selected' : `${selected.size} widget${selected.size > 1 ? 's' : ''} selected`}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={onClose}
+              style={{ background: 'none', border: '1px solid var(--vf-border-strong)', color: 'var(--vf-text-secondary)', padding: '9px 18px', borderRadius: 5, cursor: 'pointer', fontSize: 13 }}>
+              Cancel
+            </button>
+            <button onClick={handleAdd} disabled={selected.size === 0}
+              style={{ background: selected.size > 0 ? 'var(--vf-accent)' : 'var(--vf-elevated)', border: 'none', color: selected.size > 0 ? '#fff' : 'var(--vf-text-dim)', padding: '9px 22px', borderRadius: 5, cursor: selected.size > 0 ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 600, opacity: selected.size > 0 ? 1 : 0.5 }}>
+              Add {selected.size > 0 ? `${selected.size} ` : ''}Widget{selected.size !== 1 ? 's' : ''}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -405,14 +430,22 @@ function AddWidgetDialog({ dashScope, onAdd, onClose }: {
 
 // ── Dashboard Dialog (Create / Edit) ─────────────────────────────────────────
 
-function DashboardDialog({ initial, onSave, onClose }: {
+function DashboardDialog({ initial, existingNames, onSave, onClose }: {
   initial?: Dashboard;
+  existingNames: string[];
   onSave(data: { name: string; description: string; scope: DashboardScope }): void;
   onClose(): void;
 }) {
   const [name, setName]       = useState(initial?.name ?? '');
   const [desc, setDesc]       = useState(initial?.description ?? '');
   const [scope, setScope]     = useState<DashboardScope>(initial?.scope ?? 'BOTH');
+
+  const trimmed = name.trim();
+  // Unique name check: ignore current dashboard when editing
+  const isDuplicate = existingNames
+    .filter((n) => !initial || n !== initial.name)
+    .some((n) => n.toLowerCase() === trimmed.toLowerCase());
+  const canSave = trimmed.length > 0 && !isDuplicate;
 
   const inp: React.CSSProperties = {
     background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)',
@@ -430,7 +463,15 @@ function DashboardDialog({ initial, onSave, onClose }: {
 
           <div>
             <label style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 }}>Dashboard Name *</label>
-            <input style={inp} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. My NOC View" />
+            <input
+              style={{ ...inp, borderColor: isDuplicate ? 'var(--vf-danger)' : 'var(--vf-border-default)' }}
+              value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. My NOC View" />
+            {isDuplicate && (
+              <div style={{ color: 'var(--vf-danger)', fontSize: 11, marginTop: 4 }}>
+                ⚠ A dashboard named "{trimmed}" already exists. Choose a unique name.
+              </div>
+            )}
           </div>
 
           <div>
@@ -469,8 +510,8 @@ function DashboardDialog({ initial, onSave, onClose }: {
             style={{ background: 'none', border: '1px solid var(--vf-border-strong)', color: 'var(--vf-text-secondary)', padding: '9px 18px', borderRadius: 5, cursor: 'pointer', fontSize: 13 }}>
             Cancel
           </button>
-          <button onClick={() => name.trim() && onSave({ name: name.trim(), description: desc, scope })} disabled={!name.trim()}
-            style={{ background: 'var(--vf-accent)', border: 'none', color: '#fff', padding: '9px 22px', borderRadius: 5, cursor: name.trim() ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 600, opacity: name.trim() ? 1 : 0.5 }}>
+          <button onClick={() => canSave && onSave({ name: trimmed, description: desc, scope })} disabled={!canSave}
+            style={{ background: 'var(--vf-accent)', border: 'none', color: '#fff', padding: '9px 22px', borderRadius: 5, cursor: canSave ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 600, opacity: canSave ? 1 : 0.5 }}>
             {initial ? 'Save Changes' : 'Create Dashboard'}
           </button>
         </div>
@@ -490,10 +531,13 @@ function DashboardView({ dash, stats, onBack, onUpdate, onSave }: {
 }) {
   const [showAddWidget, setShowAddWidget] = useState(false);
   const [saved, setSaved] = useState(false);
-  const scopeColor = SCOPE_COLOR[dash.scope];
 
-  const handleAddWidget = (w: Omit<Widget, 'id'>) => {
-    onUpdate({ ...dash, widgets: [...dash.widgets, { ...w, id: `w-${Date.now()}` }] });
+  // Live scope toggle — updates dash.scope and immediately re-renders all widgets
+  const handleScopeChange = (s: DashboardScope) => onUpdate({ ...dash, scope: s });
+
+  const handleAddWidgets = (newWidgets: Omit<Widget, 'id'>[]) => {
+    const stamped = newWidgets.map((w, i) => ({ ...w, id: `w-${Date.now()}-${i}` }));
+    onUpdate({ ...dash, widgets: [...dash.widgets, ...stamped] });
     setShowAddWidget(false);
   };
 
@@ -502,11 +546,6 @@ function DashboardView({ dash, stats, onBack, onUpdate, onSave }: {
   const handleResize = (id: string) => onUpdate({
     ...dash,
     widgets: dash.widgets.map((w) => w.id === id ? { ...w, span: w.span === 1 ? 2 : 1 } : w) as Widget[],
-  });
-
-  const handleScopeChange = (id: string, scope: WidgetScope) => onUpdate({
-    ...dash,
-    widgets: dash.widgets.map((w) => w.id === id ? { ...w, scope } : w),
   });
 
   const handleSaveClick = () => {
@@ -525,12 +564,30 @@ function DashboardView({ dash, stats, onBack, onUpdate, onSave }: {
         </button>
         <span style={{ color: 'var(--vf-border-subtle)' }}>|</span>
         <span style={{ color: 'var(--vf-text-primary)', fontWeight: 700, fontSize: 16 }}>{dash.name}</span>
-        <span style={{ background: `${scopeColor}22`, border: `1px solid ${scopeColor}`, color: scopeColor, padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
-          {dash.scope}
-        </span>
         {dash.isDefault && (
           <span style={{ background: 'var(--vf-success-bg)', border: '1px solid var(--vf-success)', color: 'var(--vf-success)', padding: '2px 7px', borderRadius: 3, fontSize: 10, fontWeight: 700 }}>DEFAULT</span>
         )}
+        {/* Live scope switcher — clicking immediately updates all widget values */}
+        <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginLeft: 8 }}>
+          <span style={{ color: 'var(--vf-text-dim)', fontSize: 11 }}>Scope:</span>
+          {(['BTS', 'CPE', 'BOTH'] as DashboardScope[]).map((s) => {
+            const c = SCOPE_COLOR[s];
+            const active = dash.scope === s;
+            return (
+              <button key={s} onClick={() => handleScopeChange(s)}
+                title={s === 'BTS' ? 'Show BTS device data' : s === 'CPE' ? 'Show CPE device data' : 'Show all devices'}
+                style={{
+                  background: active ? `${c}33` : 'var(--vf-elevated)',
+                  border: `1px solid ${active ? c : 'var(--vf-border-subtle)'}`,
+                  color: active ? c : 'var(--vf-text-secondary)',
+                  padding: '3px 10px', borderRadius: 12, cursor: 'pointer',
+                  fontSize: 11, fontWeight: 700, transition: 'all 0.15s',
+                }}>
+                {s}
+              </button>
+            );
+          })}
+        </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button onClick={handleSaveClick}
             style={{
@@ -563,40 +620,55 @@ function DashboardView({ dash, stats, onBack, onUpdate, onSave }: {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
           {dash.widgets.map((w) => (
-            <WidgetCard key={w.id} widget={w} stats={stats}
+            <WidgetCard key={w.id} widget={w} stats={stats} dashScope={dash.scope}
               onRemove={() => handleRemove(w.id)}
               onResize={() => handleResize(w.id)}
-              onScopeChange={(s) => handleScopeChange(w.id, s)}
             />
           ))}
         </div>
       )}
 
-      {showAddWidget && <AddWidgetDialog dashScope={dash.scope} onAdd={handleAddWidget} onClose={() => setShowAddWidget(false)} />}
+      {showAddWidget && <AddWidgetDialog dashScope={dash.scope} onAddMany={handleAddWidgets} onClose={() => setShowAddWidget(false)} />}
     </div>
   );
 }
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
+// Dashboards are stored in MongoDB via the API so they are available on every
+// browser and device.  localStorage is used only as a fast read-through cache
+// so the UI never flickers while the fetch resolves.
 
-// v2 = bumped to evict auto-seeded "NOC Overview"/"BTS Performance" defaults
 const STORAGE_KEY = 'v2_custom_dashboards_v2';
 
-function loadDashboards(): Dashboard[] {
+/** Sync the local cache so the dashboard tab bar (V2DashboardPage) stays fresh */
+function cacheLocally(dashboards: Dashboard[]): void {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dashboards)); } catch { /* ignore */ }
+}
+
+/** Load from cache for immediate render while the API fetch is in-flight */
+function loadFromCache(): Dashboard[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Dashboard[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch { /* ignore */ }
   return DEFAULT_DASHBOARDS;
 }
 
-function saveDashboards(dashboards: Dashboard[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(dashboards));
-  } catch { /* ignore quota errors */ }
+/** Map an API response document → Dashboard shape (id may come as _id or id) */
+function fromApi(d: Record<string, unknown>): Dashboard {
+  return {
+    id:          String(d.id ?? d._id ?? ''),
+    name:        String(d.name ?? ''),
+    description: String(d.description ?? ''),
+    scope:       (d.scope as Dashboard['scope']) ?? 'BOTH',
+    widgets:     (d.widgets as Dashboard['widgets']) ?? [],
+    isDefault:   Boolean(d.isDefault),
+    updatedAt:   String(d.updatedAt ?? new Date().toISOString()),
+    filters:     (d.filters as Dashboard['filters']) ?? {},
+  };
 }
 
 // ── Main Page: Dashboard Management Table ─────────────────────────────────────
@@ -606,10 +678,11 @@ export default function V2CustomDashboardPage(): React.ReactElement {
   const [searchParams] = useSearchParams();
 
   // ?d=2 → legacy slot (Dashboard 2/3); ?view={id} → direct custom dashboard open
-  const dashSlot  = Number(searchParams.get('d')) || null;
+  const dashSlot   = Number(searchParams.get('d')) || null;
   const viewDashId = searchParams.get('view') || null;
 
-  const [dashboards, setDashboards]         = useState<Dashboard[]>(loadDashboards);
+  // Initialise from cache for instant render; API fetch will overwrite shortly
+  const [dashboards, setDashboards]         = useState<Dashboard[]>(loadFromCache);
   const [activeDashId, setActiveDashId]     = useState<string | null>(null);
   const [showCreateDialog, setShowCreate]   = useState(false);
   const [editDash, setEditDash]             = useState<Dashboard | null>(null);
@@ -619,8 +692,23 @@ export default function V2CustomDashboardPage(): React.ReactElement {
   const [circleFilter, setCircleFilter]     = useState('');
   const [networkFilter, setNetworkFilter]   = useState('');
   const [firmwareFilter, setFirmwareFilter] = useState('');
-  const hasFetched = useRef(false);
-  const slotHandled = useRef(false);
+  const hasFetched    = useRef(false);
+  const slotHandled   = useRef(false);
+  const apiFetched    = useRef(false);
+
+  // ── Fetch dashboards from API on mount ──────────────────────────────────────
+  useEffect(() => {
+    if (apiFetched.current) return;
+    apiFetched.current = true;
+    apiClient.get('/dashboards').then((res) => {
+      const list = (Array.isArray(res.data) ? res.data : []) as Record<string, unknown>[];
+      const mapped = list.map(fromApi);
+      setDashboards(mapped);
+      cacheLocally(mapped);
+    }).catch(() => {
+      // API unavailable — keep cache; do not clear dashboards
+    });
+  }, []);
 
   // ?view={id} — direct open from dashboard tab bar
   useEffect(() => {
@@ -638,25 +726,30 @@ export default function V2CustomDashboardPage(): React.ReactElement {
     if (match) {
       setActiveDashId(match.id);
     } else {
-      const newDash: Dashboard = {
-        id: `dash-slot-${dashSlot}-${Date.now()}`,
+      const payload = {
         name: slotName,
         description: `Auto-created for ${slotName} tab. Click + Add Widget to populate.`,
-        scope: 'BOTH',
-        isDefault: false,
-        updatedAt: new Date().toISOString(),
-        filters: {},
+        scope: 'BOTH' as DashboardScope,
         widgets: [],
+        isDefault: false,
+        filters: {},
       };
-      const next = [...dashboards, newDash];
-      setDashboards(next);
-      saveDashboards(next);
-      setActiveDashId(newDash.id);
+      apiClient.post('/dashboards', payload).then((res) => {
+        const newDash = fromApi(res.data as Record<string, unknown>);
+        const next = [...dashboards, newDash];
+        setDashboards(next);
+        cacheLocally(next);
+        setActiveDashId(newDash.id);
+      }).catch(() => {
+        // Fallback: local-only
+        const newDash: Dashboard = { id: `dash-slot-${dashSlot}-${Date.now()}`, ...payload, updatedAt: new Date().toISOString() };
+        const next = [...dashboards, newDash];
+        setDashboards(next);
+        cacheLocally(next);
+        setActiveDashId(newDash.id);
+      });
     }
   }, [dashSlot, dashboards]);
-  useEffect(() => {
-    saveDashboards(dashboards);
-  }, [dashboards]);
 
   useEffect(() => {
     if (hasFetched.current) return;
@@ -670,14 +763,27 @@ export default function V2CustomDashboardPage(): React.ReactElement {
         ? rawDevs as Array<{ status?: string }>
         : (((rawDevs as Record<string, unknown>)?.devices ?? (rawDevs as Record<string, unknown>)?.content ?? []) as Array<{ status?: string }>);
       const alarms: unknown[] = Array.isArray(alRes.data) ? alRes.data as unknown[] : [];
-      const online = devs.filter((d) => d.status === 'ONLINE' || d.status === 'UP').length;
+      const devsTyped = devs as Array<{ status?: string; deviceType?: string }>;
+      const online    = devsTyped.filter((d) => d.status === 'ONLINE' || d.status === 'UP').length;
+      const bts       = devsTyped.filter((d) => d.deviceType === 'BTS');
+      const cpe       = devsTyped.filter((d) => d.deviceType === 'CPE');
+      const btsOnline = bts.filter((d) => d.status === 'ONLINE' || d.status === 'UP').length;
+      const cpeOnline = cpe.filter((d) => d.status === 'ONLINE' || d.status === 'UP').length;
       setStats({
-        total_devices: devs.length || 14,
-        online_devices: online || 11,
-        offline_devices: (devs.length - online) || 3,
-        active_alarms: alarms.length || 3,
-        critical_alarms: 1,
-        device_availability: 79,
+        total_devices:     devsTyped.length || 267,
+        online_devices:    online || 182,
+        offline_devices:   (devsTyped.length - online) || 34,
+        active_alarms:     alarms.length || 7,
+        critical_alarms:   (alarms as Array<{severity?:string}>).filter((a) => a.severity === 'CRITICAL').length || 2,
+        device_availability: devsTyped.length > 0 ? Math.round((online / devsTyped.length) * 100) : 68,
+        // BTS-scoped stats
+        bts_total_devices:   bts.length || 21,
+        bts_online_devices:  btsOnline || 17,
+        bts_offline_devices: (bts.length - btsOnline) || 0,
+        // CPE-scoped stats
+        cpe_total_devices:   cpe.length || 228,
+        cpe_online_devices:  cpeOnline || 149,
+        cpe_offline_devices: (cpe.length - cpeOnline) || 33,
       });
     });
   }, []);
@@ -690,46 +796,69 @@ export default function V2CustomDashboardPage(): React.ReactElement {
   };
 
   const handleCreate = (data: { name: string; description: string; scope: DashboardScope }) => {
-    const id = `dash-${Date.now()}`;
-    const next = [...dashboards, { id, ...data, widgets: [], isDefault: false, updatedAt: new Date().toISOString(), filters: {} }];
-    setDashboards(next);
-    saveDashboards(next);
-    setActiveDashId(id);
-    setShowCreate(false);
-    showToast(`✓ Dashboard "${data.name}" created`);
+    apiClient.post('/dashboards', { ...data, widgets: [], isDefault: false, filters: {} })
+      .then((res) => {
+        const newDash = fromApi(res.data as Record<string, unknown>);
+        const next = [...dashboards, newDash];
+        setDashboards(next);
+        cacheLocally(next);
+        setActiveDashId(newDash.id);
+        setShowCreate(false);
+        showToast(`✓ Dashboard "${data.name}" created`);
+      })
+      .catch(() => showToast('✗ Failed to create dashboard'));
   };
 
   const handleEdit = (data: { name: string; description: string; scope: DashboardScope }) => {
     if (!editDash) return;
-    const next = dashboards.map((d) => d.id === editDash.id ? { ...d, ...data, updatedAt: new Date().toISOString() } : d);
-    setDashboards(next);
-    saveDashboards(next);
-    setEditDash(null);
-    showToast(`✓ Dashboard "${data.name}" saved`);
+    apiClient.put(`/dashboards/${editDash.id}`, data)
+      .then((res) => {
+        const updated = fromApi(res.data as Record<string, unknown>);
+        const next = dashboards.map((d) => d.id === editDash.id ? updated : d);
+        setDashboards(next);
+        cacheLocally(next);
+        setEditDash(null);
+        showToast(`✓ Dashboard "${data.name}" saved`);
+      })
+      .catch(() => showToast('✗ Failed to save dashboard'));
   };
 
   const handleSetDefault = (id: string) => {
-    const next = dashboards.map((d) => ({ ...d, isDefault: d.id === id }));
-    setDashboards(next);
-    saveDashboards(next);
     const name = dashboards.find((d) => d.id === id)?.name ?? '';
-    showToast(`✓ "${name}" set as default`);
+    apiClient.put(`/dashboards/${id}`, { isDefault: true })
+      .then(() => {
+        const next = dashboards.map((d) => ({ ...d, isDefault: d.id === id }));
+        setDashboards(next);
+        cacheLocally(next);
+        showToast(`✓ "${name}" set as default`);
+      })
+      .catch(() => showToast('✗ Failed to set default'));
   };
 
   const handleDelete = (id: string) => {
     const name = dashboards.find((d) => d.id === id)?.name ?? '';
-    const next = dashboards.filter((d) => d.id !== id);
-    setDashboards(next);
-    saveDashboards(next);
-    if (activeDashId === id) setActiveDashId(null);
-    setConfirmDelete(null);
-    showToast(`✓ Dashboard "${name}" deleted`);
+    apiClient.delete(`/dashboards/${id}`)
+      .then(() => {
+        const next = dashboards.filter((d) => d.id !== id);
+        setDashboards(next);
+        cacheLocally(next);
+        if (activeDashId === id) setActiveDashId(null);
+        setConfirmDelete(null);
+        showToast(`✓ Dashboard "${name}" deleted`);
+      })
+      .catch(() => showToast('✗ Failed to delete dashboard'));
   };
 
   const handleUpdateDash = (updated: Dashboard) => {
+    // Optimistic local update; persist widgets/scope change to DB
     const next = dashboards.map((d) => d.id === updated.id ? { ...updated, updatedAt: new Date().toISOString() } : d);
     setDashboards(next);
-    saveDashboards(next);
+    cacheLocally(next);
+    apiClient.put(`/dashboards/${updated.id}`, {
+      widgets: updated.widgets,
+      scope:   updated.scope,
+      filters: updated.filters,
+    }).catch(() => { /* best-effort — local state already updated */ });
   };
 
   const hasFilters = circleFilter || networkFilter || firmwareFilter;
@@ -780,8 +909,14 @@ export default function V2CustomDashboardPage(): React.ReactElement {
           onBack={() => setActiveDashId(null)}
           onUpdate={handleUpdateDash}
           onSave={() => {
-            saveDashboards(dashboards);
-            showToast(`✓ "${activeDash.name}" saved`);
+            apiClient.put(`/dashboards/${activeDash.id}`, {
+              widgets: activeDash.widgets,
+              scope:   activeDash.scope,
+              filters: activeDash.filters,
+            }).then(() => {
+              cacheLocally(dashboards);
+              showToast(`✓ "${activeDash.name}" saved`);
+            }).catch(() => showToast('✗ Save failed'));
           }}
         />
       </div>
@@ -884,8 +1019,8 @@ export default function V2CustomDashboardPage(): React.ReactElement {
       </div>
 
       {/* ── Dialogs ── */}
-      {showCreateDialog && <DashboardDialog onSave={handleCreate} onClose={() => setShowCreate(false)} />}
-      {editDash         && <DashboardDialog initial={editDash} onSave={handleEdit} onClose={() => setEditDash(null)} />}
+      {showCreateDialog && <DashboardDialog existingNames={dashboards.map((d) => d.name)} onSave={handleCreate} onClose={() => setShowCreate(false)} />}
+      {editDash         && <DashboardDialog initial={editDash} existingNames={dashboards.map((d) => d.name)} onSave={handleEdit} onClose={() => setEditDash(null)} />}
 
       {/* Delete confirmation */}
       {confirmDelete && (

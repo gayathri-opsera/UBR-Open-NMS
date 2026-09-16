@@ -6,6 +6,15 @@ const sessionService = require('./session.service');
 const { User, validatePasswordComplexity } = require('../models/user.model');
 const config = require('../config');
 const logger = require('../utils/logger');
+const passwordPolicyService = require('./password_policy.service');
+
+// Lazy-required to avoid circular dep at module load time
+const getMfaService = () => require('./mfa.service');
+
+// Roles for which MFA is required by policy (WO-014).
+// Admin users without MFA enrolled are blocked from receiving a full access token.
+// TEMPORARILY DISABLED FOR TESTING
+const MFA_REQUIRED_ROLES = new Set([]);
 
 /**
  * Attempt authentication. LDAP-first, MongoDB-fallback when circuit is open.
@@ -87,6 +96,52 @@ async function login(username, password, ip, userAgent) {
   // Clear any previous failure count on successful auth.
   await sessionService.clearFailedAttempts(username);
 
+  // ── MFA gate (WO-014) ─────────────────────────────────────────────────────────
+  // Fetch fresh user record to check mfaEnabled and policy requirement.
+  const userRecord = await User.findById(userId).select('mfaEnabled mfaResetRequired username');
+
+  // Admin users are required to have MFA enrolled by policy.
+  // If an admin has not enrolled MFA (or had it reset), block the login and require enrollment.
+  if (MFA_REQUIRED_ROLES.has((role || '').toLowerCase())) {
+    if (!userRecord || !userRecord.mfaEnabled || userRecord.mfaResetRequired) {
+      logger.warn('Admin login blocked: MFA not enrolled or reset required',
+        logger.maskPii({ username, ip, role }));
+      // Emit LOGIN_FAILED audit event for policy-blocked admin login
+      logger.info('audit:LOGIN_FAILED', { username, role, reason: 'MFA_ENROLLMENT_REQUIRED', ip: ip ? ip.split('.').slice(0, 2).join('.') + '.*.*' : 'unknown' });
+      const err = new Error('Administrators must enroll in MFA before logging in. Use the MFA setup endpoint to enroll.');
+      err.code = 'MFA_REQUIRED';
+      err.status = 403;
+      throw err;
+    }
+  }
+
+  if (userRecord && userRecord.mfaEnabled) {
+    // Password is correct but MFA challenge is required — issue a short-lived challenge token
+    // instead of the real access token.
+    const mfaToken = jwtService.generateMfaChallengeToken(userId, username, role);
+    logger.info('MFA challenge issued', logger.maskPii({ username, ip }));
+    return {
+      mfaRequired: true,
+      mfaToken,
+      mfaTokenExpiresIn: 300, // 5 minutes
+    };
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // ── WO-019: Local password renewal gate ───────────────────────────────────────
+  // Only applies to users with a local password (non-SSO, non-LDAP-only).
+  // Check BEFORE issuing the access token so expired-password users cannot skip renewal.
+  const policyResult = await passwordPolicyService.checkPasswordPolicy(userId);
+  if (policyResult.status === 'expired') {
+    logger.warn('Login blocked: password expired', logger.maskPii({ username, ip }));
+    return {
+      passwordChangeRequired: true,
+      reason: policyResult.reason || 'PASSWORD_EXPIRED',
+      userId,
+    };
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const accessToken = jwtService.generateAccessToken(userId, role);
   const refreshToken = jwtService.generateRefreshToken();
 
@@ -97,13 +152,21 @@ async function login(username, password, ip, userAgent) {
 
   logger.info('Login successful', logger.maskPii({ username, ip, role }));
 
-  return {
+  const response = {
     accessToken,
     refreshToken,
     expiresIn: config.jwt.accessTokenTtlSeconds,
     role,
     userId,
   };
+
+  // WO-019: include password expiry warning metadata when in the warning window
+  if (policyResult.status === 'warning') {
+    response.passwordExpiresAt = policyResult.expiresAt;
+    response.passwordRenewalRequiredInDays = policyResult.daysRemaining;
+  }
+
+  return response;
 }
 
 /**

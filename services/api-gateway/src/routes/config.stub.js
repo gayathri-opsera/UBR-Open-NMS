@@ -1,130 +1,581 @@
 'use strict';
 
 /**
- * Config stub — handles config templates, push jobs, and config history.
- * Mounted at /api/v1/config (intercepts before the Java config-service proxy
- * which is currently returning 503).
+ * Config stub — template CRUD persisted to MongoDB (config_templates collection).
+ * Push jobs are simulated in-memory (real delivery handled by config-push-worker).
+ * Mounted at /api/v1/config in app.js.
  */
-const express = require('express');
-const router  = express.Router();
+const express  = require('express');
+const http     = require('http');
+const mongoose = require('mongoose');
+const router   = express.Router();
 
-// ── In-memory stores ─────────────────────────────────────────────────────────
-let templates = [
+// ── Java inventory fetch (used by bulk-push to get authoritative device list) ─
+const INVENTORY_URL = process.env.INVENTORY_SERVICE_URL || 'http://nms-inventory:8082';
+
+function fetchJavaPage(deviceType, page, limit, sysObjectID) {
+  return new Promise((resolve) => {
+    let qs = `limit=${limit}&page=${page}${deviceType ? `&deviceType=${deviceType}` : ''}`;
+    // WO-004: forward sysObjectID filter to inventory service for SNMP device targeting
+    if (sysObjectID) qs += `&sysObjectID=${encodeURIComponent(sysObjectID)}`;
+    const url = `${INVENTORY_URL}/api/v1/devices?${qs}`;
+    http.get(url, { timeout: 8000 }, (res) => {
+      let raw = '';
+      res.on('data', (c) => raw += c);
+      res.on('end', () => {
+        try {
+          const d = JSON.parse(raw);
+          resolve(Array.isArray(d) ? d : (d.content || d.data || d.devices || []));
+        } catch { resolve([]); }
+      });
+    }).on('error', () => resolve([])).on('timeout', () => resolve([]));
+  });
+}
+
+async function fetchAllFromJava(deviceType, sysObjectID) {
+  const PAGE = 100;
+  const all = [];
+  for (let page = 0; page < 20; page++) {
+    const batch = await fetchJavaPage(deviceType, page, PAGE, sysObjectID);
+    all.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return all;
+}
+
+// ── MongoDB connection (eager, at module load) ────────────────────────────────
+// Use MONGO_URI_CONFIG if available (points to ubrnms_config DB);
+// fall back to MONGO_URI (which may point to ubr_nms for the devices stub).
+const MONGO_URI = process.env.MONGO_URI_CONFIG
+  || process.env.MONGO_URI
+  || process.env.MONGO_URL
+  || 'mongodb://mongodb:27017/ubrnms_config';
+const COLLECTION = 'config_templates';
+
+let _col = null; // resolved once DB is ready
+
+async function getCol() {
+  if (_col) return _col;
+  // reuse existing mongoose connection if already open
+  if (mongoose.connection.readyState === 1) {
+    _col = mongoose.connection.db.collection(COLLECTION);
+    await seedIfEmpty(_col);
+    return _col;
+  }
+  await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 8000 });
+  _col = mongoose.connection.db.collection(COLLECTION);
+  await seedIfEmpty(_col);
+  return _col;
+}
+
+// Connect eagerly so seeding happens before the first HTTP request
+getCol().catch((err) => console.error('[config-stub] MongoDB connect failed:', err.message));
+
+const SEED_TEMPLATES = [
   {
-    id: 'tpl-bts-standard', name: 'BTS-Standard-5GHz', deviceType: 'BTS', isDefault: true,
-    parameters: {
-      txPowerDbm: 23, operatingChannel: '36', channelBandwidthMHz: '80',
-      beaconInterval: 100, dtimPeriod: 1, shortGuardInterval: true, bandSteering: false,
-      ipMode: 'DHCP', dnsServer1: '8.8.8.8', dnsServer2: '8.8.4.4',
-      vlanMode: 'Single', vlanId: 100, vlanPriority: 0,
-      qosProfile: 'BEST_EFFORT', ulBandwidthLimit: 100, dlBandwidthLimit: 200,
-      snmpCommunity: 'public', ntpServer: 'pool.ntp.org', timezone: 'Asia/Kolkata', logLevel: 'INFO',
-    },
-    createdAt: new Date().toISOString(),
+    _id: 'tpl-bts-standard', name: 'BTS-Standard-5GHz', deviceType: 'BTS', isDefault: true,
+    ssid5: 'Airtel_UBR_5G', wpaKey5: 'Airtel@1234', ssid24: 'Airtel_UBR_2G', wpaKey24: 'Airtel@1234',
+    txPowerDbm: 23, operatingChannel: '36', channelBandwidthMHz: '80',
+    beaconInterval: 100, dtimPeriod: 1, shortGuardInterval: true, bandSteering: false,
+    ethernetSpeed: '1000Mbps Full', ethernetPort0: true,
+    ipMode: 'DHCP', dnsServer1: '8.8.8.8', dnsServer2: '8.8.4.4',
+    vlanMode: 'Single', vlanId: 100, vlanPriority: 0,
+    qosProfile: 'BEST_EFFORT', ulBandwidthLimit: 100, dlBandwidthLimit: 200,
+    snmpCommunity: 'public', ntpServer: 'pool.ntp.org', timezone: 'Asia/Kolkata', logLevel: 'INFO',
+    customFields: [], hiddenFields: [],
+    createdAt: new Date(),
   },
   {
-    id: 'tpl-cpe-home', name: 'CPE-Home-Basic', deviceType: 'CPE', isDefault: false,
-    parameters: {
-      ipMode: 'DHCP', dnsServer: '8.8.8.8',
-      vlanId: 200, vlanPriority: 0,
-      qosProfile: 'BEST_EFFORT', ulBandwidthLimit: 50, dlBandwidthLimit: 100,
-      snmpCommunity: 'public', ntpServer: 'pool.ntp.org', timezone: 'Asia/Kolkata', logLevel: 'WARN',
-    },
-    createdAt: new Date().toISOString(),
+    _id: 'tpl-cpe-home', name: 'CPE-Home-Basic', deviceType: 'CPE', isDefault: false,
+    ssid5: 'CPE_UBR_5G', wpaKey5: 'Airtel@5678', ssid24: 'CPE_UBR_2G', wpaKey24: 'Airtel@5678',
+    ethernetSpeed: 'Auto', ethernetPort0: true,
+    ipMode: 'DHCP', dnsServer: '8.8.8.8',
+    vlanMode: 'Single', vlanId: 200, vlanPriority: 0,
+    qosProfile: 'BEST_EFFORT', ulBandwidthLimit: 50, dlBandwidthLimit: 100,
+    snmpCommunity: 'public', ntpServer: 'pool.ntp.org', timezone: 'Asia/Kolkata', logLevel: 'WARN',
+    customFields: [], hiddenFields: [],
+    createdAt: new Date(),
   },
   {
-    id: 'tpl-cpe-enterprise', name: 'CPE-Enterprise-200', deviceType: 'CPE', isDefault: false,
-    parameters: {
-      ipMode: 'Static', ipAddress: '10.30.1.100', subnetMask: '255.255.255.0', gateway: '10.30.1.254', dnsServer: '10.0.0.1',
-      vlanId: 300, vlanPriority: 5,
-      qosProfile: 'EF', ulBandwidthLimit: 200, dlBandwidthLimit: 200,
-      snmpCommunity: 'corp-rw', ntpServer: '10.0.0.5', timezone: 'Asia/Kolkata', logLevel: 'WARN',
-    },
-    createdAt: new Date().toISOString(),
+    _id: 'tpl-cpe-enterprise', name: 'CPE-Enterprise-200', deviceType: 'CPE', isDefault: false,
+    ipMode: 'Static', ipAddress: '10.30.1.100', subnetMask: '255.255.255.0', gateway: '10.30.1.254', dnsServer: '10.0.0.1',
+    vlanMode: 'Double', vlanId: 300, outerVlanId: 400, vlanPriority: 5,
+    qosProfile: 'EF', ulBandwidthLimit: 200, dlBandwidthLimit: 200,
+    snmpCommunity: 'corp-rw', ntpServer: '10.0.0.5', timezone: 'Asia/Kolkata', logLevel: 'WARN',
+    customFields: [], hiddenFields: [],
+    createdAt: new Date(),
   },
   {
-    id: 'tpl-idu-p2p', name: 'IDU-P2P-Backhaul', deviceType: 'IDU', isDefault: false,
-    parameters: {
-      ipMode: 'Static', ipAddress: '192.168.100.1', subnetMask: '255.255.255.252', gateway: '192.168.100.2',
-      vlanId: 400, vlanPriority: 7,
-      snmpCommunity: 'backhaul', ntpServer: 'pool.ntp.org', logLevel: 'INFO',
-    },
-    createdAt: new Date().toISOString(),
+    _id: 'tpl-idu-p2p', name: 'IDU-P2P-Backhaul', deviceType: 'IDU', isDefault: false,
+    ipMode: 'Static', ipAddress: '192.168.100.1', subnetMask: '255.255.255.252', gateway: '192.168.100.2',
+    vlanMode: 'Single', vlanId: 400, vlanPriority: 7,
+    snmpCommunity: 'backhaul', ntpServer: 'pool.ntp.org', logLevel: 'INFO',
+    customFields: [], hiddenFields: [],
+    createdAt: new Date(),
   },
 ];
-let nextTplId  = 3;
-let jobs       = {};
-let nextJobId  = 1;
 
-// ── Templates ────────────────────────────────────────────────────────────────
-router.get('/templates', (_req, res) => res.json(templates));
+/** Seed default templates if the collection is empty */
+async function seedIfEmpty(col) {
+  const count = await col.countDocuments();
+  if (count === 0) {
+    await col.insertMany(SEED_TEMPLATES);
+  }
+}
 
-router.post('/templates', (req, res) => {
-  const { name, deviceType, parameters, description, isDefault } = req.body || {};
-  if (!name) return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'name is required' });
-  const tpl = { id: `tpl-${nextTplId++}`, name, description: description || '', deviceType: deviceType || 'BTS', isDefault: isDefault || false, parameters: parameters || {}, createdAt: new Date().toISOString() };
-  templates.push(tpl);
-  res.status(201).json(tpl);
+/** Map MongoDB doc → API response shape */
+function toApi(doc) {
+  const { _id, __v, ...rest } = doc;
+  return { id: String(_id), ...rest };
+}
+
+// ── In-memory push jobs ───────────────────────────────────────────────────────
+const jobs      = {};
+let   nextJobId = 1;
+
+// ── Persistent push history (MongoDB-backed) ──────────────────────────────────
+const HISTORY_COLLECTION = 'config_push_history';
+let _histCol = null;
+
+async function getHistCol() {
+  if (_histCol) return _histCol;
+  if (mongoose.connection.readyState === 1) {
+    _histCol = mongoose.connection.db.collection(HISTORY_COLLECTION);
+    return _histCol;
+  }
+  // reuse the connection opened by getCol()
+  await getCol(); // ensure main connection is ready
+  _histCol = mongoose.connection.db.collection(HISTORY_COLLECTION);
+  return _histCol;
+}
+
+/** Persist a push event to MongoDB so history survives server restarts */
+async function recordPush(deviceId, params, actor, templateId, status) {
+  try {
+    const col = await getHistCol();
+    await col.insertOne({
+      _id:        `ph-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      deviceId,
+      actor:      actor || 'operator',
+      templateId: templateId || 'inline',
+      params:     params || {},
+      status:     status || 'PUSHED',
+      pushedAt:   new Date(),
+    });
+  } catch (e) {
+    // Non-fatal — history is best-effort
+    console.warn('[config-stub] Could not persist push history:', e.message);
+  }
+}
+
+// ── Helper: build ConfigJob response shape ────────────────────────────────────
+function buildJobResponse(job) {
+  const devices        = job.devices || [];
+  const total          = devices.length;
+  const success        = devices.filter((d) => d.status === 'SUCCESS').length;
+  const failed         = devices.filter((d) => ['FAILED', 'UNSUPPORTED'].includes(d.status)).length;
+  const queuedCount    = devices.filter((d) => d.status === 'QUEUED').length;
+  const pending        = total - success - failed - queuedCount;
+  const progressPercent = total === 0 ? 0 : Math.round(((success + failed) / total) * 100);
+
+  // WO-049: Build rich per-device delivery records
+  const perDeviceStatus = devices.map((d) => ({
+    deviceId: d.deviceId,
+    deliveryChannel: d.deliveryChannel || null,
+    currentState: d.status,
+    queueEligible: d.queueEligible !== undefined ? d.queueEligible : (d.status === 'QUEUED'),
+    pendingCommandId: d.pendingCommandId || null,
+    failureReason: d.failureReason || null,
+    lastUpdatedAt: d.updatedAt || job.startedAt || new Date().toISOString(),
+    retryable: d.retryable !== undefined ? d.retryable : (d.status === 'FAILED'),
+    idempotencyKey: d.idempotencyKey || null,
+    protocolAttempts: d.protocolAttempts || [],
+  }));
+
+  return {
+    jobId: job.jobId,
+    status: job.status,
+    totalDevices: total,
+    successCount: success,
+    failedCount: failed,
+    queuedCount,
+    pendingCount: Math.max(0, pending),
+    progressPercent,
+    perDeviceStatus,
+    previewId: job.previewId || null,
+    confirmedBy: job.confirmedBy || null,
+    confirmedAt: job.confirmedAt || null,
+    startedAt: job.startedAt,
+    completedAt: job.completedAt || null,
+  };
+}
+
+// ── Templates (MongoDB-backed, in-memory fallback if DB unreachable) ──────────
+router.get('/templates', async (_req, res) => {
+  try {
+    const col = await getCol();
+    const docs = await col.find({}).toArray();
+    res.json(docs.map(toApi));
+  } catch (e) {
+    console.error('[config-stub] /templates DB error — returning seed data:', e.message);
+    // Fallback: return the seed templates so the UI never shows a blank/error state
+    res.json(SEED_TEMPLATES.map(toApi));
+  }
 });
 
-router.put('/templates/:id', (req, res) => {
-  const idx = templates.findIndex((t) => t.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ code: 'NOT_FOUND', message: 'Template not found' });
-  templates[idx] = { ...templates[idx], ...req.body, id: req.params.id, updatedAt: new Date().toISOString() };
-  res.json(templates[idx]);
+router.post('/templates', async (req, res) => {
+  try {
+    const col = await getCol();
+    const { name, deviceType, description, isDefault, customFields, hiddenFields, ...params } = req.body || {};
+    if (!name) return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'name is required' });
+    const doc = {
+      _id: `tpl-${Date.now()}`,
+      name, description: description || '', deviceType: deviceType || 'BTS',
+      isDefault: Boolean(isDefault),
+      customFields: customFields || [],
+      hiddenFields: hiddenFields || [],
+      ...params,
+      createdAt: new Date(), updatedAt: new Date(),
+    };
+    await col.insertOne(doc);
+    res.status(201).json(toApi(doc));
+  } catch (e) {
+    if (e.code === 11000) return res.status(409).json({ code: 'DUPLICATE', message: 'Template name already exists' });
+    res.status(500).json({ code: 'DB_ERROR', message: e.message });
+  }
 });
 
-router.delete('/templates/:id', (req, res) => {
-  const idx = templates.findIndex((t) => t.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ code: 'NOT_FOUND', message: 'Template not found' });
-  templates.splice(idx, 1);
-  res.status(204).end();
+router.put('/templates/:id', async (req, res) => {
+  try {
+    const col = await getCol();
+    const { _id, id, ...update } = req.body || {};
+    update.updatedAt = new Date();
+    const result = await col.findOneAndUpdate(
+      { _id: req.params.id },
+      { $set: update },
+      { returnDocument: 'after' },
+    );
+    if (!result) return res.status(404).json({ code: 'NOT_FOUND', message: 'Template not found' });
+    res.json(toApi(result));
+  } catch (e) {
+    res.status(500).json({ code: 'DB_ERROR', message: e.message });
+  }
+});
+
+router.delete('/templates/:id', async (req, res) => {
+  try {
+    const col = await getCol();
+    await col.deleteOne({ _id: req.params.id });
+    res.status(204).end();
+  } catch (e) {
+    res.status(500).json({ code: 'DB_ERROR', message: e.message });
+  }
 });
 
 // ── Push (single device) ─────────────────────────────────────────────────────
 router.post('/push/:deviceId', (req, res) => {
-  const { deviceId }  = req.params;
-  const { templateId, firmware, firmwareVersion } = req.body || req.query || {};
+  const { deviceId } = req.params;
+  if (!deviceId || deviceId === 'undefined' || deviceId === 'null') {
+    return res.status(400).json({ code: 'BAD_REQUEST', message: 'deviceId is required and must not be "undefined"' });
+  }
+  const queryParams  = req.query || {};
+  const bodyParams   = req.body  || {};
+
+  // templateId / firmware flags can come from body OR query string
+  const templateId     = bodyParams.templateId     || queryParams.templateId     || 'inline';
+  const firmware       = bodyParams.firmware       || queryParams.firmware;
+  const firmwareVersion = bodyParams.firmwareVersion || queryParams.firmwareVersion;
+  const actor          = bodyParams.actor          || queryParams.actor || (req.user?.username) || 'operator';
+
+  // Collect the actual config parameters from the body (everything except meta fields)
+  const META = new Set(['templateId', 'firmware', 'firmwareVersion', 'actor']);
+  const pushParams = {};
+  for (const [k, v] of Object.entries(bodyParams)) {
+    if (!META.has(k) && v !== null && v !== undefined) pushParams[k] = v;
+  }
+  if (firmware) pushParams.firmwareVersion = firmwareVersion;
+
   const jobId = `job-${nextJobId++}`;
-  const job = {
+  jobs[jobId] = {
     jobId, deviceId, templateId, firmwareVersion,
-    status: 'QUEUED', startedAt: new Date().toISOString(), completedAt: null,
+    status: 'RUNNING', startedAt: new Date().toISOString(), completedAt: null,
     devices: [{ deviceId, status: 'QUEUED' }],
   };
-  jobs[jobId] = job;
-  // Simulate async completion
-  setTimeout(() => {
-    jobs[jobId].status        = 'COMPLETED';
-    jobs[jobId].completedAt   = new Date().toISOString();
-    jobs[jobId].devices[0].status = 'SUCCESS';
-  }, 2000);
-  res.json({ jobId, status: 'QUEUED', message: firmware ? 'Firmware upgrade queued' : 'Config push queued' });
-});
 
-// ── Bulk push ─────────────────────────────────────────────────────────────────
-router.post('/bulk-push', (req, res) => {
-  const { templateId, deviceType, deviceIds } = req.body || {};
-  const jobId = `job-${nextJobId++}`;
-  const targets = (deviceIds || []).map((id) => ({ deviceId: id, status: 'QUEUED' }));
-  const job = {
-    jobId, templateId, deviceType, status: 'RUNNING',
-    startedAt: new Date().toISOString(), completedAt: null, devices: targets,
-  };
-  jobs[jobId] = job;
+  // Persist push event to MongoDB (non-blocking)
+  recordPush(deviceId, pushParams, actor, templateId, 'PUSHED');
+
   setTimeout(() => {
     jobs[jobId].status = 'COMPLETED';
     jobs[jobId].completedAt = new Date().toISOString();
-    jobs[jobId].devices.forEach((d) => { d.status = 'SUCCESS'; });
-  }, 3000);
-  res.json({ jobId, status: 'RUNNING', total: targets.length });
+    jobs[jobId].devices[0].status = 'SUCCESS';
+  }, 2000);
+
+  res.json({
+    status: 'PUSHED',
+    message: firmware ? 'Firmware upgrade queued' : 'Config push accepted — applying to device',
+    commandId: jobId,
+  });
+});
+
+// ── Config history (WO-050): proxy to Java config-service ────────────────────
+// The authoritative history is now owned by the Java config-service (WO-050).
+// We forward requests there first and fall back to the local MongoDB stub only
+// when the Java service is unavailable (dev/offline mode).
+router.get('/history/:deviceId', async (req, res) => {
+  const { deviceId } = req.params;
+  const limit  = Math.min(parseInt(req.query.limit  || '50', 10), 200);
+  const cursor = Math.max(parseInt(req.query.cursor || '0',  10), 0);
+
+  // Try Java config-service first (authoritative WO-050 endpoint)
+  try {
+    await new Promise((resolve, reject) => {
+      const url = `${CONFIG_SERVICE_URL}/api/v1/config/history/${encodeURIComponent(deviceId)}?limit=${limit}&cursor=${cursor}`;
+      http.get(url, { timeout: 6000 }, (javaRes) => {
+        if (javaRes.statusCode === 200) {
+          let raw = '';
+          javaRes.on('data', (c) => raw += c);
+          javaRes.on('end', () => {
+            try {
+              const parsed = JSON.parse(raw);
+              res.json(parsed);
+              resolve('java');
+            } catch (e) {
+              reject(new Error('Java history parse error'));
+            }
+          });
+        } else {
+          reject(new Error(`Java config-service returned ${javaRes.statusCode}`));
+        }
+      }).on('error', reject).on('timeout', () => reject(new Error('timeout')));
+    });
+    return; // Java service responded — we're done
+  } catch (javaErr) {
+    console.warn('[config-stub] Java config history unavailable, using local stub:', javaErr.message);
+  }
+
+  // Fallback: local MongoDB stub history (WO-050 dev fallback)
+  const deviceIdOrig = deviceId;
+  const legacyLimit = limit;
+  try {
+    // Build a set of all known aliases for this device
+    const aliases = new Set([deviceIdOrig]);
+
+    // 1. Try MongoDB inventory (for manually-created / IDU devices)
+    try {
+      const invCol = await getInvCol();
+      const inv = await invCol.findOne({
+        $or: [
+          { serialNumber: deviceIdOrig },
+          { deviceId:    deviceIdOrig },
+          { id:          deviceIdOrig },
+          { _id:         deviceIdOrig },
+        ],
+      });
+      if (inv) {
+        if (inv.serialNumber) aliases.add(inv.serialNumber);
+        if (inv.deviceId)     aliases.add(inv.deviceId);
+        if (inv.id)           aliases.add(inv.id);
+        if (inv._id)          aliases.add(String(inv._id));
+      }
+    } catch (e) {
+      console.warn('[config-stub] MongoDB alias resolution failed:', e.message);
+    }
+
+    // 2. Also try Java inventory service (authoritative for BTS/CPE devices)
+    // Java may return { id, serialNumber, deviceId } — all should be treated as aliases.
+    try {
+      const javaDevice = await fetchJavaDevice(deviceIdOrig);
+      if (javaDevice) {
+        if (javaDevice.serialNumber) aliases.add(javaDevice.serialNumber);
+        if (javaDevice.deviceId)     aliases.add(javaDevice.deviceId);
+        if (javaDevice.id)           aliases.add(String(javaDevice.id));
+        if (javaDevice.name)         aliases.add(javaDevice.name);
+      }
+    } catch (e) {
+      console.warn('[config-stub] Java inventory alias resolution failed:', e.message);
+    }
+
+    const col = await getHistCol();
+    const docs = await col
+      .find({ deviceId: { $in: Array.from(aliases) } })
+      .sort({ pushedAt: -1 })
+      .limit(legacyLimit)
+      .toArray();
+
+    // Shape to match WO-050 paginated response format
+    const items = docs.map((doc, i) => ({
+      versionId:       String(doc._id),
+      versionNumber:   docs.length - i,
+      status:          doc.status || 'APPLIED',
+      jobId:           doc.jobId || null,
+      templateId:      doc.templateId || null,
+      actor:           doc.actor || 'system',
+      approvalReference: doc.approvalReference || null,
+      deliveryChannel: doc.deliveryChannel || null,
+      appliedAt:       doc.pushedAt instanceof Date ? doc.pushedAt.toISOString() : doc.pushedAt,
+      attemptedAt:     null,
+      diffSummary:     doc.diffSummary || null,
+      sanitizedDiff:   [],
+      rollbackEligible: true,
+      failureReason:   null,
+      renderedHash:    null,
+    }));
+
+    res.json({
+      deviceId: deviceIdOrig,
+      items,
+      nextCursor: null,
+      totalKnown: items.length,
+      page: 0,
+      limit: legacyLimit,
+    });
+  } catch (e) {
+    console.error('[config-stub] History query failed:', e.message);
+    res.status(500).json({ code: 'DB_ERROR', message: e.message });
+  }
+});
+
+// ── Inventory collection helper (for bulk-push real device resolution) ────────
+// Inventory lives in ubrnms_inventory — derive from existing MONGO_URI by
+// swapping the database name (the host/port are shared across all services).
+function buildInvUri() {
+  const base = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongodb:27017/ubrnms';
+  return base.replace(/\/[^/?]+(\?|$)/, '/ubrnms_inventory$1');
+}
+let _invConn = null;
+let _invCol  = null;
+async function getInvCol() {
+  if (_invCol) return _invCol;
+  if (!_invConn) {
+    _invConn = await mongoose.createConnection(buildInvUri(), { serverSelectionTimeoutMS: 5000 }).asPromise();
+  }
+  _invCol = _invConn.db.collection('devices');
+  return _invCol;
+}
+
+// ── Java inventory — single device fetch (used for alias resolution) ──────────
+function fetchJavaDevice(id) {
+  return new Promise((resolve) => {
+    const url = `${INVENTORY_URL}/api/v1/devices/${encodeURIComponent(id)}`;
+    http.get(url, { timeout: 5000 }, (res) => {
+      let raw = '';
+      res.on('data', (c) => raw += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(raw)); } catch { resolve(null); }
+      });
+    }).on('error', () => resolve(null)).on('timeout', () => resolve(null));
+  });
+}
+
+// ── Bulk push ─────────────────────────────────────────────────────────────────
+router.post('/bulk-push', async (req, res) => {
+  const { templateId, filter, deviceIds } = req.body || {};
+  const jobId = `job-${nextJobId++}`;
+  // Capture actor before async processing so it is available in the interval closure
+  const actor = req.body?.actor || req.user?.username || 'operator';
+  // WO-004: extract sysObjectID filter for SNMP device targeting
+  const sysObjectIDFilter = filter?.sysObjectID || req.query.sysObjectID || null;
+
+  let devices = [];
+
+  try {
+    if (Array.isArray(deviceIds) && deviceIds.length > 0) {
+      // Explicit list of device IDs provided by caller
+      devices = deviceIds.map((id) => ({ deviceId: id, status: 'QUEUED' }));
+    } else {
+      const typeUpper = (filter?.deviceType || '').toUpperCase();
+
+      if (typeUpper === 'IDU') {
+        // IDU devices are not in Java inventory — use MongoDB
+        try {
+          const col = await getInvCol();
+          const docs = await col
+            .find({ deviceType: { $regex: 'IDU', $options: 'i' } }, { projection: { serialNumber: 1, deviceId: 1, _id: 1 } })
+            .limit(500).toArray();
+          devices = docs.map((d) => ({ deviceId: d.serialNumber || d.deviceId || String(d._id), status: 'QUEUED' }));
+        } catch (err) {
+          console.warn('[config-stub] IDU MongoDB query failed:', err.message);
+        }
+      } else {
+        // BTS / CPE / all — call Java inventory (authoritative, matches what the UI shows)
+        try {
+          const javaDevs = await fetchAllFromJava(typeUpper || null, sysObjectIDFilter);
+          devices = javaDevs.map((d) => ({
+            deviceId: d.serialNumber || d.deviceId || d.id || String(d._id),
+            status: 'QUEUED',
+          }));
+
+          // If no filter, also append IDU from MongoDB
+          if (!typeUpper) {
+            try {
+              const col = await getInvCol();
+              const iduDocs = await col
+                .find({ deviceType: { $regex: 'IDU', $options: 'i' } }, { projection: { serialNumber: 1, deviceId: 1, _id: 1 } })
+                .limit(500).toArray();
+              iduDocs.forEach((d) => devices.push({ deviceId: d.serialNumber || d.deviceId || String(d._id), status: 'QUEUED' }));
+            } catch { /* IDU append is best-effort */ }
+          }
+        } catch (err) {
+          console.warn('[config-stub] Java inventory fetch for bulk-push failed:', err.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[config-stub] Bulk-push device resolution failed:', err.message);
+    devices = [];
+  }
+
+  const deviceCount = devices.length;
+
+  jobs[jobId] = {
+    jobId, templateId, filter, status: deviceCount === 0 ? 'COMPLETED' : 'RUNNING',
+    startedAt: new Date().toISOString(), completedAt: deviceCount === 0 ? new Date().toISOString() : null,
+    devices,
+  };
+
+  if (deviceCount > 0) {
+    let completed = 0;
+    const interval = setInterval(() => {
+      const batch = Math.min(Math.ceil(deviceCount / 8), deviceCount - completed);
+      for (let i = completed; i < completed + batch; i++) {
+        if (jobs[jobId] && jobs[jobId].devices[i]) {
+          const devStatus = Math.random() > 0.05 ? 'SUCCESS' : 'FAILED';
+          jobs[jobId].devices[i].status = devStatus;
+          // Persist to history so Config History tab shows this push
+          if (devStatus === 'SUCCESS') {
+            recordPush(
+              jobs[jobId].devices[i].deviceId,
+              { templateId, bulkJob: jobId },
+              actor,
+              templateId,
+              'PUSHED',
+            );
+          }
+        }
+      }
+      completed += batch;
+      if (completed >= deviceCount) {
+        clearInterval(interval);
+        if (jobs[jobId]) {
+          jobs[jobId].status = 'COMPLETED';
+          jobs[jobId].completedAt = new Date().toISOString();
+        }
+      }
+    }, 500);
+  }
+
+  res.json(buildJobResponse(jobs[jobId]));
 });
 
 // ── Job status ────────────────────────────────────────────────────────────────
-router.get('/jobs/:jobId', (req, res) => {
+function serveJob(req, res) {
   const job = jobs[req.params.jobId];
   if (!job) return res.status(404).json({ code: 'NOT_FOUND', message: 'Job not found' });
-  res.json(job);
-});
+  res.json(buildJobResponse(job));
+}
+router.get('/jobs/:jobId',        serveJob);
+router.get('/jobs/:jobId/status', serveJob);
 
 // ── Firmware summary ──────────────────────────────────────────────────────────
 router.get('/firmware/summary', (_req, res) => {
@@ -134,6 +585,128 @@ router.get('/firmware/summary', (_req, res) => {
     { version: 'v3.0.1', count: 84, deviceType: 'CPE' },
     { version: 'v2.9.5', count: 14, deviceType: 'CPE' },
   ]);
+});
+
+// ── Target preview (WO-039) and confirmation (WO-045) ────────────────────────
+// Forwards POST /api/v1/config/targets/preview and /actions/confirm to the Java
+// config-service. The gateway proxies — it never computes authoritative target sets.
+const CONFIG_SERVICE_URL = process.env.CONFIG_SERVICE_URL || 'http://nms-config:8083';
+
+router.post('/targets/preview', async (req, res) => {
+  // RBAC: only network_engineer, admin, and auditor (read-only preview) may access
+  const role = req.headers['x-user-role'] || '';
+  const allowed = ['admin', 'network_engineer', 'noc_operator', 'auditor'];
+  if (!allowed.includes(role)) {
+    return res.status(403).json({
+      status: 'error',
+      error: { code: 'FORBIDDEN', message: 'Target preview requires network_engineer or admin role' },
+    });
+  }
+
+  try {
+    const resp = await fetch(`${CONFIG_SERVICE_URL}/api/v1/config/targets/preview`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Actor-Role': role,
+        // Forward correlation ID for distributed tracing
+        ...(req.headers['x-correlation-id']
+          ? { 'X-Correlation-Id': req.headers['x-correlation-id'] } : {}),
+      },
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const body = await resp.json().catch(() => ({}));
+    // Forward the upstream status code so frontends handle 400/503 correctly.
+    res.status(resp.status).json(body);
+  } catch (err) {
+    if (err && err.name === 'TimeoutError') {
+      return res.status(503).json({
+        status: 'error',
+        error: { code: 'INVENTORY_UNAVAILABLE', message: 'Target resolution timed out — retry shortly', retryAfterSeconds: 30 },
+      });
+    }
+    console.error('[config.stub] target preview proxy error', err && err.message);
+    res.status(503).json({
+      status: 'error',
+      error: { code: 'GATEWAY_ERROR', message: 'Config service unreachable — retry shortly', retryAfterSeconds: 15 },
+    });
+  }
+});
+
+// ── Confirm execution (WO-045) ────────────────────────────────────────────────
+// Explicit confirmation gate: binds a preview to a job, validates actor role,
+// preview freshness, and expected target count before forwarding to Java service.
+router.post('/actions/confirm', async (req, res) => {
+  const role = req.headers['x-actor-role'] || req.headers['x-user-role'] || '';
+  const actor = req.headers['x-actor'] || req.user?.username || 'unknown';
+
+  // RBAC: only admin and network_engineer may confirm execution
+  if (!['admin', 'network_engineer'].includes(role)) {
+    return res.status(403).json({
+      status: 'error',
+      error: { code: 'FORBIDDEN', message: 'Execution confirmation requires network_engineer or admin role' },
+    });
+  }
+
+  const { previewId, actionType, expectedTargetCount, templateId, acceptWarnings, approvalReference, idempotencyKey } = req.body || {};
+
+  if (!previewId) {
+    return res.status(400).json({
+      status: 'error',
+      error: { code: 'MISSING_FIELD', field: 'previewId', message: 'previewId is required' },
+    });
+  }
+  if (!actionType) {
+    return res.status(400).json({
+      status: 'error',
+      error: { code: 'MISSING_FIELD', field: 'actionType', message: 'actionType is required' },
+    });
+  }
+  if (expectedTargetCount == null || expectedTargetCount <= 0) {
+    return res.status(400).json({
+      status: 'error',
+      error: { code: 'INVALID_FIELD', field: 'expectedTargetCount', message: 'expectedTargetCount must be a positive integer' },
+    });
+  }
+
+  try {
+    const resp = await fetch(`${CONFIG_SERVICE_URL}/api/v1/config/actions/confirm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Actor-Role': role,
+        'X-Actor': actor,
+        ...(req.headers['x-correlation-id'] ? { 'X-Correlation-Id': req.headers['x-correlation-id'] } : {}),
+      },
+      body: JSON.stringify({ previewId, actionType, expectedTargetCount, templateId, acceptWarnings, approvalReference, idempotencyKey }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const body = await resp.json().catch(() => ({}));
+    res.status(resp.status).json(body);
+  } catch (err) {
+    if (err && err.name === 'TimeoutError') {
+      return res.status(503).json({
+        status: 'error',
+        error: { code: 'SERVICE_TIMEOUT', message: 'Config service timed out — retry shortly', retryAfterSeconds: 15 },
+      });
+    }
+    // Java service unavailable — respond with a simulated acceptance so dev mode works
+    console.warn('[config.stub] confirm proxy failed, using dev fallback:', err && err.message);
+    const jobId = `job-confirm-${Date.now()}`;
+    const now = new Date().toISOString();
+    res.status(202).json({
+      jobId,
+      status: 'ACCEPTED',
+      acceptedAt: now,
+      acceptedBy: actor,
+      targetCount: expectedTargetCount,
+      previewId,
+      trackingUrl: `/api/v1/config/jobs/${jobId}/status`,
+    });
+  }
 });
 
 module.exports = router;

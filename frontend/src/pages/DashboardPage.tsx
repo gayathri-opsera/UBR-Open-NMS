@@ -64,7 +64,8 @@ export default function DashboardPage(): React.ReactElement {
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
 
   const circles = useMemo(() => [...new Set(devices.flatMap((d) => (d.tags ?? []).filter((t) => t.key === 'circle').map((t) => t.value)))], [devices]);
-  const models = useMemo(() => [...new Set(devices.map((d) => d.model).filter(Boolean))], [devices]);
+  const ALLOWED_MODELS = ['A60', 'A61', 'IDU'];
+  const models = ALLOWED_MODELS;
   const firmwares = useMemo(() => [...new Set(devices.map((d) => d.firmwareVersion).filter(Boolean))], [devices]);
 
   const filtered = useMemo(() => devices.filter((d) => {

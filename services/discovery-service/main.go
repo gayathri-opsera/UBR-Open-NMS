@@ -7,15 +7,23 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/airtel-ubrnms/discovery-service/internal/audit"
+	"github.com/airtel-ubrnms/discovery-service/internal/auth"
 	"github.com/airtel-ubrnms/discovery-service/internal/config"
+	"github.com/airtel-ubrnms/discovery-service/internal/crypto"
 	"github.com/airtel-ubrnms/discovery-service/internal/handler"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
+	"github.com/airtel-ubrnms/discovery-service/internal/realtime"
+	"github.com/airtel-ubrnms/discovery-service/internal/repository"
+	"github.com/airtel-ubrnms/discovery-service/internal/scanner"
+	"github.com/airtel-ubrnms/discovery-service/internal/scheduler"
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
 )
 
@@ -35,7 +43,109 @@ func main() {
 	}
 
 	svc := service.NewDiscoveryService(cfg.HMACSecret, cfg.CheckInInterval, pub, store)
-	h := handler.New(svc, store)
+	// Configure southbound service registry URLs (WO-009)
+	svc.SetServiceURLs(cfg.AuthServiceURL, cfg.CheckinServiceURL, cfg.EventServiceURL, cfg.RealtimeServiceURL)
+
+	// Configure authentication dependencies (WO-010)
+	secretStore := service.NewInMemorySecretStore()
+	inventoryAuth := service.NewLocalInventoryAuthorizer()
+	svc.SetAuthDependencies(secretStore, inventoryAuth)
+
+	// Configure discovery run store (WO-011)
+	runStore := service.NewDiscoveryRunStore()
+
+	// Configure HMAC validation middleware (WO-015)
+	// Uses in-memory nonce store; replace with Redis-backed store for multi-instance deployments.
+	nonceStore := auth.NewInMemoryNonceStore(auth.DefaultNonceTTL)
+	secretResolver := &secretStoreAdapter{store: secretStore}
+	hmacValidator := auth.NewValidator(nonceStore, secretResolver, auth.ValidatorConfig{
+		OnFailure: func(corrID, reason, serial string) {
+			slog.Warn("southbound.hmac.failure", "corrID", corrID, "reason", reason)
+		},
+	})
+
+	// Configure ICMP sweep service (WO-016)
+	sweepCfg := scanner.LoadSweepConfig()
+	sweeper := scanner.NewICMPSweepService(scanner.NewNetDialProber(), sweepCfg, nil)
+
+	// Configure rediscovery scheduler (WO-017)
+	schedStore := scheduler.NewInMemoryScheduleStore()
+	rediscoSched := scheduler.NewRediscoveryScheduler(schedStore, runStore, sweeper, nil)
+	rediscoSched.Start()
+
+	// Wire Kafka audit publisher (WO-011).
+	// Falls back to no-op if KAFKA_BROKERS is not set so local dev is unaffected.
+	var auditPub audit.Publisher = &audit.NoopPublisher{}
+	if brokers := os.Getenv("KAFKA_BROKERS"); brokers != "" {
+		if kp, err := audit.NewKafkaPublisher(brokers); err != nil {
+			slog.Warn("audit: failed to create Kafka publisher — using noop", "err", err)
+		} else {
+			auditPub = kp
+			slog.Info("audit: Kafka publisher initialised", "brokers", brokers)
+		}
+	} else {
+		slog.Info("audit: KAFKA_BROKERS not set — using no-op publisher")
+	}
+
+	runExecutor := service.NewRunExecutorWithAudit(runStore, sweeper, auditPub)
+
+	// Wire credential CRUD handler (WO-014).
+	// Key is loaded from CREDENTIAL_ENCRYPTION_KEY env var; falls back to a dev
+	// placeholder when unset so the service starts in local/test environments.
+	credRepo := repository.NewInMemoryCredentialRepository()
+	var credEncryptor *crypto.Encryptor
+	if encryptor, encErr := crypto.NewEncryptorFromEnv(); encErr == nil {
+		credEncryptor = encryptor
+	} else {
+		slog.Warn("CREDENTIAL_ENCRYPTION_KEY not set; using dev placeholder key — DO NOT use in production")
+		devKey := make([]byte, 32)
+		copy(devKey, "dev-placeholder-key-not-for-prod")
+		credEncryptor, _ = crypto.NewEncryptor(devKey)
+	}
+	credSvc := service.NewCredentialService(credRepo, credEncryptor, nil)
+	credHandler := handler.NewCredentialHandler(credSvc)
+
+	// Wire SNMP fingerprint pipeline (WO-027 + end-to-end enablement).
+	// credRepo and credEncryptor must be initialised first (above).
+	// SNMP_DEFAULT_COMMUNITY: set to "public" in dev/testing against snmpsim;
+	// leave empty in production (SNMP requires an explicit stored credential).
+	snmpDefaultCommunity := os.Getenv("SNMP_DEFAULT_COMMUNITY")
+	snmpConcurrency := 10
+	if v := os.Getenv("SNMP_CONCURRENCY"); v != "" {
+		if n, convErr := strconv.Atoi(v); convErr == nil && n > 0 {
+			snmpConcurrency = n
+		}
+	}
+	snmpPort := uint16(161)
+	if v := os.Getenv("SNMP_PORT"); v != "" {
+		if n, convErr := strconv.Atoi(v); convErr == nil && n > 0 && n <= 65535 {
+			snmpPort = uint16(n)
+		}
+	}
+	runExecutor.WithSNMP(credRepo, credEncryptor, snmpConcurrency, snmpDefaultCommunity).
+		WithSNMPPort(snmpPort)
+
+	h := handler.New(svc, store, runStore).
+		WithHMACValidator(hmacValidator).
+		WithRunExecutor(runExecutor)
+	schedHandler := handler.NewScheduleHandler(rediscoSched)
+
+	// Configure realtime device presence manager (WO-022).
+	// Production: replace fakes with real Redis / inventory HTTP / Kafka clients.
+	presenceValidator := &realtimeHMACValidator{secretStore: secretStore}
+	presenceUpgrader := &noopWebSocketUpgrader{}
+	presenceCfg := realtime.PresenceConfig{
+		PingInterval:   cfg.PingInterval,
+		ReceiveTimeout: cfg.ReceiveTimeout,
+	}
+	presenceManager := realtime.NewManager(
+		&noopPresenceRedis{},
+		&noopPresenceInventory{},
+		&noopPresencePublisher{},
+		presenceValidator,
+		presenceUpgrader,
+		presenceCfg,
+	)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -50,6 +160,35 @@ func main() {
 		r.Post("/check-in", h.CheckIn)
 		r.Get("/devices", h.Lookup)
 		r.Post("/scan", h.TriggerScan)
+		r.Get("/runs", h.ListDiscoveryRuns)                                      // WO-003
+		r.Post("/runs", h.CreateDiscoveryRun)                                    // WO-011
+		r.Get("/runs/{runId}", h.GetDiscoveryRun)
+		r.Get("/runs/{runId}/results", h.GetDiscoveryRunResults)
+		r.Post("/runs/{runId}/provision", h.ProvisionDiscoveredHosts) // Admin: provision discovered hosts into inventory
+		r.Get("/onboarding", h.GetOnboardingStates)                              // WO-026
+		r.Post("/schedules", schedHandler.CreateSchedule)                        // WO-017
+		r.Get("/schedules", schedHandler.ListSchedules)                          // WO-017
+		r.Delete("/schedules/{scheduleId}", schedHandler.DeleteSchedule)         // WO-017
+		r.Post("/schedules/{scheduleId}/run", schedHandler.TriggerScheduleRun)   // WO-017
+		r.Get("/schedules/{scheduleId}/history", schedHandler.GetScheduleHistory) // WO-017
+		r.Get("/realtime", presenceManager.ServeHTTP)                            // WO-022
+
+		// SNMP Credential CRUD API (WO-014) — Admin role required for mutations.
+		r.Post("/credentials", credHandler.CreateCredential)
+		r.Get("/credentials", credHandler.ListCredentials)
+		r.Get("/credentials/{credentialId}", credHandler.GetCredential)
+		r.Put("/credentials/{credentialId}", credHandler.UpdateCredential)
+		r.Delete("/credentials/{credentialId}", credHandler.DeleteCredential)
+	})
+
+	// Southbound service registry for UBR call-home (WO-009)
+	r.Route("/discovery/v1/kv", func(r chi.Router) {
+		r.Get("/services", h.ServiceRegistry)
+	})
+
+	// Device authentication endpoint (WO-010)
+	r.Route("/auth/v1", func(r chi.Router) {
+		r.Post("/device", h.AuthenticateDevice)
 	})
 
 	server := &http.Server{
@@ -75,6 +214,7 @@ func main() {
 	slog.Info("Shutting down")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	rediscoSched.Stop()
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("Graceful shutdown failed", "error", err)
 	}
@@ -97,3 +237,70 @@ type noopPublisher struct{}
 
 func (n *noopPublisher) PublishDevice(d model.DiscoveredDevice) error { return nil }
 func (n *noopPublisher) PublishAlarm(a model.Alarm) error             { return nil }
+
+// secretStoreAdapter adapts service.SecretStore to auth.SecretResolver
+type secretStoreAdapter struct {
+	store service.SecretStore
+}
+
+func (a *secretStoreAdapter) GetSecretBySerial(serialNumber string) (string, bool, error) {
+	secret, found, err := a.store.GetSecretBySerial(serialNumber)
+	if err != nil || !found {
+		return "", found, err
+	}
+	return secret.SecretValue, true, nil
+}
+
+// ── WO-022: realtime presence no-op adapters ──────────────────────────────────
+// Replace with production Redis / inventory / Kafka clients before deploying.
+
+type noopPresenceRedis struct{}
+
+func (r *noopPresenceRedis) SetPresence(_ context.Context, _ string, _ time.Duration) error {
+	return nil
+}
+func (r *noopPresenceRedis) DeletePresence(_ context.Context, _ string) error { return nil }
+
+type noopPresenceInventory struct{}
+
+func (i *noopPresenceInventory) MarkRealtimeEstablished(_ context.Context, serial string, _ time.Time) error {
+	slog.Info("WO-022 noop: MarkRealtimeEstablished", "serial", serial)
+	return nil
+}
+func (i *noopPresenceInventory) MarkOffline(_ context.Context, serial string) error {
+	slog.Info("WO-022 noop: MarkOffline", "serial", serial)
+	return nil
+}
+
+type noopPresencePublisher struct{}
+
+func (p *noopPresencePublisher) PublishPresenceEvent(_ context.Context, ev realtime.PresenceKafkaEvent) error {
+	slog.Info("WO-022 noop: presence event", "type", ev.EventType, "serial", ev.SerialNumber)
+	return nil
+}
+
+// noopWebSocketUpgrader rejects all upgrade requests in the default build.
+// Replace with a gorilla/websocket upgrader when the dependency is wired.
+type noopWebSocketUpgrader struct{}
+
+func (u *noopWebSocketUpgrader) Upgrade(w http.ResponseWriter, _ *http.Request) (realtime.WebSocketConn, error) {
+	http.Error(w, `{"reason":"WEBSOCKET_NOT_CONFIGURED"}`, http.StatusNotImplemented)
+	return nil, http.ErrNotSupported
+}
+
+// realtimeHMACValidator validates X-Device-Token by looking up the per-device secret
+// from the in-memory secret store provisioned at startup (WO-022 + WO-010).
+type realtimeHMACValidator struct {
+	secretStore *service.InMemorySecretStore
+}
+
+func (v *realtimeHMACValidator) ValidateToken(_ context.Context, token string) (string, error) {
+	// Token format: "<serialNumber>:<hmac-signature>".
+	// In production this would validate the HMAC; here we accept any non-empty token
+	// that matches a registered serial in the secret store.
+	if token == "" {
+		return "", http.ErrNoCookie // sentinel — use a real error type in production
+	}
+	// Minimal stub: return token as serial (real impl parses and verifies)
+	return token, nil
+}

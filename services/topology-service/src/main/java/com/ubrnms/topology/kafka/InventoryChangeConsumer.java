@@ -22,6 +22,19 @@ public class InventoryChangeConsumer {
     public void consume(String message) {
         try {
             Map<String, Object> event = objectMapper.readValue(message, new TypeReference<>() {});
+
+            // DEVICE_DELETED tombstone — remove the node and detach its edges.
+            // Published by InventoryService.deleteDevice() before the MongoDB delete.
+            if ("DEVICE_DELETED".equals(event.get("eventType"))) {
+                String deviceId = (String) event.getOrDefault("serialNumber",
+                                           event.getOrDefault("id", null));
+                if (deviceId != null) {
+                    topologyService.deleteNode(deviceId);
+                    log.info("Topology node removed on DEVICE_DELETED for serialNumber={}", deviceId);
+                }
+                return;
+            }
+
             topologyService.upsertFromInventory(event);
             log.info("Topology updated from inventory event: {}", event.get("serialNumber"));
         } catch (Exception e) {

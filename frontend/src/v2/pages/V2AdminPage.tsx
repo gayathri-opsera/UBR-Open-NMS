@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   fetchUsers, createUser, updateUser, deleteUser, resetPassword,
   fetchSessions, terminateSession, fetchSystemHealth,
-  fetchAuditLog, fetchBackups, triggerBackup, restoreBackup, deleteBackup,
+  fetchAuditLog, exportAuditLog, fetchBackups, triggerBackup, restoreBackup, deleteBackup,
   fetchNorthboundConfig, updateNorthboundConfig,
   fetchRedundancyStatus, forceSyncRedundancy, triggerManualSwitchover,
+  getSsoConfig, updateSsoConfig,
 } from '../../api/admin.api';
+import type { TenantSsoConfig } from '../../api/admin.api';
 import type {
   NmsUser, UserRole, UserSession, SystemHealth, ServiceStatus,
   AuditEntry, BackupRecord, NorthboundConfig, RedundancyStatus, RedundancySite,
@@ -81,12 +84,17 @@ import { LoadingState, EmptyState } from '../components/common/States';
 import { useToast } from '../components/common/Toast';
 import { logger } from '../utils/logger';
 
-type AdminTab = 'users' | 'sessions' | 'health' | 'hierarchy' | 'audit' | 'backup' | 'northbound' | 'redundancy';
+type AdminTab = 'users' | 'sessions' | 'health' | 'hierarchy' | 'audit' | 'backup' | 'northbound' | 'redundancy' | 'security';
 
 const ROLE_OPTIONS = [
-  { value: 'admin',    label: 'Admin' },
-  { value: 'operator', label: 'Operator' },
-  { value: 'user',     label: 'Viewer' },
+  { value: 'admin',            label: 'Admin' },
+  { value: 'operator',         label: 'Operator' },
+  { value: 'network_engineer', label: 'Network Engineer' },
+  { value: 'noc_operator',     label: 'NOC Operator' },
+  { value: 'compliance',       label: 'Compliance' },
+  // WO-025: auditor is a dedicated read-only role
+  { value: 'auditor',          label: 'Auditor (read-only)' },
+  { value: 'user',             label: 'Viewer' },
 ];
 
 // Map legacy/display role values to backend-valid values
@@ -94,6 +102,19 @@ function normalizeRole(r: string): string {
   const lower = r.toLowerCase();
   if (lower === 'viewer') return 'user';
   return lower;
+}
+
+/**
+ * Returns the set of tabs visible to a given role (WO-025).
+ * Auditors see only the Audit Log and System Health tabs in read-only mode.
+ * Backend authorization is always authoritative; this controls navigation UX only.
+ */
+function getVisibleTabs(role: string | undefined): AdminTab[] {
+  const r = (role ?? '').toLowerCase();
+  if (r === 'auditor') return ['audit', 'health'];
+  if (r === 'compliance') return ['audit', 'health', 'hierarchy'];
+  // Admin, operator, and specialist roles see all tabs
+  return ['users', 'sessions', 'health', 'hierarchy', 'audit', 'backup', 'northbound', 'redundancy', 'security'];
 }
 
 interface UserFormState {
@@ -150,6 +171,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 function UsersTab() {
   const { addToast } = useToast();
+  const { user: currentUser } = useAuth();
   const [users, setUsers]         = useState<NmsUser[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
@@ -157,6 +179,7 @@ function UsersTab() {
   const [showCreate, setShowCreate] = useState(false);
   const [showDelete, setShowDelete] = useState<NmsUser | null>(null);
   const [showPwd, setShowPwd]     = useState<NmsUser | null>(null);
+  const [toggling, setToggling]   = useState<string | null>(null);
   const [formState, setFormState] = useState<UserFormState>(EMPTY_FORM);
   const [newPwd, setNewPwd]       = useState('');
   const [saving, setSaving]       = useState(false);
@@ -176,6 +199,9 @@ function UsersTab() {
 
   const handleSave = async () => {
     if (!formState.username || !formState.role) { addToast('Username and role are required', 'warning'); return; }
+    if (!formState.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formState.email)) {
+      addToast('A valid email address is required', 'warning'); return;
+    }
     if (!editUser) {
       if (!formState.password) { addToast('Password required for new user', 'warning'); return; }
       if (!isPasswordValid(formState.password)) {
@@ -213,6 +239,17 @@ function UsersTab() {
     try { await resetPassword(showPwd.id, newPwd); addToast('Password reset', 'success'); }
     catch { addToast('Failed to reset password', 'error'); }
     finally { setShowPwd(null); setNewPwd(''); }
+  };
+
+  const handleToggleActive = async (u: NmsUser) => {
+    const nowActive = (u.isActive ?? u.enabled) !== false;
+    setToggling(u.id);
+    try {
+      const updated = await updateUser(u.id, { isActive: !nowActive } as Partial<NmsUser>);
+      setUsers((prev) => prev.map((x) => x.id === u.id ? { ...x, ...updated, isActive: !nowActive } : x));
+      addToast(`User "${u.username}" ${nowActive ? 'disabled' : 'enabled'}`, 'success');
+    } catch { addToast('Failed to update user status', 'error'); }
+    finally { setToggling(null); }
   };
 
   const visible = users.filter((u) => {
@@ -271,9 +308,21 @@ function UsersTab() {
                     </Badge>
                   </td>
                   <td style={{ padding: '9px 12px' }}>
-                    <div style={{ display: 'flex', gap: 4 }}>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       <Button variant="ghost" size="sm" onClick={() => openEdit(u)}>Edit</Button>
                       <Button variant="ghost" size="sm" onClick={() => { setShowPwd(u); setNewPwd(''); }}>Reset Pwd</Button>
+                      {/* Disable / Enable — hidden for current logged-in user to prevent self-lockout */}
+                      {u.username !== currentUser?.username && (
+                        <Button
+                          variant={(u.isActive ?? u.enabled) !== false ? 'warning' : 'success'}
+                          size="sm"
+                          loading={toggling === u.id}
+                          onClick={() => handleToggleActive(u)}
+                          title={(u.isActive ?? u.enabled) !== false ? 'Disable this user account' : 'Re-enable this user account'}
+                        >
+                          {(u.isActive ?? u.enabled) !== false ? 'Disable' : 'Enable'}
+                        </Button>
+                      )}
                       <Button variant="danger" size="sm" onClick={() => setShowDelete(u)}>Delete</Button>
                     </div>
                   </td>
@@ -610,9 +659,13 @@ function HierarchyTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 function AuditTab() {
   const { addToast } = useToast();
+  const { user: currentUser } = useAuth();
   const [entries, setEntries]     = useState<AuditEntry[]>([]);
   const [loading, setLoading]     = useState(true);
   const [actorFilter, setActor]   = useState('');
+  const [exporting, setExporting] = useState(false);
+
+  const isAuditor = (currentUser?.role ?? '').toLowerCase() === 'auditor';
 
   const load = useCallback(() => {
     setLoading(true);
@@ -624,13 +677,46 @@ function AuditTab() {
 
   useEffect(load, [load]);
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const url = await exportAuditLog({ actor: actorFilter || undefined });
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      addToast('Audit export downloaded', 'success');
+    } catch {
+      addToast('Export failed', 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const visible = entries.filter((e) => !actorFilter || e.actor.toLowerCase().includes(actorFilter.toLowerCase()));
 
   return (
     <>
+      {/* WO-025: read-only banner for auditor role */}
+      {isAuditor && (
+        <div style={{
+          padding: '10px 14px', marginBottom: 16,
+          background: 'rgba(96,165,250,0.06)',
+          border: '1px solid rgba(96,165,250,0.2)',
+          borderRadius: 8, fontSize: 12, color: 'var(--vf-text-muted)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ color: '#60a5fa', fontWeight: 600 }}>Read-only access</span>
+          — Auditor role. You may view and export audit evidence. No mutations permitted.
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
         <Input placeholder="Filter by actor…" value={actorFilter} onChange={(e) => setActor(e.target.value)} style={{ width: 260 }} />
         <Button variant="ghost" size="sm" onClick={load}>↻ Refresh</Button>
+        <Button variant="ghost" size="sm" onClick={handleExport} loading={exporting} disabled={exporting}>
+          Export CSV
+        </Button>
         <span style={{ fontSize: 12, color: 'var(--vf-text-muted)', alignSelf: 'center' }}>{visible.length} entries</span>
       </div>
       {loading ? <LoadingState label="Loading audit log…" /> : visible.length === 0 ? (
@@ -1019,10 +1105,276 @@ function RedundancyTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Security / SSO Configuration tab  (WO-013 AC#1, AC#9)
+// Shows current provider mode and a form to update it.
+// Secrets (client_secret, bind password, etc.) are never rendered.
+// ═══════════════════════════════════════════════════════════════════════════════
+const SSO_PROVIDER_OPTIONS = [
+  { value: 'local', label: 'Local (username + password)' },
+  { value: 'oidc',  label: 'OIDC / OpenID Connect' },
+  { value: 'saml',  label: 'SAML 2.0' },
+  { value: 'ldap',  label: 'LDAP / Active Directory' },
+];
+
+function SecurityTab() {
+  const { addToast } = useToast();
+  const [cfg, setCfg]       = useState<TenantSsoConfig | null>(null);
+  const [loading, setLoad]  = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft]   = useState<Partial<TenantSsoConfig>>({});
+
+  useEffect(() => {
+    getSsoConfig()
+      .then((data) => { setCfg(data); setDraft(data ?? {}); })
+      .catch(() => addToast('Failed to load SSO configuration', 'error'))
+      .finally(() => setLoad(false));
+  }, [addToast]);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const saved = await updateSsoConfig(draft);
+      setCfg(saved);
+      setDraft(saved);
+      addToast('SSO configuration saved', 'success');
+    } catch { addToast('Failed to save SSO configuration', 'error'); }
+    finally { setSaving(false); }
+  }
+
+  if (loading) return <LoadingState label="Loading SSO configuration…" />;
+
+  const sectionStyle: React.CSSProperties = {
+    background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)',
+    borderRadius: 10, padding: '18px 20px', marginBottom: 16,
+  };
+  const provider = draft.providerType ?? cfg?.providerType ?? 'local';
+
+  return (
+    <>
+      {/* Current mode banner */}
+      <div style={{ padding: '12px 16px', background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: 8, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>Current authentication mode:</span>
+        <Badge variant={provider === 'local' ? 'default' : 'info'} style={{ textTransform: 'uppercase', fontSize: 11 }}>
+          {provider}
+        </Badge>
+        {cfg?.localFallbackEnabled && provider !== 'local' && (
+          <Badge variant="warning" style={{ fontSize: 11 }}>local fallback enabled</Badge>
+        )}
+      </div>
+
+      {/* Provider selector */}
+      <div style={sectionStyle}>
+        <SectionLabel>Authentication Provider</SectionLabel>
+        <p style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+          Select how users authenticate to the NMS. Changes take effect immediately after saving.
+          Local fallback allows admins to log in with username/password if the IdP is unreachable.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+          <div>
+            <SectionLabel>Provider Mode</SectionLabel>
+            <select
+              value={provider}
+              onChange={(e) => setDraft((d) => ({ ...d, providerType: e.target.value as TenantSsoConfig['providerType'] }))}
+              style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-surface)', color: 'var(--vf-text-primary)', fontSize: 13 }}
+            >
+              {SSO_PROVIDER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          {provider !== 'local' && (
+            <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 2 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={draft.localFallbackEnabled ?? false}
+                  onChange={(e) => setDraft((d) => ({ ...d, localFallbackEnabled: e.target.checked }))}
+                />
+                Enable local fallback (admin login)
+              </label>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* OIDC settings */}
+      {provider === 'oidc' && (
+        <div style={sectionStyle}>
+          <SectionLabel>OpenID Connect Settings</SectionLabel>
+          <p style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+            Client secret is stored server-side and never returned by this API.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginTop: 10 }}>
+            <div>
+              <SectionLabel>Discovery URL</SectionLabel>
+              <FieldInput
+                value={draft.oidc?.discoveryUrl ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, oidc: { ...d.oidc, discoveryUrl: v, clientId: d.oidc?.clientId ?? '' } }))}
+                placeholder="https://idp.example.com/.well-known/openid-configuration"
+              />
+            </div>
+            <div>
+              <SectionLabel>Client ID</SectionLabel>
+              <FieldInput
+                value={draft.oidc?.clientId ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, oidc: { ...d.oidc, clientId: v, discoveryUrl: d.oidc?.discoveryUrl ?? '' } }))}
+                placeholder="ubr-nms-client"
+              />
+            </div>
+            <div>
+              <SectionLabel>Groups Claim</SectionLabel>
+              <FieldInput
+                value={draft.oidc?.groupsClaim ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, oidc: { ...d.oidc, groupsClaim: v, clientId: d.oidc?.clientId ?? '', discoveryUrl: d.oidc?.discoveryUrl ?? '' } }))}
+                placeholder="groups"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SAML settings */}
+      {provider === 'saml' && (
+        <div style={sectionStyle}>
+          <SectionLabel>SAML 2.0 Settings</SectionLabel>
+          <p style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+            IdP certificate is stored server-side. SP metadata is available at
+            <code style={{ marginLeft: 4, fontFamily: 'var(--vf-font-mono)', fontSize: 11 }}>/api/v1/auth/sso/metadata</code>.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginTop: 10 }}>
+            <div>
+              <SectionLabel>Entry Point (SSO URL)</SectionLabel>
+              <FieldInput
+                value={draft.saml?.entryPoint ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, saml: { ...d.saml, entryPoint: v, issuer: d.saml?.issuer ?? '' } }))}
+                placeholder="https://idp.example.com/saml2/sso"
+              />
+            </div>
+            <div>
+              <SectionLabel>Issuer (Entity ID)</SectionLabel>
+              <FieldInput
+                value={draft.saml?.issuer ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, saml: { ...d.saml, issuer: v, entryPoint: d.saml?.entryPoint ?? '' } }))}
+                placeholder="https://idp.example.com/saml2/metadata"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LDAP settings */}
+      {provider === 'ldap' && (
+        <div style={sectionStyle}>
+          <SectionLabel>LDAP / Active Directory Settings</SectionLabel>
+          <p style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+            Bind password is stored server-side and never returned by this API.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginTop: 10 }}>
+            <div>
+              <SectionLabel>LDAP URL</SectionLabel>
+              <FieldInput
+                value={draft.ldap?.ldapUrl ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, ldap: { ...d.ldap, ldapUrl: v, baseDn: d.ldap?.baseDn ?? '' } }))}
+                placeholder="ldap://niam.airtel.in:389"
+              />
+            </div>
+            <div>
+              <SectionLabel>Base DN</SectionLabel>
+              <FieldInput
+                value={draft.ldap?.baseDn ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, ldap: { ...d.ldap, baseDn: v, ldapUrl: d.ldap?.ldapUrl ?? '' } }))}
+                placeholder="ou=users,dc=airtel,dc=in"
+              />
+            </div>
+            <div>
+              <SectionLabel>Bind DN</SectionLabel>
+              <FieldInput
+                value={draft.ldap?.bindDn ?? ''}
+                onChange={(v) => setDraft((d) => ({ ...d, ldap: { ...d.ldap, bindDn: v, ldapUrl: d.ldap?.ldapUrl ?? '', baseDn: d.ldap?.baseDn ?? '' } }))}
+                placeholder="cn=svc-nms,ou=service,dc=airtel,dc=in"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <Button variant="ghost" size="sm" onClick={() => setDraft(cfg ?? {})}>Reset</Button>
+        <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
+          {saving ? 'Saving…' : 'Save SSO Configuration'}
+        </Button>
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Main Admin Page
 // ═══════════════════════════════════════════════════════════════════════════════
+// WO-014 AC#6: banner shown to admin users who have not yet completed MFA enrollment
+function MfaRequiredBanner({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <div style={{
+      padding: '12px 16px', marginBottom: 20,
+      background: 'rgba(245,158,11,0.08)',
+      border: '1.5px solid rgba(245,158,11,0.35)',
+      borderRadius: 10,
+      display: 'flex', alignItems: 'flex-start', gap: 12,
+    }}>
+      <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>⚠</span>
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#f59e0b', marginBottom: 3 }}>
+          MFA Enrollment Required
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--vf-text-secondary)', lineHeight: 1.55 }}>
+          This admin panel section requires MFA verification. Please go to{' '}
+          <strong>Security Settings</strong> (your profile) to enable two-factor authentication
+          before accessing Users, System, and Audit endpoints.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// WO-025: read-only role banner for auditor and compliance roles
+function ReadOnlyRoleBanner({ role }: { role?: string }) {
+  const r = (role ?? '').toLowerCase();
+  if (r !== 'auditor' && r !== 'compliance') return null;
+  return (
+    <div style={{
+      padding: '10px 14px', marginBottom: 20,
+      background: 'rgba(96,165,250,0.06)',
+      border: '1px solid rgba(96,165,250,0.2)',
+      borderRadius: 10, fontSize: 13, display: 'flex', alignItems: 'center', gap: 10,
+    }}>
+      <span style={{ color: '#60a5fa', fontWeight: 700 }}>
+        {r === 'auditor' ? 'Auditor' : 'Compliance'} — Read-only access
+      </span>
+      <span style={{ color: 'var(--vf-text-muted)' }}>
+        You can view audit evidence and system health. Mutation actions are disabled for your role.
+        Backend authorization is authoritative — attempting mutations via direct API calls will return 403.
+      </span>
+    </div>
+  );
+}
+
 export default function V2AdminPage() {
-  const [tab, setTab] = useState<AdminTab>('users');
+  const { user } = useAuth();
+  const role = (user?.role ?? '').toLowerCase();
+  const visibleTabs = getVisibleTabs(role);
+
+  // Default tab is the first visible tab for the role
+  const [tab, setTab] = useState<AdminTab>(() => visibleTabs[0] ?? 'audit');
+
+  // Admin tabs that require MFA assurance per WO-014 AC#3
+  const MFA_SENSITIVE_TABS: AdminTab[] = ['users', 'health', 'audit'];
+  const needsMfaBanner = role === 'admin' && !(user as unknown as { mfaVerified?: boolean }).mfaVerified && MFA_SENSITIVE_TABS.includes(tab);
+
+  // Tab label map for display
+  const TAB_LABELS: Record<AdminTab, string> = {
+    users: 'Users', sessions: 'Sessions', health: 'System Health',
+    hierarchy: 'Hierarchy', audit: 'Audit Log', backup: 'Backup & Restore',
+    northbound: 'Northbound', redundancy: 'Redundancy', security: 'Security / SSO',
+  };
 
   return (
     <div className="vf-page">
@@ -1030,26 +1382,25 @@ export default function V2AdminPage() {
         <h1 className="vf-page-title">Admin Panel</h1>
       </div>
 
-      {/* Tab bar — scrollable so all 8 tabs fit on smaller screens */}
+      {/* Tab bar — only shows tabs the current role can access */}
       <div style={{ display: 'flex', background: 'var(--vf-surface)', borderBottom: '1px solid rgba(77,158,255,0.1)', marginBottom: 24, marginLeft: -28, marginRight: -28, paddingLeft: 28, overflowX: 'auto' }}>
-        <TabBtn id="users"      active={tab === 'users'}      label="Users"          onClick={setTab} />
-        <TabBtn id="sessions"   active={tab === 'sessions'}   label="Sessions"       onClick={setTab} />
-        <TabBtn id="health"     active={tab === 'health'}     label="System Health"  onClick={setTab} />
-        <TabBtn id="hierarchy"  active={tab === 'hierarchy'}  label="Hierarchy"      onClick={setTab} />
-        <TabBtn id="audit"      active={tab === 'audit'}      label="Audit Log"      onClick={setTab} />
-        <TabBtn id="backup"     active={tab === 'backup'}     label="Backup & Restore" onClick={setTab} />
-        <TabBtn id="northbound" active={tab === 'northbound'} label="Northbound"     onClick={setTab} />
-        <TabBtn id="redundancy" active={tab === 'redundancy'} label="Redundancy"     onClick={setTab} />
+        {visibleTabs.map((id) => (
+          <TabBtn key={id} id={id} active={tab === id} label={TAB_LABELS[id]} onClick={setTab} />
+        ))}
       </div>
 
-      {tab === 'users'      && <UsersTab />}
-      {tab === 'sessions'   && <SessionsTab />}
-      {tab === 'health'     && <HealthTab />}
-      {tab === 'hierarchy'  && <HierarchyTab />}
-      {tab === 'audit'      && <AuditTab />}
-      {tab === 'backup'     && <BackupTab />}
-      {tab === 'northbound' && <NorthboundTab />}
-      {tab === 'redundancy' && <RedundancyTab />}
+      <ReadOnlyRoleBanner role={role} />
+      <MfaRequiredBanner show={needsMfaBanner} />
+
+      {tab === 'users'      && visibleTabs.includes('users')      && <UsersTab />}
+      {tab === 'sessions'   && visibleTabs.includes('sessions')   && <SessionsTab />}
+      {tab === 'health'     && visibleTabs.includes('health')     && <HealthTab />}
+      {tab === 'hierarchy'  && visibleTabs.includes('hierarchy')  && <HierarchyTab />}
+      {tab === 'audit'      && visibleTabs.includes('audit')      && <AuditTab />}
+      {tab === 'backup'     && visibleTabs.includes('backup')     && <BackupTab />}
+      {tab === 'northbound' && visibleTabs.includes('northbound') && <NorthboundTab />}
+      {tab === 'redundancy' && visibleTabs.includes('redundancy') && <RedundancyTab />}
+      {tab === 'security'   && visibleTabs.includes('security')   && <SecurityTab />}
     </div>
   );
 }

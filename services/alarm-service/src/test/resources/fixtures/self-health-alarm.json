@@ -1,0 +1,13 @@
+{
+  "alarmId": "sh-alarm-001",
+  "deviceId": "nms-platform",
+  "deviceType": "NMS",
+  "alarmType": "SERVICE_RESTART",
+  "alarmName": "Platform service restarted",
+  "severity": "WARNING",
+  "source": "SELF_HEALTH",
+  "sourceSystem": "SELF_HEALTH_MONITOR",
+  "description": "kafka-consumer restarted after 3 failures",
+  "correlationId": "corr-sh-001",
+  "eventId": "evt-sh-001"
+}

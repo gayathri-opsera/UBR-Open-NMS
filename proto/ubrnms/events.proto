@@ -1,0 +1,169 @@
+// events.proto — Kafka event message schemas for UBR NMS (WO-007).
+// Each message is the envelope published to its respective Kafka topic.
+// Source of truth: shared-libs/json-schemas/kafka/*.schema.json.
+
+syntax = "proto3";
+
+package ubrnms.v1;
+
+option go_package = "github.com/airtel-ubrnms/proto/ubrnms/v1;ubrnmsv1";
+option java_package = "com.ubrnms.proto.v1";
+option java_outer_classname = "EventsProto";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+import "ubrnms/device.proto";
+import "ubrnms/alarm.proto";
+import "ubrnms/kpi.proto";
+
+// ─────────────────────────────────────────────
+// inventory-sync topic
+// ─────────────────────────────────────────────
+
+// InventorySyncEvent — published when a device is created, updated, or deleted.
+message InventorySyncEvent {
+  // Unique event ID (UUID).
+  string event_id = 1;
+
+  // Wall-clock time the event was produced.
+  google.protobuf.Timestamp produced_at = 2;
+
+  // Schema version for backward-compatibility checks.
+  string schema_version = 3;
+
+  enum EventType {
+    EVENT_TYPE_UNKNOWN = 0;
+    EVENT_TYPE_CREATED = 1;
+    EVENT_TYPE_UPDATED = 2;
+    EVENT_TYPE_DELETED = 3;
+  }
+
+  EventType event_type = 4;
+
+  // Full device snapshot at time of event.
+  DeviceEntity device = 5;
+}
+
+// ─────────────────────────────────────────────
+// device-discovered topic (discovery-service → inventory-service)
+// ─────────────────────────────────────────────
+
+// DeviceDiscoveredEvent — emitted by the discovery service after SNMP classification.
+message DeviceDiscoveredEvent {
+  string event_id = 1;
+  google.protobuf.Timestamp produced_at = 2;
+  string schema_version = 3;
+
+  // Run that triggered this discovery.
+  string run_id = 4;
+
+  // IP address of the discovered host.
+  string ip_address = 5;
+
+  // ICMP status: "reachable" | "unreachable" | "timeout".
+  string icmp_status = 6;
+
+  // SNMP status: "success" | "partial" | "auth_failed" | "timeout" | "not_attempted".
+  string snmp_status = 7;
+
+  // Classification outcome: "RECOGNISED" | "UNRECOGNISED" | "DEFERRED_UNSUPPORTED" | "CLASSIFICATION_ERROR".
+  string classification_status = 8;
+
+  // Vendor string from SNMP fingerprint.
+  string vendor = 9;
+
+  // Model string from SNMP fingerprint.
+  string model = 10;
+
+  // Generic device type (SWITCH, ROUTER, AP, …).
+  string generic_device_type = 11;
+
+  // MIB-II fields.
+  string sys_object_id = 12;
+  string sys_descr = 13;
+  string sys_name = 14;
+  string sys_contact = 15;   // [sensitive]
+  string sys_location = 16;  // [sensitive]
+  int64 sys_up_time_seconds = 17;
+
+  // Reason a device was deferred, if applicable.
+  string defer_reason = 18;
+}
+
+// ─────────────────────────────────────────────
+// raw-alarms / processed-alarms topics
+// ─────────────────────────────────────────────
+
+// RawAlarmEvent — published by a southbound forwarder (Netcool, MycomNEOS, etc.).
+message RawAlarmEvent {
+  string event_id = 1;
+  google.protobuf.Timestamp produced_at = 2;
+  string schema_version = 3;
+
+  // Source system identifier (e.g. "netcool", "mycom").
+  string source = 4;
+
+  // Raw alarm payload from the southbound system (opaque JSON string).
+  string raw_payload = 5;
+}
+
+// ProcessedAlarmEvent — emitted by the alarm-service after enrichment and deduplication.
+message ProcessedAlarmEvent {
+  string event_id = 1;
+  google.protobuf.Timestamp produced_at = 2;
+  string schema_version = 3;
+
+  // Enriched and correlated alarm.
+  AlarmRecord alarm = 4;
+}
+
+// ─────────────────────────────────────────────
+// raw-kpi topic
+// ─────────────────────────────────────────────
+
+// RawKpiEvent — a batch of raw KPI samples from a kpi-collector instance.
+message RawKpiEvent {
+  string event_id = 1;
+  google.protobuf.Timestamp produced_at = 2;
+  string schema_version = 3;
+
+  // Collector instance identifier.
+  string collector_id = 4;
+
+  repeated KPIDataPoint data_points = 5;
+}
+
+// ─────────────────────────────────────────────
+// audit-events topic
+// ─────────────────────────────────────────────
+
+// AuditEvent — immutable record of an actor performing an action on a resource.
+message AuditEvent {
+  string event_id = 1;
+  google.protobuf.Timestamp produced_at = 2;
+  string schema_version = 3;
+
+  // Service that produced this event (e.g. "discovery-service", "inventory-service").
+  string service = 4;
+
+  // Correlation ID for end-to-end tracing.
+  string correlation_id = 5;
+
+  // Actor (user sub claim or service account name). [sensitive]
+  string actor = 6;
+
+  // Action verb (e.g. "discovery.run.created", "credential.deleted").
+  string action = 7;
+
+  // Resource type (e.g. "DiscoveryRun", "SnmpCredential").
+  string resource_type = 8;
+
+  // Resource ID being acted upon.
+  string resource_id = 9;
+
+  // Outcome: "success" | "failure".
+  string outcome = 10;
+
+  // Optional human-readable detail.
+  string detail = 11;
+}

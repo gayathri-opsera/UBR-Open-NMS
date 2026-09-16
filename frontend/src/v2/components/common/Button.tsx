@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'warning' | 'success';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -32,6 +32,16 @@ const variantStyles: Record<ButtonVariant, React.CSSProperties> = {
     background: 'var(--vf-danger-bg)',
     color: 'var(--vf-danger)',
     border: '1px solid var(--vf-danger)',
+  },
+  warning: {
+    background: 'rgba(245,158,11,0.12)',
+    color: '#f59e0b',
+    border: '1px solid rgba(245,158,11,0.4)',
+  },
+  success: {
+    background: 'rgba(34,197,94,0.12)',
+    color: '#22c55e',
+    border: '1px solid rgba(34,197,94,0.4)',
   },
 };
 

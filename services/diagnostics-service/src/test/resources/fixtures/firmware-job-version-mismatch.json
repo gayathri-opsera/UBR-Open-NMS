@@ -1,0 +1,17 @@
+{
+  "id": "fw-job-discrepancy-001",
+  "deviceId": "dev-bts-dn-010",
+  "imageRef": "firmware-images/ubr-bts-a60-v3.5.2.1.bin",
+  "expectedVersion": "3.5.2.1",
+  "observedVersion": "3.4.1",
+  "checksumAlgorithm": "SHA256",
+  "transferMethod": "HTTP",
+  "actor": "operator",
+  "role": "network_engineer",
+  "firmwarePhase": "DISCREPANCY",
+  "status": "COMPLETED",
+  "checksumVerified": true,
+  "discrepancy": true,
+  "failureReason": "Version mismatch: expected 3.5.2.1, observed 3.4.1",
+  "comment": "Post-reboot validation detected that device is still running old firmware version"
+}

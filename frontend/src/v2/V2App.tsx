@@ -21,6 +21,8 @@ const V2DeviceDetailPage  = lazy(() => import('./pages/V2DeviceDetailPage'));
 const V2AlarmsPage        = lazy(() => import('./pages/V2AlarmsPage'));
 const V2TopologyPage      = lazy(() => import('./pages/V2TopologyPage'));
 const V2KpiPage           = lazy(() => import('./pages/V2KpiPage'));
+const V2KpiOperationsSummaryPage = lazy(() => import('./pages/V2KpiOperationsSummaryPage'));
+const V2KpiDrilldownPage = lazy(() => import('./pages/V2KpiDrilldownPage'));
 const V2ConfigPage        = lazy(() => import('./pages/V2ConfigPage'));
 const V2HierarchyPage     = lazy(() => import('./pages/V2HierarchyPage'));
 const V2TroubleshootPage  = lazy(() => import('./pages/V2TroubleshootPage'));
@@ -28,7 +30,12 @@ const V2ReportsPage       = lazy(() => import('./pages/V2ReportsPage'));
 const V2NotificationsPage = lazy(() => import('./pages/V2NotificationsPage'));
 const V2AdminPage         = lazy(() => import('./pages/V2AdminPage'));
 const V2GroupsPage        = lazy(() => import('./pages/V2GroupsPage'));
+const V2ProfilePage       = lazy(() => import('./pages/V2ProfilePage'));
 const V2NotFoundPage      = lazy(() => import('./pages/V2NotFoundPage'));
+const V2UnifiedOnboardingPage = lazy(() => import('./pages/V2UnifiedOnboardingPage'));
+const V2ReleaseValidationPage = lazy(() => import('./pages/V2ReleaseValidationPage'));
+const V2CompliancePage    = lazy(() => import('./pages/V2CompliancePage'));
+const V2DiscoveryPage     = lazy(() => import('./pages/V2DiscoveryPage'));
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
@@ -75,6 +82,8 @@ export function V2App() {
                 <Route path="alarms"          element={<V2AlarmsPage />} />
                 <Route path="topology"        element={<V2TopologyPage />} />
                 <Route path="kpi"             element={<V2KpiPage />} />
+                <Route path="kpi/operations"  element={<V2KpiOperationsSummaryPage />} />
+                <Route path="kpi/drilldown"  element={<V2KpiDrilldownPage />} />
                 <Route
                   path="config"
                   element={
@@ -100,6 +109,22 @@ export function V2App() {
                   }
                 />
                 <Route path="reports"       element={<V2ReportsPage />} />
+                <Route
+                  path="release-validation"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2ReleaseValidationPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="compliance"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2CompliancePage />
+                    </V2ProtectedRoute>
+                  }
+                />
                 <Route path="groups"        element={<V2GroupsPage />} />
                 <Route
                   path="notifications"
@@ -117,6 +142,16 @@ export function V2App() {
                     </V2ProtectedRoute>
                   }
                 />
+                <Route path="profile" element={<V2ProfilePage />} />
+                <Route
+                  path="onboarding"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2UnifiedOnboardingPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                <Route path="discovery" element={<V2DiscoveryPage />} />
                 <Route path="*" element={<V2NotFoundPage />} />
               </Routes>
             </Suspense>

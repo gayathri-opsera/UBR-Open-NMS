@@ -1,0 +1,166 @@
+// device.proto — canonical DeviceEntity schema for UBR NMS (WO-007).
+// Source of truth: shared-libs/json-schemas/device-entity.schema.json and
+// services/inventory-service/src/main/java/com/ubrnms/inventory/model/Device.java.
+//
+// DO NOT hand-edit generated fields — update the source JSON schema and regenerate.
+
+syntax = "proto3";
+
+package ubrnms.v1;
+
+option go_package = "github.com/airtel-ubrnms/proto/ubrnms/v1;ubrnmsv1";
+option java_package = "com.ubrnms.proto.v1";
+option java_outer_classname = "DeviceProto";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+// DeviceType mirrors the JSON schema enum.
+enum DeviceType {
+  DEVICE_TYPE_UNKNOWN = 0;
+  DEVICE_TYPE_BTS = 1;
+  DEVICE_TYPE_CPE = 2;
+  DEVICE_TYPE_IDU = 3;
+}
+
+// DeviceStatus mirrors the JSON schema enum.
+enum DeviceStatus {
+  DEVICE_STATUS_UNKNOWN = 0;
+  DEVICE_STATUS_ONLINE = 1;
+  DEVICE_STATUS_OFFLINE = 2;
+  DEVICE_STATUS_PROVISIONING = 3;
+  DEVICE_STATUS_DECOMMISSIONED = 4;
+}
+
+// DiscoveryParadigm records how the device was first seen.
+enum DiscoveryParadigm {
+  DISCOVERY_PARADIGM_UNKNOWN = 0;
+  DISCOVERY_PARADIGM_UBR_CALL_HOME = 1;
+  DISCOVERY_PARADIGM_GENERIC_SNMP = 2;
+  DISCOVERY_PARADIGM_GENERIC_CLI = 3;
+}
+
+// IdentityAuthority — who owns the authoritative identity fields.
+enum IdentityAuthority {
+  IDENTITY_AUTHORITY_UNKNOWN = 0;
+  IDENTITY_AUTHORITY_UBR = 1;
+  IDENTITY_AUTHORITY_GENERIC = 2;
+}
+
+// A key/value tag attached to a device.
+message DeviceTag {
+  string key = 1;
+  string value = 2;
+}
+
+// DeviceEntity — canonical representation of a BTS, CPE, or IDU in inventory.
+// Fields marked "sensitive" must not be logged or returned in API list responses.
+message DeviceEntity {
+  // Unique device identifier (UUID).
+  string device_id = 1;
+
+  // UBR serial number — immutable once set by UBR call-home.
+  string serial_number = 2;
+
+  // MAC address — immutable once set by UBR call-home. [sensitive]
+  string mac_address = 3;
+
+  // Primary IP address for management.
+  string ip_address = 4;
+
+  DeviceType device_type = 5;
+
+  // Human-readable hardware model string.
+  string model = 6;
+
+  // Firmware version string as reported by the device.
+  string firmware_version = 7;
+
+  // Geographic region / circle code.
+  string region = 8;
+
+  // WGS-84 latitude, degrees.
+  double latitude = 9;
+
+  // WGS-84 longitude, degrees.
+  double longitude = 10;
+
+  // Elevation in metres above sea level.
+  double elevation = 11;
+
+  // Antenna azimuth in degrees (0–359).
+  int32 azimuth = 12;
+
+  // Antenna tilt in degrees.
+  int32 tilt = 13;
+
+  DeviceStatus status = 14;
+
+  // Device uptime in seconds at last poll.
+  int64 uptime_seconds = 15;
+
+  // Serial number of the connected BTS (CPE/IDU only).
+  google.protobuf.StringValue connected_bts_serial = 16;
+
+  // Count of CPE devices connected under this BTS.
+  int32 connected_cpe_count = 17;
+
+  // Count of IDU devices connected under this BTS.
+  int32 connected_idu_count = 18;
+
+  // Arbitrary operator tags.
+  repeated DeviceTag tags = 19;
+
+  // Organisation hierarchy ID.
+  string organization_id = 20;
+
+  // Network segment ID.
+  string network_id = 21;
+
+  google.protobuf.Timestamp created_at = 22;
+  google.protobuf.Timestamp updated_at = 23;
+
+  // Schema version for migration tracking.
+  string schema_version = 24;
+
+  DiscoveryParadigm discovery_paradigm = 25;
+
+  IdentityAuthority identity_authority = 26;
+
+  // Who owns the online/offline state determination.
+  IdentityAuthority online_state_authority = 27;
+
+  // Last UBR call-home timestamp.
+  google.protobuf.Timestamp last_check_in_at = 28;
+
+  // MIB-II sysObjectID (SNMP-discovered devices only).
+  string sys_object_id = 29;
+
+  // MIB-II sysDescr.
+  string sys_descr = 30;
+
+  // MIB-II sysName (hostname).
+  string sys_name = 31;
+
+  // MIB-II sysContact. [sensitive — may contain PII]
+  string sys_contact = 32;
+
+  // MIB-II sysLocation. [sensitive — physical location]
+  string sys_location = 33;
+
+  // MIB-II sysUpTime in seconds.
+  int64 sys_up_time_seconds = 34;
+
+  // SNMP classification vendor.
+  string vendor = 35;
+
+  // SNMP classification generic device type string.
+  string generic_device_type = 36;
+
+  // Reference to the stored SNMP credential. [sensitive — must not be logged]
+  string credential_ref = 37;
+
+  // Bootstrap provisioning state.
+  string bootstrap_state = 38;
+}

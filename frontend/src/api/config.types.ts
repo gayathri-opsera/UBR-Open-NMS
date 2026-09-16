@@ -52,7 +52,7 @@ export interface ConfigJob {
   successCount: number;
   failureCount: number;
   pendingCount: number;
-  status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PARTIAL';
+  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PARTIAL';
   progressPercent: number;
   perDeviceStatus?: Record<string, string>;
 }

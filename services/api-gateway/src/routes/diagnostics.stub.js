@@ -106,4 +106,91 @@ router.get('/missing-data', (_req, res) => {
   })));
 });
 
+// ── WO-012: Firmware Upgrade Operations ───────────────────────────────────
+
+// POST /operations/devices/:deviceId/firmware-upgrade
+router.post('/operations/devices/:deviceId/firmware-upgrade', (req, res) => {
+  const { deviceId } = req.params;
+  const { expectedVersion, imageRef, checksumAlgorithm, checksumValue, transferMethod } = req.body;
+
+  if (!expectedVersion || !imageRef || !checksumAlgorithm || !checksumValue || !transferMethod) {
+    return res.status(400).json({
+      status: 'error',
+      error: { code: 'VALIDATION_ERROR', message: 'Missing required fields' },
+    });
+  }
+
+  const jobId = `fw-job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  res.status(202).json({
+    jobId,
+    status: 'PENDING',
+    firmwarePhase: 'ACCEPTED',
+    acceptedAt: new Date().toISOString(),
+    precheckState: 'PENDING',
+    trackingUrl: `/api/v1/operations/firmware-jobs/${jobId}`,
+  });
+});
+
+// GET /operations/firmware-jobs/:jobId
+router.get('/operations/firmware-jobs/:jobId', (req, res) => {
+  const { jobId } = req.params;
+
+  // Simulate firmware job phases
+  const phases = ['ACCEPTED', 'PRECHECK', 'TRANSFER', 'CHECKSUM_VERIFY', 'INSTALL', 'REBOOT_WAIT', 'POSTCHECK', 'SUCCEEDED'];
+  const randomPhaseIdx = Math.floor(Math.random() * phases.length);
+  const phase = phases[randomPhaseIdx];
+  const isComplete = phase === 'SUCCEEDED';
+
+  res.json({
+    id: jobId,
+    deviceId: 'dev-bts-dn-010',
+    imageRef: 'firmware-images/ubr-bts-a60-v3.5.2.1.bin',
+    expectedVersion: '3.5.2.1',
+    checksumAlgorithm: 'SHA256',
+    transferMethod: 'HTTP',
+    actor: 'operator',
+    role: 'network_engineer',
+    firmwarePhase: phase,
+    status: isComplete ? 'COMPLETED' : 'IN_PROGRESS',
+    transferProgress: phase === 'TRANSFER' ? Math.floor(Math.random() * 100) : 100,
+    checksumVerified: ['CHECKSUM_VERIFY', 'INSTALL', 'REBOOT_WAIT', 'POSTCHECK', 'SUCCEEDED'].includes(phase),
+    observedVersion: isComplete ? '3.5.2.1' : null,
+    discrepancy: false,
+    retryable: true,
+    compatibilityDecision: 'COMPATIBLE',
+    acceptedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    completedAt: isComplete ? new Date().toISOString() : null,
+    durationMs: isComplete ? 5 * 60 * 1000 : null,
+  });
+});
+
+// GET /operations/devices/:deviceId/firmware-jobs
+router.get('/operations/devices/:deviceId/firmware-jobs', (req, res) => {
+  const { deviceId } = req.params;
+
+  res.json([
+    {
+      id: 'fw-job-001',
+      deviceId,
+      expectedVersion: '3.5.2.1',
+      firmwarePhase: 'SUCCEEDED',
+      status: 'COMPLETED',
+      acceptedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      completedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 5 * 60 * 1000).toISOString(),
+      discrepancy: false,
+    },
+    {
+      id: 'fw-job-002',
+      deviceId,
+      expectedVersion: '3.5.1.0',
+      firmwarePhase: 'FAILED',
+      status: 'FAILED',
+      failureReason: 'Checksum verification failed',
+      acceptedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      completedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000 + 3 * 60 * 1000).toISOString(),
+    },
+  ]);
+});
+
 module.exports = router;

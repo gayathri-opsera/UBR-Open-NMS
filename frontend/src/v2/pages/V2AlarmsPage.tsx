@@ -59,7 +59,10 @@ export default function V2AlarmsPage() {
     if (state) init.state = state;
     return init;
   });
-  const [search, setSearch] = useState(searchParams.get('search') ?? '');
+  // Prefer explicit 'search' param, fall back to deviceId for alarm drilldown from dashboard
+  const [search, setSearch] = useState(
+    searchParams.get('search') ?? searchParams.get('deviceId') ?? ''
+  );
   const [acking, setAcking] = useState<Set<string>>(new Set());
   const [thresholds, setThresholds] = useState<AlarmThreshold[]>([]);
   const [showThresholds, setShowThresholds] = useState(false);
@@ -220,8 +223,15 @@ export default function V2AlarmsPage() {
                     <Badge variant={SEV_VARIANT[alarm.severity] ?? 'default'} dot>{alarm.severity}</Badge>
                   </td>
                   <td style={{ padding: '9px 12px', color: 'var(--vf-text-primary)', fontWeight: 500 }}>{alarm.alarmType}</td>
-                  <td style={{ padding: '9px 12px', color: 'var(--vf-text-secondary)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alarm.alarmName}</td>
-                  <td style={{ padding: '9px 12px', color: 'var(--vf-text-secondary)', fontFamily: 'var(--vf-font-mono)', fontSize: 12 }}>{alarm.deviceId}</td>
+                  <td style={{ padding: '9px 12px', color: 'var(--vf-text-secondary)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={alarm.message || alarm.alarmName}>
+                    {alarm.message || alarm.alarmName}
+                  </td>
+                  <td style={{ padding: '9px 12px', fontFamily: 'var(--vf-font-mono)', fontSize: 12 }}>
+                    {(!alarm.deviceId || alarm.deviceId === 'unknown')
+                      ? <span style={{ color: 'var(--vf-text-muted)', fontStyle: 'italic' }}>System / NMS</span>
+                      : <span style={{ color: 'var(--vf-text-secondary)' }}>{alarm.deviceId}</span>}
+                  </td>
                   <td style={{ padding: '9px 12px' }}>
                     <Badge variant={alarm.state === 'ACTIVE' ? 'danger' : alarm.state === 'ACKNOWLEDGED' ? 'warning' : 'success'}>
                       {alarm.state}
