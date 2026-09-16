@@ -1,0 +1,329 @@
+openapi: "3.1.0"
+info:
+  title: Framework Product Definitions API
+  version: "1.0.0"
+  description: |
+    Manages NMS Framework Product Definitions — structured files that describe
+    how to collect, normalise, and display metrics for specific network equipment
+    models (e.g. Cisco ASR 1000, Ericsson Radio 4480).
+
+    Supported upload formats:
+    - **XML** (namespace `urn:nms:productdef:1.0`)
+    - **XLSX** (workbook with Identity / Fingerprints / Protocols / Parameters sheets)
+    - **JSON** (schema URI `urn:nms:productdef:json:1.0`)
+
+servers:
+  - url: /api/v1/framework/product-definitions
+    description: Via API Gateway
+
+tags:
+  - name: Upload
+    description: Ingest a new product definition file
+  - name: Versions
+    description: List and retrieve persisted version records
+  - name: Validation
+    description: Retrieve the validation report for an uploaded version
+
+paths:
+
+  /upload:
+    post:
+      tags: [Upload]
+      summary: Upload a product definition file
+      description: |
+        Accepts an XML, XLSX, or JSON product definition file.  The file is
+        parsed, validated, and persisted as a DRAFT version.
+
+        **Roles required:** `FRAMEWORK_ADMIN`, `SYSTEM_ADMIN`
+
+        **Duplicate detection:** If the SHA-256 hash of the uploaded file matches
+        an existing version, the request is rejected with 422 and the existing
+        `versionId` is returned in the error message.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The product definition file (XML / XLSX / JSON, max 10 MB)
+                description:
+                  type: string
+                  maxLength: 500
+                  description: Optional operator-provided description for this version
+      responses:
+        "201":
+          description: Definition successfully ingested (may be VALID or INVALID)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDefinitionVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: Unprocessable — file could not be parsed, validation failed, or duplicate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /{definitionId}/versions:
+    get:
+      tags: [Versions]
+      summary: List all versions for a product definition
+      description: |
+        Returns all uploaded versions for a given `definitionId`, newest first.
+
+        **Roles required:** `FRAMEWORK_ADMIN`, `SYSTEM_ADMIN`, `NMS_OPERATOR`
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/definitionId"
+      responses:
+        "200":
+          description: List of versions (may be empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductDefinitionVersion"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /{definitionId}/versions/{versionId}:
+    get:
+      tags: [Versions]
+      summary: Get a specific version
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/definitionId"
+        - $ref: "#/components/parameters/versionId"
+      responses:
+        "200":
+          description: Version record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDefinitionVersion"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /{definitionId}/versions/{versionId}/report:
+    get:
+      tags: [Validation]
+      summary: Get the validation report for a version
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/definitionId"
+        - $ref: "#/components/parameters/versionId"
+      responses:
+        "200":
+          description: Validation report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    definitionId:
+      name: definitionId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: cisco-asr-1000
+    versionId:
+      name: versionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+        example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+  schemas:
+
+    ProductDefinitionVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          description: MongoDB document ID
+        definitionId:
+          type: string
+          example: cisco-asr-1000
+        versionId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: ASR 1000
+        vendor:
+          type: string
+          example: Cisco
+        model:
+          type: string
+          example: ASR 1000
+        lifecycleStatus:
+          type: string
+          enum: [DRAFT, VALIDATED, STAGED, ACTIVE, ARCHIVED]
+        validationStatus:
+          type: string
+          enum: [VALID, INVALID, PENDING]
+        contentHash:
+          type: string
+          description: SHA-256 hex digest of the uploaded file
+        uploadedFormat:
+          type: string
+          enum: [XML, XLS, JSON]
+        description:
+          type: string
+        actorUserId:
+          type: string
+        actorUsername:
+          type: string
+        actorRole:
+          type: string
+        correlationId:
+          type: string
+        normalizedMetadataJson:
+          type: string
+          description: JSON-encoded sanitised metadata summary
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ValidationReport:
+      type: object
+      properties:
+        id:
+          type: string
+        definitionId:
+          type: string
+        versionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [VALID, INVALID]
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationError"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationError"
+        parameterCount:
+          type: integer
+        fingerprintCount:
+          type: integer
+        protocolCount:
+          type: integer
+        normalizedSummary:
+          type: string
+          example: "Cisco ASR 1000 (ASR 1000) — 3 fingerprint(s), 2 protocol(s), 12 parameter(s)"
+        correlationId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ValidationError:
+      type: object
+      properties:
+        code:
+          type: string
+          example: REQUIRED_FIELD
+        field:
+          type: string
+          example: identity.name
+        message:
+          type: string
+        severity:
+          type: string
+          enum: [ERROR, WARNING]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Malformed request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Insufficient role
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

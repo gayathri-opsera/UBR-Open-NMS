@@ -216,6 +216,28 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8082/actuator/health"]
       <<: *healthcheck-http
 
+  # ── Product Definition Service ─────────────────────────────────────────────
+  product-definition-service:
+    build:
+      context: services/product-definition-service
+      dockerfile: Dockerfile
+    container_name: nms-product-def
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      <<: *java-env
+      PORT: "8093"
+      MONGO_URI: mongodb://mongo:27017/ubrnms_productdef
+      MAX_UPLOAD_SIZE: 10MB
+    ports:
+      - "8093:8093"
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8093/actuator/health"]
+      <<: *healthcheck-http
+
   # ── SNMP Test Simulator ─────────────────────────────────────────────────────
   # A lightweight net-snmp agent that responds to MIB-II OIDs with simulated
   # Linux device data. Used for end-to-end SNMP discovery testing.
@@ -557,6 +579,7 @@ services:
       KPI_SERVICE_URL: "http://kpi-query-service:8089"
       REPORT_SERVICE_URL: "http://report-service:8091"
       DIAGNOSTICS_SERVICE_URL: "http://diagnostics-service:8090"
+      PRODUCT_DEFINITION_URL: "http://product-definition-service:8093"
       EVENT_COLLECTOR_URL: "http://event-collector:9090"
     ports:
       - "3100:3000"   # host 3100 → container 3000 (avoids conflict with aitutor-frontend)

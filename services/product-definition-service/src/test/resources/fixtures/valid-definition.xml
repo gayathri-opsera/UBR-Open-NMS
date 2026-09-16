@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<productDefinition xmlns="urn:nms:productdef:1.0">
+
+  <identity>
+    <name>ASR 1000</name>
+    <vendor>Cisco</vendor>
+    <model>ASR-1001-X</model>
+    <firmwareFrom>16.9</firmwareFrom>
+    <firmwareTo>17.6</firmwareTo>
+    <productFamily>ASR 1000 Series</productFamily>
+  </identity>
+
+  <fingerprints>
+    <fingerprint>
+      <sysObjectId>.1.3.6.1.4.1.9.1.685</sysObjectId>
+      <sysDescrPattern>.*Cisco.*ASR 1001.*</sysDescrPattern>
+      <firmwareFrom>16.9</firmwareFrom>
+      <firmwareTo>17.6</firmwareTo>
+    </fingerprint>
+    <fingerprint>
+      <sysObjectId>.1.3.6.1.4.1.9.1.686</sysObjectId>
+      <sysDescrPattern>.*Cisco.*ASR 1001-X.*</sysDescrPattern>
+    </fingerprint>
+  </fingerprints>
+
+  <protocols>
+    <protocol><type>SNMP</type></protocol>
+    <protocol><type>CLI</type></protocol>
+  </protocols>
+
+  <parameters>
+    <group name="cpu">
+      <parameter>
+        <id>cpu_utilization</id>
+        <displayName>CPU Utilization</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>%</unit>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+        <thresholdHigh>90</thresholdHigh>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.9.9.109.1.1.1.1.8.1</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+    <group name="interface">
+      <parameter>
+        <id>if_in_octets</id>
+        <displayName>Interface Inbound Octets</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>bytes</unit>
+        <snmpMapping>
+          <oid>.1.3.6.1.2.1.2.2.1.10</oid>
+        </snmpMapping>
+      </parameter>
+    </group>
+  </parameters>
+
+</productDefinition>

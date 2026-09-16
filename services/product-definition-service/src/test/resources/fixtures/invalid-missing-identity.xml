@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Intentionally missing <identity> element — used to test validation error path -->
+<productDefinition xmlns="urn:nms:productdef:1.0">
+
+  <fingerprints>
+    <fingerprint>
+      <sysObjectId>.1.3.6.1.4.1.9.1.685</sysObjectId>
+    </fingerprint>
+  </fingerprints>
+
+  <protocols>
+    <protocol><type>SNMP</type></protocol>
+  </protocols>
+
+  <parameters>
+    <group name="cpu">
+      <parameter>
+        <id>cpu_utilization</id>
+        <dataType>GAUGE</dataType>
+      </parameter>
+    </group>
+  </parameters>
+
+</productDefinition>

@@ -22,6 +22,7 @@ const devicesStub     = require('./routes/devices.stub');
 const dashboardsStub  = require('./routes/dashboards.stub');
 const { createProvisionHandler } = require('./routes/provision.stub');
 const { listIgnored, addIgnored, removeIgnored } = require('./routes/ignore.stub');
+const frameworkProductDefinitions = require('./routes/frameworkProductDefinitions');
 // Alarms stub — serves local alarm data instead of proxying to the external Opsera dev
 // environment.  Without this stub, ALARM_SERVICE_URL (often set to ubr-nms-frontend-dev.
 // agent.opsera.dev) causes a CORS error + 401 for every /api/v1/alarms request.
@@ -55,6 +56,9 @@ function createApp(redisClient) {
   app.use('/api/v1/groups',        groupsStub);
   // Custom dashboards — persisted to MongoDB so they survive browser/device changes
   app.use('/api/v1/dashboards',    dashboardsStub);
+  // Framework Product Definitions — proxied to product-definition-service with RBAC
+  app.use('/api/v1/framework/product-definitions', frameworkProductDefinitions);
+
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);
   // Diagnostics stub — Java diagnostics-service returns 503 in local dev

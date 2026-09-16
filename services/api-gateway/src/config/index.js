@@ -45,7 +45,8 @@ module.exports = {
     discovery:    process.env.DISCOVERY_SERVICE_URL       || 'http://localhost:3007',
     audit:        process.env.AUDIT_SERVICE_URL           || 'http://localhost:3008',
     notification: process.env.NOTIFICATION_SERVICE_URL   || 'http://localhost:3009',
-    healthMonitor:process.env.HEALTH_MONITOR_URL          || 'http://localhost:8092',
-    diagnostics:  process.env.DIAGNOSTICS_SERVICE_URL    || 'http://localhost:8090',
+    healthMonitor:    process.env.HEALTH_MONITOR_URL           || 'http://localhost:8092',
+    diagnostics:      process.env.DIAGNOSTICS_SERVICE_URL     || 'http://localhost:8090',
+    productDefinition:process.env.PRODUCT_DEFINITION_URL      || 'http://localhost:8093',
   },
 };
