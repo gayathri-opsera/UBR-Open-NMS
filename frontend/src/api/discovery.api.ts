@@ -120,6 +120,12 @@ export interface DiscoveryResult {
   sysLocation?: string;
   /** MIB-II sysUpTime in seconds. */
   sysUpTimeSeconds?: number;
+  /**
+   * Chassis MAC address retrieved via IF-MIB ifPhysAddress walk (1.3.6.1.2.1.2.2.1.6).
+   * Populated only when the discovery scanner successfully walked the interface table.
+   * Empty string / undefined when the device doesn't expose IF-MIB or the walk was skipped.
+   */
+  macAddress?: string;
 }
 
 // ── WO-016: Parallel ICMP sweep progress and scheduling ──────────────────────
@@ -148,8 +154,8 @@ export type DiscoveryRunStatus =
  * Extended discovery run detail with sweep progress and SNMP metadata.
  * Returned by GET /discovery/runs/:runId.
  */
-export interface DiscoveryRunDetail extends DiscoveryRunResponse {
-  /** Overrides DiscoveryRunResponse.status with all lifecycle states. */
+export interface DiscoveryRunDetail extends Omit<DiscoveryRunResponse, 'status'> {
+  /** Full lifecycle status (overrides the narrower type on DiscoveryRunResponse). */
   status: DiscoveryRunStatus;
   /** Live ICMP sweep progress; present while status is RUNNING. */
   sweep?: SweepProgress;
@@ -365,6 +371,168 @@ export async function listDiscoveryRuns(
   if (status) params.status = status;
   const res = await apiClient.get<PaginatedRunsResponse>('/discovery/runs', { params });
   return res.data;
+}
+
+// ── Provisioning: convert discovered hosts into managed inventory devices ─────
+
+/**
+ * Maps a `genericDeviceType` string from SNMP discovery to the nearest UBR
+ * device type (BTS | CPE | IDU). Falls back to CPE when no mapping exists.
+ */
+export function mapGenericTypeToDeviceType(generic?: string): 'BTS' | 'CPE' | 'IDU' {
+  if (!generic) return 'CPE';
+  const g = generic.toUpperCase();
+  if (g === 'BTS' || g.includes('BASE') || g.includes('ROUTER')) return 'BTS';
+  if (g === 'IDU' || g.includes('IDU')) return 'IDU';
+  return 'CPE';
+}
+
+/**
+ * Derive a provisional serial number from the IP address when SNMP did not
+ * return one.  Format: "SNMP-<dotted-IP-with-dashes>" e.g. "SNMP-192-168-1-5".
+ */
+function deriveSerial(ip: string, sysName?: string): string {
+  if (sysName && sysName.trim() && sysName.trim() !== 'N/A') {
+    // Use hostname but ensure it conforms to the 8-32 alphanum rule
+    const safe = sysName.trim().replace(/[^a-zA-Z0-9-_]/g, '-').slice(0, 28);
+    if (safe.length >= 4) return `SN-${safe}`;
+  }
+  return `SNMP-${ip.replace(/\./g, '-')}`;
+}
+
+/**
+ * Request body for POST /api/v1/discovery/runs/{runId}/provision.
+ * Each host entry corresponds to one DiscoveryResult selected by the admin.
+ */
+export interface ProvisionHostRequest {
+  ip: string;
+  /** UBR device type chosen by the admin (BTS | CPE | IDU). */
+  deviceType: 'BTS' | 'CPE' | 'IDU';
+  serialNumber: string;
+  macAddress: string;
+  networkId?: string;
+  vendor?: string;
+  model?: string;
+  sysName?: string;
+  sysLocation?: string;
+  sysObjectID?: string;
+  sysDescr?: string;
+  /** Optional GPS latitude for map placement. */
+  latitude?: number;
+  /** Optional GPS longitude for map placement. */
+  longitude?: number;
+}
+
+/** Per-host result returned by the provision endpoint. */
+export interface ProvisionHostResult {
+  ip: string;
+  deviceId: string;
+  serialNumber: string;
+  status: 'provisioned' | 'failed';
+  error?: string;
+}
+
+/** Full response from POST /api/v1/discovery/runs/{runId}/provision. */
+export interface ProvisionResponse {
+  results: ProvisionHostResult[];
+  provisioned: number;
+  failed: number;
+}
+
+/**
+ * Provision one or more discovered hosts into the inventory as managed devices.
+ *
+ * Calls POST /api/v1/discovery/runs/{runId}/provision.  The discovery-service
+ * forwards each host to the inventory-service and returns the resulting deviceIds.
+ *
+ * @param runId   The UUID of the completed discovery run.
+ * @param hosts   One or more hosts to provision.
+ */
+export async function provisionDiscoveredHosts(
+  runId: string,
+  hosts: ProvisionHostRequest[],
+): Promise<ProvisionResponse> {
+  const res = await apiClient.post<ProvisionResponse>(
+    `/discovery/runs/${runId}/provision`,
+    { hosts },
+  );
+  return res.data;
+}
+
+/**
+ * Build a ProvisionHostRequest from a DiscoveryResult with admin-provided overrides.
+ * Used by the ProvisionDeviceModal to assemble the final payload.
+ */
+export function buildProvisionRequest(
+  result: DiscoveryResult,
+  overrides: {
+    deviceType: 'BTS' | 'CPE' | 'IDU';
+    serialNumber: string;
+    macAddress: string;
+    networkId?: string;
+    latitude?: number;
+    longitude?: number;
+  },
+): ProvisionHostRequest {
+  return {
+    ip:           result.ip,
+    deviceType:   overrides.deviceType,
+    serialNumber: overrides.serialNumber || deriveSerial(result.ip, result.sysName),
+    macAddress:   overrides.macAddress || '',
+    networkId:    overrides.networkId,
+    vendor:       result.vendor,
+    model:        result.model,
+    sysName:      result.sysName,
+    sysLocation:  result.sysLocation,
+    sysObjectID:  result.sysObjectID,
+    sysDescr:     result.sysDescr,
+    latitude:     overrides.latitude,
+    longitude:    overrides.longitude,
+  };
+}
+
+// ── Discovery Ignore: suppress unwanted hosts from results ────────────────────
+
+/** A single ignored-host record returned by the ignore list endpoint. */
+export interface IgnoredHost {
+  ip: string;
+  ignoredAt: string;
+  ignoredBy: string;
+  reason: string;
+}
+
+/**
+ * Fetch all currently ignored host IPs for the current tenant.
+ * Used on mount to pre-populate the ignoredIPs set in the discovery UI.
+ */
+export async function listIgnoredHosts(): Promise<IgnoredHost[]> {
+  try {
+    const res = await apiClient.get<IgnoredHost[]>('/discovery/ignore');
+    return Array.isArray(res.data) ? res.data : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Mark one or more discovered IPs as "ignored".
+ * Ignored hosts are suppressed from the discovery results view and are never
+ * provisioned into inventory or surfaced on the topology map.
+ *
+ * @param ips    One or more IPv4 addresses to ignore.
+ * @param reason Optional human-readable reason for the audit log.
+ */
+export async function ignoreDiscoveredHosts(ips: string[], reason?: string): Promise<void> {
+  await apiClient.post('/discovery/ignore', { ips, reason: reason ?? '' });
+}
+
+/**
+ * Remove an IP from the ignore list, making it eligible for provisioning again.
+ *
+ * @param ip IPv4 address to un-ignore.
+ */
+export async function unignoreDiscoveredHost(ip: string): Promise<void> {
+  await apiClient.delete(`/discovery/ignore/${encodeURIComponent(ip)}`);
 }
 
 // ── Utility: scope input parsing ──────────────────────────────────────────────

@@ -57,9 +57,9 @@ function actionLabel(action: string): string {
   return map[action] ?? action;
 }
 
-function outcomeBadgeVariant(outcome: string): 'success' | 'error' | 'default' {
+function outcomeBadgeVariant(outcome: string): 'success' | 'danger' | 'default' {
   if (outcome === 'success') return 'success';
-  if (outcome === 'failure') return 'error';
+  if (outcome === 'failure') return 'danger';
   return 'default';
 }
 
@@ -157,13 +157,13 @@ export function V2DiscoveryAuditPage() {
         <Select
           label="Action"
           value={action}
-          onChange={(v) => { setAction(v); setCurrentPage(0); }}
+          onChange={(e) => { setAction(e.target.value); setCurrentPage(0); }}
           options={ACTION_OPTIONS}
         />
         <Select
           label="Outcome"
           value={outcome}
-          onChange={(v) => { setOutcome(v); setCurrentPage(0); }}
+          onChange={(e) => { setOutcome(e.target.value); setCurrentPage(0); }}
           options={OUTCOME_OPTIONS}
         />
         <Input
@@ -188,7 +188,7 @@ export function V2DiscoveryAuditPage() {
 
       {/* Content */}
       {loading ? (
-        <LoadingState message="Loading audit events…" />
+        <LoadingState label="Loading audit events…" />
       ) : error ? (
         <div className="rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4">
           <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
@@ -200,7 +200,7 @@ export function V2DiscoveryAuditPage() {
         <EmptyState
           title="No audit events found"
           description={hasFilters ? 'Try adjusting your filters.' : 'No discovery events have been recorded yet.'}
-          action={hasFilters ? { label: 'Clear filters', onClick: clearFilters } : undefined}
+          action={hasFilters ? <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button> : undefined}
         />
       ) : (
         <>

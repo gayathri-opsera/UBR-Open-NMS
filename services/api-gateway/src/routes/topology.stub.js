@@ -1,10 +1,38 @@
 'use strict';
 
-const express = require('express');
-const router  = express.Router();
+const express  = require('express');
+const mongoose = require('mongoose');
+const router   = express.Router();
 
 // ── Inventory service URL (internal Docker network or override) ─────────────
 const INVENTORY_URL = process.env.INVENTORY_SERVICE_URL || 'http://nms-inventory:8082';
+
+// ── MongoDB connection for locally-provisioned devices ───────────────────────
+// The API-gateway provision stub and devices stub write SNMP-discovered devices
+// to the 'devices' collection in ubrnms.  We read them here so provisioned
+// devices appear in topology immediately without waiting for Kafka/Java sync.
+const MONGO_URI    = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms';
+let _mongoDevCol   = null;
+let _mongoConn     = null;
+
+async function getMongoDevices() {
+  try {
+    if (!_mongoDevCol) {
+      // Prefer the shared mongoose connection if already established.
+      if (mongoose.connection.readyState === 1) {
+        _mongoDevCol = mongoose.connection.db.collection('devices');
+      } else {
+        _mongoConn   = await mongoose.createConnection(MONGO_URI, { serverSelectionTimeoutMS: 3000 }).asPromise();
+        _mongoDevCol = _mongoConn.db.collection('devices');
+      }
+    }
+    const docs = await _mongoDevCol.find({}).limit(2000).toArray();
+    return docs;
+  } catch (err) {
+    console.warn('[topology.stub] MongoDB device read failed (non-fatal):', err.message);
+    return [];
+  }
+}
 
 // ── Short in-memory cache so we don't hammer inventory on every request ──────
 let _devCache  = null;
@@ -37,29 +65,42 @@ function fmtUptime(sec) {
 }
 
 // ── Fetch ALL devices from inventory, paginating through all pages ────────────
+// Merges Java inventory (BTS/CPE from production) with MongoDB stub devices
+// (including SNMP-discovered devices provisioned via the gateway stub).
 async function getInventoryDevices(bustCache = false) {
   const now = Date.now();
   if (!bustCache && _devCache && now - _cacheAt < CACHE_TTL) return _devCache;
 
   const PAGE_SIZE = 100;          // inventory service default max per page
   const MAX_PAGES = 20;           // safety cap — allows up to 2,000 devices
-  let all  = [];
+  let javaDevices = [];
   let page = 0;
   let more = true;
 
-  while (more && page < MAX_PAGES) {
-    const resp = await fetch(
-      `${INVENTORY_URL}/api/v1/devices?limit=${PAGE_SIZE}&page=${page}`
-    );
-    if (!resp.ok) throw new Error(`Inventory HTTP ${resp.status}`);
-    const body = await resp.json();
-    const batch = Array.isArray(body) ? body : (body.devices ?? body.data ?? body.items ?? []);
-    all.push(...batch);
-    // Stop when we got fewer records than the page size (last page)
-    more = batch.length === PAGE_SIZE;
-    page++;
+  // Attempt to fetch from Java inventory; fall through gracefully on failure.
+  try {
+    while (more && page < MAX_PAGES) {
+      const resp = await fetch(
+        `${INVENTORY_URL}/api/v1/devices?limit=${PAGE_SIZE}&page=${page}`
+      );
+      if (!resp.ok) throw new Error(`Inventory HTTP ${resp.status}`);
+      const body = await resp.json();
+      const batch = Array.isArray(body) ? body : (body.devices ?? body.data ?? body.items ?? []);
+      javaDevices.push(...batch);
+      more = batch.length === PAGE_SIZE;
+      page++;
+    }
+  } catch (err) {
+    console.warn('[topology.stub] Java inventory unavailable, using MongoDB only:', err.message);
   }
 
+  // Read locally-provisioned devices from MongoDB (written by devices.stub POST handler).
+  // De-duplicate by serialNumber so Java and MongoDB devices don't appear twice.
+  const mongoDevices = await getMongoDevices();
+  const javaSerials  = new Set(javaDevices.map((d) => d.serialNumber).filter(Boolean));
+  const mongoUniq    = mongoDevices.filter((d) => !javaSerials.has(d.serialNumber));
+
+  const all = [...javaDevices, ...mongoUniq];
   _devCache = all;
   _cacheAt  = now;
   return all;
@@ -475,4 +516,13 @@ router.get('/device/:deviceId/events', async (req, res) => {
   }
 });
 
-module.exports = router;
+// ── Cache management export ───────────────────────────────────────────────────
+// Called by provision.stub.js after writing a new device to MongoDB so the next
+// topology request reflects the change immediately without the 30s cache delay.
+function bustTopologyCache() {
+  _devCache = null;
+  _cacheAt  = 0;
+}
+
+module.exports        = router;
+module.exports.bustTopologyCache = bustTopologyCache;

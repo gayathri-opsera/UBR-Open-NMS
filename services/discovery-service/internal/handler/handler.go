@@ -2,10 +2,14 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -462,4 +466,176 @@ func (h *DiscoveryHandler) CreateDiscoveryRun(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
+}
+
+// ProvisionDiscoveredHosts handles POST /api/v1/discovery/runs/{runId}/provision.
+//
+// An admin calls this endpoint after reviewing discovery results to provision one
+// or more discovered hosts as fully-managed devices in the inventory-service.
+//
+// Each host in the request is forwarded to the inventory-service via HTTP
+// (INVENTORY_SERVICE_URL env var, defaulting to http://inventory-service:8082).
+// The endpoint returns per-host provisioning results including the assigned deviceId.
+func (h *DiscoveryHandler) ProvisionDiscoveredHosts(w http.ResponseWriter, r *http.Request) {
+	corrID := r.Header.Get("X-Correlation-ID")
+
+	runID := chi.URLParam(r, "runId")
+	if runID == "" {
+		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "runId path parameter is required")
+		return
+	}
+
+	// Verify the discovery run exists (provision must follow a completed run).
+	run, ok := h.runStore.Get(runID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "Discovery run not found")
+		return
+	}
+	_ = run // run metadata available for future audit enrichment
+
+	var req model.ProvisionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		southbound.BadRequest(w, "Invalid or malformed request body", corrID)
+		return
+	}
+
+	if len(req.Hosts) == 0 {
+		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "hosts array must not be empty")
+		return
+	}
+
+	inventoryURL := os.Getenv("INVENTORY_SERVICE_URL")
+	if inventoryURL == "" {
+		inventoryURL = "http://inventory-service:8082"
+	}
+
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	results := make([]model.ProvisionHostResult, 0, len(req.Hosts))
+	provisioned, failed := 0, 0
+
+	for _, host := range req.Hosts {
+		result := provisionOneHost(httpClient, inventoryURL, runID, host)
+		results = append(results, result)
+		if result.Status == "provisioned" {
+			provisioned++
+		} else {
+			failed++
+		}
+	}
+
+	resp := model.ProvisionResponse{
+		Results:     results,
+		Provisioned: provisioned,
+		Failed:      failed,
+	}
+
+	status := http.StatusOK
+	if provisioned == 0 && failed > 0 {
+		status = http.StatusBadGateway
+	}
+
+	writeJSON(w, status, resp)
+}
+
+// provisionOneHost attempts to create a single device in the inventory-service via HTTP.
+// Returns a ProvisionHostResult describing the outcome (never panics).
+func provisionOneHost(client *http.Client, inventoryURL, runID string, host model.ProvisionHost) model.ProvisionHostResult {
+	result := model.ProvisionHostResult{
+		IP:           host.IP,
+		SerialNumber: host.SerialNumber,
+		Status:       "failed",
+	}
+
+	payload := buildInventoryPayload(host)
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to marshal inventory payload: %v", err)
+		slog.Warn("provision: marshal error", "ip", host.IP, "err", err)
+		return result
+	}
+
+	// Inventory-service exposes devices at /api/v1/devices (Spring Boot REST convention)
+	url := inventoryURL + "/api/v1/devices"
+	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to build inventory request: %v", err)
+		return result
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Source", "discovery-service")
+	httpReq.Header.Set("X-Discovery-Run-ID", runID)
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		result.Error = fmt.Sprintf("inventory-service unreachable: %v", err)
+		slog.Error("provision: inventory call failed", "ip", host.IP, "err", err)
+		return result
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusConflict {
+		result.Error = "device with this serial number already exists in inventory"
+		return result
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		result.Error = fmt.Sprintf("inventory-service returned HTTP %d", resp.StatusCode)
+		slog.Warn("provision: non-2xx from inventory", "ip", host.IP, "status", resp.StatusCode)
+		return result
+	}
+
+	// Parse response to extract the assigned deviceId.
+	var created model.InventoryCreateResponse
+	if decErr := json.NewDecoder(resp.Body).Decode(&created); decErr != nil {
+		// Device was created (2xx) but we couldn't parse the ID — still success.
+		result.Status = "provisioned"
+		result.DeviceID = "unknown"
+		slog.Warn("provision: could not parse inventory response", "ip", host.IP, "err", decErr)
+		return result
+	}
+
+	deviceID := created.DeviceID
+	if deviceID == "" {
+		deviceID = created.ID
+	}
+
+	result.Status = "provisioned"
+	result.DeviceID = deviceID
+	slog.Info("provision: device created in inventory", "ip", host.IP, "deviceId", deviceID)
+	return result
+}
+
+// buildInventoryPayload maps a ProvisionHost to the JSON payload expected by
+// the inventory-service POST /devices endpoint.
+func buildInventoryPayload(host model.ProvisionHost) map[string]interface{} {
+	payload := map[string]interface{}{
+		"deviceType":        host.DeviceType,
+		"serialNumber":      host.SerialNumber,
+		"macAddress":        host.MACAddress,
+		"ipAddress":         host.IP,
+		"manufacturer":      host.Vendor,
+		"model":             host.Model,
+		"firmwareVersion":   "Unknown",
+		"status":            "ONLINE",
+		"discoveryParadigm": "SNMP",
+	}
+
+	if host.NetworkID != "" {
+		payload["networkId"] = host.NetworkID
+	}
+	if host.SysObjectID != "" {
+		payload["sysObjectID"] = host.SysObjectID
+	}
+	if host.SysDescr != "" {
+		payload["sysDescr"] = host.SysDescr
+	}
+	// GPS location: required for the topology map to place the device at the correct position.
+	// When lat/lng are supplied, the inventory-service stores them as a GeoJSON Point.
+	if host.Latitude != 0 || host.Longitude != 0 {
+		payload["latitude"] = host.Latitude
+		payload["longitude"] = host.Longitude
+	}
+
+	return payload
 }

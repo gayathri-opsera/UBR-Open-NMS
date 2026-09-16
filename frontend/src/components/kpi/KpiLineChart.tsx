@@ -185,7 +185,7 @@ export function KpiLineChart({ series, threshold, thresholdDefinitions = [], bre
           <YAxis tick={{ fill: '#475569', fontSize: 10 }} width={40} />
           <Tooltip
             contentStyle={{ background: '#0d1b2a', border: '1px solid #1e293b', fontSize: 12 }}
-            formatter={(v: number) => [v?.toFixed(2), 'Avg']}
+            formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(2) : String(v ?? ''), 'Avg']}
           />
 
           {/* Threshold reference lines — WARNING amber, CRITICAL red */}

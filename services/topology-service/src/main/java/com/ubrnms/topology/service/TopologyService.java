@@ -73,6 +73,34 @@ public class TopologyService {
     }
 
     /**
+     * Removes a topology node and detaches it from its parent's child list.
+     * Called when a DEVICE_DELETED tombstone arrives on the inventory-sync topic.
+     *
+     * @param deviceId the serialNumber / id used as the node key
+     */
+    public void deleteNode(String deviceId) {
+        nodeRepo.findByDeviceId(deviceId).ifPresent(node -> {
+            // Detach from parent's child list so the parent's edge disappears cleanly.
+            if (node.getParentDeviceId() != null) {
+                nodeRepo.findByDeviceId(node.getParentDeviceId()).ifPresent(parent -> {
+                    parent.getChildDeviceIds().remove(deviceId);
+                    nodeRepo.save(parent);
+                });
+            }
+            // Detach children — set their parentDeviceId to null so they become orphan roots
+            // rather than pointing at a deleted node.
+            node.getChildDeviceIds().forEach(childId ->
+                nodeRepo.findByDeviceId(childId).ifPresent(child -> {
+                    child.setParentDeviceId(null);
+                    nodeRepo.save(child);
+                })
+            );
+            nodeRepo.delete(node);
+            log.info("Deleted topology node for deviceId={}", deviceId);
+        });
+    }
+
+    /**
      * Get full topology graph for a network scope.
      */
     public TopologyGraph getTopologyByNetwork(String networkId) {

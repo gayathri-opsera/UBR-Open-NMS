@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { fetchDevices, updateDevice } from '../../api/devices.api';
+import { fetchDevices, updateDevice, deleteDevice } from '../../api/devices.api';
 import { fetchDeviceKpi, fetchDeviceAvailabilitySummary } from '../../api/kpi.api';
 import { timeRangeToGranularity, timeRangeToMs, KPI_PARAMS } from '../../api/kpi.types';
 import { pushDeviceParam, getVersionHistory } from '../../api/config.api';
@@ -71,6 +71,8 @@ export default function V2DeviceDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Device>>({});
   const [editSaving, setEditSaving] = useState(false);
+  const [confirmDeprovision, setConfirmDeprovision] = useState(false);
+  const [deprovisioning, setDeprovisioning] = useState(false);
 
   // Canonical device identifier — falls back through all possible ID fields.
   // device.deviceId is often undefined for Java-service devices that only return 'id'.
@@ -156,6 +158,52 @@ export default function V2DeviceDetailPage() {
         <div className="vf-page-actions">
           <Badge variant="default">{device.firmwareVersion}</Badge>
           <Button variant="ghost" size="sm" onClick={openEdit}>✏ Edit Device</Button>
+          {/* Deprovision — removes device from managed inventory */}
+          {!confirmDeprovision ? (
+            <button
+              onClick={() => setConfirmDeprovision(true)}
+              style={{
+                padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', background: 'rgba(239,68,68,0.08)',
+                border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444',
+              }}
+            >
+              🗑 Deprovision
+            </button>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 11, color: '#ef4444', fontWeight: 600 }}>Confirm?</span>
+              <button
+                onClick={() => setConfirmDeprovision(false)}
+                style={{ padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer', background: 'var(--vf-surface-raised)', border: '1px solid var(--vf-border-subtle)', color: 'var(--vf-text-muted)' }}
+              >Cancel</button>
+              <button
+                disabled={deprovisioning}
+                onClick={async () => {
+                  setDeprovisioning(true);
+                  try {
+                    await deleteDevice(devId);
+                    addToast(`🗑 ${device.serialNumber} removed from inventory`, 'success');
+                    navigate(fromTopology ? '/v2/topology' : '/v2/devices');
+                  } catch (e) {
+                    logger.error('DeviceDetail: deprovision failed', e);
+                    addToast('Failed to deprovision device. Please try again.', 'error');
+                    setConfirmDeprovision(false);
+                  } finally {
+                    setDeprovisioning(false);
+                  }
+                }}
+                style={{
+                  padding: '4px 10px', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                  cursor: deprovisioning ? 'default' : 'pointer',
+                  background: deprovisioning ? '#999' : '#ef4444',
+                  border: 'none', color: '#fff',
+                }}
+              >
+                {deprovisioning ? '⏳ Removing…' : 'Yes, Remove'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

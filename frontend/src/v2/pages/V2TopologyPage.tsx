@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import * as d3 from 'd3';
 import { useNavigate } from 'react-router-dom';
 import L from 'leaflet';
@@ -19,7 +20,7 @@ import type {
   LinkHealth, DeviceEvent, DiscoveryParadigm, AlarmSeverityLevel,
 } from '../../api/topology.types';
 import {
-  filterNodes, normalizeSearch, activeFilterChips, hasActiveFilters, emptyFilterCriteria,
+  filterNodes, activeFilterChips, hasActiveFilters,
 } from '../../components/topology/topologyFilters';
 import type { TopologyFilterCriteria } from '../../components/topology/topologyFilters';
 import { Badge } from '../components/common/Badge';
@@ -28,6 +29,7 @@ import { Select } from '../components/common/Select';
 import { LoadingState, EmptyState } from '../components/common/States';
 import { useToast } from '../components/common/Toast';
 import { logger } from '../utils/logger';
+import { deleteDevice } from '../../api/devices.api';
 
 // ── India city fallbacks ──────────────────────────────────────────────────────
 const INDIA_CITIES: [number, number][] = [
@@ -199,13 +201,16 @@ function DeviceTooltip({ node, hideClickHint }: { node: TopologyNode; hideClickH
 }
 
 // ── Side detail panel ─────────────────────────────────────────────────────────
-function DevicePanel({ node, onClose, onNavigate, height }: {
+function DevicePanel({ node, onClose, onNavigate, onDeprovision, height }: {
   node: TopologyNode;
   onClose: () => void;
   onNavigate: (id: string) => void;
+  /** Called when the admin confirms deprovisioning this node from the topology panel. */
+  onDeprovision?: (node: TopologyNode) => void;
   height: number;
 }) {
   const [tab, setTab]             = useState<PanelTab>('info');
+  const [confirmDeprovision, setConfirmDeprovision] = useState(false);
   const [linkHealth, setLinkHealth] = useState<LinkHealth | null>(null);
   const [events, setEvents]       = useState<DeviceEvent[]>([]);
   const [connected, setConnected] = useState<TopologyNode[]>([]);
@@ -271,6 +276,49 @@ function DevicePanel({ node, onClose, onNavigate, height }: {
         <Button variant="primary" size="sm" style={{ width: '100%' }} onClick={() => onNavigate(deviceId)}>
           View Device Details →
         </Button>
+
+        {/* Deprovision action — removes device from inventory + topology */}
+        {onDeprovision && !confirmDeprovision && (
+          <button
+            onClick={() => setConfirmDeprovision(true)}
+            style={{
+              marginTop: 6, width: '100%', padding: '5px 0', borderRadius: 6,
+              fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.25)',
+              color: '#ef4444',
+            }}
+          >
+            🗑 Deprovision Device
+          </button>
+        )}
+        {confirmDeprovision && (
+          <div style={{
+            marginTop: 6, padding: '10px 12px', borderRadius: 8,
+            background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.3)',
+          }}>
+            <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 600, marginBottom: 6 }}>
+              ⚠ Remove <strong>{node.serialNumber || node.ipAddress}</strong> from managed inventory?
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={() => setConfirmDeprovision(false)}
+                style={{
+                  flex: 1, padding: '4px 0', borderRadius: 5, fontSize: 11,
+                  background: 'var(--vf-surface-raised)', border: '1px solid var(--vf-border-subtle)',
+                  color: 'var(--vf-text-muted)', cursor: 'pointer',
+                }}
+              >Cancel</button>
+              <button
+                onClick={() => { setConfirmDeprovision(false); onDeprovision?.(node); }}
+                style={{
+                  flex: 1, padding: '4px 0', borderRadius: 5, fontSize: 11, fontWeight: 700,
+                  background: '#ef4444', border: 'none', color: '#fff', cursor: 'pointer',
+                }}
+              >Confirm</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -1142,6 +1190,10 @@ export default function V2TopologyPage() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const mapHeight = useMapHeight();
+  const [searchParams] = useSearchParams();
+
+  // Deep-link: ?highlight=<ip-or-deviceId> — auto-selects the device on load.
+  const highlightTarget = searchParams.get('highlight') ?? '';
 
   const [graph, setGraph]               = useState<TopologyGraph | null>(null);
   const [loading, setLoading]           = useState(true);
@@ -1173,7 +1225,33 @@ export default function V2TopologyPage() {
 
   useEffect(() => {
     fetchTopology(undefined, isBustCache)
-      .then((g) => { setGraph(g); setIsBustCache(false); addToast(`Topology refreshed — ${g.nodes?.length ?? 0} devices`, 'success'); })
+      .then((g) => {
+        setGraph(g);
+        setIsBustCache(false);
+        addToast(`Topology refreshed — ${g.nodes?.length ?? 0} devices`, 'success');
+
+        // Deep-link: if a ?highlight= param was provided, select that device automatically.
+        if (highlightTarget && g.nodes?.length) {
+          const target = g.nodes.find(
+            (n) => n.ipAddress === highlightTarget
+              || n.id === highlightTarget
+              || n.deviceId === highlightTarget
+              || n.serialNumber === highlightTarget,
+          );
+          if (target) {
+            setSelectedNode(target);
+            setView('map'); // Ensure map view is active so the panel opens
+          } else {
+            // Device not yet on map (no GPS) — show list view so admin can locate it.
+            addToast(
+              `Device ${highlightTarget} is provisioned but has no GPS coordinates yet. It appears in the list below.`,
+              'warning',
+            );
+            setView('list');
+            setSearch(highlightTarget);
+          }
+        }
+      })
       .catch((e) => { logger.error('Topology fetch failed', e); addToast('Failed to load topology data', 'error'); })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1181,6 +1259,21 @@ export default function V2TopologyPage() {
 
   const nodes = graph?.nodes ?? [];
   const edges = graph?.edges ?? [];
+
+  // ── Unplaced devices: provisioned but missing GPS ──────────────────────
+  // Per spec section 05: "Unplaced provisioned devices surfaced in a visible panel,
+  // not dropped silently."  A node is "unplaced" when it uses a fallback coordinate
+  // (all India city fallbacks are in the bounding box 6–38°N, 67–98°E).
+  // We detect this by checking if the node's lat/lng is exactly one of our INDIA_CITIES
+  // values (fallbackLatLng returns a slightly jittered India city).
+  // The simpler heuristic: any node with no explicit lat/lng in the raw inventory
+  // data shows a fallback — we surface all nodes that have _fallback flag or no real GPS.
+  const unplacedNodes = useMemo(() =>
+    nodes.filter((n) => {
+      const extended = n as TopologyNode & { latitude?: number; longitude?: number; _usedFallback?: boolean };
+      return !extended.latitude || !extended.longitude || extended._usedFallback;
+    }),
+  [nodes]);
 
   // ── WO-043: compose filter criteria and delegate to pure helper ────────
   const filterCriteria: TopologyFilterCriteria = {
@@ -1192,7 +1285,7 @@ export default function V2TopologyPage() {
     networkId: networkIdFilter,
     tag: tagFilter,
   };
-  const { visible: filteredNodes, contextualIds } = filterNodes(nodes, filterCriteria);
+  const { visible: filteredNodes } = filterNodes(nodes, filterCriteria);
 
   const filtersActive = hasActiveFilters(filterCriteria);
   const filterChips   = activeFilterChips(filterCriteria);
@@ -1234,6 +1327,25 @@ export default function V2TopologyPage() {
     const navId = node?.deviceId || node?.serialNumber || deviceIdOrSerial;
     navigate(`/v2/devices/${navId}`, { state: { from: 'topology' } });
   }, [navigate, nodes]);
+
+  /**
+   * Deprovision from the topology panel.
+   * Calls DELETE /devices/:id which busts the topology cache (devices.stub.js),
+   * then closes the panel and increments refreshKey to reload the topology graph.
+   */
+  const handleTopologyDeprovision = useCallback(async (node: TopologyNode) => {
+    const deviceId = node.deviceId || node.serialNumber || node.id;
+    try {
+      await deleteDevice(deviceId);
+      addToast(`🗑 ${node.serialNumber || node.ipAddress} removed from inventory`, 'success');
+      setSelectedNode(null);
+      // Increment refreshKey to re-trigger the topology fetch effect.
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      logger.error('TopologyPage: deprovision failed', err);
+      addToast('Failed to deprovision device. Please try again.', 'error');
+    }
+  }, [addToast, setRefreshKey]);
 
   const contentHeight = mapHeight;
 
@@ -1444,6 +1556,7 @@ export default function V2TopologyPage() {
           action={<Button variant="primary" size="sm" onClick={handleClearAllFilters}>Reset Filters</Button>}
         />
       ) : (
+        <>
         <div style={{ display: 'flex', height: contentHeight, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--vf-border-subtle)' }}>
           {/* Visualization */}
           <div style={{ flex: 1, minWidth: 0, height: contentHeight }}>
@@ -1477,10 +1590,69 @@ export default function V2TopologyPage() {
               node={selectedNode}
               onClose={() => setSelectedNode(null)}
               onNavigate={handleNavigate}
+              onDeprovision={handleTopologyDeprovision}
               height={contentHeight}
             />
           )}
         </div>
+
+        {/* ── Unplaced Devices Panel ───────────────────────────────────────── */}
+        {/* Spec §05: "Unplaced provisioned devices surfaced in a visible panel,
+            not dropped silently." Shows all devices that have no real GPS and
+            are using a fallback city coordinate.                               */}
+        {unplacedNodes.length > 0 && (
+          <div style={{
+            marginTop: 16,
+            background: 'rgba(245,158,11,0.06)',
+            border: '1px solid rgba(245,158,11,0.25)',
+            borderRadius: 10,
+            padding: '12px 16px',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+              fontSize: 13, fontWeight: 700, color: '#d97706',
+            }}>
+              📍 {unplacedNodes.length} device{unplacedNodes.length !== 1 ? 's' : ''} without GPS coordinates
+              <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--vf-text-muted)' }}>
+                — shown at approximate city locations on the map
+              </span>
+            </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+              gap: 8,
+            }}>
+              {unplacedNodes.slice(0, 20).map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => { setSelectedNode(n); setView('map'); }}
+                  style={{
+                    background: 'var(--vf-surface)',
+                    border: '1px solid var(--vf-border-subtle)',
+                    borderRadius: 7, padding: '8px 10px',
+                    textAlign: 'left', cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'rgba(245,158,11,0.5)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--vf-border-subtle)')}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--vf-text-primary)', marginBottom: 2 }}>
+                    {n.deviceName || n.serialNumber}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', fontFamily: 'var(--vf-font-mono)' }}>
+                    {n.ipAddress} · {n.deviceType}
+                  </div>
+                </button>
+              ))}
+              {unplacedNodes.length > 20 && (
+                <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', padding: '8px 10px' }}>
+                  +{unplacedNodes.length - 20} more — set GPS coordinates in the device provisioning form to place them on the map.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        </>
       )}
     </div>
   );

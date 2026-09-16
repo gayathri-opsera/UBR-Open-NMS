@@ -1,7 +1,7 @@
 /**
  * WO-047: Mock data for device investigation context
  */
-import { DeviceInvestigationContext } from '../types/device-investigation-context';
+import type { DeviceInvestigationContext } from '../types/device-investigation-context';
 
 export const mockBtsParentIncident: DeviceInvestigationContext = {
   device: {

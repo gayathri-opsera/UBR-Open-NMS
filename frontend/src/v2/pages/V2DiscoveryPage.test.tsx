@@ -51,7 +51,7 @@ vi.mock('../components/discovery/DiscoveryResultsTable', () => ({
 vi.mock('../../api/devices.api', () => ({
   fetchDevices: vi.fn().mockResolvedValue([]),
   updateDevice: vi.fn(),
-  deleteDevice: vi.fn(),
+  deleteDevice: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../api/alarms.api', () => ({
@@ -61,6 +61,17 @@ vi.mock('../../api/alarms.api', () => ({
 vi.mock('../../api/client', () => ({
   apiClient: { get: vi.fn().mockResolvedValue({ data: {} }), put: vi.fn() },
 }));
+
+// Mock discovery API including new ignore endpoints
+vi.mock('../../api/discovery.api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/discovery.api')>();
+  return {
+    ...actual,
+    listIgnoredHosts:       vi.fn().mockResolvedValue([]),
+    ignoreDiscoveredHosts:  vi.fn().mockResolvedValue(undefined),
+    unignoreDiscoveredHost: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 vi.mock('../components/common/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),

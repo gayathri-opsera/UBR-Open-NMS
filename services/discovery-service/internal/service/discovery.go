@@ -894,16 +894,19 @@ func (s *DiscoveryService) CreateDiscoveryRun(req *model.DiscoveryRunRequest, cr
 		protocol = "SNMP_V2C"
 	}
 
-	// Create discovery run record
+	// Create discovery run record — ephemeral community is never persisted.
 	run := &model.DiscoveryRun{
-		ID:              uuid.NewString(),
-		NormalizedScope: normalized,
-		Status:          "QUEUED",
-		CreatedBy:       createdBy,
-		CreatedAt:       time.Now().UTC(),
-		ValidationNotes: fmt.Sprintf("Validated %d scope entries", len(normalized)),
-		CredentialID:    req.CredentialID,
-		Protocol:        protocol,
+		ID:                 uuid.NewString(),
+		NormalizedScope:    normalized,
+		Status:             "QUEUED",
+		CreatedBy:          createdBy,
+		CreatedAt:          time.Now().UTC(),
+		ValidationNotes:    fmt.Sprintf("Validated %d scope entries", len(normalized)),
+		CredentialID:       req.CredentialID,
+		Protocol:           protocol,
+		TimeoutSeconds:     req.TimeoutSeconds,
+		Retries:            req.Retries,
+		EphemeralCommunity: req.Community,
 	}
 
 	// Persist run

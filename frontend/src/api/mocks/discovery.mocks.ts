@@ -93,6 +93,8 @@ export const mockResultCiscoSwitch: DiscoveryResult = {
   sysUpTimeSeconds:     864000,
   classificationStatus: 'RECOGNISED',
   correlationId:        'corr-001',
+  // MAC address collected via IF-MIB ifPhysAddress walk (simulated by test/snmpsim/agent.py)
+  macAddress:           '00:1a:2b:3c:4d:5e',
 };
 
 /** A Juniper router classified via OID. */

@@ -163,6 +163,42 @@ export function DiscoveryRunStatusView({ runId, onComplete, onBack }: DiscoveryR
     ? sweep.hostsScanned - sweep.reachableHosts
     : undefined;
 
+  // Derive workflow step states from the run detail.
+  const icmpDone    = pct === 100 || TERMINAL_STATUSES.includes(run.status);
+  const snmpDone    = run.status === 'COMPLETED' || (run.snmpAttemptCount !== undefined && run.snmpSuccessCount !== undefined);
+  const classifyDone = run.status === 'COMPLETED';
+
+  const steps: Array<{ label: string; detail: string; done: boolean; active: boolean }> = [
+    {
+      label:  'ICMP Sweep',
+      detail: sweep
+        ? `${sweep.reachableHosts} reachable of ${sweep.totalHosts} hosts`
+        : run.status === 'QUEUED' ? 'Waiting for worker…' : 'Scanning…',
+      done:   icmpDone,
+      active: !icmpDone,
+    },
+    {
+      label:  'SNMP Fingerprint',
+      detail: run.snmpAttemptCount !== undefined
+        ? `${run.snmpSuccessCount ?? 0} / ${run.snmpAttemptCount} succeeded`
+        : icmpDone ? 'Querying MIB-II OIDs…' : 'Waiting for ICMP sweep…',
+      done:   snmpDone,
+      active: icmpDone && !snmpDone,
+    },
+    {
+      label:  'Classification',
+      detail: classifyDone ? 'Vendor / model identified' : snmpDone ? 'Mapping OIDs to vendor catalogue…' : 'Waiting for SNMP data…',
+      done:   classifyDone,
+      active: snmpDone && !classifyDone,
+    },
+    {
+      label:  'Discovery Complete',
+      detail: classifyDone ? 'Results ready — see below' : 'Pending',
+      done:   classifyDone,
+      active: false,
+    },
+  ];
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
@@ -170,13 +206,12 @@ export function DiscoveryRunStatusView({ runId, onComplete, onBack }: DiscoveryR
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--vf-text-primary)' }}>
-            Run {run.runId}
+            Run {run.runId.slice(0, 8)}…
           </span>
           <Badge variant={statusVariant(run.status)} dot>
             {run.status}
           </Badge>
         </div>
-
         {onBack && (
           <Button variant="ghost" size="sm" onClick={onBack}>
             ← Back
@@ -184,16 +219,84 @@ export function DiscoveryRunStatusView({ runId, onComplete, onBack }: DiscoveryR
         )}
       </div>
 
-      {/* Progress bar */}
+      {/* ── Step-by-step workflow ─────────────────────────────────────────── */}
+      <div
+        style={{
+          background: 'var(--vf-surface)',
+          border: '1px solid var(--vf-border-subtle)',
+          borderRadius: 'var(--vf-radius-lg)',
+          padding: '16px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 0,
+        }}
+      >
+        {steps.map((step, idx) => {
+          const icon = step.done
+            ? '✅'
+            : step.active
+            ? '⏳'
+            : '⬜';
+
+          const isLast = idx === steps.length - 1;
+          return (
+            <div key={step.label}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
+                  padding: '10px 0',
+                }}
+              >
+                {/* Icon + vertical connector */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, minWidth: 24 }}>
+                  <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>{icon}</span>
+                  {!isLast && (
+                    <div style={{
+                      width: 2,
+                      flex: 1,
+                      minHeight: 20,
+                      background: step.done ? 'var(--vf-success)' : 'var(--vf-border-subtle)',
+                      margin: '4px 0',
+                      borderRadius: 1,
+                    }} />
+                  )}
+                </div>
+
+                {/* Text */}
+                <div style={{ paddingBottom: isLast ? 0 : 8 }}>
+                  <div style={{
+                    fontWeight: step.done ? 700 : step.active ? 600 : 500,
+                    fontSize: 14,
+                    color: step.done
+                      ? 'var(--vf-success)'
+                      : step.active
+                      ? 'var(--vf-text-primary)'
+                      : 'var(--vf-text-muted)',
+                  }}>
+                    {step.label}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginTop: 2 }}>
+                    {step.detail}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Overall progress bar */}
       <ProgressIndicator
         pct={pct}
-        label="ICMP Host Sweep"
+        label="Overall Progress"
         description={
           sweep
             ? `${sweep.hostsScanned} / ${sweep.totalHosts} hosts scanned`
             : run.status === 'QUEUED' ? 'Waiting for worker capacity…' : undefined
         }
-        ariaLabel="ICMP sweep progress"
+        ariaLabel="Discovery progress"
       />
 
       {/* Metric counters */}

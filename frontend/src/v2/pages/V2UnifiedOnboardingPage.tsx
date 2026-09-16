@@ -170,7 +170,7 @@ function FailureDetailPanel({ item, onClose, canAct }: FailureDetailPanelProps) 
   // Guard: ensure no sensitive field is rendered
   if (hasSensitiveField(item as unknown as Record<string, unknown>)) {
     logger.warn('Onboarding item contained sensitive field — redacted before render', {
-      deviceId: item.deviceId,
+      metadata: { deviceId: item.deviceId },
     });
   }
 

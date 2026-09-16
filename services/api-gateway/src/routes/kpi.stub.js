@@ -11,6 +11,13 @@
  *   PUT  /thresholds/:id             – update threshold
  *   DELETE /thresholds/:id           – delete threshold
  *   GET  /export                     – CSV/XLS download
+ *
+ * ⚠️  ARCHITECTURE GAP (real Java path):
+ *   This stub gates /devices/:deviceId/metrics behind a MongoDB existence check
+ *   (returns 404 for deprovisioned devices).  The production kpi-query-service
+ *   MUST implement the same gate via a gRPC call to inventory-service before
+ *   synthesising any metric series.  Testing only against this Node stub will NOT
+ *   catch a regression in the Java path.
  */
 
 const router = require('express').Router();
@@ -84,8 +91,42 @@ function generateBuckets(deviceId, metrics, granularity, from, to) {
 }
 
 // ── GET /devices/:deviceId/metrics ───────────────────────────────────────────
-router.get('/devices/:deviceId/metrics', (req, res) => {
+// The spec requires this route to be gated on device existence.
+// A deprovisioned (deleted) device must receive a 404, not a synthetic series.
+// In dev the stub reads directly from MongoDB (same store used by devices.stub.js)
+// to mirror what the real Java kpi-query-service would check via inventory gRPC.
+router.get('/devices/:deviceId/metrics', async (req, res) => {
   const { deviceId } = req.params;
+
+  // Resolve device: accept serialNumber, MongoDB _id, or ipAddress as the key
+  // (mirrors how devices.stub.js identifies records) so deep-link URLs work.
+  try {
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState === 1) {
+      const col = mongoose.connection.db.collection('devices');
+      // Try serial/_id first (most specific), then ipAddress as fallback.
+      const doc = await col.findOne({
+        $or: [
+          { _id: deviceId },
+          { serialNumber: deviceId },
+          { ipAddress: deviceId },
+        ],
+      });
+      if (!doc) {
+        return res.status(404).json({
+          code: 'DEVICE_NOT_FOUND',
+          message: 'Device not found or has been deprovisioned. The metrics endpoint does not answer for deleted devices.',
+        });
+      }
+    }
+    // If MongoDB is not reachable fall through to stub data so local dev
+    // without Docker still works — this replicates the behaviour gap flagged
+    // in the architecture review: stub connectivity masks production gaps.
+  } catch (err) {
+    // Log but continue — we prefer degraded data over a broken UI in dev.
+    console.warn('[kpi-stub] Device existence check failed, returning stub data:', err.message);
+  }
+
   const {
     metrics    = 'cpuUtilization,memoryUtilization',
     granularity = 'HOUR',

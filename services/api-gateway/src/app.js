@@ -20,6 +20,12 @@ const kpiStub         = require('./routes/kpi.stub');
 const topologyStub    = require('./routes/topology.stub');
 const devicesStub     = require('./routes/devices.stub');
 const dashboardsStub  = require('./routes/dashboards.stub');
+const { createProvisionHandler } = require('./routes/provision.stub');
+const { listIgnored, addIgnored, removeIgnored } = require('./routes/ignore.stub');
+// Alarms stub — serves local alarm data instead of proxying to the external Opsera dev
+// environment.  Without this stub, ALARM_SERVICE_URL (often set to ubr-nms-frontend-dev.
+// agent.opsera.dev) causes a CORS error + 401 for every /api/v1/alarms request.
+const alarmsStub      = require('./routes/alarms.stub');
 
 function createApp(redisClient) {
   const app = express();
@@ -42,6 +48,8 @@ function createApp(redisClient) {
   app.use('/api/v1/notifications/stream', createSseProxy(config.services.notification));
 
   // ── Stub routers for sub-services (mounted BEFORE proxy routes) ──────────────
+  // Alarms stub — intercepts before the external proxy so local dev never hits Opsera dev.
+  app.use('/api/v1/alarms',        alarmsStub);
   app.use('/api/v1/admin',         adminStub);
   app.use('/api/v1/organizations', hierarchyStub);
   app.use('/api/v1/groups',        groupsStub);
@@ -62,6 +70,65 @@ function createApp(redisClient) {
   app.put('/api/v1/devices/:id',       devicesStub);
   app.delete('/api/v1/devices/:id',    devicesStub);
   app.put('/api/v1/devices/:id/tags',  devicesStub);
+
+  // Discovery provision stub — intercepts POST /api/v1/discovery/runs/:runId/provision
+  // before the discovery-service proxy so SNMP-discovered devices are written to MongoDB
+  // (same store as the devices stub) and immediately appear in inventory + topology.
+  app.post('/api/v1/discovery/runs/:runId/provision', createProvisionHandler(config));
+
+  // Discovery ignore stub — persists admin-suppressed IPs to MongoDB so ignored devices
+  // are filtered out of discovery results and never surfaced in inventory/topology.
+  app.get('/api/v1/discovery/ignore',        listIgnored);
+  app.post('/api/v1/discovery/ignore',       addIgnored);
+  app.delete('/api/v1/discovery/ignore/:ip', removeIgnored);
+
+  // ── Dev-only: deduplicate devices collection by IP address ───────────────────
+  // POST /api/v1/admin/devices/dedup-by-ip
+  // Removes all but the most-recently-updated document per IP from ubrnms.devices.
+  // Safe to call repeatedly (idempotent). Primarily needed after the admin
+  // provisioned the same SNMP device multiple times before the "already provisioned"
+  // guard was in place.
+  app.post('/api/v1/admin/devices/dedup-by-ip', async (req, res) => {
+    const mongoose = require('mongoose');
+    try {
+      const col = mongoose.connection.readyState === 1
+        ? mongoose.connection.db.collection('devices')
+        : null;
+      if (!col) return res.status(503).json({ code: 'DB_UNAVAILABLE', message: 'MongoDB not connected' });
+
+      const all = await col.find({}).toArray();
+
+      // Group docs by ipAddress; keep the one with the latest updatedAt.
+      const byIp = new Map();
+      const noIp = [];
+      for (const d of all) {
+        if (!d.ipAddress) { noIp.push(d); continue; }
+        const prev = byIp.get(d.ipAddress);
+        const dTime   = new Date(d.updatedAt || d.createdAt || 0).getTime();
+        const prevTime = prev ? new Date(prev.updatedAt || prev.createdAt || 0).getTime() : -1;
+        if (!prev || dTime >= prevTime) byIp.set(d.ipAddress, d);
+      }
+
+      // Collect _ids to DELETE (everything NOT in the keeper set).
+      const keepIds = new Set([
+        ...byIp.values(),
+        ...noIp,
+      ].map((d) => String(d._id)));
+      const toDelete = all.filter((d) => !keepIds.has(String(d._id))).map((d) => d._id);
+
+      let removed = 0;
+      if (toDelete.length > 0) {
+        const result = await col.deleteMany({ _id: { $in: toDelete } });
+        removed = result.deletedCount;
+      }
+
+      logger.info(`[dedup] Removed ${removed} duplicate device records (${byIp.size} unique IPs kept)`);
+      return res.json({ removed, kept: keepIds.size, message: `Removed ${removed} duplicate records` });
+    } catch (err) {
+      logger.error('[dedup] Failed:', err.message);
+      return res.status(500).json({ code: 'ERROR', message: err.message });
+    }
+  });
 
   // System health stub — health-monitor service may not be running in local dev
   app.get('/api/v1/system/health', (_req, res) => {

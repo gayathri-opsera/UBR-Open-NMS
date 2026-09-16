@@ -28,6 +28,10 @@ import java.util.List;
 @CompoundIndex(name = "idx_serial", def = "{'serialNumber': 1}", unique = true)
 @CompoundIndex(name = "idx_mac", def = "{'macAddress': 1}")
 @CompoundIndex(name = "idx_ip", def = "{'ipAddress': 1}")
+// Enforces that the same IP+hostname pair cannot have two active provisioned records.
+// The sparse flag means documents that omit either field (e.g. manual admin entries) are
+// excluded from the uniqueness check, preserving backward compatibility.
+@CompoundIndex(name = "idx_ip_hostname_unique", def = "{'ipAddress': 1, 'hostname': 1}", unique = true, sparse = true)
 public class Device {
 
     // ── Authority / paradigm enums (WO-002) ──────────────────────────────────

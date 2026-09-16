@@ -38,7 +38,7 @@ export default function V2CompliancePage() {
   // Evidence state
   const [activeEvidenceId, setActiveEvidenceId] = useState<string | null>(null);
   const [evidenceResponse, setEvidenceResponse] = useState<IncidentEvidenceResponse | null>(null);
-  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+  const [pollInterval, setPollInterval] = useState<ReturnType<typeof setInterval> | null>(null);
 
   // Initialize date range to last 7 days
   useEffect(() => {
@@ -122,8 +122,8 @@ export default function V2CompliancePage() {
   };
 
   const handleCopyChecksum = () => {
-    if (evidenceResponse?.data?.checksum) {
-      navigator.clipboard.writeText(evidenceResponse.data.checksum);
+    if (evidenceResponse?.checksum) {
+      navigator.clipboard.writeText(evidenceResponse.checksum);
       addToast('Checksum copied to clipboard', 'success');
     }
   };
@@ -283,13 +283,8 @@ function RequestTab({
               onChange={(e) => setLookupType(e.target.value as LookupType)}
               disabled={requesting || evidenceResponse?.status === 'PENDING'}
               style={{ width: '100%', maxWidth: 300 }}
-            >
-              {lookupOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </Select>
+              options={lookupOptions}
+            />
           </div>
 
           {/* Lookup Value */}
@@ -350,7 +345,7 @@ function RequestTab({
       {/* Pending Status */}
       {evidenceResponse && evidenceResponse.status === 'PENDING' && (
         <Card padding="lg">
-          <LoadingState message="Collecting and assembling incident evidence..." />
+          <LoadingState label="Collecting and assembling incident evidence..." />
         </Card>
       )}
     </div>
@@ -385,7 +380,7 @@ function StatusTab({
   if (evidenceResponse.status === 'PENDING') {
     return (
       <Card padding="lg">
-        <LoadingState message="Collecting and assembling incident evidence..." />
+        <LoadingState label="Collecting and assembling incident evidence..." />
       </Card>
     );
   }

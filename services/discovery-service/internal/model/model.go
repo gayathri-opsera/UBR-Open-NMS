@@ -224,6 +224,10 @@ type DiscoveryHostResult struct {
 	ClassificationStatus string `json:"classificationStatus"`
 	DeferReason          string `json:"deferReason,omitempty"`
 	CorrelationID        string `json:"correlationId,omitempty"`
+	// MACAddress is the chassis MAC address retrieved via ifPhysAddress (IF-MIB) walk.
+	// Empty string when the device doesn't expose the IF-MIB or when only scalar GETs
+	// were attempted (e.g. community string restricted to MIB-II scalars only).
+	MACAddress           string `json:"macAddress,omitempty"`
 }
 
 // DiscoveryRun represents a stored discovery run record (WO-011).
@@ -237,6 +241,16 @@ type DiscoveryRun struct {
 	ValidationNotes string
 	CredentialID    string
 	Protocol        string
+	// TimeoutSeconds is the per-SNMP-GET timeout passed by the caller.
+	// 0 means "use service default" (5 s).
+	TimeoutSeconds int
+	// Retries is the number of SNMP GET attempts (including the first).
+	// 0 means "use service default" (2 attempts total: 1 original + 1 retry).
+	Retries int
+	// EphemeralCommunity is an in-memory-only community string supplied by the
+	// caller when no stored credential is referenced. It is never written to
+	// persistent storage or included in API responses.
+	EphemeralCommunity string
 	FailureReason   string
 	Sweep           *SweepProgress
 	Results         []DiscoveryHostResult
@@ -381,6 +395,55 @@ type PortProbeResult struct {
 	Open      bool   `json:"open"`
 	LatencyMs int64  `json:"latencyMs,omitempty"`
 	Error     string `json:"error,omitempty"`
+}
+
+// ── Provisioning: bridging discovery results into managed inventory ───────────
+
+// ProvisionHost describes one discovered host that an admin wants to provision
+// into the NMS-managed inventory.  The admin-supplied fields (DeviceType, SerialNumber,
+// NetworkID, lat/lng) supplement the SNMP-fingerprinted data from discovery.
+type ProvisionHost struct {
+	IP           string  `json:"ip"`
+	DeviceType   string  `json:"deviceType"`   // BTS | CPE | IDU (admin-chosen)
+	SerialNumber string  `json:"serialNumber"`
+	MACAddress   string  `json:"macAddress,omitempty"`
+	NetworkID    string  `json:"networkId,omitempty"`
+	Vendor       string  `json:"vendor,omitempty"`
+	Model        string  `json:"model,omitempty"`
+	SysName      string  `json:"sysName,omitempty"`
+	SysLocation  string  `json:"sysLocation,omitempty"`
+	SysObjectID  string  `json:"sysObjectID,omitempty"`
+	SysDescr     string  `json:"sysDescr,omitempty"`
+	Latitude     float64 `json:"latitude,omitempty"`
+	Longitude    float64 `json:"longitude,omitempty"`
+}
+
+// ProvisionRequest is the body for POST /api/v1/discovery/runs/{runId}/provision.
+type ProvisionRequest struct {
+	Hosts []ProvisionHost `json:"hosts"`
+}
+
+// ProvisionHostResult is the per-host outcome included in ProvisionResponse.
+type ProvisionHostResult struct {
+	IP           string `json:"ip"`
+	DeviceID     string `json:"deviceId,omitempty"`
+	SerialNumber string `json:"serialNumber,omitempty"`
+	Status       string `json:"status"` // "provisioned" | "failed"
+	Error        string `json:"error,omitempty"`
+}
+
+// ProvisionResponse is returned by POST /api/v1/discovery/runs/{runId}/provision.
+type ProvisionResponse struct {
+	Results     []ProvisionHostResult `json:"results"`
+	Provisioned int                   `json:"provisioned"`
+	Failed      int                   `json:"failed"`
+}
+
+// InventoryCreateResponse is the minimal shape returned by the inventory-service
+// POST /devices endpoint that we need for extracting the assigned deviceId.
+type InventoryCreateResponse struct {
+	ID       string `json:"id"`
+	DeviceID string `json:"deviceId"`
 }
 
 // PortProbeResultEvent is published to discovery.port.results after probing

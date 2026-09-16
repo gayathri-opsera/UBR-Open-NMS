@@ -19,7 +19,7 @@ import {
   listReleaseReports,
 } from '../../api/reports.api';
 import { downloadBlob } from '../../utils/download';
-import type { ReleaseReportStatus, ValidationResultSummary } from '../../api/reports.types';
+import type { ReleaseReportStatus, ReleaseReportResponse, ValidationResultSummary } from '../../api/reports.types';
 import { logger } from '../utils/logger';
 
 type TabType = 'generate' | 'history';
@@ -38,7 +38,7 @@ export default function V2ReleaseValidationPage() {
   // Report state
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const [reportStatus, setReportStatus] = useState<ReleaseReportStatus | null>(null);
-  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+  const [pollInterval, setPollInterval] = useState<ReturnType<typeof setInterval> | null>(null);
 
   // Load history when switching to history tab
   useEffect(() => {
@@ -57,7 +57,7 @@ export default function V2ReleaseValidationPage() {
           if (status.status !== 'PENDING') {
             clearInterval(interval);
             setPollInterval(null);
-            if (status.status === 'DONE') {
+            if (status.status === 'COMPLETED') {
               addToast('Report generated successfully', 'success');
             } else if (status.status === 'FAILED') {
               addToast(`Report generation failed: ${status.errorMessage}`, 'error');
@@ -267,16 +267,17 @@ function GenerateTab({
       {/* Status/Results */}
       {reportStatus && reportStatus.status === 'PENDING' && (
         <Card padding="lg">
-          <LoadingState message="Generating release validation report..." />
+          <LoadingState label="Generating release validation report..." />
         </Card>
       )}
 
-      {reportStatus && reportStatus.status === 'DONE' && reportStatus.data && (
+      {reportStatus && reportStatus.status === 'COMPLETED' && reportStatus.scenarios && (
         <>
-          <ReleaseStatusCard data={reportStatus.data} />
+          {/* Cast is safe: COMPLETED status means the full report payload is present */}
+          <ReleaseStatusCard data={reportStatus as unknown as ReleaseReportResponse} />
 
           <Card title="Validation Results" padding="lg">
-            <ValidationResultTable results={reportStatus.data.scenarios} />
+            <ValidationResultTable results={reportStatus.scenarios} />
           </Card>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -318,7 +319,7 @@ function HistoryTab({
   if (loading) {
     return (
       <Card padding="lg">
-        <LoadingState message="Loading validation history..." />
+        <LoadingState label="Loading validation history..." />
       </Card>
     );
   }

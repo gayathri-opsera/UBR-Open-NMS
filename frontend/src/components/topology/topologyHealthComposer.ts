@@ -15,7 +15,7 @@
  *   If link quality is DOWN, force FAULTY regardless of endpoint health.
  *   If link quality is absent, derive UNKNOWN — never drop the edge.
  */
-import type { TopologyGraph, TopologyNode, TopologyEdge, AvailabilitySummary, NodeHealth } from '../api/topology.types';
+import type { TopologyGraph, TopologyNode, TopologyEdge, AvailabilitySummary, NodeHealth } from '../../api/topology.types';
 
 // ── Health ordering ───────────────────────────────────────────────────────────
 

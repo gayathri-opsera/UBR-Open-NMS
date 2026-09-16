@@ -48,6 +48,17 @@ async function getInvCol() {
 getCol().catch((err) => console.error('[devices-stub] MongoDB connect failed:', err.message));
 getInvCol().catch((err) => console.error('[devices-stub] Inventory MongoDB connect failed:', err.message));
 
+// Lazy-load topology stub for cache invalidation after DELETE.
+// Require is deferred to avoid a circular-dependency issue at module load time.
+function bustTopologyCache() {
+  try {
+    // eslint-disable-next-line global-require
+    require('./topology.stub').bustTopologyCache();
+  } catch {
+    /* topology stub may not be loaded yet — safe to ignore */
+  }
+}
+
 /** Fetch a page from the Java inventory service (internal call) */
 function fetchFromJava(query) {
   const invUrl = process.env.INVENTORY_SERVICE_URL || 'http://nms-inventory:8082';
@@ -92,42 +103,81 @@ function normaliseIdu(doc) {
   };
 }
 
-// ── GET /api/v1/devices — merge Java inventory + MongoDB IDU devices ──────────
+// ── GET /api/v1/devices — merge Java inventory + locally-provisioned devices ──
+// Source priority (highest wins on serial-number deduplication):
+//   1. Java inventory (BTS/CPE from production CRUD)
+//   2. ubrnms.devices — written by POST /api/v1/devices and provision.stub.js
+//   3. ubrnms_inventory.devices — IDU written by call-home / UBR board scripts
 router.get('/', async (req, res, next) => {
   const { deviceType, limit = '100', page = '0', ...rest } = req.query || {};
   const typeUpper = (deviceType || '').toUpperCase();
 
   try {
-    // If caller explicitly wants IDU only — serve directly from MongoDB
-    if (typeUpper === 'IDU') {
-      const col = await getInvCol();
-      const docs = await col.find({ deviceType: { $regex: 'IDU', $options: 'i' } }).limit(500).toArray();
-      return res.json(docs.map(normaliseIdu));
-    }
-
-    // Otherwise fetch from Java inventory (BTS/CPE)
+    // ── 1. Java inventory ─────────────────────────────────────────────────────
     const javaQuery = { limit, page, ...(deviceType ? { deviceType } : {}), ...rest };
     let javaDevices = [];
     try {
       const raw = await fetchFromJava(javaQuery);
       javaDevices = Array.isArray(raw) ? raw : (raw.content || raw.data || raw.devices || []);
     } catch (err) {
-      console.warn('[devices-stub] Java inventory fetch failed, returning empty BTS/CPE list:', err.message);
+      console.warn('[devices-stub] Java inventory fetch failed, returning MongoDB only:', err.message);
     }
 
-    // Append IDU devices only when no deviceType filter (or no filter at all)
+    // Track serials already covered by Java to avoid duplicates.
+    const javaSerials = new Set(javaDevices.map((d) => d.serialNumber).filter(Boolean));
+
+    // ── 2. Locally-provisioned (and admin-created) devices from ubrnms.devices ─
+    let localDevices = [];
+    try {
+      const col   = await getCol();
+      const query = typeUpper ? { deviceType: { $regex: typeUpper, $options: 'i' } } : {};
+      const docs  = await col.find(query).limit(parseInt(limit, 10) || 500).toArray();
+
+      // Deduplicate within the local collection by ipAddress — keep the most recently
+      // updated document per IP.  This is a safety net for cases where a device was
+      // provisioned multiple times with different serial numbers (e.g. the admin
+      // re-opened the provision modal before the "already provisioned" guard was active).
+      const ipMap = new Map();
+      for (const d of docs) {
+        if (!d.ipAddress) {
+          // Devices without an IP are kept as-is (admin-created manual entries).
+          ipMap.set(d.serialNumber || String(d._id), d);
+          continue;
+        }
+        const prev = ipMap.get(d.ipAddress);
+        // Compare by updatedAt; fall back to createdAt if updatedAt is missing.
+        const dTime   = new Date(d.updatedAt   || d.createdAt   || 0).getTime();
+        const prevTime = prev ? new Date(prev.updatedAt || prev.createdAt || 0).getTime() : -1;
+        if (!prev || dTime >= prevTime) {
+          ipMap.set(d.ipAddress, d);
+        }
+      }
+      const deduped = [...ipMap.values()];
+
+      // Only include devices NOT already present in Java response.
+      localDevices = deduped.filter((d) => !javaSerials.has(d.serialNumber));
+    } catch (err) {
+      console.warn('[devices-stub] Local MongoDB fetch failed:', err.message);
+    }
+
+    // ── 3. IDU devices from ubrnms_inventory ─────────────────────────────────
+    // Only when caller has not applied a type filter that excludes IDU.
     let iduDevices = [];
-    if (!typeUpper) {
+    if (!typeUpper || typeUpper === 'IDU') {
       try {
-        const col = await getInvCol();
+        const allSerials = new Set([
+          ...javaSerials,
+          ...localDevices.map((d) => d.serialNumber).filter(Boolean),
+        ]);
+        const col  = await getInvCol();
         const docs = await col.find({ deviceType: { $regex: 'IDU', $options: 'i' } }).limit(500).toArray();
-        iduDevices = docs.map(normaliseIdu);
+        iduDevices = docs.filter((d) => !allSerials.has(d.serialNumber)).map(normaliseIdu);
       } catch (err) {
         console.warn('[devices-stub] IDU MongoDB fetch failed:', err.message);
       }
     }
 
-    return res.json([...javaDevices, ...iduDevices]);
+    return res.json([...javaDevices, ...localDevices, ...iduDevices]);
   } catch (err) {
     console.error('[devices-stub] GET /devices error:', err.message);
     // Fall through to Java proxy on unexpected error
@@ -224,6 +274,8 @@ router.delete('/:id', async (req, res) => {
     if (result.deletedCount === 0) {
       return res.status(404).json({ code: 'NOT_FOUND', message: `Device '${id}' not found` });
     }
+    // Bust the topology cache so deprovisioned devices disappear immediately from the map.
+    bustTopologyCache();
     res.status(204).send();
   } catch (e) {
     console.error('[devices-stub] DELETE /devices error:', e.message);

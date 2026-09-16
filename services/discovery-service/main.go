@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -87,10 +88,6 @@ func main() {
 	}
 
 	runExecutor := service.NewRunExecutorWithAudit(runStore, sweeper, auditPub)
-	h := handler.New(svc, store, runStore).
-		WithHMACValidator(hmacValidator).
-		WithRunExecutor(runExecutor)
-	schedHandler := handler.NewScheduleHandler(rediscoSched)
 
 	// Wire credential CRUD handler (WO-014).
 	// Key is loaded from CREDENTIAL_ENCRYPTION_KEY env var; falls back to a dev
@@ -107,6 +104,31 @@ func main() {
 	}
 	credSvc := service.NewCredentialService(credRepo, credEncryptor, nil)
 	credHandler := handler.NewCredentialHandler(credSvc)
+
+	// Wire SNMP fingerprint pipeline (WO-027 + end-to-end enablement).
+	// credRepo and credEncryptor must be initialised first (above).
+	// SNMP_DEFAULT_COMMUNITY: set to "public" in dev/testing against snmpsim;
+	// leave empty in production (SNMP requires an explicit stored credential).
+	snmpDefaultCommunity := os.Getenv("SNMP_DEFAULT_COMMUNITY")
+	snmpConcurrency := 10
+	if v := os.Getenv("SNMP_CONCURRENCY"); v != "" {
+		if n, convErr := strconv.Atoi(v); convErr == nil && n > 0 {
+			snmpConcurrency = n
+		}
+	}
+	snmpPort := uint16(161)
+	if v := os.Getenv("SNMP_PORT"); v != "" {
+		if n, convErr := strconv.Atoi(v); convErr == nil && n > 0 && n <= 65535 {
+			snmpPort = uint16(n)
+		}
+	}
+	runExecutor.WithSNMP(credRepo, credEncryptor, snmpConcurrency, snmpDefaultCommunity).
+		WithSNMPPort(snmpPort)
+
+	h := handler.New(svc, store, runStore).
+		WithHMACValidator(hmacValidator).
+		WithRunExecutor(runExecutor)
+	schedHandler := handler.NewScheduleHandler(rediscoSched)
 
 	// Configure realtime device presence manager (WO-022).
 	// Production: replace fakes with real Redis / inventory HTTP / Kafka clients.
@@ -142,6 +164,7 @@ func main() {
 		r.Post("/runs", h.CreateDiscoveryRun)                                    // WO-011
 		r.Get("/runs/{runId}", h.GetDiscoveryRun)
 		r.Get("/runs/{runId}/results", h.GetDiscoveryRunResults)
+		r.Post("/runs/{runId}/provision", h.ProvisionDiscoveredHosts) // Admin: provision discovered hosts into inventory
 		r.Get("/onboarding", h.GetOnboardingStates)                              // WO-026
 		r.Post("/schedules", schedHandler.CreateSchedule)                        // WO-017
 		r.Get("/schedules", schedHandler.ListSchedules)                          // WO-017

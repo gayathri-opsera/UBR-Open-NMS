@@ -193,8 +193,41 @@ public class InventoryService {
         return saved;
     }
 
+    /**
+     * Deletes a device from inventory and publishes a DEVICE_DELETED tombstone on the
+     * inventory-sync topic so downstream consumers (topology-service, kpi-query, etc.)
+     * can remove any derived state they hold for the device.
+     *
+     * <p>The tombstone is published BEFORE the delete so that the serial number is still
+     * available for keying the Kafka message.  If the device does not exist the method
+     * returns silently (idempotent).
+     */
     public void deleteDevice(String id) {
-        deviceRepo.deleteById(id);
+        deviceRepo.findById(id).ifPresent(device -> {
+            publishDeleteTombstone(device);
+            deviceRepo.deleteById(id);
+        });
+    }
+
+    /**
+     * Publishes a tombstone to the inventory-sync topic with eventType=DEVICE_DELETED.
+     * Topology-service and any other consumers must check this field and purge their state.
+     */
+    private void publishDeleteTombstone(Device device) {
+        try {
+            Map<String, Object> tombstone = Map.of(
+                "eventType",    "DEVICE_DELETED",
+                "id",           device.getId() != null ? device.getId() : "",
+                "serialNumber", device.getSerialNumber() != null ? device.getSerialNumber() : "",
+                "ipAddress",    device.getIpAddress() != null ? device.getIpAddress() : "",
+                "deletedAt",    Instant.now().toString()
+            );
+            String json = objectMapper.writeValueAsString(tombstone);
+            kafkaTemplate.send(inventorySyncTopic, device.getSerialNumber(), json);
+            log.info("Published DEVICE_DELETED tombstone for serial=[redacted]");
+        } catch (Exception e) {
+            log.error("Failed to publish DEVICE_DELETED tombstone — device may linger in topology/KPI", e);
+        }
     }
 
     // ---- GPS search (NMS-IV-04) ----

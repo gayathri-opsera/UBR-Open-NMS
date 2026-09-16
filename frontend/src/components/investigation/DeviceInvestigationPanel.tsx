@@ -2,13 +2,13 @@
  * WO-047: Device Investigation Panel - unified context for KPI, topology, and alarms
  */
 import React, { useEffect, useState } from 'react';
-import {
+import type {
   DeviceInvestigationContext,
   DeviceIdentity,
   InvestigationContextLoading,
   InvestigationContextError,
-  normalizeDeviceIdentity,
 } from '../../types/device-investigation-context';
+import { normalizeDeviceIdentity } from '../../types/device-investigation-context';
 
 interface DeviceInvestigationPanelProps {
   deviceId?: string;
