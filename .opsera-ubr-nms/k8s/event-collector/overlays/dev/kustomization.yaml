@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_EVENT_COLLECTOR_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-event-collector
-  newTag: dev-84a22ca5-20260710054946
+  newTag: dev-b8ba8eae-20260916145523
 
 labels:
 - pairs:
