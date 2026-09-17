@@ -24,6 +24,7 @@ const { createProvisionHandler } = require('./routes/provision.stub');
 const { listIgnored, addIgnored, removeIgnored } = require('./routes/ignore.stub');
 const frameworkProductDefinitions = require('./routes/frameworkProductDefinitions');
 const frameworkSecurity           = require('./routes/frameworkSecurity.routes');
+const frameworkParameters         = require('./routes/frameworkParameters.routes');
 // Alarms stub — serves local alarm data instead of proxying to the external Opsera dev
 // environment.  Without this stub, ALARM_SERVICE_URL (often set to ubr-nms-frontend-dev.
 // agent.opsera.dev) causes a CORS error + 401 for every /api/v1/alarms request.
@@ -69,6 +70,11 @@ function createApp(redisClient) {
   // All routes require SuperAdmin capability; secrets are write-only and stored AES-256-GCM encrypted.
   app.use('/api/framework/v1/security/credential-references', frameworkSecurity);
   app.use('/api/v1/framework/security/credential-references', frameworkSecurity); // legacy alias
+
+  // WO-006: Framework Parameter Visibility — Device Parameter Routes
+  // Server-side role filtering of parameter groups and parameters based on uiVisibleTo metadata.
+  app.use('/api/framework/v1/devices', frameworkParameters);
+  app.use('/api/v1/framework/devices', frameworkParameters); // legacy alias
 
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);
