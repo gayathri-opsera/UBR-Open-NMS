@@ -101,6 +101,8 @@ router.get('/:definitionId/audit-history',      requireFrameworkRole(WRITE_ROLES
 router.put('/:definitionId/versions/:versionId/stage',    requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
 router.put('/:definitionId/versions/:versionId/activate', requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
 router.put('/:definitionId/rollback',                     requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
+// WO-017: Targeted rollback to specific version — POST with {targetVersionId, reason} body
+router.post('/:definitionId/rollback',                    requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
 
 // Health passthrough — unauthenticated health probe for infrastructure monitoring
 router.get('/health', productDefinitionProxy());

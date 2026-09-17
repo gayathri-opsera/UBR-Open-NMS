@@ -547,6 +547,217 @@ public class ProductDefinitionLifecycleService {
         );
     }
 
+    // ── Targeted rollback (WO-017) ────────────────────────────────────────────
+
+    /**
+     * Rolls back the active version to a specific eligible historical version (WO-017).
+     *
+     * <p>Unlike {@link #rollbackVersion}, which always targets the immediately previous
+     * active version, this method accepts an explicit {@code targetVersionId} so
+     * administrators can restore any eligible historical version.
+     *
+     * <p><b>Eligibility rules:</b>
+     * <ul>
+     *   <li>Target version must exist and belong to {@code definitionId}.</li>
+     *   <li>Target version's {@code validationStatus} must be {@code VALID}.</li>
+     *   <li>Target version's {@code lifecycleStatus} must be {@code STAGED} or
+     *       {@code SUPERSEDED} — ACTIVE, ARCHIVED, and DRAFT are not eligible.</li>
+     *   <li>Target version must not be the currently active version.</li>
+     * </ul>
+     *
+     * <p><b>Atomicity:</b> Registry entries are deleted and rebuilt before the active
+     * version pointer is updated.  If registry rebuild fails the method throws
+     * {@link IllegalStateException} with code {@code REGISTRY_REBUILD_FAILED}; the
+     * previously active version and pointer remain unchanged because the pointer update
+     * runs last.
+     *
+     * @param definitionId    stable product definition ID
+     * @param targetVersionId the version to restore to ACTIVE
+     * @param reason          human-readable rollback reason (required for audit)
+     * @param actorUserId     user performing the rollback
+     * @param actorUsername   display name for audit
+     * @param correlationId   request correlation ID
+     * @return rollback result map with active definition metadata, active version metadata, and lifecycle status
+     * @throws NoSuchElementException   if the target version does not exist or no active version is found
+     * @throws IllegalArgumentException if the target version is ineligible
+     */
+    public Map<String, Object> rollbackToVersion(
+            String definitionId,
+            String targetVersionId,
+            String reason,
+            String actorUserId,
+            String actorUsername,
+            String correlationId) {
+
+        // Load and validate target version
+        ProductDefinitionVersion targetVersion = versionRepo
+                .findByDefinitionIdAndVersionId(definitionId, targetVersionId)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Rollback target version '" + targetVersionId + "' not found for definition "
+                        + definitionId + ". ROLLBACK_TARGET_INVALID"));
+
+        validateRollbackEligibility(targetVersion, correlationId);
+
+        // Find the current active version
+        List<ProductDefinitionActiveVersion> activePointers =
+                activeVersionRepo.findByProductDefinitionId(definitionId);
+        if (activePointers.isEmpty()) {
+            throw new NoSuchElementException(
+                    "No active version found for definition " + definitionId
+                    + ". Cannot roll back when nothing is active. ROLLBACK_TARGET_INVALID");
+        }
+
+        ProductDefinitionActiveVersion activePointer = activePointers.get(0);
+        String currentVersionId = activePointer.getActiveVersionId();
+
+        if (targetVersionId.equals(currentVersionId)) {
+            throw new IllegalArgumentException(
+                    "Target version '" + targetVersionId + "' is already the active version. "
+                    + "ROLLBACK_TARGET_INVALID");
+        }
+
+        // Parse normalized metadata to rebuild registries
+        NormalizedProductDefinition normalized = parseNormalizedMetadata(targetVersion, correlationId);
+        long newRegistryVersion = activePointer.getRegistryVersion() + 1;
+
+        // Rebuild registries — if this fails the pointer has not moved yet (atomicity)
+        List<FingerprintRegistryEntry> fpEntries;
+        List<ParameterRegistryEntry>   paramEntries;
+        try {
+            fpEntries    = fingerprintBuilder.build(normalized, definitionId, targetVersionId, newRegistryVersion);
+            paramEntries = parameterBuilder.build(normalized, definitionId, targetVersionId, newRegistryVersion);
+        } catch (Exception e) {
+            log.error("[{}] Registry rebuild failed during rollback to target {}: {}",
+                    correlationId, targetVersionId, e.getMessage(), e);
+            recordEvent(ProductDefinitionLifecycleEvent.builder()
+                    .eventType("ROLLBACK_FAILED")
+                    .productDefinitionId(definitionId)
+                    .versionId(targetVersionId)
+                    .actor(actorUsername)
+                    .actorUserId(actorUserId)
+                    .previousLifecycleStatus(targetVersion.getLifecycleStatus())
+                    .newLifecycleStatus(targetVersion.getLifecycleStatus())
+                    .outcome("FAILURE")
+                    .errorCode("REGISTRY_REBUILD_FAILED")
+                    .changeSummary("Registry rebuild failed during rollback to " + targetVersionId + ": " + e.getMessage())
+                    .registryVersion(0L)
+                    .correlationId(correlationId)
+                    .build());
+            throw new IllegalStateException(
+                    "Registry rebuild failed during rollback to version " + targetVersionId
+                    + ". REGISTRY_REBUILD_FAILED. The previously active version " + currentVersionId
+                    + " remains active. Cause: " + e.getMessage(), e);
+        }
+
+        // Persist new registry — atomicity: pointer update happens AFTER all registry writes succeed
+        fingerprintRegistryRepo.deleteByProductDefinitionId(definitionId);
+        fingerprintRegistryRepo.saveAll(fpEntries);
+        parameterRegistryRepo.deleteByProductDefinitionId(definitionId);
+        parameterRegistryRepo.saveAll(paramEntries);
+
+        // Supersede the current active version
+        Instant now = Instant.now();
+        ProductDefinitionVersion currentVersion = versionRepo
+                .findByDefinitionIdAndVersionId(definitionId, currentVersionId)
+                .orElse(null);
+        String prevLifecycleStatus = targetVersion.getLifecycleStatus();
+        if (currentVersion != null) {
+            currentVersion.setLifecycleStatus(ProductDefinitionStateMachine.SUPERSEDED);
+            currentVersion.setRolledBackBy(actorUserId);
+            currentVersion.setRolledBackAt(now);
+            currentVersion.setRollbackReason(AuditRecordRedactor.redact(reason));
+            currentVersion.setVersion(currentVersion.getVersion() + 1);
+            versionRepo.save(currentVersion);
+        }
+
+        // Restore target version to ACTIVE
+        targetVersion.setLifecycleStatus(ProductDefinitionStateMachine.ACTIVE);
+        targetVersion.setActivatedBy(actorUserId);
+        targetVersion.setActivatedAt(now);
+        targetVersion.setRegistryVersion(newRegistryVersion);
+        targetVersion.setRestoredFromVersionId(currentVersionId); // lineage: WO-020
+        targetVersion.setVersion(targetVersion.getVersion() + 1);
+        versionRepo.save(targetVersion);
+
+        // Advance the active version pointer — this is the last write; after this point the state is consistent
+        activePointer.setPreviousVersionId(currentVersionId);
+        activePointer.setActiveVersionId(targetVersionId);
+        activePointer.setRegistryVersion(newRegistryVersion);
+        activePointer.setActivatedBy(actorUserId);
+        activePointer.setActivatedAt(now);
+        activeVersionRepo.save(activePointer);
+
+        // Immutable audit event
+        String summary = String.format(
+                "Targeted rollback of definition %s: restored version %s from %s. "
+              + "Reason: %s. RegistryVersion advanced to %d. "
+              + "%d fingerprint entries and %d parameter entries rebuilt.",
+                definitionId, targetVersionId, currentVersionId,
+                AuditRecordRedactor.redact(reason), newRegistryVersion, fpEntries.size(), paramEntries.size());
+
+        recordEvent(ProductDefinitionLifecycleEvent.builder()
+                .eventType("ROLLED_BACK")
+                .productDefinitionId(definitionId)
+                .versionId(targetVersionId)
+                .actor(actorUsername)
+                .actorUserId(actorUserId)
+                .previousLifecycleStatus(prevLifecycleStatus)
+                .newLifecycleStatus(ProductDefinitionStateMachine.ACTIVE)
+                .predecessorVersionId(currentVersionId)
+                .reason(AuditRecordRedactor.redact(reason))
+                .outcome("SUCCESS")
+                .changeSummary(summary)
+                .registryVersion(newRegistryVersion)
+                .correlationId(correlationId)
+                .build());
+
+        publishLifecycleEvent("ROLLED_BACK", definitionId, targetVersionId,
+                newRegistryVersion, fpEntries.size(), paramEntries.size(), correlationId);
+
+        log.info("[{}] Targeted rollback of definition {} from {} to {} at registryVersion={} by {}",
+                correlationId, definitionId, currentVersionId, targetVersionId, newRegistryVersion, actorUsername);
+
+        return Map.of(
+                "productDefinitionId",  definitionId,
+                "restoredVersionId",    targetVersionId,
+                "supersededVersionId",  currentVersionId,
+                "registryVersion",      newRegistryVersion,
+                "lifecycleStatus",      ProductDefinitionStateMachine.ACTIVE,
+                "fingerprintCount",     fpEntries.size(),
+                "parameterCount",       paramEntries.size(),
+                "rollbackStatus",       "SUCCESS"
+        );
+    }
+
+    /**
+     * Validates that a version is eligible as a rollback target (WO-017 step 1).
+     *
+     * <p>Eligible versions must:
+     * <ol>
+     *   <li>Have {@code validationStatus} = {@code VALID}</li>
+     *   <li>Have {@code lifecycleStatus} in {STAGED, SUPERSEDED}</li>
+     * </ol>
+     *
+     * @throws IllegalArgumentException if the version fails any eligibility rule
+     */
+    private void validateRollbackEligibility(ProductDefinitionVersion version, String correlationId) {
+        if (!"VALID".equals(version.getValidationStatus())) {
+            throw new IllegalArgumentException(
+                    "Version '" + version.getVersionId()
+                    + "' cannot be a rollback target: validationStatus is '"
+                    + version.getValidationStatus()
+                    + "'. Only VALID versions are eligible for rollback. ROLLBACK_TARGET_INVALID");
+        }
+        String status = version.getLifecycleStatus();
+        if (!ProductDefinitionStateMachine.STAGED.equals(status)
+                && !ProductDefinitionStateMachine.SUPERSEDED.equals(status)) {
+            throw new IllegalArgumentException(
+                    "Version '" + version.getVersionId()
+                    + "' cannot be a rollback target: lifecycleStatus is '"
+                    + status + "'. Only STAGED or SUPERSEDED versions are eligible. ROLLBACK_TARGET_INVALID");
+        }
+    }
+
     // ── Queries ───────────────────────────────────────────────────────────────
 
     /**

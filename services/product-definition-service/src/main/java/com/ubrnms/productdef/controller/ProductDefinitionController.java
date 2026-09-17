@@ -274,6 +274,82 @@ public class ProductDefinitionController {
         }
     }
 
+    // ── POST /{definitionId}/rollback (targeted rollback — WO-017) ───────────
+
+    /**
+     * Rolls back the current active version to a specific eligible historical version.
+     *
+     * <p>The request body must include {@code targetVersionId} (required) and
+     * optional {@code reason}.  Eligible target versions must have
+     * {@code validationStatus=VALID} and {@code lifecycleStatus} in {STAGED, SUPERSEDED}.
+     *
+     * <p>Authorization: SuperAdmin and FRAMEWORK_ADMIN roles only (enforced by API gateway).
+     *
+     * <p>Error codes returned in response body:
+     * <ul>
+     *   <li>{@code ROLLBACK_TARGET_INVALID} — target version does not exist or is ineligible</li>
+     *   <li>{@code ROLLBACK_CONFLICT} — target version is already active</li>
+     *   <li>{@code REGISTRY_REBUILD_FAILED} — registry rebuild failed; previous active version preserved</li>
+     *   <li>{@code FORBIDDEN_ACTION} — caller role is not authorized</li>
+     * </ul>
+     */
+    @PostMapping("/{definitionId}/rollback")
+    public ResponseEntity<?> rollbackToVersion(
+            @PathVariable String definitionId,
+            @RequestBody  Map<String, String> body,
+            @RequestHeader(value = "X-Correlation-Id", defaultValue = "") String correlationId,
+            @RequestHeader(value = "X-User-Id",    defaultValue = "unknown") String userId,
+            @RequestHeader(value = "X-Username",   defaultValue = "unknown") String username,
+            @RequestHeader(value = "X-User-Role",  defaultValue = "viewer")  String role) {
+
+        String targetVersionId = body != null ? body.get("targetVersionId") : null;
+        String reason          = body != null ? body.getOrDefault("reason", "Administrator rollback") : "Administrator rollback";
+
+        if (targetVersionId == null || targetVersionId.isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(errorBody("ROLLBACK_TARGET_INVALID",
+                            "Request body must include 'targetVersionId' specifying the version to restore."));
+        }
+
+        // Role check — SuperAdmin and FRAMEWORK_ADMIN are permitted (gateway enforces this)
+        // Surfacing FORBIDDEN_ACTION for clients that bypass the gateway
+        String normalizedRole = role.toUpperCase();
+        if (!"SYSTEM_ADMIN".equals(normalizedRole) && !"FRAMEWORK_ADMIN".equals(normalizedRole)) {
+            log.warn("[{}] Rollback attempted by unauthorized role '{}' for definition {}",
+                    correlationId, role, definitionId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(errorBody("FORBIDDEN_ACTION",
+                            "Role '" + role + "' is not authorized to perform rollback. "
+                            + "Required: SYSTEM_ADMIN or FRAMEWORK_ADMIN."));
+        }
+
+        try {
+            Map<String, Object> result = lifecycleService.rollbackToVersion(
+                    definitionId, targetVersionId, reason, userId, username, correlationId);
+            return ResponseEntity.ok(result);
+        } catch (NoSuchElementException e) {
+            log.warn("[{}] Rollback target not found: {}", correlationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(errorBody("ROLLBACK_TARGET_INVALID", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            // Includes ROLLBACK_TARGET_INVALID and ROLLBACK_CONFLICT messages
+            log.warn("[{}] Rollback target ineligible: {}", correlationId, e.getMessage());
+            String code = e.getMessage().contains("already the active") ? "ROLLBACK_CONFLICT" : "ROLLBACK_TARGET_INVALID";
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(errorBody(code, e.getMessage()));
+        } catch (IllegalStateException e) {
+            // REGISTRY_REBUILD_FAILED
+            log.error("[{}] Registry rebuild failed during rollback: {}", correlationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorBody("REGISTRY_REBUILD_FAILED", e.getMessage()));
+        } catch (Exception e) {
+            log.error("[{}] Unexpected error during targeted rollback of definition {}",
+                    correlationId, definitionId, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to roll back definition " + definitionId));
+        }
+    }
+
     // ── GET /{definitionId}/active ────────────────────────────────────────────
 
     @GetMapping("/{definitionId}/active")
