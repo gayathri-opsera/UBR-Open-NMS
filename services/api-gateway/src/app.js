@@ -56,8 +56,12 @@ function createApp(redisClient) {
   app.use('/api/v1/groups',        groupsStub);
   // Custom dashboards — persisted to MongoDB so they survive browser/device changes
   app.use('/api/v1/dashboards',    dashboardsStub);
-  // Framework Product Definitions — proxied to product-definition-service with RBAC
+  // Framework Product Definitions — proxied to product-definition-service with RBAC.
+  // Mounted at both the legacy v1 path and the canonical framework path (WO-004).
+  // The WO-004 path (/api/framework/v1/product-definitions) is the authoritative
+  // endpoint for all northbound consumers; the v1 path remains for backward compat.
   app.use('/api/v1/framework/product-definitions', frameworkProductDefinitions);
+  app.use('/api/framework/v1/product-definitions', frameworkProductDefinitions);
 
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);

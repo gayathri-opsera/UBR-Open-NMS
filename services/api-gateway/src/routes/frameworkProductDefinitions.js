@@ -4,12 +4,18 @@
  * API Gateway route for Framework Product Definitions.
  *
  * Proxies all /api/v1/framework/product-definitions/* requests to the
- * product-definition-service after enforcing role-based access:
+ * product-definition-service after enforcing role-based access using the
+ * WO-004 framework capability model:
  *
- *   POST   /upload            → FRAMEWORK_ADMIN, SYSTEM_ADMIN
- *   GET    /:id/versions      → FRAMEWORK_ADMIN, SYSTEM_ADMIN, NMS_OPERATOR
- *   GET    /:id/versions/:vid → same read roles
- *   GET    /:id/versions/:vid/report → same read roles
+ *   SuperAdmin (admin / FRAMEWORK_ADMIN / SYSTEM_ADMIN / super_admin)
+ *     → full lifecycle: upload, stage, activate, rollback, audit-history
+ *   Operator (operator / NMS_OPERATOR / network_engineer / noc_operator)
+ *     → read + lifecycle mutations (stage, activate, rollback)
+ *   ReadOnly (viewer / compliance / auditor / user)
+ *     → read-only: list, get version, report, active, lifecycle-history
+ *
+ * All authorization failures return the standard structured error envelope:
+ *   { status: "error", error: { code, message, details: {}, correlationId } }
  *
  * Gateway-injected headers forwarded to the downstream service:
  *   X-User-Id, X-Username, X-User-Role, X-Correlation-Id
@@ -18,30 +24,12 @@
 const express = require('express');
 const httpProxy = require('express-http-proxy');
 const config = require('../config');
+const {
+  requireFrameworkCapability,
+  FRAMEWORK_CAPABILITY,
+} = require('../middleware/rbac.middleware');
 
 const router = express.Router();
-
-// ── RBAC middleware ───────────────────────────────────────────────────────────
-
-const WRITE_ROLES = new Set(['FRAMEWORK_ADMIN', 'SYSTEM_ADMIN']);
-const READ_ROLES  = new Set(['FRAMEWORK_ADMIN', 'SYSTEM_ADMIN', 'NMS_OPERATOR']);
-
-/**
- * Requires the requesting user to hold one of the allowed roles.
- * Roles are injected by the upstream JWT/RBAC middleware as req.user.role.
- */
-function requireFrameworkRole(allowedRoles) {
-  return (req, res, next) => {
-    const role = (req.user && req.user.role) ? req.user.role.toUpperCase() : '';
-    if (!allowedRoles.has(role)) {
-      return res.status(403).json({
-        code: 'FORBIDDEN',
-        message: `Role '${role || 'unknown'}' is not authorised for this operation. Required: ${[...allowedRoles].join(', ')}`,
-      });
-    }
-    next();
-  };
-}
 
 // ── Proxy factory ─────────────────────────────────────────────────────────────
 
@@ -79,32 +67,69 @@ function productDefinitionProxy() {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-// Upload: write-role required
-router.post('/upload', requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
-
-// List all definitions (summary): read-role required
-router.get('/', requireFrameworkRole(READ_ROLES), productDefinitionProxy());
-
-// Read endpoints: read-role required
-router.get('/:definitionId/versions',                             requireFrameworkRole(READ_ROLES), productDefinitionProxy());
-router.get('/:definitionId/versions/:versionId',                  requireFrameworkRole(READ_ROLES), productDefinitionProxy());
-router.get('/:definitionId/versions/:versionId/report',           requireFrameworkRole(READ_ROLES), productDefinitionProxy());
-
-// Active version, lifecycle history, and audit history: read-role required
-router.get('/:definitionId/active',             requireFrameworkRole(READ_ROLES), productDefinitionProxy());
-router.get('/:definitionId/lifecycle-history',  requireFrameworkRole(READ_ROLES), productDefinitionProxy());
-// WO-020: paginated audit trail — Admin/SYSTEM_ADMIN only (no operators)
-router.get('/:definitionId/audit-history',      requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
-
-// Lifecycle mutations: write-role required (stage, activate, rollback)
-// These routes advance the Product Definition lifecycle state — only admins may perform them.
-router.put('/:definitionId/versions/:versionId/stage',    requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
-router.put('/:definitionId/versions/:versionId/activate', requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
-router.put('/:definitionId/rollback',                     requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
-// WO-017: Targeted rollback to specific version — POST with {targetVersionId, reason} body
-router.post('/:definitionId/rollback',                    requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
-
 // Health passthrough — unauthenticated health probe for infrastructure monitoring
 router.get('/health', productDefinitionProxy());
+
+// Upload: SuperAdmin only — triggers validation and ingestion pipeline
+router.post('/upload',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'product-definitions.upload'),
+  productDefinitionProxy(),
+);
+
+// List all definitions (summary): ReadOnly+
+router.get('/',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.list'),
+  productDefinitionProxy(),
+);
+
+// Read endpoints: ReadOnly+
+router.get('/:definitionId/versions',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.versions.list'),
+  productDefinitionProxy(),
+);
+router.get('/:definitionId/versions/:versionId',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.versions.get'),
+  productDefinitionProxy(),
+);
+router.get('/:definitionId/versions/:versionId/report',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.versions.report'),
+  productDefinitionProxy(),
+);
+
+// Active version and lifecycle history: ReadOnly+
+router.get('/:definitionId/active',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.active.get'),
+  productDefinitionProxy(),
+);
+router.get('/:definitionId/lifecycle-history',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.lifecycle-history'),
+  productDefinitionProxy(),
+);
+
+// Audit trail: SuperAdmin only — contains sensitive operational metadata
+// WO-020: paginated audit trail restricted to admins; operators are excluded
+router.get('/:definitionId/audit-history',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'product-definitions.audit-history'),
+  productDefinitionProxy(),
+);
+
+// Lifecycle mutations: Operator+ (admins and operators may mutate lifecycle state)
+router.put('/:definitionId/versions/:versionId/stage',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.stage'),
+  productDefinitionProxy(),
+);
+router.put('/:definitionId/versions/:versionId/activate',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.activate'),
+  productDefinitionProxy(),
+);
+router.put('/:definitionId/rollback',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.rollback'),
+  productDefinitionProxy(),
+);
+// WO-017: Targeted rollback to specific version — POST with {targetVersionId, reason} body
+router.post('/:definitionId/rollback',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.rollback.targeted'),
+  productDefinitionProxy(),
+);
 
 module.exports = router;
