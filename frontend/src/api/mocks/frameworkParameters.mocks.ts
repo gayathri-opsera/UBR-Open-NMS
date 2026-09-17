@@ -230,6 +230,128 @@ export const mockUnmappedResponse: ParameterCurrentValueResponse = {
   },
 };
 
+// ── Threshold-high device: cpu_load at 94.5% (threshold 90%) ─────────────────
+// Uses the same device/parameter IDs as the WO-015 scenario suite so frontend
+// and scenario fixtures share identity and cannot silently drift.
+
+const thresholdHighCPU: ParameterCurrentValue = {
+  deviceId:            'fw-dev-threshold-high-001',
+  groupId:             'grp-chassis',
+  parameterId:         'cpu_load',
+  label:               'CPU Load',
+  dataType:            'gauge',
+  unit:                '%',
+  value:               '94.5',
+  valueNumeric:        94.5,
+  source:              'SNMP',
+  collectedAt:         NOW,
+  pollIntervalSeconds: 60,
+  freshnessState:      'FRESH',
+  readStatus:          'SUCCESS',
+  lastSuccessAt:       LAST_OK,
+  registryVersion:     'registry-fw-001',
+  productDefinitionId: 'pd-framework-router-v1',
+};
+
+const thresholdHighMem: ParameterCurrentValue = {
+  ...thresholdHighCPU,
+  parameterId:  'mem_util',
+  label:        'Memory Utilisation',
+  value:        '71',
+  valueNumeric: 71,
+};
+
+export const mockThresholdHighGroup: ParameterCurrentValueGroup = {
+  groupId:    'grp-chassis',
+  label:      'Chassis Health',
+  parameters: [thresholdHighCPU, thresholdHighMem],
+};
+
+export const mockThresholdHighResponse: ParameterCurrentValueResponse = {
+  status: 'ok',
+  data: {
+    deviceId:            'fw-dev-threshold-high-001',
+    productDefinitionId: 'pd-framework-router-v1',
+    registryVersion:     'registry-fw-001',
+    groups:              [mockThresholdHighGroup],
+  },
+};
+
+// ── Threshold-low device: rx_power at -13.5 dBm (threshold -10 dBm) ──────────
+
+const thresholdLowRx: ParameterCurrentValue = {
+  deviceId:            'fw-dev-threshold-low-001',
+  groupId:             'grp-optical',
+  parameterId:         'rx_power',
+  label:               'RX Power',
+  dataType:            'gauge',
+  unit:                'dBm',
+  value:               '-13.5',
+  valueNumeric:        -13.5,
+  source:              'SNMP',
+  collectedAt:         NOW,
+  pollIntervalSeconds: 60,
+  freshnessState:      'FRESH',
+  readStatus:          'SUCCESS',
+  lastSuccessAt:       LAST_OK,
+  registryVersion:     'registry-fw-001',
+  productDefinitionId: 'pd-framework-router-v1',
+};
+
+const thresholdLowTx: ParameterCurrentValue = {
+  ...thresholdLowRx,
+  parameterId:  'tx_power',
+  label:        'TX Power',
+  value:        '-1.8',
+  valueNumeric: -1.8,
+};
+
+export const mockThresholdLowGroup: ParameterCurrentValueGroup = {
+  groupId:    'grp-optical',
+  label:      'Optical Power',
+  parameters: [thresholdLowRx, thresholdLowTx],
+};
+
+export const mockThresholdLowResponse: ParameterCurrentValueResponse = {
+  status: 'ok',
+  data: {
+    deviceId:            'fw-dev-threshold-low-001',
+    productDefinitionId: 'pd-framework-router-v1',
+    registryVersion:     'registry-fw-001',
+    groups:              [mockThresholdLowGroup],
+  },
+};
+
+// ── Role-restricted device: restricted_viewer sees only grp-chassis ───────────
+// Matches the role_visibility.restricted_viewer profile in framework-monitoring.yaml
+
+const roleRestrictedCPU: ParameterCurrentValue = {
+  ...thresholdHighCPU,
+  deviceId: 'fw-dev-success-001',
+};
+
+const roleRestrictedMem: ParameterCurrentValue = {
+  ...thresholdHighMem,
+  deviceId: 'fw-dev-success-001',
+};
+
+export const mockRoleRestrictedGroup: ParameterCurrentValueGroup = {
+  groupId:    'grp-chassis',
+  label:      'Chassis Health',
+  // grp-optical is absent — server-side role filtering removed it
+  parameters: [roleRestrictedCPU, roleRestrictedMem],
+};
+
+export const mockRoleRestrictedResponse: ParameterCurrentValueResponse = {
+  status: 'ok',
+  data: {
+    deviceId:            'fw-dev-success-001',
+    productDefinitionId: 'pd-framework-router-v1',
+    registryVersion:     'registry-fw-001',
+    groups:              [mockRoleRestrictedGroup],
+  },
+};
+
 // ── All response fixtures array for table-driven tests ────────────────────────
 
 export const mockAllCurrentValueResponses: ParameterCurrentValueResponse[] = [
@@ -238,4 +360,7 @@ export const mockAllCurrentValueResponses: ParameterCurrentValueResponse[] = [
   mockCLIOnlyResponse,
   mockStaleResponse,
   mockFailedResponse,
+  mockThresholdHighResponse,
+  mockThresholdLowResponse,
+  mockRoleRestrictedResponse,
 ];

@@ -1,0 +1,182 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# WO-015: Framework Monitoring Validation Profile
+#
+# Product Definition-aware simulator profiles for the read-only monitoring
+# critical path: discovery association → parameter polling → threshold alarms.
+#
+# Scenarios covered:
+#   1. successful-read      — device fully reachable, all parameters FRESH
+#   2. stale-read           — device responds, but delayed beyond staleness window
+#   3. timeout-failure      — device unreachable, all parameters TIMEOUT / STALE
+#   4. auth-failure         — device rejects SNMP community, all AUTH_FAILURE / FAILED
+#   5. threshold-high       — cpu_load breaches high threshold (90%)
+#   6. threshold-low        — rx_power drops below low threshold (-10 dBm)
+#
+# No real credentials or IPs are embedded — all addresses are RFC-5737 (203.0.113.x)
+# or loopback ranges safe for test environments.
+# ──────────────────────────────────────────────────────────────────────────────
+profile_name: framework-monitoring
+description: "Product Definition-aware monitoring validation — 6 deterministic scenarios"
+
+# ── Shared Product Definition identity ───────────────────────────────────────
+product_definition:
+  id: "pd-framework-router-v1"
+  version: "1.0.0"
+  registry_version: "registry-fw-001"
+
+# ── Parameter groups mirroring the framework registry ────────────────────────
+parameter_groups:
+  - group_id: "grp-chassis"
+    label: "Chassis Health"
+    poll_interval_seconds: 60
+    parameters:
+      - parameter_id: "cpu_load"
+        label: "CPU Load"
+        data_type: "gauge"
+        unit: "%"
+        protocol: "SNMP"
+        oid: "1.3.6.1.4.1.28776.10.1.1"
+        thresholds:
+          high: 90.0
+          # no low threshold — only high breach matters for CPU
+      - parameter_id: "mem_util"
+        label: "Memory Utilisation"
+        data_type: "gauge"
+        unit: "%"
+        protocol: "SNMP"
+        oid: "1.3.6.1.4.1.28776.10.1.2"
+
+  - group_id: "grp-optical"
+    label: "Optical Power"
+    poll_interval_seconds: 60
+    parameters:
+      - parameter_id: "rx_power"
+        label: "RX Power"
+        data_type: "gauge"
+        unit: "dBm"
+        protocol: "SNMP"
+        oid: "1.3.6.1.4.1.28776.10.2.1"
+        thresholds:
+          low: -10.0
+          high: 0.0
+      - parameter_id: "tx_power"
+        label: "TX Power"
+        data_type: "gauge"
+        unit: "dBm"
+        protocol: "SNMP"
+        oid: "1.3.6.1.4.1.28776.10.2.2"
+        thresholds:
+          low: -10.0
+          high: 0.0
+
+# ── Device simulation profiles ────────────────────────────────────────────────
+devices:
+  # ── Scenario 1: successful read — all parameters FRESH ──────────────────────
+  - device_id: "fw-dev-success-001"
+    label: "Framework Device — Successful Reads"
+    ip_address: "203.0.113.1"    # RFC-5737 TEST-NET-3
+    product_definition_id: "pd-framework-router-v1"
+    snmp_community: "${SNMP_COMMUNITY_SUCCESS:public}"
+    behaviour: "successful-read"
+    parameter_overrides:
+      cpu_load:  { value: 42.0, freshness_state: "FRESH", read_status: "SUCCESS" }
+      mem_util:  { value: 68.0, freshness_state: "FRESH", read_status: "SUCCESS" }
+      rx_power:  { value: -3.2, freshness_state: "FRESH", read_status: "SUCCESS" }
+      tx_power:  { value: -1.8, freshness_state: "FRESH", read_status: "SUCCESS" }
+
+  # ── Scenario 2: stale read — delay pushes collected_at beyond 2× poll_interval
+  - device_id: "fw-dev-stale-001"
+    label: "Framework Device — Stale Values"
+    ip_address: "203.0.113.2"
+    product_definition_id: "pd-framework-router-v1"
+    snmp_community: "${SNMP_COMMUNITY_SUCCESS:public}"
+    behaviour: "stale-read"
+    stale_delay_multiplier: 3    # collected_at will be 3× poll_interval in the past
+    parameter_overrides:
+      cpu_load:  { value: 55.0, freshness_state: "STALE", read_status: "TIMEOUT" }
+      mem_util:  { value: 60.0, freshness_state: "STALE", read_status: "TIMEOUT" }
+      rx_power:  { value: -4.0, freshness_state: "STALE", read_status: "TIMEOUT" }
+      tx_power:  { value: -2.0, freshness_state: "STALE", read_status: "TIMEOUT" }
+
+  # ── Scenario 3: timeout — device does not respond at all ────────────────────
+  - device_id: "fw-dev-timeout-001"
+    label: "Framework Device — Timeout Failure"
+    ip_address: "203.0.113.3"
+    product_definition_id: "pd-framework-router-v1"
+    snmp_community: "${SNMP_COMMUNITY_SUCCESS:public}"
+    behaviour: "timeout-failure"
+    parameter_overrides:
+      cpu_load:  { freshness_state: "STALE", read_status: "TIMEOUT",
+                   failure_category: "TIMEOUT",
+                   failure_reason: "protocol read request timed out — device did not respond within the configured interval" }
+      mem_util:  { freshness_state: "STALE", read_status: "TIMEOUT",
+                   failure_category: "TIMEOUT",
+                   failure_reason: "protocol read request timed out — device did not respond within the configured interval" }
+      rx_power:  { freshness_state: "STALE", read_status: "TIMEOUT",
+                   failure_category: "TIMEOUT",
+                   failure_reason: "protocol read request timed out — device did not respond within the configured interval" }
+      tx_power:  { freshness_state: "STALE", read_status: "TIMEOUT",
+                   failure_category: "TIMEOUT",
+                   failure_reason: "protocol read request timed out — device did not respond within the configured interval" }
+
+  # ── Scenario 4: auth failure — wrong community string ───────────────────────
+  - device_id: "fw-dev-authfail-001"
+    label: "Framework Device — Auth Failure"
+    ip_address: "203.0.113.4"
+    product_definition_id: "pd-framework-router-v1"
+    snmp_community: "WRONG_COMMUNITY_INTENTIONAL"
+    behaviour: "auth-failure"
+    parameter_overrides:
+      cpu_load:  { freshness_state: "FAILED", read_status: "AUTH_FAILURE",
+                   failure_category: "AUTH_FAILURE",
+                   failure_reason: "management access was rejected — verify the vault reference configured for this device" }
+      mem_util:  { freshness_state: "FAILED", read_status: "AUTH_FAILURE",
+                   failure_category: "AUTH_FAILURE",
+                   failure_reason: "management access was rejected — verify the vault reference configured for this device" }
+      rx_power:  { freshness_state: "FAILED", read_status: "AUTH_FAILURE",
+                   failure_category: "AUTH_FAILURE",
+                   failure_reason: "management access was rejected — verify the vault reference configured for this device" }
+      tx_power:  { freshness_state: "FAILED", read_status: "AUTH_FAILURE",
+                   failure_category: "AUTH_FAILURE",
+                   failure_reason: "management access was rejected — verify the vault reference configured for this device" }
+
+  # ── Scenario 5: threshold-high — CPU load breaches high threshold ────────────
+  - device_id: "fw-dev-threshold-high-001"
+    label: "Framework Device — Threshold High Breach"
+    ip_address: "203.0.113.5"
+    product_definition_id: "pd-framework-router-v1"
+    snmp_community: "${SNMP_COMMUNITY_SUCCESS:public}"
+    behaviour: "threshold-high"
+    parameter_overrides:
+      # cpu_load exceeds the 90% high threshold
+      cpu_load:  { value: 94.5, freshness_state: "FRESH", read_status: "SUCCESS" }
+      mem_util:  { value: 71.0, freshness_state: "FRESH", read_status: "SUCCESS" }
+      rx_power:  { value: -3.2, freshness_state: "FRESH", read_status: "SUCCESS" }
+      tx_power:  { value: -1.8, freshness_state: "FRESH", read_status: "SUCCESS" }
+
+  # ── Scenario 6: threshold-low — RX power drops below low threshold ───────────
+  - device_id: "fw-dev-threshold-low-001"
+    label: "Framework Device — Threshold Low Breach"
+    ip_address: "203.0.113.6"
+    product_definition_id: "pd-framework-router-v1"
+    snmp_community: "${SNMP_COMMUNITY_SUCCESS:public}"
+    behaviour: "threshold-low"
+    parameter_overrides:
+      cpu_load:  { value: 38.0, freshness_state: "FRESH", read_status: "SUCCESS" }
+      mem_util:  { value: 52.0, freshness_state: "FRESH", read_status: "SUCCESS" }
+      # rx_power drops below the -10 dBm low threshold
+      rx_power:  { value: -13.5, freshness_state: "FRESH", read_status: "SUCCESS" }
+      tx_power:  { value: -1.8,  freshness_state: "FRESH", read_status: "SUCCESS" }
+
+# ── Role visibility matrix (server-side enforcement, no client filtering) ─────
+role_visibility:
+  readonly_operator:
+    visible_groups: ["grp-chassis", "grp-optical"]
+    visible_parameters:
+      grp-chassis:  ["cpu_load", "mem_util"]
+      grp-optical:  ["rx_power", "tx_power"]
+  restricted_viewer:
+    # Restricted role: can only see chassis health, not optical
+    visible_groups: ["grp-chassis"]
+    visible_parameters:
+      grp-chassis: ["cpu_load", "mem_util"]
