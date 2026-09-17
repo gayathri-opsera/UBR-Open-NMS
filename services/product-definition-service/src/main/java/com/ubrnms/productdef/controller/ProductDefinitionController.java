@@ -7,6 +7,7 @@ import com.ubrnms.productdef.model.ValidationReport;
 import com.ubrnms.productdef.service.ProductDefinitionAuditService;
 import com.ubrnms.productdef.service.ProductDefinitionLifecycleService;
 import com.ubrnms.productdef.service.ProductDefinitionService;
+import com.ubrnms.productdef.service.PublishGateViolation;
 import org.springframework.data.domain.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -202,6 +203,19 @@ public class ProductDefinitionController {
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(errorBody("VERSION_NOT_FOUND", e.getMessage()));
+        } catch (PublishGateViolation gv) {
+            // WO-021: structured error identifies which gate failed
+            log.warn("[{}] Publish gate blocked activation: gate={} message={}",
+                    correlationId, gv.getGateName(), gv.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(Map.of(
+                        "status", "error",
+                        "error", Map.of(
+                            "code",      gv.getGateName(),
+                            "message",   gv.getMessage(),
+                            "failedGate", gv.getGateName()
+                        )
+                    ));
         } catch (IllegalArgumentException e) {
             log.warn("[{}] Activation rejected: {}", correlationId, e.getMessage());
             return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)

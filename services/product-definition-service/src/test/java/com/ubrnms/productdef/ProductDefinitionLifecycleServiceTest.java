@@ -32,6 +32,8 @@ class ProductDefinitionLifecycleServiceTest {
     @Mock private IdempotencyRecordRepository                idempotencyRepo;
     @Mock private ProductDefinitionConflictService           conflictService;
     @Mock private KafkaTemplate<String, String>              kafkaTemplate;
+    // WO-021: publish gate evaluator — mocked so existing tests are not affected
+    @Mock private PublishGateEvaluator                       publishGateEvaluator;
 
     private ObjectMapper objectMapper;
     private FingerprintRegistryBuilder fingerprintBuilder;
@@ -54,7 +56,9 @@ class ProductDefinitionLifecycleServiceTest {
         lifecycleService = new ProductDefinitionLifecycleService(
                 versionRepo, activeVersionRepo, fingerprintRegistryRepo, parameterRegistryRepo,
                 lifecycleEventRepo, idempotencyRepo, fingerprintBuilder, parameterBuilder,
-                conflictService, objectMapper, kafkaTemplate);
+                conflictService, objectMapper, kafkaTemplate, publishGateEvaluator);
+        // By default, publish gates pass — lenient so non-activation tests don't trigger UnnecessaryStubbingException
+        lenient().doNothing().when(publishGateEvaluator).evaluate(any(), any());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

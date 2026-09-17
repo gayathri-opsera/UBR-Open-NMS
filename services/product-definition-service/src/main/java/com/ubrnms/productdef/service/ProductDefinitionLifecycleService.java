@@ -56,6 +56,8 @@ public class ProductDefinitionLifecycleService {
 
     private final ObjectMapper                           objectMapper;
     private final KafkaTemplate<String, String>         kafkaTemplate;
+    /** WO-021: Evaluates all publish prerequisite gates before state change. */
+    private final PublishGateEvaluator                  publishGateEvaluator;
 
     // Kafka topic for sanitised lifecycle events consumed by downstream services
     private static final String LIFECYCLE_TOPIC = "product-definition.lifecycle.events";
@@ -184,6 +186,29 @@ public class ProductDefinitionLifecycleService {
 
         // Parse the stored normalized metadata to rebuild registries
         NormalizedProductDefinition normalized = parseNormalizedMetadata(version, correlationId);
+
+        // Publish gate evaluation (WO-021) — all gates must pass before any state change
+        try {
+            publishGateEvaluator.evaluate(version, normalized);
+        } catch (PublishGateViolation gv) {
+            log.warn("[{}] Publish gate '{}' blocked activation of version {}: {}",
+                    correlationId, gv.getGateName(), versionId, gv.getMessage());
+            recordEvent(ProductDefinitionLifecycleEvent.builder()
+                    .eventType("ACTIVATION_BLOCKED")
+                    .productDefinitionId(definitionId)
+                    .versionId(versionId)
+                    .actor(actorUsername)
+                    .actorUserId(actorUserId)
+                    .previousLifecycleStatus(version.getLifecycleStatus())
+                    .newLifecycleStatus(version.getLifecycleStatus()) // unchanged
+                    .outcome("FAILURE")
+                    .errorCode(gv.getGateName())
+                    .changeSummary("Publish gate '" + gv.getGateName() + "' blocked activation: " + gv.getMessage())
+                    .registryVersion(0L)
+                    .correlationId(correlationId)
+                    .build());
+            throw gv; // re-throw so the controller returns HTTP 422
+        }
 
         // Conflict detection — must run before any state change
         ProductDefinitionConflictService.ConflictResult conflicts =
