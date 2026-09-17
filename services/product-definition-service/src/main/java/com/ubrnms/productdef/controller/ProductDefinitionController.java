@@ -8,6 +8,7 @@ import com.ubrnms.productdef.service.ProductDefinitionAuditService;
 import com.ubrnms.productdef.service.ProductDefinitionLifecycleService;
 import com.ubrnms.productdef.service.ProductDefinitionService;
 import com.ubrnms.productdef.service.PublishGateViolation;
+import java.util.ConcurrentModificationException;
 import org.springframework.data.domain.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -153,17 +154,24 @@ public class ProductDefinitionController {
     public ResponseEntity<?> stageVersion(
             @PathVariable String definitionId,
             @PathVariable String versionId,
+            @RequestParam(value = "idempotencyKey",  required = false)  String idempotencyKey,
+            @RequestHeader(value = "X-Expected-Version", required = false) Long expectedVersion,
             @RequestHeader(value = "X-Correlation-Id", defaultValue = "") String correlationId,
             @RequestHeader(value = "X-User-Id",    defaultValue = "unknown") String userId,
             @RequestHeader(value = "X-Username",   defaultValue = "unknown") String username,
             @RequestHeader(value = "X-User-Role",  defaultValue = "viewer")  String role) {
         try {
             ProductDefinitionVersion staged = lifecycleService.stageVersion(
-                    definitionId, versionId, userId, username, correlationId);
+                    definitionId, versionId, expectedVersion, idempotencyKey, userId, username, correlationId);
             return ResponseEntity.ok(staged);
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(errorBody("VERSION_NOT_FOUND", e.getMessage()));
+        } catch (ConcurrentModificationException e) {
+            // WO-022: Optimistic lock conflict
+            log.warn("[{}] Stage version conflict: {}", correlationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(errorBody("VERSION_CONFLICT", e.getMessage()));
         } catch (ProductDefinitionLifecycleException e) {
             log.warn("[{}] Stage rejected — {}: {}", correlationId, e.getErrorCode(), e.getMessage());
             return ResponseEntity.status(HttpStatus.CONFLICT)
@@ -242,13 +250,14 @@ public class ProductDefinitionController {
     public ResponseEntity<?> rollbackVersion(
             @PathVariable String definitionId,
             @RequestParam(value = "reason", required = false, defaultValue = "Operator-requested rollback") String reason,
+            @RequestParam(value = "idempotencyKey", required = false) String idempotencyKey,
             @RequestHeader(value = "X-Correlation-Id", defaultValue = "") String correlationId,
             @RequestHeader(value = "X-User-Id",    defaultValue = "unknown") String userId,
             @RequestHeader(value = "X-Username",   defaultValue = "unknown") String username,
             @RequestHeader(value = "X-User-Role",  defaultValue = "viewer")  String role) {
         try {
             Map<String, Object> result = lifecycleService.rollbackVersion(
-                    definitionId, reason, userId, username, correlationId);
+                    definitionId, reason, idempotencyKey, userId, username, correlationId);
             return ResponseEntity.ok(result);
         } catch (NoSuchElementException e) {
             log.warn("[{}] Rollback not available: {}", correlationId, e.getMessage());

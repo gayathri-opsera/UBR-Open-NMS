@@ -34,6 +34,8 @@ class ProductDefinitionLifecycleServiceTest {
     @Mock private KafkaTemplate<String, String>              kafkaTemplate;
     // WO-021: publish gate evaluator — mocked so existing tests are not affected
     @Mock private PublishGateEvaluator                       publishGateEvaluator;
+    // WO-022: idempotency service — mocked; default returns PROCEED
+    @Mock private IdempotencyService                         idempotencyService;
 
     private ObjectMapper objectMapper;
     private FingerprintRegistryBuilder fingerprintBuilder;
@@ -56,9 +58,13 @@ class ProductDefinitionLifecycleServiceTest {
         lifecycleService = new ProductDefinitionLifecycleService(
                 versionRepo, activeVersionRepo, fingerprintRegistryRepo, parameterRegistryRepo,
                 lifecycleEventRepo, idempotencyRepo, fingerprintBuilder, parameterBuilder,
-                conflictService, objectMapper, kafkaTemplate, publishGateEvaluator);
-        // By default, publish gates pass — lenient so non-activation tests don't trigger UnnecessaryStubbingException
+                conflictService, objectMapper, kafkaTemplate, publishGateEvaluator, idempotencyService);
+        // Default: publish gates pass, idempotency always PROCEED
         lenient().doNothing().when(publishGateEvaluator).evaluate(any(), any());
+        lenient().when(idempotencyService.check(any(), any(), any(), any()))
+                .thenReturn(IdempotencyService.CheckOutcome.proceed());
+        lenient().doNothing().when(idempotencyService).validateOptimisticLock(anyLong(), any(), any());
+        lenient().doNothing().when(idempotencyService).record(any(), any(), any(), any(), any(), any(), anyLong());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -114,7 +120,7 @@ class ProductDefinitionLifecycleServiceTest {
         when(lifecycleEventRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         ProductDefinitionVersion result =
-                lifecycleService.stageVersion(DEF_ID, VERSION_V1, USER_ID, USERNAME, CORR_ID);
+                lifecycleService.stageVersion(DEF_ID, VERSION_V1, null, null, USER_ID, USERNAME, CORR_ID);
 
         assertThat(result.getLifecycleStatus()).isEqualTo("STAGED");
         assertThat(result.getStagedBy()).isEqualTo(USER_ID);
@@ -130,7 +136,7 @@ class ProductDefinitionLifecycleServiceTest {
         when(lifecycleEventRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         assertThatThrownBy(() ->
-                lifecycleService.stageVersion(DEF_ID, VERSION_V1, USER_ID, USERNAME, CORR_ID))
+                lifecycleService.stageVersion(DEF_ID, VERSION_V1, null, null, USER_ID, USERNAME, CORR_ID))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("VALID");
     }
@@ -142,7 +148,7 @@ class ProductDefinitionLifecycleServiceTest {
                 .thenReturn(Optional.of(staged));
 
         assertThatThrownBy(() ->
-                lifecycleService.stageVersion(DEF_ID, VERSION_V1, USER_ID, USERNAME, CORR_ID))
+                lifecycleService.stageVersion(DEF_ID, VERSION_V1, null, null, USER_ID, USERNAME, CORR_ID))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("DRAFT");
     }
@@ -153,7 +159,7 @@ class ProductDefinitionLifecycleServiceTest {
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() ->
-                lifecycleService.stageVersion(DEF_ID, "missing", USER_ID, USERNAME, CORR_ID))
+                lifecycleService.stageVersion(DEF_ID, "missing", null, null, USER_ID, USERNAME, CORR_ID))
                 .isInstanceOf(NoSuchElementException.class);
     }
 
@@ -219,6 +225,7 @@ class ProductDefinitionLifecycleServiceTest {
 
     @Test
     void activateVersion_idempotencyKeyAlreadyExists_returnsExistingOutcome() {
+        // WO-022: mock idempotencyService.check() to return DUPLICATE with a cached record
         IdempotencyRecord existing = IdempotencyRecord.builder()
                 .compositeKey("ACTIVATE:key-001")
                 .operation("ACTIVATE")
@@ -226,7 +233,8 @@ class ProductDefinitionLifecycleServiceTest {
                 .resultActiveVersionId(VERSION_V1)
                 .registryVersion(3L)
                 .build();
-        when(idempotencyRepo.findByCompositeKey("ACTIVATE:key-001")).thenReturn(Optional.of(existing));
+        when(idempotencyService.check(eq("ACTIVATE"), eq("key-001"), eq(DEF_ID), eq(VERSION_V1)))
+                .thenReturn(new IdempotencyService.CheckOutcome(IdempotencyService.CheckResult.DUPLICATE, existing));
 
         Map<String, Object> result = lifecycleService.activateVersion(
                 DEF_ID, VERSION_V1, "key-001", USER_ID, USERNAME, CORR_ID);
@@ -300,7 +308,7 @@ class ProductDefinitionLifecycleServiceTest {
         when(lifecycleEventRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Map<String, Object> result = lifecycleService.rollbackVersion(
-                DEF_ID, "Reverting unstable release", USER_ID, USERNAME, CORR_ID);
+                DEF_ID, "Reverting unstable release", null, USER_ID, USERNAME, CORR_ID);
 
         assertThat(result.get("rollbackStatus")).isEqualTo("SUCCESS");
         assertThat(result.get("restoredVersionId")).isEqualTo(VERSION_V1);
@@ -319,7 +327,7 @@ class ProductDefinitionLifecycleServiceTest {
         when(lifecycleEventRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         assertThatThrownBy(() ->
-                lifecycleService.rollbackVersion(DEF_ID, "test", USER_ID, USERNAME, CORR_ID))
+                lifecycleService.rollbackVersion(DEF_ID, "test", null, USER_ID, USERNAME, CORR_ID))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("No previous active version");
     }
@@ -330,7 +338,7 @@ class ProductDefinitionLifecycleServiceTest {
         when(lifecycleEventRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         assertThatThrownBy(() ->
-                lifecycleService.rollbackVersion(DEF_ID, "test", USER_ID, USERNAME, CORR_ID))
+                lifecycleService.rollbackVersion(DEF_ID, "test", null, USER_ID, USERNAME, CORR_ID))
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessageContaining("No active version");
     }

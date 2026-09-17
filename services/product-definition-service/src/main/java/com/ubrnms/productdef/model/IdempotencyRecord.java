@@ -53,6 +53,15 @@ public class IdempotencyRecord {
     private String versionId;
 
     /**
+     * WO-022: SHA-256 hash of {@code "<operation>:<definitionId>:<versionId>"}.
+     *
+     * <p>Used to detect when the same idempotency key is reused with different
+     * request parameters.  If the fingerprint on a retry differs from the original,
+     * the service rejects the request with {@code IDEMPOTENCY_KEY_MISMATCH}.
+     */
+    private String requestFingerprint;
+
+    /**
      * Outcome recorded when the record was first written.
      * Values: {@code SUCCESS}, {@code FAILURE}.
      */

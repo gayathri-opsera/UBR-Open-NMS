@@ -58,6 +58,8 @@ public class ProductDefinitionLifecycleService {
     private final KafkaTemplate<String, String>         kafkaTemplate;
     /** WO-021: Evaluates all publish prerequisite gates before state change. */
     private final PublishGateEvaluator                  publishGateEvaluator;
+    /** WO-022: Centralised idempotency and optimistic lock service. */
+    private final IdempotencyService                    idempotencyService;
 
     // Kafka topic for sanitised lifecycle events consumed by downstream services
     private static final String LIFECYCLE_TOPIC = "product-definition.lifecycle.events";
@@ -82,11 +84,29 @@ public class ProductDefinitionLifecycleService {
     public ProductDefinitionVersion stageVersion(
             String definitionId,
             String versionId,
+            Long   expectedVersion,
+            String idempotencyKey,
             String actorUserId,
             String actorUsername,
             String correlationId) {
 
+        // WO-022: Idempotency check for STAGE
+        IdempotencyService.CheckOutcome stageIdempotency =
+                idempotencyService.check("STAGE", idempotencyKey, definitionId, versionId);
+        if (stageIdempotency.result() == IdempotencyService.CheckResult.DUPLICATE) {
+            // Reload the version to return the current state (it is now STAGED)
+            return loadVersion(definitionId, versionId);
+        }
+        if (stageIdempotency.result() == IdempotencyService.CheckResult.MISMATCH) {
+            throw new IllegalArgumentException(
+                    "Idempotency key '" + idempotencyKey + "' was already used for a different STAGE request. "
+                    + "Use a unique idempotency key for each distinct staging operation.");
+        }
+
         ProductDefinitionVersion version = loadVersion(definitionId, versionId);
+
+        // WO-022: Optimistic lock validation
+        idempotencyService.validateOptimisticLock(version.getVersion(), expectedVersion, versionId);
 
         validateTransition(version, ProductDefinitionStateMachine.STAGED, correlationId);
 
@@ -120,7 +140,12 @@ public class ProductDefinitionLifecycleService {
         version.setLifecycleStatus(ProductDefinitionStateMachine.STAGED);
         version.setStagedBy(actorUserId);
         version.setStagedAt(now);
+        version.setVersion(version.getVersion() + 1); // WO-022: increment optimistic lock counter
         ProductDefinitionVersion saved = versionRepo.save(version);
+
+        // WO-022: Record idempotency after successful stage
+        idempotencyService.record("STAGE", idempotencyKey, definitionId, versionId,
+                "SUCCESS", versionId, 0L);
 
         recordEvent(ProductDefinitionLifecycleEvent.builder()
                 .eventType("STAGED")
@@ -168,17 +193,19 @@ public class ProductDefinitionLifecycleService {
             String actorUsername,
             String correlationId) {
 
-        // Idempotency check
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            String compositeKey = "ACTIVATE:" + idempotencyKey;
-            Optional<IdempotencyRecord> existing = idempotencyRepo.findByCompositeKey(compositeKey);
-            if (existing.isPresent()) {
-                IdempotencyRecord record = existing.get();
-                log.info("[{}] Idempotent activation: returning existing outcome for key {}",
-                        correlationId, idempotencyKey);
-                return buildActivationResult(record.getResultActiveVersionId(),
-                        record.getRegistryVersion(), 0, 0, record.getOutcome());
+        // WO-022: Idempotency check using IdempotencyService (fingerprint + mismatch detection)
+        IdempotencyService.CheckOutcome idempotencyCheck =
+                idempotencyService.check("ACTIVATE", idempotencyKey, definitionId, versionId);
+        switch (idempotencyCheck.result()) {
+            case DUPLICATE -> {
+                IdempotencyRecord rec = idempotencyCheck.record();
+                log.info("[{}] Idempotent activation: returning cached outcome for key {}", correlationId, idempotencyKey);
+                return buildActivationResult(rec.getResultActiveVersionId(), rec.getRegistryVersion(), 0, 0, rec.getOutcome());
             }
+            case MISMATCH -> throw new IllegalArgumentException(
+                    "Idempotency key '" + idempotencyKey + "' was already used for a different ACTIVATE request. "
+                    + "Use a unique idempotency key for each distinct activation.");
+            default -> { /* PROCEED — continue */ }
         }
 
         ProductDefinitionVersion version = loadVersion(definitionId, versionId);
@@ -322,18 +349,13 @@ public class ProductDefinitionLifecycleService {
         publishLifecycleEvent("ACTIVATED", definitionId, versionId, newRegistryVersion,
                 fpEntries.size(), paramEntries.size(), correlationId);
 
-        // Record idempotency for safe retries
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            idempotencyRepo.save(IdempotencyRecord.builder()
-                    .compositeKey("ACTIVATE:" + idempotencyKey)
-                    .operation("ACTIVATE")
-                    .productDefinitionId(definitionId)
-                    .versionId(versionId)
-                    .outcome("SUCCESS")
-                    .resultActiveVersionId(versionId)
-                    .registryVersion(newRegistryVersion)
-                    .build());
-        }
+        // WO-022: Increment optimistic lock counter on successful activation
+        version.setVersion(version.getVersion() + 1);
+        versionRepo.save(version);
+
+        // WO-022: Record idempotency via centralised service (includes fingerprint)
+        idempotencyService.record("ACTIVATE", idempotencyKey, definitionId, versionId,
+                "SUCCESS", versionId, newRegistryVersion);
 
         log.info("[{}] Definition {} version {} activated at registryVersion={} by {}",
                 correlationId, definitionId, versionId, newRegistryVersion, actorUsername);
@@ -363,9 +385,26 @@ public class ProductDefinitionLifecycleService {
     public Map<String, Object> rollbackVersion(
             String definitionId,
             String reason,
+            String idempotencyKey,
             String actorUserId,
             String actorUsername,
             String correlationId) {
+
+        // WO-022: Idempotency check for ROLLBACK
+        IdempotencyService.CheckOutcome rbIdempotency =
+                idempotencyService.check("ROLLBACK", idempotencyKey, definitionId, null);
+        if (rbIdempotency.result() == IdempotencyService.CheckResult.DUPLICATE) {
+            IdempotencyRecord rec = rbIdempotency.record();
+            log.info("[{}] Idempotent rollback: returning cached outcome for key {}", correlationId, idempotencyKey);
+            return Map.of("restoredVersionId", rec.getResultActiveVersionId() != null ? rec.getResultActiveVersionId() : "unknown",
+                          "registryVersion",   rec.getRegistryVersion(),
+                          "outcome",           rec.getOutcome());
+        }
+        if (rbIdempotency.result() == IdempotencyService.CheckResult.MISMATCH) {
+            throw new IllegalArgumentException(
+                    "Idempotency key '" + idempotencyKey + "' was already used for a different ROLLBACK request. "
+                    + "Use a unique idempotency key for each distinct rollback operation.");
+        }
 
         // Find the current active version pointer
         List<ProductDefinitionActiveVersion> activePointers =
@@ -494,6 +533,10 @@ public class ProductDefinitionLifecycleService {
         log.info("[{}] Definition {} rolled back from {} to {} at registryVersion={} by {}",
                 correlationId, definitionId, currentVersionId, previousVersionId,
                 newRegistryVersion, actorUsername);
+
+        // WO-022: Record idempotency after successful rollback
+        idempotencyService.record("ROLLBACK", idempotencyKey, definitionId, currentVersionId,
+                "SUCCESS", previousVersionId, newRegistryVersion);
 
         return Map.of(
                 "restoredVersionId",   previousVersionId,

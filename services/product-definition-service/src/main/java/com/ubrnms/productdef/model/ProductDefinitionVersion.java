@@ -65,6 +65,20 @@ public class ProductDefinitionVersion {
      */
     private String normalizedMetadataJson;
 
+    // ── Optimistic concurrency token (WO-022) ─────────────────────────────────
+
+    /**
+     * Monotonically increasing version counter used for optimistic locking (WO-022).
+     *
+     * <p>Starts at {@code 1} when the version is first uploaded and is incremented
+     * by every state-changing lifecycle command (stage, activate, rollback).
+     *
+     * <p>Callers may supply this value as {@code X-Expected-Version} to detect
+     * concurrent modifications: if the value in the database differs from the
+     * caller-supplied token, the command fails with HTTP 409 / {@code VERSION_CONFLICT}.
+     */
+    private long version = 1L;
+
     // ── Lineage fields (WO-020) ───────────────────────────────────────────────
 
     /**
