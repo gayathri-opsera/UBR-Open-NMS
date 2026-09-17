@@ -6,10 +6,11 @@ It was validated end-to-end on a fresh AWS EC2 instance (Ubuntu 26.04, 16 vCPU, 
 
 It also documents several **real bugs found in the Helm charts** during this
 validation. Those bugs are fixed directly in the chart files under `helm-charts/`
-in this working tree — see [Chart fixes applied](#chart-fixes-applied) before you
-assume a plain `git clone` + `helm install` will work on `main`. **These fixes
-have not been committed/pushed yet** — do that before relying on this guide from
-a fresh clone.
+— see [Chart fixes applied](#chart-fixes-applied) for what changed and why. The
+full procedure below (steps 1-7) was re-run end-to-end after a full teardown
+(`helm uninstall`, delete infra/namespaces, delete images, `rm -rf` the synced
+repo dir on the target) to confirm it's reproducible from a clean `main` — it
+came up with zero pod restarts on the first `helm install`.
 
 ## Architecture recap
 
@@ -228,8 +229,7 @@ changes external-facing infrastructure.
 ## Chart fixes applied
 
 These were real defects found while getting a first successful deployment, not
-environment quirks. They're fixed directly in the chart files in this working
-tree; commit them before treating `main` as deployable as-is.
+environment quirks. They're fixed directly in the chart files on `main`.
 
 1. **Wrong health-check paths for Java services** — `helm-charts/ubrnms-common/templates/_helpers.tpl`
    hardcoded `/healthz` (liveness) and `/readyz` (readiness) for every service.
@@ -323,6 +323,12 @@ tree; commit them before treating `main` as deployable as-is.
 - `pkill -f "<pattern>"` over SSH can match its own invoking command line and kill
   the parent shell if the pattern string appears in the remote command itself —
   use `ps`/`grep -v grep`/`awk` instead when scripting process cleanup remotely.
+- A `kubectl port-forward` doesn't die when its target pod is deleted — it errors
+  ("failed to find sandbox ... not found") on the next connection attempt but
+  keeps holding the local port, so a later `port-forward` on the same port fails
+  with "address already in use". If you tear down and redeploy, kill old
+  `port-forward` processes first (`ps aux | grep kubectl`, not `pkill -f
+  port-forward` — see above) rather than assuming the port is free.
 
 ## Teardown
 
