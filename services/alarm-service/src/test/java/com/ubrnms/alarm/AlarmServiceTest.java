@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.ubrnms.alarm.model.Alarm;
 import com.ubrnms.alarm.model.AlarmThreshold;
+import com.ubrnms.alarm.model.FrameworkThresholdEvaluationRequest;
 import com.ubrnms.alarm.repository.AlarmRepository;
 import com.ubrnms.alarm.repository.AlarmThresholdRepository;
 import com.ubrnms.alarm.service.AlarmService;
@@ -396,5 +397,185 @@ class AlarmServiceTest {
         assertThat(result.getCategory()).isEqualTo("SECURITY");
         // Device identity must be marked as unknown, not as a crash.
         assertThat(result.getDeviceId()).isEqualTo("unknown");
+    }
+
+    // ── WO-013: Framework metadata threshold evaluation ──────────────────────────
+
+    /**
+     * Helper to build a minimal FrameworkThresholdEvaluationRequest for threshold tests.
+     */
+    private FrameworkThresholdEvaluationRequest frameworkRequest(
+            String deviceId, String parameterId, double value,
+            Double thresholdHigh, Double thresholdLow) {
+        return FrameworkThresholdEvaluationRequest.builder()
+                .deviceId(deviceId)
+                .deviceType("BTS")
+                .productDefinitionId("pd-cisco-ios")
+                .registryVersion("registry-v1")
+                .groupId("grp-interface")
+                .parameterId(parameterId)
+                .valueNumeric(value)
+                .collectedAt(Instant.now())
+                .thresholdHigh(thresholdHigh)
+                .thresholdLow(thresholdLow)
+                .correlationId("corr-wo013-test")
+                .build();
+    }
+
+    @Test
+    void frameworkThreshold_highBreachRaisesActiveAlarm() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        FrameworkThresholdEvaluationRequest req = frameworkRequest("dev-fw-001", "ifInOctets", 9000.0, 5000.0, null);
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(req);
+
+        assertThat(result).isPresent();
+        Alarm alarm = result.get();
+        assertThat(alarm.getState()).isEqualTo("ACTIVE");
+        assertThat(alarm.getSeverity()).isEqualTo("MAJOR");
+        assertThat(alarm.getSource()).isEqualTo("THRESHOLD");
+        assertThat(alarm.getCategory()).isEqualTo("THRESHOLD");
+        assertThat(alarm.getThresholdCondition()).isEqualTo("HIGH");
+        assertThat(alarm.getObservedValue()).isEqualTo(9000.0);
+        assertThat(alarm.getThresholdValue()).isEqualTo(5000.0);
+        assertThat(alarm.getParameterId()).isEqualTo("ifInOctets");
+        assertThat(alarm.getProductDefinitionId()).isEqualTo("pd-cisco-ios");
+        assertThat(alarm.getRegistryVersion()).isEqualTo("registry-v1");
+        assertThat(alarm.getGroupId()).isEqualTo("grp-interface");
+        assertThat(alarm.getCorrelationId()).isEqualTo("corr-wo013-test");
+        assertThat(alarm.getAlarmType()).contains("THRESHOLD_HIGH");
+        assertThat(alarm.getAlarmType()).contains("IFINOCTETS");
+    }
+
+    @Test
+    void frameworkThreshold_lowBreachRaisesActiveAlarm() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        FrameworkThresholdEvaluationRequest req = frameworkRequest("dev-fw-002", "rxPower", -45.0, null, -40.0);
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(req);
+
+        assertThat(result).isPresent();
+        Alarm alarm = result.get();
+        assertThat(alarm.getThresholdCondition()).isEqualTo("LOW");
+        assertThat(alarm.getObservedValue()).isEqualTo(-45.0);
+        assertThat(alarm.getThresholdValue()).isEqualTo(-40.0);
+        assertThat(alarm.getAlarmType()).contains("THRESHOLD_LOW");
+    }
+
+    @Test
+    void frameworkThreshold_inRangeReturnsEmpty() {
+        FrameworkThresholdEvaluationRequest req = frameworkRequest("dev-fw-003", "cpuLoad", 30.0, 90.0, 5.0);
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(req);
+        assertThat(result).isEmpty();
+        verify(alarmRepo, never()).save(any());
+    }
+
+    @Test
+    void frameworkThreshold_noThresholdsConfiguredReturnsEmpty() {
+        // Both thresholds null — parameter has no threshold metadata.
+        FrameworkThresholdEvaluationRequest req = frameworkRequest("dev-fw-004", "ifDescr", 0.0, null, null);
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(req);
+        assertThat(result).isEmpty();
+        verify(alarmRepo, never()).save(any());
+    }
+
+    @Test
+    void frameworkThreshold_nullRequestReturnsEmpty() {
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(null);
+        assertThat(result).isEmpty();
+        verify(alarmRepo, never()).save(any());
+    }
+
+    @Test
+    void frameworkThreshold_deduplicatesRepeatedBreach() {
+        // First call creates the alarm; second call deduplicates it.
+        Alarm existing = new Alarm();
+        existing.setAlarmId("fw-a1");
+        existing.setDeviceId("dev-fw-005");
+        existing.setAlarmType("FRAMEWORK_THRESHOLD_HIGH_IFINOCTETS");
+        existing.setState("ACTIVE");
+        existing.setDedupCount(0);
+        existing.setDedupWindowStart(Instant.now());
+
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                eq("dev-fw-005"), eq("FRAMEWORK_THRESHOLD_HIGH_IFINOCTETS"), eq("ACTIVE"), any()))
+                .thenReturn(Optional.of(existing));
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        FrameworkThresholdEvaluationRequest req = frameworkRequest("dev-fw-005", "ifInOctets", 9000.0, 5000.0, null);
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(req);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getDedupCount()).isEqualTo(1);
+    }
+
+    @Test
+    void frameworkThreshold_alarmDescriptionContainsParameterAndThresholdContext() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        FrameworkThresholdEvaluationRequest req = frameworkRequest("dev-fw-006", "memUtil", 95.0, 90.0, null);
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(req);
+
+        assertThat(result).isPresent();
+        String description = result.get().getDescription();
+        assertThat(description).contains("memUtil");
+        assertThat(description).contains("95.0000");
+        assertThat(description).contains("90.0000");
+        assertThat(description).contains("pd-cisco-ios");
+    }
+
+    @Test
+    void frameworkThreshold_descriptionNeverContainsCredentialKeywords() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        FrameworkThresholdEvaluationRequest req = frameworkRequest("dev-fw-007", "rxPower", -55.0, null, -50.0);
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(req);
+
+        assertThat(result).isPresent();
+        String desc = result.get().getDescription().toLowerCase();
+        List<String> forbidden = List.of("password", "secret", "token", "api_key", "community", "private_key");
+        for (String kw : forbidden) {
+            assertThat(desc).as("Description must not contain " + kw).doesNotContain(kw);
+        }
+    }
+
+    @Test
+    void frameworkThreshold_highAtExactBoundaryIsBreached() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Exact equality with threshold triggers alarm (>= semantics)
+        FrameworkThresholdEvaluationRequest req = frameworkRequest("dev-fw-008", "cpuLoad", 90.0, 90.0, null);
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(req);
+        assertThat(result).isPresent();
+        assertThat(result.get().getThresholdCondition()).isEqualTo("HIGH");
+    }
+
+    @Test
+    void frameworkThreshold_lowAtExactBoundaryIsBreached() {
+        when(alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(alarmRepo.findByDeviceIdAndStateOrderByRaisedAtDesc(any(), any())).thenReturn(List.of());
+        when(alarmRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Exact equality with low threshold triggers alarm (<= semantics)
+        FrameworkThresholdEvaluationRequest req = frameworkRequest("dev-fw-009", "rxPower", -40.0, null, -40.0);
+        Optional<Alarm> result = service.evaluateFrameworkThreshold(req);
+        assertThat(result).isPresent();
+        assertThat(result.get().getThresholdCondition()).isEqualTo("LOW");
     }
 }

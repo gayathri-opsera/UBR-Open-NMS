@@ -3,6 +3,7 @@ package com.ubrnms.alarm.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ubrnms.alarm.model.Alarm;
 import com.ubrnms.alarm.model.AlarmThreshold;
+import com.ubrnms.alarm.model.FrameworkThresholdEvaluationRequest;
 import com.ubrnms.alarm.repository.AlarmRepository;
 import com.ubrnms.alarm.repository.AlarmThresholdRepository;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -116,6 +117,112 @@ public class AlarmService {
             }
         }
         return Optional.empty();
+    }
+
+    // ── WO-013: Framework metadata threshold evaluation ───────────────────────────
+
+    /**
+     * Evaluate a fresh, numeric framework parameter value against the high and low
+     * thresholds declared in its Product Definition metadata.
+     *
+     * <p>This method is additive — it does not replace or affect the existing
+     * repository-backed {@link #evaluateThreshold} path. Only callers that have
+     * already coerced a numeric value and confirmed freshness should invoke this.
+     *
+     * <p>Behaviour:
+     * <ul>
+     *   <li>If {@code request.getThresholdHigh()} is non-null and
+     *       {@code valueNumeric >= thresholdHigh}, a THRESHOLD_HIGH alarm is raised.</li>
+     *   <li>If {@code request.getThresholdLow()} is non-null and
+     *       {@code valueNumeric <= thresholdLow}, a THRESHOLD_LOW alarm is raised.</li>
+     *   <li>If neither condition is met, or both thresholds are null, the method
+     *       returns {@link Optional#empty()} — no alarm is raised.</li>
+     *   <li>Deduplication is delegated to {@link #processRawAlarm} using the
+     *       same window-based logic as existing alarm sources.</li>
+     * </ul>
+     *
+     * <p>Security: this method must never log, store, or propagate credential
+     * references. The {@code correlationId} from the request is the only
+     * tracking identifier that flows into the alarm record.
+     *
+     * @param request fully-populated threshold evaluation request (non-null)
+     * @return the raised or deduplicated alarm, or {@link Optional#empty()} if no threshold was breached
+     */
+    public Optional<Alarm> evaluateFrameworkThreshold(FrameworkThresholdEvaluationRequest request) {
+        if (request == null) {
+            log.warn("evaluateFrameworkThreshold called with null request — skipping");
+            return Optional.empty();
+        }
+
+        double value = request.getValueNumeric();
+
+        // High threshold evaluation
+        if (request.getThresholdHigh() != null && value >= request.getThresholdHigh()) {
+            return Optional.of(raiseFrameworkThresholdAlarm(request, "HIGH", request.getThresholdHigh()));
+        }
+
+        // Low threshold evaluation
+        if (request.getThresholdLow() != null && value <= request.getThresholdLow()) {
+            return Optional.of(raiseFrameworkThresholdAlarm(request, "LOW", request.getThresholdLow()));
+        }
+
+        // Value is within range — no alarm raised.
+        log.debug("Framework threshold evaluation: in-range for deviceId={} parameterId={} value={}",
+                request.getDeviceId(), request.getParameterId(), value);
+        return Optional.empty();
+    }
+
+    /**
+     * Build and process a single framework threshold alarm.
+     * Uses the same processRawAlarm lifecycle (dedup, correlate, persist, publish)
+     * as all other alarm sources.
+     */
+    private Alarm raiseFrameworkThresholdAlarm(
+            FrameworkThresholdEvaluationRequest request,
+            String condition,      // "HIGH" or "LOW"
+            double breachedThreshold) {
+
+        String alarmType = "FRAMEWORK_THRESHOLD_" + condition + "_" + request.getParameterId().toUpperCase();
+
+        Alarm alarm = new Alarm();
+        alarm.setAlarmId(UUID.randomUUID().toString());
+        alarm.setDeviceId(request.getDeviceId());
+        alarm.setDeviceType(request.getDeviceType() != null ? request.getDeviceType() : "UNKNOWN");
+        alarm.setAlarmType(alarmType);
+        alarm.setAlarmName(request.getParameterId() + " threshold " + condition.toLowerCase() + " breached");
+        // Framework threshold alarms default to MAJOR severity — a future story can
+        // add per-parameter severity metadata to the Product Definition spec.
+        alarm.setSeverity("MAJOR");
+        alarm.setState("ACTIVE");
+        alarm.setSource("THRESHOLD");
+        alarm.setMetricValue(request.getValueNumeric());
+        alarm.setThreshold(breachedThreshold);
+        alarm.setRaisedAt(request.getCollectedAt() != null ? request.getCollectedAt() : Instant.now());
+        alarm.setDedupWindowStart(Instant.now());
+        alarm.setDescription(String.format(
+                "Framework parameter %s=%s=%.4f breached %s threshold=%.4f (pd=%s registry=%s)",
+                request.getGroupId(), request.getParameterId(),
+                request.getValueNumeric(), condition, breachedThreshold,
+                request.getProductDefinitionId(), request.getRegistryVersion()));
+        alarm.setCorrelationId(request.getCorrelationId());
+        alarm.setCategory("THRESHOLD");
+        alarm.setSourceSystem("FRAMEWORK_POLLER");
+        alarm.setSchemaVersion("2.0");
+
+        // Framework-specific fields (WO-013 additions to Alarm model)
+        alarm.setProductDefinitionId(request.getProductDefinitionId());
+        alarm.setRegistryVersion(request.getRegistryVersion());
+        alarm.setGroupId(request.getGroupId());
+        alarm.setParameterId(request.getParameterId());
+        alarm.setObservedValue(request.getValueNumeric());
+        alarm.setThresholdValue(breachedThreshold);
+        alarm.setThresholdCondition(condition);
+
+        log.info("Raising framework threshold alarm: deviceId={} parameterId={} condition={} value={} threshold={} correlationId={}",
+                request.getDeviceId(), request.getParameterId(), condition,
+                request.getValueNumeric(), breachedThreshold, request.getCorrelationId());
+
+        return processRawAlarm(objectMapper.convertValue(alarm, Map.class));
     }
 
     public Alarm acknowledge(String id, String actor) {
