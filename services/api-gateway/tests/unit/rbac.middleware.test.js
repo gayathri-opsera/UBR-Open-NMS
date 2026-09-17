@@ -2,8 +2,15 @@
 
 const { requireRole, ROLE_HIERARCHY, checkActionPermission, ACTION_PERMISSIONS } = require('../../src/middleware/rbac.middleware');
 
-function mockReqRes(path, role) {
-  const req = { path, user: role ? { sub: 'u1', role } : null };
+// WO-014 AC#3: admin routes require mfaVerified=true in the token.
+// Helper accepts optional extra user fields so MFA-sensitive tests can pass { mfaVerified: true }.
+function mockReqRes(path, role, extraUserFields = {}) {
+  const req = {
+    path,
+    user: role ? { sub: 'u1', role, ...extraUserFields } : null,
+    headers: {},
+    ip: '127.0.0.1',
+  };
   const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
   return { req, res, next: jest.fn() };
 }
@@ -16,10 +23,19 @@ describe('rbac.middleware', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
+  // WO-014: admin with MFA assurance can access user-management route
   it('admin can access /api/v1/users', () => {
-    const { req, res, next } = mockReqRes('/api/v1/users', 'admin');
+    const { req, res, next } = mockReqRes('/api/v1/users', 'admin', { mfaVerified: true });
     requireRole(req, res, next);
     expect(next).toHaveBeenCalled();
+  });
+
+  // WO-014: admin WITHOUT mfaVerified is rejected with MFA_REQUIRED on sensitive routes
+  it('admin without MFA is blocked on /api/v1/users with MFA_REQUIRED', () => {
+    const { req, res, next } = mockReqRes('/api/v1/users', 'admin');
+    requireRole(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'MFA_REQUIRED' }));
   });
 
   it('operator is denied /api/v1/users', () => {
@@ -35,8 +51,9 @@ describe('rbac.middleware', () => {
     expect(res.status).toHaveBeenCalledWith(403);
   });
 
+  // WO-014: admin with MFA assurance can access system config route
   it('admin can access /api/v1/system/config', () => {
-    const { req, res, next } = mockReqRes('/api/v1/system/config', 'admin');
+    const { req, res, next } = mockReqRes('/api/v1/system/config', 'admin', { mfaVerified: true });
     requireRole(req, res, next);
     expect(next).toHaveBeenCalled();
   });
@@ -116,11 +133,12 @@ describe('WO-007: checkActionPermission — full role×action matrix', () => {
   });
 
   // auditor matrix
+  // WO-025 updated the ACTION_PERMISSIONS to allow auditors to export evidence.
   it('auditor can read audit evidence', () => {
     expect(checkActionPermission('audit.evidence.read', { role: 'auditor' })).toBe(true);
   });
-  it('auditor cannot export audit evidence', () => {
-    expect(checkActionPermission('audit.evidence.export', { role: 'auditor' })).toBe(false);
+  it('auditor can export audit evidence (WO-025: auditor added to export permission)', () => {
+    expect(checkActionPermission('audit.evidence.export', { role: 'auditor' })).toBe(true);
   });
   it('auditor cannot execute config', () => {
     expect(checkActionPermission('config.execute', { role: 'auditor' })).toBe(false);

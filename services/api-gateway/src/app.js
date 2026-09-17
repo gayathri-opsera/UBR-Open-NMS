@@ -25,6 +25,7 @@ const { listIgnored, addIgnored, removeIgnored } = require('./routes/ignore.stub
 const frameworkProductDefinitions = require('./routes/frameworkProductDefinitions');
 const frameworkSecurity           = require('./routes/frameworkSecurity.routes');
 const frameworkParameters         = require('./routes/frameworkParameters.routes');
+const framework                   = require('./routes/framework.routes');
 // Alarms stub — serves local alarm data instead of proxying to the external Opsera dev
 // environment.  Without this stub, ALARM_SERVICE_URL (often set to ubr-nms-frontend-dev.
 // agent.opsera.dev) causes a CORS error + 401 for every /api/v1/alarms request.
@@ -75,6 +76,12 @@ function createApp(redisClient) {
   // Server-side role filtering of parameter groups and parameters based on uiVisibleTo metadata.
   app.use('/api/framework/v1/devices', frameworkParameters);
   app.use('/api/v1/framework/devices', frameworkParameters); // legacy alias
+
+  // WO-007: Read-Only Framework API Routes
+  // Device framework identity, discovery run results, guided failures, security status.
+  // Mounted under the same protected path group — JWT + framework RBAC is enforced per-route.
+  app.use('/api/framework/v1', framework);
+  app.use('/api/v1/framework', framework); // legacy alias
 
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);

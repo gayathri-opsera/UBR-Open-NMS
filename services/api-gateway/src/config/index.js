@@ -48,5 +48,6 @@ module.exports = {
     healthMonitor:    process.env.HEALTH_MONITOR_URL           || 'http://localhost:8092',
     diagnostics:      process.env.DIAGNOSTICS_SERVICE_URL     || 'http://localhost:8090',
     productDefinition:process.env.PRODUCT_DEFINITION_URL      || 'http://localhost:8093',
+    credentialVault:  process.env.CREDENTIAL_VAULT_URL         || 'http://localhost:8090',
   },
 };
