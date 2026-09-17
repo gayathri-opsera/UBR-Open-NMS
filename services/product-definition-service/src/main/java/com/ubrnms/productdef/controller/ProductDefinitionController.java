@@ -1,7 +1,9 @@
 package com.ubrnms.productdef.controller;
 
+import com.ubrnms.productdef.model.ProductDefinitionLifecycleEvent;
 import com.ubrnms.productdef.model.ProductDefinitionVersion;
 import com.ubrnms.productdef.model.ValidationReport;
+import com.ubrnms.productdef.service.ProductDefinitionLifecycleService;
 import com.ubrnms.productdef.service.ProductDefinitionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,7 +30,8 @@ import java.util.NoSuchElementException;
 @RequiredArgsConstructor
 public class ProductDefinitionController {
 
-    private final ProductDefinitionService service;
+    private final ProductDefinitionService          service;
+    private final ProductDefinitionLifecycleService lifecycleService;
 
     // ── POST /upload ──────────────────────────────────────────────────────────
 
@@ -117,6 +120,159 @@ public class ProductDefinitionController {
             log.error("Error retrieving report definitionId={} versionId={}", definitionId, versionId, e);
             return ResponseEntity.internalServerError()
                     .body(errorBody("INTERNAL_ERROR", "Failed to retrieve validation report"));
+        }
+    }
+
+    // ── GET / (list definitions) ──────────────────────────────────────────────
+
+    @GetMapping
+    public ResponseEntity<?> listDefinitions() {
+        try {
+            return ResponseEntity.ok(lifecycleService.listDefinitions());
+        } catch (Exception e) {
+            log.error("Error listing definitions", e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to list definitions"));
+        }
+    }
+
+    // ── PUT /{definitionId}/versions/{versionId}/stage ───────────────────────
+
+    /**
+     * Moves a VALID DRAFT version to STAGED.
+     *
+     * <p>Only VALID definitions may be staged — invalid or unknown versions are rejected
+     * with 422.
+     */
+    @PutMapping("/{definitionId}/versions/{versionId}/stage")
+    public ResponseEntity<?> stageVersion(
+            @PathVariable String definitionId,
+            @PathVariable String versionId,
+            @RequestHeader(value = "X-Correlation-Id", defaultValue = "") String correlationId,
+            @RequestHeader(value = "X-User-Id",    defaultValue = "unknown") String userId,
+            @RequestHeader(value = "X-Username",   defaultValue = "unknown") String username,
+            @RequestHeader(value = "X-User-Role",  defaultValue = "viewer")  String role) {
+        try {
+            ProductDefinitionVersion staged = lifecycleService.stageVersion(
+                    definitionId, versionId, userId, username, correlationId);
+            return ResponseEntity.ok(staged);
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(errorBody("VERSION_NOT_FOUND", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            log.warn("[{}] Stage rejected: {}", correlationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(errorBody("VALIDATION_REQUIRED", e.getMessage()));
+        } catch (Exception e) {
+            log.error("[{}] Unexpected error staging version {}", correlationId, versionId, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to stage version " + versionId));
+        }
+    }
+
+    // ── PUT /{definitionId}/versions/{versionId}/activate ────────────────────
+
+    /**
+     * Activates a STAGED version, rebuilding fingerprint and parameter registries atomically.
+     *
+     * <p>Returns HTTP 409 when activation conflicts are detected.  The previous active
+     * registry version is preserved and returned in the error body for operator reference.
+     */
+    @PutMapping("/{definitionId}/versions/{versionId}/activate")
+    public ResponseEntity<?> activateVersion(
+            @PathVariable String definitionId,
+            @PathVariable String versionId,
+            @RequestParam(value = "idempotencyKey", required = false) String idempotencyKey,
+            @RequestHeader(value = "X-Correlation-Id", defaultValue = "") String correlationId,
+            @RequestHeader(value = "X-User-Id",    defaultValue = "unknown") String userId,
+            @RequestHeader(value = "X-Username",   defaultValue = "unknown") String username,
+            @RequestHeader(value = "X-User-Role",  defaultValue = "viewer")  String role) {
+        try {
+            Map<String, Object> result = lifecycleService.activateVersion(
+                    definitionId, versionId, idempotencyKey, userId, username, correlationId);
+            return ResponseEntity.ok(result);
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(errorBody("VERSION_NOT_FOUND", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            log.warn("[{}] Activation rejected: {}", correlationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(errorBody("ACTIVATION_BLOCKED", e.getMessage()));
+        } catch (IllegalStateException e) {
+            log.warn("[{}] Activation conflict: {}", correlationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(errorBody("CONFLICTING_FINGERPRINT", e.getMessage()));
+        } catch (Exception e) {
+            log.error("[{}] Unexpected error activating version {}", correlationId, versionId, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to activate version " + versionId));
+        }
+    }
+
+    // ── PUT /{definitionId}/rollback ──────────────────────────────────────────
+
+    /**
+     * Rolls back the current active version to the immediately previous active version.
+     *
+     * <p>Returns HTTP 409 when no previous active version is available.
+     */
+    @PutMapping("/{definitionId}/rollback")
+    public ResponseEntity<?> rollbackVersion(
+            @PathVariable String definitionId,
+            @RequestParam(value = "reason", required = false, defaultValue = "Operator-requested rollback") String reason,
+            @RequestHeader(value = "X-Correlation-Id", defaultValue = "") String correlationId,
+            @RequestHeader(value = "X-User-Id",    defaultValue = "unknown") String userId,
+            @RequestHeader(value = "X-Username",   defaultValue = "unknown") String username,
+            @RequestHeader(value = "X-User-Role",  defaultValue = "viewer")  String role) {
+        try {
+            Map<String, Object> result = lifecycleService.rollbackVersion(
+                    definitionId, reason, userId, username, correlationId);
+            return ResponseEntity.ok(result);
+        } catch (NoSuchElementException e) {
+            log.warn("[{}] Rollback not available: {}", correlationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(errorBody("ROLLBACK_NOT_AVAILABLE", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            log.warn("[{}] Rollback rejected: {}", correlationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(errorBody("ROLLBACK_NOT_AVAILABLE", e.getMessage()));
+        } catch (Exception e) {
+            log.error("[{}] Unexpected error rolling back definition {}", correlationId, definitionId, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to roll back definition " + definitionId));
+        }
+    }
+
+    // ── GET /{definitionId}/active ────────────────────────────────────────────
+
+    @GetMapping("/{definitionId}/active")
+    public ResponseEntity<?> getActiveVersion(
+            @PathVariable String definitionId) {
+        try {
+            ProductDefinitionVersion active = lifecycleService.getActiveVersion(definitionId);
+            return ResponseEntity.ok(active);
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(errorBody("NOT_FOUND", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Error retrieving active version for definitionId={}", definitionId, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to retrieve active version"));
+        }
+    }
+
+    // ── GET /{definitionId}/lifecycle-history ─────────────────────────────────
+
+    @GetMapping("/{definitionId}/lifecycle-history")
+    public ResponseEntity<?> getLifecycleHistory(@PathVariable String definitionId) {
+        try {
+            List<ProductDefinitionLifecycleEvent> events =
+                    lifecycleService.getLifecycleHistory(definitionId);
+            return ResponseEntity.ok(events);
+        } catch (Exception e) {
+            log.error("Error retrieving lifecycle history for definitionId={}", definitionId, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to retrieve lifecycle history"));
         }
     }
 

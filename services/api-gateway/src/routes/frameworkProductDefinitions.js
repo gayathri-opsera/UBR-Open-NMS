@@ -82,10 +82,23 @@ function productDefinitionProxy() {
 // Upload: write-role required
 router.post('/upload', requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
 
+// List all definitions (summary): read-role required
+router.get('/', requireFrameworkRole(READ_ROLES), productDefinitionProxy());
+
 // Read endpoints: read-role required
 router.get('/:definitionId/versions',                             requireFrameworkRole(READ_ROLES), productDefinitionProxy());
 router.get('/:definitionId/versions/:versionId',                  requireFrameworkRole(READ_ROLES), productDefinitionProxy());
 router.get('/:definitionId/versions/:versionId/report',           requireFrameworkRole(READ_ROLES), productDefinitionProxy());
+
+// Active version and lifecycle history: read-role required
+router.get('/:definitionId/active',             requireFrameworkRole(READ_ROLES), productDefinitionProxy());
+router.get('/:definitionId/lifecycle-history',  requireFrameworkRole(READ_ROLES), productDefinitionProxy());
+
+// Lifecycle mutations: write-role required (stage, activate, rollback)
+// These routes advance the Product Definition lifecycle state — only admins may perform them.
+router.put('/:definitionId/versions/:versionId/stage',    requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
+router.put('/:definitionId/versions/:versionId/activate', requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
+router.put('/:definitionId/rollback',                     requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
 
 // Health passthrough — unauthenticated health probe for infrastructure monitoring
 router.get('/health', productDefinitionProxy());

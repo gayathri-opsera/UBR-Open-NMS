@@ -1,7 +1,9 @@
 package com.ubrnms.productdef.model;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.List;
 
@@ -16,9 +18,15 @@ import java.util.List;
  * <p><b>Credential policy:</b> this DTO must never contain credential values,
  * community strings, private keys, or passphrases.  The parsers are responsible
  * for rejecting any upload that contains such material before constructing this DTO.
+ *
+ * <p>{@code @NoArgsConstructor} and {@code @AllArgsConstructor} are required alongside
+ * {@code @Builder} so Jackson can deserialize instances when reading back the stored
+ * {@code normalizedMetadataJson} during lifecycle operations (activation, rollback).
  */
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class NormalizedProductDefinition {
 
     // ── Identity ─────────────────────────────────────────────────────────────
@@ -84,6 +92,8 @@ public class NormalizedProductDefinition {
      */
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class CredentialRuntimeRequirements {
         /** Required vault provider. Must be AES_256_GCM for production. */
         private String vaultProvider;
@@ -99,6 +109,8 @@ public class NormalizedProductDefinition {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class FingerprintEntry {
         /** Dotted-numeric OID — mandatory. */
         private String sysObjectId;
@@ -112,6 +124,8 @@ public class NormalizedProductDefinition {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ParameterGroup {
         private String groupName;
         private List<ParameterEntry> parameters;
@@ -119,6 +133,8 @@ public class NormalizedProductDefinition {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class ParameterEntry {
         /** Stable parameter identifier — alphanumeric, hyphens, underscores. */
         private String id;

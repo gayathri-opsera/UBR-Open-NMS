@@ -37,7 +37,7 @@ public class ProductDefinitionVersion {
     private String model;
     private String schemaVersion;
 
-    /** DRAFT | VALIDATED | STAGED | ACTIVE | ARCHIVED — this story creates DRAFT only. */
+    /** DRAFT | VALIDATED | STAGED | ACTIVE | SUPERSEDED | ROLLED_BACK | ARCHIVED */
     @Indexed
     private String lifecycleStatus;
 
@@ -58,8 +58,39 @@ public class ProductDefinitionVersion {
     @Indexed
     private String correlationId;
 
-    /** JSON-serialized sanitized normalized metadata summary — no credentials. */
+    /**
+     * JSON-serialized full sanitized NormalizedProductDefinition — no credentials.
+     * Populated on upload; used by lifecycle service to rebuild registries on
+     * activation and rollback without re-parsing the original file bytes.
+     */
     private String normalizedMetadataJson;
+
+    // ── Lifecycle provenance fields (WO-002) ─────────────────────────────────
+
+    /** User ID that moved this version to STAGED. */
+    private String stagedBy;
+    private Instant stagedAt;
+
+    /** User ID that activated this version. */
+    private String activatedBy;
+    private Instant activatedAt;
+
+    /** When this version was superseded by a newer activation. */
+    private Instant supersededAt;
+
+    /** User ID that rolled back away from this version. */
+    private String rolledBackBy;
+    private Instant rolledBackAt;
+
+    /** Human-readable reason supplied at rollback time. */
+    private String rollbackReason;
+
+    /**
+     * Registry generation counter at the time this version was activated.
+     * Incremented on every activation or rollback so downstream consumers can
+     * detect stale cached registries and trigger a refresh.
+     */
+    private Long registryVersion;
 
     @CreatedDate
     private Instant createdAt;

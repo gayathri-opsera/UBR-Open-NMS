@@ -117,20 +117,15 @@ public class ProductDefinitionService {
             }
         }
 
-        // Build version record
+        // Build version record — store the full sanitized NormalizedProductDefinition so the
+        // lifecycle service can rebuild fingerprint/parameter registries on activation or rollback
+        // without needing the original file bytes (which are not persisted).
         String normalizedJson = null;
         if (normalized != null) {
             try {
-                normalizedJson = objectMapper.writeValueAsString(Map.of(
-                        "name",    normalized.getName()   != null ? normalized.getName()   : "",
-                        "vendor",  normalized.getVendor() != null ? normalized.getVendor() : "",
-                        "model",   normalized.getModel()  != null ? normalized.getModel()  : "",
-                        "fingerprints",    normalized.getFingerprints()      == null ? 0 : normalized.getFingerprints().size(),
-                        "protocols",       normalized.getSupportedProtocols() == null ? 0 : normalized.getSupportedProtocols().size(),
-                        "parameterGroups", normalized.getParameterGroups()   == null ? 0 : normalized.getParameterGroups().size()
-                ));
+                normalizedJson = objectMapper.writeValueAsString(normalized);
             } catch (Exception e) {
-                log.warn("[{}] Failed to serialize normalized summary — storing null", correlationId);
+                log.warn("[{}] Failed to serialize normalized metadata — storing null", correlationId);
             }
         }
 
