@@ -4,8 +4,10 @@ import com.ubrnms.productdef.lifecycle.ProductDefinitionLifecycleException;
 import com.ubrnms.productdef.model.ProductDefinitionLifecycleEvent;
 import com.ubrnms.productdef.model.ProductDefinitionVersion;
 import com.ubrnms.productdef.model.ValidationReport;
+import com.ubrnms.productdef.service.ProductDefinitionAuditService;
 import com.ubrnms.productdef.service.ProductDefinitionLifecycleService;
 import com.ubrnms.productdef.service.ProductDefinitionService;
+import org.springframework.data.domain.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -33,6 +35,7 @@ public class ProductDefinitionController {
 
     private final ProductDefinitionService          service;
     private final ProductDefinitionLifecycleService lifecycleService;
+    private final ProductDefinitionAuditService     auditService;
 
     // ── POST /upload ──────────────────────────────────────────────────────────
 
@@ -266,7 +269,7 @@ public class ProductDefinitionController {
         }
     }
 
-    // ── GET /{definitionId}/lifecycle-history ─────────────────────────────────
+    // ── GET /{definitionId}/lifecycle-history (alias for backward compat) ────
 
     @GetMapping("/{definitionId}/lifecycle-history")
     public ResponseEntity<?> getLifecycleHistory(@PathVariable String definitionId) {
@@ -278,6 +281,34 @@ public class ProductDefinitionController {
             log.error("Error retrieving lifecycle history for definitionId={}", definitionId, e);
             return ResponseEntity.internalServerError()
                     .body(errorBody("INTERNAL_ERROR", "Failed to retrieve lifecycle history"));
+        }
+    }
+
+    // ── GET /{definitionId}/audit-history (paginated) — WO-020 ───────────────
+
+    /**
+     * Returns the paginated, chronologically descending audit trail for a Product Definition.
+     *
+     * <p>Authorized roles: Admin, SuperAdmin only.  Lower-privilege callers receive 403 from the
+     * API Gateway RBAC layer before this handler is reached.
+     *
+     * @param definitionId the definition to retrieve audit records for
+     * @param page         0-indexed page number (default 0)
+     * @param pageSize     records per page (1–100, default 20)
+     */
+    @GetMapping("/{definitionId}/audit-history")
+    public ResponseEntity<?> getAuditHistory(
+            @PathVariable String definitionId,
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
+        try {
+            Page<ProductDefinitionLifecycleEvent> result =
+                    auditService.getAuditHistory(definitionId, page, pageSize);
+            return ResponseEntity.ok(auditService.buildPageResponse(result));
+        } catch (Exception e) {
+            log.error("Error retrieving audit history for definitionId={}", definitionId, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to retrieve audit history for " + definitionId));
         }
     }
 

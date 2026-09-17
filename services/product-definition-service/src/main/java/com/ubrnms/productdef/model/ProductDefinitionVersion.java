@@ -65,6 +65,30 @@ public class ProductDefinitionVersion {
      */
     private String normalizedMetadataJson;
 
+    // ── Lineage fields (WO-020) ───────────────────────────────────────────────
+
+    /**
+     * The {@code versionId} of the version that was ACTIVE or STAGED immediately
+     * before this version was uploaded into the same definition.
+     *
+     * <p>Populated during upload when an earlier version already exists.  Used by
+     * the audit trail to reconstruct the lineage chain from oldest to newest.
+     * {@code null} for the first version of a definition.
+     */
+    private String predecessorVersionId;
+
+    /**
+     * When this version was created by a rollback restore operation, this field
+     * holds the {@code versionId} of the source version that was restored.
+     *
+     * <p>For WO-017 rollback: when version V3 is ACTIVE and an admin rolls back
+     * to V1, V1 transitions to ACTIVE and {@code restoredFromVersionId} on the
+     * event record points back to V3's lineage for bi-directional tracing.
+     * This field lives here so the audit history endpoint can surface it
+     * without joining on event records.
+     */
+    private String restoredFromVersionId;
+
     // ── Lifecycle provenance fields (WO-002) ─────────────────────────────────
 
     /** User ID that moved this version to STAGED. */

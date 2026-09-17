@@ -55,6 +55,34 @@ public class ProductDefinitionLifecycleEvent {
     /** User ID of the actor. */
     private String actorUserId;
 
+    // ── WO-020: Audit trail and lineage fields ────────────────────────────────
+
+    /**
+     * Lifecycle state <em>before</em> this event — empty string for creation events.
+     * Required for AC-3: "Lifecycle transitions produce audit records with
+     * previous state, new state, …"
+     */
+    private String previousLifecycleStatus;
+
+    /**
+     * Lifecycle state <em>after</em> this event.
+     */
+    private String newLifecycleStatus;
+
+    /**
+     * Lineage: the version ID that immediately preceded this one in the same
+     * definition's history.  Populated when a new version is uploaded with an
+     * existing ACTIVE or STAGED ancestor, and during rollback.
+     */
+    private String predecessorVersionId;
+
+    /**
+     * Human-readable reason supplied by the actor.
+     * Required for ROLLBACK events; optional for other transitions.
+     * Must not contain credential values or secret material (see redaction rules).
+     */
+    private String reason;
+
     /**
      * Outcome of the action.
      * Values: {@code SUCCESS}, {@code FAILURE}.

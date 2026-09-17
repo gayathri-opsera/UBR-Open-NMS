@@ -90,9 +90,11 @@ router.get('/:definitionId/versions',                             requireFramewo
 router.get('/:definitionId/versions/:versionId',                  requireFrameworkRole(READ_ROLES), productDefinitionProxy());
 router.get('/:definitionId/versions/:versionId/report',           requireFrameworkRole(READ_ROLES), productDefinitionProxy());
 
-// Active version and lifecycle history: read-role required
+// Active version, lifecycle history, and audit history: read-role required
 router.get('/:definitionId/active',             requireFrameworkRole(READ_ROLES), productDefinitionProxy());
 router.get('/:definitionId/lifecycle-history',  requireFrameworkRole(READ_ROLES), productDefinitionProxy());
+// WO-020: paginated audit trail — Admin/SYSTEM_ADMIN only (no operators)
+router.get('/:definitionId/audit-history',      requireFrameworkRole(WRITE_ROLES), productDefinitionProxy());
 
 // Lifecycle mutations: write-role required (stage, activate, rollback)
 // These routes advance the Product Definition lifecycle state — only admins may perform them.

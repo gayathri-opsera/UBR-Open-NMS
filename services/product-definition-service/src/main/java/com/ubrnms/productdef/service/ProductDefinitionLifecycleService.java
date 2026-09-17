@@ -88,6 +88,8 @@ public class ProductDefinitionLifecycleService {
 
         validateTransition(version, ProductDefinitionStateMachine.STAGED, correlationId);
 
+        String prevStatus = version.getLifecycleStatus();
+
         if (!"VALID".equals(version.getValidationStatus())) {
             recordEvent(ProductDefinitionLifecycleEvent.builder()
                     .eventType("STAGED")
@@ -95,6 +97,8 @@ public class ProductDefinitionLifecycleService {
                     .versionId(versionId)
                     .actor(actorUsername)
                     .actorUserId(actorUserId)
+                    .previousLifecycleStatus(prevStatus)
+                    .newLifecycleStatus(prevStatus) // unchanged — transition was rejected
                     .outcome("FAILURE")
                     .errorCode("VALIDATION_REQUIRED")
                     .changeSummary("Stage rejected: version " + versionId
@@ -122,6 +126,8 @@ public class ProductDefinitionLifecycleService {
                 .versionId(versionId)
                 .actor(actorUsername)
                 .actorUserId(actorUserId)
+                .previousLifecycleStatus(prevStatus)
+                .newLifecycleStatus(ProductDefinitionStateMachine.STAGED)
                 .outcome("SUCCESS")
                 .changeSummary("Version " + versionId + " moved to STAGED by " + actorUsername)
                 .registryVersion(0L)
@@ -183,6 +189,8 @@ public class ProductDefinitionLifecycleService {
         ProductDefinitionConflictService.ConflictResult conflicts =
                 conflictService.detect(definitionId, normalized);
 
+        String activatePrevStatus = version.getLifecycleStatus();
+
         if (conflicts.hasConflicts()) {
             String conflictDetail = String.join("; ", conflicts.conflicts());
             recordEvent(ProductDefinitionLifecycleEvent.builder()
@@ -191,6 +199,8 @@ public class ProductDefinitionLifecycleService {
                     .versionId(versionId)
                     .actor(actorUsername)
                     .actorUserId(actorUserId)
+                    .previousLifecycleStatus(activatePrevStatus)
+                    .newLifecycleStatus(activatePrevStatus) // unchanged
                     .outcome("FAILURE")
                     .errorCode("CONFLICTING_FINGERPRINT")
                     .changeSummary("Activation blocked: " + conflictDetail)
@@ -274,6 +284,9 @@ public class ProductDefinitionLifecycleService {
                 .versionId(versionId)
                 .actor(actorUsername)
                 .actorUserId(actorUserId)
+                .previousLifecycleStatus(activatePrevStatus)
+                .newLifecycleStatus(ProductDefinitionStateMachine.ACTIVE)
+                .predecessorVersionId(previousVersionId) // lineage: which version was superseded
                 .outcome("SUCCESS")
                 .changeSummary(summary)
                 .registryVersion(newRegistryVersion)
@@ -425,7 +438,9 @@ public class ProductDefinitionLifecycleService {
         activePointer.setActivatedAt(now);
         activeVersionRepo.save(activePointer);
 
-        // Audit event
+        // Audit event — include both prev/new status and lineage (WO-020)
+        String rollbackPrevStatus = currentVersion != null
+                ? ProductDefinitionStateMachine.ACTIVE : ProductDefinitionStateMachine.SUPERSEDED;
         String summary = String.format(
                 "Rolled back definition %s from version %s to version %s. "
               + "Reason: %s. RegistryVersion advanced to %d. "
@@ -438,6 +453,10 @@ public class ProductDefinitionLifecycleService {
                 .versionId(previousVersionId)
                 .actor(actorUsername)
                 .actorUserId(actorUserId)
+                .previousLifecycleStatus(rollbackPrevStatus)
+                .newLifecycleStatus(ProductDefinitionStateMachine.ACTIVE)
+                .predecessorVersionId(currentVersionId) // lineage: what was the ACTIVE version before rollback
+                .reason(AuditRecordRedactor.redact(reason)) // redact before embedding in summary
                 .outcome("SUCCESS")
                 .changeSummary(summary)
                 .registryVersion(newRegistryVersion)
@@ -571,7 +590,17 @@ public class ProductDefinitionLifecycleService {
                 definitionId, normalized.getFirmwareFrom(), normalized.getFirmwareTo());
     }
 
+    /**
+     * Redacts secret material from the event's text fields, then persists the event.
+     *
+     * <p>Redaction is applied before save so that no credential values or secret
+     * strings ever reach the MongoDB audit collection (WO-020 AC-7).
+     */
     private void recordEvent(ProductDefinitionLifecycleEvent event) {
+        // Apply redaction to mutable text fields before persistence (WO-020)
+        event.setChangeSummary(AuditRecordRedactor.redact(event.getChangeSummary()));
+        event.setReason(AuditRecordRedactor.redact(event.getReason()));
+
         try {
             lifecycleEventRepo.save(event);
         } catch (Exception e) {
