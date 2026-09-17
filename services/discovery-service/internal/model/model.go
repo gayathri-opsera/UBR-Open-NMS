@@ -232,6 +232,30 @@ type DiscoveryHostResult struct {
 	// Empty string when the device doesn't expose the IF-MIB or when only scalar GETs
 	// were attempted (e.g. community string restricted to MIB-II scalars only).
 	MACAddress           string `json:"macAddress,omitempty"`
+
+	// ── WO-010: Framework identity fields (additive, nullable) ────────────────
+	// These fields are populated by the FingerprintMatcher after probe evidence is
+	// matched against the active Product Definition registry. They are never written
+	// by UBR call-home and must not overwrite authoritative identity fields.
+
+	// ProductDefinitionID is the matched Product Definition identifier.
+	// Nil/empty when the device is UNKNOWN, CONFLICT, or registry is unavailable.
+	ProductDefinitionID string `json:"productDefinitionId,omitempty"`
+	// ProductDefinitionVersion is the PD version that produced the match.
+	ProductDefinitionVersion string `json:"productDefinitionVersion,omitempty"`
+	// RegistryVersion identifies the fingerprint registry snapshot used for matching.
+	RegistryVersion string `json:"registryVersion,omitempty"`
+	// ActiveAdapterCandidate is the preferred protocol for this product (e.g. SNMP, SSH).
+	ActiveAdapterCandidate string `json:"activeAdapterCandidate,omitempty"`
+	// FingerprintStatus is the matching outcome: MATCHED, UNKNOWN, CONFLICT,
+	// VERSION_MISMATCH, or REGISTRY_UNAVAILABLE.
+	FingerprintStatus string `json:"fingerprintStatus,omitempty"`
+	// FingerprintConflictReason describes which definitions conflicted (set on CONFLICT).
+	FingerprintConflictReason string `json:"fingerprintConflictReason,omitempty"`
+	// MatchConfidence is a float in [0,1] representing matching strength (set on MATCHED).
+	MatchConfidence float64 `json:"matchConfidence,omitempty"`
+	// MatchEvidence is a credential-free summary of the matched selector (set on MATCHED).
+	MatchEvidence string `json:"matchEvidence,omitempty"`
 }
 
 // DiscoveryRun represents a stored discovery run record (WO-011, WO-008).

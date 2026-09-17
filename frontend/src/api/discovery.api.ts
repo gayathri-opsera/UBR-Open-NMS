@@ -187,7 +187,47 @@ export interface DiscoveryResult {
    * Empty string / undefined when the device doesn't expose IF-MIB or the walk was skipped.
    */
   macAddress?: string;
+
+  // ── WO-010: Framework identity fields (additive, nullable) ─────────────────
+  //
+  // Populated by the FingerprintMatcher after probe evidence is matched against
+  // the active Product Definition registry. Only present when matching was attempted.
+
+  /** Matching outcome: MATCHED, UNKNOWN, CONFLICT, VERSION_MISMATCH, or REGISTRY_UNAVAILABLE. */
+  fingerprintStatus?: FingerprintStatus;
+  /** Product Definition identifier — set only when fingerprintStatus === 'MATCHED'. */
+  productDefinitionId?: string;
+  /** Product Definition version that produced the match. */
+  productDefinitionVersion?: string;
+  /** Registry snapshot version used for this match. */
+  registryVersion?: string;
+  /** Preferred southbound protocol for this product (e.g. SNMP, SSH). */
+  activeAdapterCandidate?: string;
+  /**
+   * Match confidence score in [0,1]. Higher means stronger evidence.
+   * 1.0 = exact SNMP OID match, 0.65 = HTTP body substring match.
+   */
+  matchConfidence?: number;
+  /** Credential-free summary of the matched selector. */
+  matchEvidence?: string;
+  /** Conflict/mismatch reason — set when fingerprintStatus === 'CONFLICT' or 'VERSION_MISMATCH'. */
+  fingerprintConflictReason?: string;
 }
+
+/**
+ * Fingerprint matching outcome returned alongside each DiscoveryResult.
+ * MATCHED — exactly one Product Definition matched with unique evidence.
+ * UNKNOWN — no registry entry matched any probe evidence.
+ * CONFLICT — two or more definitions matched at equal confidence; no inventory write allowed.
+ * VERSION_MISMATCH — OID matched but firmware falls outside the definition's range.
+ * REGISTRY_UNAVAILABLE — the registry could not be read; evidence was recorded but not matched.
+ */
+export type FingerprintStatus =
+  | 'MATCHED'
+  | 'UNKNOWN'
+  | 'CONFLICT'
+  | 'VERSION_MISMATCH'
+  | 'REGISTRY_UNAVAILABLE';
 
 // ── WO-016: Parallel ICMP sweep progress and scheduling ──────────────────────
 

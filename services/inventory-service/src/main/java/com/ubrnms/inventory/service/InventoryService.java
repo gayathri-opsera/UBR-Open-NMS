@@ -831,6 +831,75 @@ public class InventoryService {
         }
     }
 
+    // ── WO-010: Framework identity association ───────────────────────────────
+
+    /**
+     * Applies framework identity fields (productDefinitionId, activeAdapter, frameworkStatus,
+     * observedFirmwareVersion, lastFrameworkSeenAt, lastFrameworkFailureSummary) to an existing
+     * device record using additive-only semantics.
+     *
+     * <p>Protected fields (serial, MAC, deviceType, identityAuthority, bootstrapState,
+     * credentialRef) are NEVER touched by this method — only the nullable framework
+     * identity fields defined in WO-010 are written.
+     *
+     * <p>If the device is not found, the method logs a warning and returns without error.
+     * The caller is responsible for deciding whether to retry.
+     *
+     * @param ipAddress         Management IP of the device (used to locate the record).
+     * @param frameworkIdentity Map of framework identity fields to apply. Accepted keys:
+     *                          productDefinitionId, productDefinitionVersion,
+     *                          observedFirmwareVersion, activeAdapter,
+     *                          frameworkStatus, lastFrameworkFailureSummary.
+     * @param correlationId     Tracing correlation ID for this update.
+     */
+    public void applyFrameworkIdentity(String ipAddress, Map<String, Object> frameworkIdentity, String correlationId) {
+        if (ipAddress == null || ipAddress.isBlank()) {
+            log.warn("applyFrameworkIdentity: ipAddress is blank — skipping; correlationId={}", correlationId);
+            return;
+        }
+        if (frameworkIdentity == null || frameworkIdentity.isEmpty()) {
+            log.debug("applyFrameworkIdentity: empty identity map — skipping; correlationId={}", correlationId);
+            return;
+        }
+
+        Query query = new Query(Criteria.where("ipAddress").is(ipAddress));
+        Optional<Device> maybeDevice = Optional.ofNullable(mongoTemplate.findOne(query, Device.class));
+
+        if (maybeDevice.isEmpty()) {
+            log.warn("applyFrameworkIdentity: no device found for ip=[redacted]; correlationId={}", correlationId);
+            return;
+        }
+
+        Device device = maybeDevice.get();
+
+        // Apply only the allowed additive framework fields — never touch protected fields.
+        if (frameworkIdentity.containsKey("productDefinitionId")) {
+            device.setProductDefinitionId(str(frameworkIdentity.get("productDefinitionId")));
+        }
+        if (frameworkIdentity.containsKey("productDefinitionVersion")) {
+            device.setProductDefinitionVersion(str(frameworkIdentity.get("productDefinitionVersion")));
+        }
+        if (frameworkIdentity.containsKey("observedFirmwareVersion")) {
+            device.setObservedFirmwareVersion(str(frameworkIdentity.get("observedFirmwareVersion")));
+        }
+        if (frameworkIdentity.containsKey("activeAdapter")) {
+            device.setActiveAdapter(str(frameworkIdentity.get("activeAdapter")));
+        }
+        if (frameworkIdentity.containsKey("frameworkStatus")) {
+            device.setFrameworkStatus(str(frameworkIdentity.get("frameworkStatus")));
+        }
+        if (frameworkIdentity.containsKey("lastFrameworkFailureSummary")) {
+            device.setLastFrameworkFailureSummary(str(frameworkIdentity.get("lastFrameworkFailureSummary")));
+        }
+        device.setLastFrameworkSeenAt(Instant.now());
+
+        deviceRepo.save(device);
+        publishInventorySync(device);
+
+        log.info("applyFrameworkIdentity: updated frameworkStatus={} pdId=[{}] ip=[redacted] correlationId={}",
+            device.getFrameworkStatus(), device.getProductDefinitionId(), correlationId);
+    }
+
     // ── Type coercions ────────────────────────────────────────────────────────
 
     private static String str(Object v) {

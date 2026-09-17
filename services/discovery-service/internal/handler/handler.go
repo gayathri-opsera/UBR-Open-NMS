@@ -3,6 +3,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/airtel-ubrnms/discovery-service/internal/auth"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
+	"github.com/airtel-ubrnms/discovery-service/internal/fingerprint"
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
 	"github.com/airtel-ubrnms/discovery-service/internal/southbound"
 )
@@ -25,9 +27,10 @@ import (
 type DiscoveryHandler struct {
 	svc           *service.DiscoveryService
 	store         *service.DeviceStore
-	runStore      *service.DiscoveryRunStore // WO-011
-	runExecutor   *service.RunExecutor       // async ICMP/SNMP pipeline
-	hmacValidator *auth.Validator            // WO-015: nil disables HMAC validation (dev/test)
+	runStore      *service.DiscoveryRunStore  // WO-011
+	runExecutor   *service.RunExecutor        // async ICMP/SNMP pipeline
+	hmacValidator *auth.Validator             // WO-015: nil disables HMAC validation (dev/test)
+	matcher       *fingerprint.Matcher        // WO-010: nil disables fingerprint matching
 }
 
 // New creates a DiscoveryHandler.
@@ -46,6 +49,56 @@ func (h *DiscoveryHandler) WithHMACValidator(v *auth.Validator) *DiscoveryHandle
 func (h *DiscoveryHandler) WithRunExecutor(e *service.RunExecutor) *DiscoveryHandler {
 	h.runExecutor = e
 	return h
+}
+
+// WithMatcher attaches a FingerprintMatcher (WO-010).
+// When set, discovery run results are enriched with framework identity fields
+// by matching probe evidence against the active Product Definition registry.
+func (h *DiscoveryHandler) WithMatcher(m *fingerprint.Matcher) *DiscoveryHandler {
+	h.matcher = m
+	return h
+}
+
+// applyFingerprintMatch enriches a DiscoveryHostResult with the framework identity
+// fields resolved by the FingerprintMatcher for this host. It is a no-op when the
+// matcher is not configured. The host result is mutated in-place.
+func (h *DiscoveryHandler) applyFingerprintMatch(ctx context.Context, result *model.DiscoveryHostResult, runID, correlationID string) {
+	if h.matcher == nil {
+		return
+	}
+	// Build credential-free evidence from the already-collected fingerprint fields.
+	ev := fingerprint.ProbeEvidence{
+		IP:                 result.IP,
+		RunID:              runID,
+		CorrelationID:      correlationID,
+		SNMPOIDSysObjectID: result.SysObjectID,
+		SNMPSysDescr:       result.SysDescr,
+		// SSH banner, HTTP headers/body, and gRPC services are populated by the
+		// probe orchestrator when non-SNMP probes are enabled (WO-008 future).
+	}
+	mr := h.matcher.Match(ctx, ev)
+	if mr == nil {
+		return
+	}
+
+	result.FingerprintStatus = string(mr.Status)
+	switch mr.Status {
+	case fingerprint.FingerprintStatusMatched:
+		result.ProductDefinitionID = mr.ProductDefinitionID
+		result.ProductDefinitionVersion = mr.ProductDefinitionVersion
+		result.RegistryVersion = mr.RegistryVersion
+		result.ActiveAdapterCandidate = mr.ActiveAdapterCandidate
+		result.MatchConfidence = mr.MatchConfidence
+		result.MatchEvidence = mr.MatchEvidence
+	case fingerprint.FingerprintStatusConflict:
+		result.FingerprintConflictReason = mr.ConflictReason
+		result.RegistryVersion = mr.RegistryVersion
+	case fingerprint.FingerprintStatusVersionMismatch:
+		result.RegistryVersion = mr.RegistryVersion
+		result.FingerprintConflictReason = fmt.Sprintf("firmware %q is outside the range accepted by %s", mr.FirmwareVersion, mr.VersionMismatchEntry)
+	case fingerprint.FingerprintStatusRegistryUnavailable:
+		// Registry read failed — leave other fields empty; callers can retry.
+	}
 }
 
 // CheckIn handles POST /api/v1/discovery/check-in
@@ -450,6 +503,18 @@ func (h *DiscoveryHandler) CreateDiscoveryRun(w http.ResponseWriter, r *http.Req
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(validationErr)
+			return
+		}
+		// WO-008: event-driven duplicate suppression — return existing run ID as 409 Conflict.
+		if errors.Is(err, service.ErrDuplicateInFlightTarget) {
+			writeJSON(w, http.StatusConflict, map[string]interface{}{
+				"status": "error",
+				"error": map[string]interface{}{
+					"code":          "DUPLICATE_IN_FLIGHT_TARGET",
+					"message":       "A discovery run is already in progress for one or more targets in this scope. Use the existing run ID.",
+					"correlationId": corrID,
+				},
+			})
 			return
 		}
 		// Unexpected internal fault: 500
