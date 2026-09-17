@@ -1,0 +1,6 @@
+dependencies:
+- name: ubrnms-common
+  repository: file://../ubrnms-common
+  version: 1.0.0
+digest: sha256:e8311d6ed9c2353dc812c1fbc941ce2b02bec8a7d441938974e116f517f6f942
+generated: "2026-09-17T10:29:39.324109-07:00"
