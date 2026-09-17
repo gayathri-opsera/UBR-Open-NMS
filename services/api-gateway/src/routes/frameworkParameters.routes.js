@@ -182,6 +182,65 @@ router.get(
 );
 
 /**
+ * GET /:deviceId/parameters/current
+ *
+ * WO-012: Returns the current polled parameter values for a device.
+ * Values are read from the parameter-poller service (not the product-definition-service).
+ * Each value includes freshnessState, readStatus, lastSuccessAt, and failureCategory
+ * so the UI can distinguish fresh, stale, failed, and unmapped parameters without
+ * reading backend logs.
+ *
+ * Authorization: ReadOnly+ (same as parameter-template).
+ * This route is mounted BEFORE /:parameterId so "current" is never treated as a parameter ID.
+ */
+router.get(
+  '/:deviceId/parameters/current',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'devices.parameters.current.get'),
+  (req, res, next) => {
+    const correlationId = req.headers['x-correlation-id'] || uuidv4();
+    const { deviceId }  = req.params;
+
+    logger.info({
+      msg:  'Framework parameter current-values requested',
+      deviceId,
+      correlationId,
+    });
+
+    const pollerUrl = process.env.PARAMETER_POLLER_URL || 'http://localhost:8097';
+
+    const proxy = httpProxy(pollerUrl, {
+      timeout: 15000,
+      proxyReqPathResolver(srcReq) {
+        return `/devices/${deviceId}/parameters/current`;
+      },
+      proxyReqOptDecorator(proxyReqOpts, srcReq) {
+        proxyReqOpts.headers['X-User-Id']       = srcReq.headers['x-user-id'] || '';
+        proxyReqOpts.headers['X-Username']       = srcReq.headers['x-username'] || '';
+        proxyReqOpts.headers['X-User-Role']      = srcReq.headers['x-user-role'] || '';
+        proxyReqOpts.headers['X-Correlation-Id'] = correlationId;
+        return proxyReqOpts;
+      },
+      proxyErrorHandler(err, res, next) {
+        logger.error({ msg: 'parameter-poller proxy error', err: err.message, deviceId, correlationId });
+        if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+          return res.status(503).json({
+            status: 'error',
+            error: {
+              code:          'SERVICE_UNAVAILABLE',
+              message:       'parameter-poller service is not reachable — current values are temporarily unavailable',
+              correlationId,
+            },
+          });
+        }
+        next(err);
+      },
+    });
+
+    return proxy(req, res, next);
+  },
+);
+
+/**
  * GET /:deviceId/parameters/:parameterId
  *
  * Direct parameter read with object-level authorization.
