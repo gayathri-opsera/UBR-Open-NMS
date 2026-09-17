@@ -29,6 +29,8 @@ const {
   FRAMEWORK_CAPABILITY,
 } = require('../middleware/rbac.middleware');
 
+const { detectCredentials } = require('../middleware/credentialDetect.middleware');
+
 const router = express.Router();
 
 // ── Proxy factory ─────────────────────────────────────────────────────────────
@@ -70,9 +72,12 @@ function productDefinitionProxy() {
 // Health passthrough — unauthenticated health probe for infrastructure monitoring
 router.get('/health', productDefinitionProxy());
 
-// Upload: SuperAdmin only — triggers validation and ingestion pipeline
+// Upload: SuperAdmin only — triggers validation and ingestion pipeline.
+// WO-005: detectCredentials scans the request body for credential-like content
+// and rejects the upload before it reaches the product-definition-service.
 router.post('/upload',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'product-definitions.upload'),
+  detectCredentials,
   productDefinitionProxy(),
 );
 

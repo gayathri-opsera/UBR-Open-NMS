@@ -23,6 +23,7 @@ const dashboardsStub  = require('./routes/dashboards.stub');
 const { createProvisionHandler } = require('./routes/provision.stub');
 const { listIgnored, addIgnored, removeIgnored } = require('./routes/ignore.stub');
 const frameworkProductDefinitions = require('./routes/frameworkProductDefinitions');
+const frameworkSecurity           = require('./routes/frameworkSecurity.routes');
 // Alarms stub — serves local alarm data instead of proxying to the external Opsera dev
 // environment.  Without this stub, ALARM_SERVICE_URL (often set to ubr-nms-frontend-dev.
 // agent.opsera.dev) causes a CORS error + 401 for every /api/v1/alarms request.
@@ -62,6 +63,12 @@ function createApp(redisClient) {
   // endpoint for all northbound consumers; the v1 path remains for backward compat.
   app.use('/api/v1/framework/product-definitions', frameworkProductDefinitions);
   app.use('/api/framework/v1/product-definitions', frameworkProductDefinitions);
+
+  // WO-005: Framework Security — Credential Reference API
+  // Exposes northbound-safe credential reference CRUD under the protected framework route group.
+  // All routes require SuperAdmin capability; secrets are write-only and stored AES-256-GCM encrypted.
+  app.use('/api/framework/v1/security/credential-references', frameworkSecurity);
+  app.use('/api/v1/framework/security/credential-references', frameworkSecurity); // legacy alias
 
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);
