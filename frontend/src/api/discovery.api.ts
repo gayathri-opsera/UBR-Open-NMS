@@ -212,6 +212,14 @@ export interface DiscoveryResult {
   matchEvidence?: string;
   /** Conflict/mismatch reason — set when fingerprintStatus === 'CONFLICT' or 'VERSION_MISMATCH'. */
   fingerprintConflictReason?: string;
+
+  // ── WO-011: Guided failure detail ─────────────────────────────────────────
+  /**
+   * Structured failure detail populated for any failed, auth-failed, timeout,
+   * partial, or degraded result. Undefined for healthy MATCHED results.
+   * Never contains credential material.
+   */
+  guidedFailure?: GuidedFailure;
 }
 
 /**
@@ -228,6 +236,54 @@ export type FingerprintStatus =
   | 'CONFLICT'
   | 'VERSION_MISMATCH'
   | 'REGISTRY_UNAVAILABLE';
+
+// ── WO-011: Guided discovery failure model ────────────────────────────────────
+
+/**
+ * Structured failure detail attached to failed or degraded discovery results (WO-011).
+ * All fields are operator-visible; credential material is never present.
+ */
+export interface GuidedFailure {
+  /** Top-level machine-readable failure category. */
+  category: DiscoveryFailureCategory;
+  /** Specific sub-category code within the category. */
+  code: string;
+  /** Human-readable, credential-free description of the failure. */
+  explicitReason: string;
+  /** True when submitting a new discovery run may resolve the issue. */
+  retryable: boolean;
+  /**
+   * Earliest ISO-8601 UTC time the caller may retry.
+   * Undefined means retry immediately.
+   */
+  retryAfter?: string;
+  /**
+   * Last protocol that produced usable fingerprint evidence.
+   * Empty/undefined when no protocol has ever succeeded for this target.
+   */
+  lastSuccessfulProtocolAttempt?: string;
+  /** Final protocol attempted (whether it succeeded or failed). */
+  lastAttemptedProtocol?: string;
+  /** Human-readable operator guidance for resolving this failure. */
+  recommendedNextAction: string;
+  /** Correlation ID linking this failure to the backend log entry. */
+  correlationId?: string;
+}
+
+/**
+ * Top-level discovery failure categories.
+ * Maps to taxonomy.Category constants in the Go discovery service.
+ */
+export type DiscoveryFailureCategory =
+  | 'REACHABILITY_FAILURE'
+  | 'CREDENTIAL_FAILURE'
+  | 'PROTOCOL_TIMEOUT'
+  | 'UNKNOWN_FINGERPRINT'
+  | 'CONFLICTING_FINGERPRINT'
+  | 'REGISTRY_UNAVAILABLE'
+  | 'UNSUPPORTED_PROTOCOL'
+  | 'ADAPTER_HEALTH_FAILURE'
+  | 'INTERNAL_ERROR';
 
 // ── WO-016: Parallel ICMP sweep progress and scheduling ──────────────────────
 
