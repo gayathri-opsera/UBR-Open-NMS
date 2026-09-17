@@ -1,5 +1,55 @@
 import { apiClient } from './client';
 
+// ── WO-008: Multi-mode deterministic discovery probe types ────────────────────
+
+/**
+ * Trigger mode — identifies the source that initiated a discovery run.
+ * The gateway accepts all five values; MANUAL is the default when absent.
+ */
+export type TriggerMode =
+  | 'MANUAL'
+  | 'SCHEDULED'
+  | 'EVENT_SNMP_TRAP'
+  | 'EVENT_SYSLOG'
+  | 'EVENT_DHCP';
+
+/** Protocol used in a single probe attempt. */
+export type ProbeType = 'ICMP' | 'SNMP' | 'SSH' | 'HTTP' | 'HTTPS' | 'GRPC_HEALTH';
+
+/** Outcome of a single probe attempt. */
+export type ProbeAttemptStatus =
+  | 'success'
+  | 'timeout'
+  | 'unreachable'
+  | 'auth_failed'
+  | 'skipped'
+  | 'failed';
+
+/**
+ * Records the outcome of a single protocol probe against one target.
+ * Credential material (SNMP community strings, SSH passwords) is NEVER included.
+ */
+export interface ProbeAttempt {
+  /** Protocol used for this probe attempt. */
+  probeType:            ProbeType;
+  /** Outcome of the probe. */
+  status:               ProbeAttemptStatus;
+  /** ISO-8601 UTC timestamp when the probe started. */
+  startedAt:            string;
+  /** ISO-8601 UTC timestamp when the probe completed. */
+  completedAt:          string;
+  /** Round-trip latency in milliseconds. 0 when the probe failed immediately. */
+  latencyMs:            number;
+  /** Machine-readable failure category (e.g. TIMEOUT, AUTH_FAILED). Empty on success. */
+  failureCategory?:     string;
+  /** Human-readable failure message. Never contains credential values. */
+  failureReason?:       string;
+  /** Credential-free evidence summary (e.g. sysDescr snippet, SSH banner prefix). */
+  safeEvidenceSummary?: string;
+  /** Whether this probe type should be retried on a subsequent run. */
+  retryable:            boolean;
+}
+
 // ── WO-011: Discovery scope intake types and API ─────────────────────────────
 
 export type ScopeEntryType = 'CIDR' | 'IP' | 'SEED';
@@ -43,11 +93,22 @@ export interface SnmpDiscoveryRunRequest {
   timeoutSeconds?: number;
   /** Number of SNMP retries on timeout (default: 2). Auth failures are never retried). */
   retries?: number;
+  /** WO-008: Trigger mode. Defaults to MANUAL when absent. */
+  triggerMode?: TriggerMode;
+  /** WO-008: Caller-supplied correlation ID for end-to-end tracing. */
+  correlationId?: string;
 }
 
 /** Backward-compatible alias for the basic scope-only request (WO-011). */
 export interface DiscoveryRunRequest {
   scope: ScopeEntry[];
+  /**
+   * WO-008: Trigger mode for multi-mode deterministic probing.
+   * Defaults to MANUAL on the backend when absent.
+   */
+  triggerMode?:   TriggerMode;
+  /** WO-008: Caller-supplied correlation ID for end-to-end tracing. */
+  correlationId?: string;
 }
 
 export interface DiscoveryRunResponse {
@@ -151,7 +212,8 @@ export type DiscoveryRunStatus =
   | 'CANCELLED';
 
 /**
- * Extended discovery run detail with sweep progress and SNMP metadata.
+ * Extended discovery run detail with sweep progress, SNMP metadata, and
+ * WO-008 multi-mode probe chain fields.
  * Returned by GET /discovery/runs/:runId.
  */
 export interface DiscoveryRunDetail extends Omit<DiscoveryRunResponse, 'status'> {
@@ -169,6 +231,22 @@ export interface DiscoveryRunDetail extends Omit<DiscoveryRunResponse, 'status'>
   snmpAttemptCount?: number;
   /** Number of hosts for which SNMP fingerprinting succeeded. */
   snmpSuccessCount?: number;
+  // ── WO-008: multi-mode probe fields (absent on legacy runs) ─────────────
+  /** Trigger mode that initiated this run (MANUAL, SCHEDULED, EVENT_*). */
+  triggerMode?: TriggerMode;
+  /** End-to-end correlation identifier for this run. */
+  correlationId?: string;
+  /** Ordered probe attempt chain across all targets in this run. */
+  probeAttempts?: ProbeAttempt[];
+  /** Total number of probe attempts recorded. */
+  probeAttemptCount?: number;
+  /** First probe type that produced usable fingerprint evidence. */
+  successfulProbeType?: ProbeType;
+  /**
+   * ISO-8601 timestamp when this event-driven run should be retried.
+   * Present only for EVENT_* trigger modes when the run fails transiently.
+   */
+  retryAt?: string;
 }
 
 // ── API functions ─────────────────────────────────────────────────────────────

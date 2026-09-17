@@ -689,8 +689,11 @@ func isValidCIDR(cidr string) bool {
 	if !isValidIPAddress(parts[0]) {
 		return false
 	}
-	// Validate prefix length
+	// Validate prefix length: must be non-empty and contain only digits.
 	prefix := parts[1]
+	if len(prefix) == 0 {
+		return false
+	}
 	for _, c := range prefix {
 		if c < '0' || c > '9' {
 			return false
@@ -720,17 +723,22 @@ func estimateCIDRSize(cidr string) int {
 
 // isValidIPAddress checks if a string is a valid IPv4 or IPv6 address.
 func isValidIPAddress(ip string) bool {
-	// Simple IPv4 validation
+	// Simple IPv4 validation: four dot-separated octets each in [0, 255].
 	parts := strings.Split(ip, ".")
 	if len(parts) == 4 {
 		for _, part := range parts {
 			if len(part) == 0 || len(part) > 3 {
 				return false
 			}
+			val := 0
 			for _, c := range part {
 				if c < '0' || c > '9' {
 					return false
 				}
+				val = val*10 + int(c-'0')
+			}
+			if val > 255 {
+				return false
 			}
 		}
 		return true
@@ -881,7 +889,31 @@ func (s *DiscoveryRunStore) ListRuns(p ListRunsParams) ListRunsResult {
 	}
 }
 
-// CreateDiscoveryRun validates scope and creates a discovery run record (WO-011).
+// HasActiveRunForTarget returns true when any QUEUED or RUNNING run contains a
+// scope entry whose value matches the given target (IP or CIDR).
+// Used by event-driven run creation to suppress duplicates (WO-008).
+func (s *DiscoveryRunStore) HasActiveRunForTarget(target string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, run := range s.runs {
+		if run.Status != "QUEUED" && run.Status != "RUNNING" {
+			continue
+		}
+		for _, entry := range run.NormalizedScope {
+			if entry.Value == target {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ErrDuplicateInFlightTarget is returned when an event-driven run would duplicate
+// an already running probe for the same target within the dedup window (WO-008).
+var ErrDuplicateInFlightTarget = errors.New("target already has an active in-flight discovery run")
+
+// CreateDiscoveryRun validates scope and creates a discovery run record (WO-011, WO-008).
+// TriggerMode defaults to MANUAL when absent or empty.
 func (s *DiscoveryService) CreateDiscoveryRun(req *model.DiscoveryRunRequest, createdBy string, runStore *DiscoveryRunStore) (*model.DiscoveryRunResponse, []model.ValidationError, error) {
 	// Validate and normalize scope
 	normalized, fieldErrors, err := ValidateAndNormalizeScope(req.Scope)
@@ -889,16 +921,49 @@ func (s *DiscoveryService) CreateDiscoveryRun(req *model.DiscoveryRunRequest, cr
 		return nil, fieldErrors, err
 	}
 
+	// Normalize trigger mode — default to MANUAL when not supplied.
+	triggerMode := req.TriggerMode
+	if triggerMode == "" {
+		triggerMode = model.TriggerModeManual
+	}
+	// Validate trigger mode against the allowlist.
+	if !model.ValidTriggerModes[triggerMode] {
+		return nil, []model.ValidationError{{
+			Field:   "triggerMode",
+			Message: fmt.Sprintf("unsupported trigger mode: %q; valid values: MANUAL, SCHEDULED, EVENT_SNMP_TRAP, EVENT_SYSLOG, EVENT_DHCP", triggerMode),
+		}}, ErrInvalidScope
+	}
+
+	// WO-008: For event-driven runs, check whether any target in the scope is
+	// already being probed by an active run to prevent fan-out overload.
+	isEventDriven := triggerMode == model.TriggerModeEventTrap ||
+		triggerMode == model.TriggerModeEventSyslog ||
+		triggerMode == model.TriggerModeEventDHCP
+	if isEventDriven {
+		for _, entry := range normalized {
+			if runStore.HasActiveRunForTarget(entry.Value) {
+				return nil, nil, fmt.Errorf("%w: target=%s", ErrDuplicateInFlightTarget, entry.Value)
+			}
+		}
+	}
+
 	protocol := req.Protocol
 	if protocol == "" {
 		protocol = "SNMP_V2C"
 	}
 
+	// Correlation ID: use caller-supplied value or generate a new one.
+	corrID := req.CorrelationID
+	if corrID == "" {
+		corrID = uuid.NewString()
+	}
+
 	// Create discovery run record — ephemeral community is never persisted.
+	// Initial status is CREATED; the RunExecutor moves it to QUEUED → RUNNING.
 	run := &model.DiscoveryRun{
 		ID:                 uuid.NewString(),
 		NormalizedScope:    normalized,
-		Status:             "QUEUED",
+		Status:             "CREATED",
 		CreatedBy:          createdBy,
 		CreatedAt:          time.Now().UTC(),
 		ValidationNotes:    fmt.Sprintf("Validated %d scope entries", len(normalized)),
@@ -907,6 +972,9 @@ func (s *DiscoveryService) CreateDiscoveryRun(req *model.DiscoveryRunRequest, cr
 		TimeoutSeconds:     req.TimeoutSeconds,
 		Retries:            req.Retries,
 		EphemeralCommunity: req.Community,
+		// WO-008: multi-mode probe metadata.
+		TriggerMode:   triggerMode,
+		CorrelationID: corrID,
 	}
 
 	// Persist run
