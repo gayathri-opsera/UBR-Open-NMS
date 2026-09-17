@@ -1,6 +1,8 @@
 package com.ubrnms.productdef.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ubrnms.productdef.lifecycle.ProductDefinitionLifecycleException;
+import com.ubrnms.productdef.lifecycle.ProductDefinitionStateMachine;
 import com.ubrnms.productdef.model.*;
 import com.ubrnms.productdef.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -84,7 +86,7 @@ public class ProductDefinitionLifecycleService {
 
         ProductDefinitionVersion version = loadVersion(definitionId, versionId);
 
-        validateTransition(version, "DRAFT", "STAGED", correlationId);
+        validateTransition(version, ProductDefinitionStateMachine.STAGED, correlationId);
 
         if (!"VALID".equals(version.getValidationStatus())) {
             recordEvent(ProductDefinitionLifecycleEvent.builder()
@@ -109,7 +111,7 @@ public class ProductDefinitionLifecycleService {
         }
 
         Instant now = Instant.now();
-        version.setLifecycleStatus("STAGED");
+        version.setLifecycleStatus(ProductDefinitionStateMachine.STAGED);
         version.setStagedBy(actorUserId);
         version.setStagedAt(now);
         ProductDefinitionVersion saved = versionRepo.save(version);
@@ -172,7 +174,7 @@ public class ProductDefinitionLifecycleService {
         }
 
         ProductDefinitionVersion version = loadVersion(definitionId, versionId);
-        validateTransition(version, "STAGED", "ACTIVE", correlationId);
+        validateTransition(version, ProductDefinitionStateMachine.ACTIVE, correlationId);
 
         // Parse the stored normalized metadata to rebuild registries
         NormalizedProductDefinition normalized = parseNormalizedMetadata(version, correlationId);
@@ -231,7 +233,7 @@ public class ProductDefinitionLifecycleService {
                     .findByDefinitionIdAndVersionId(definitionId, previousVersionId)
                     .orElse(null);
             if (previousVersion != null) {
-                previousVersion.setLifecycleStatus("SUPERSEDED");
+                previousVersion.setLifecycleStatus(ProductDefinitionStateMachine.SUPERSEDED);
                 previousVersion.setSupersededAt(Instant.now());
                 versionRepo.save(previousVersion);
             }
@@ -255,7 +257,7 @@ public class ProductDefinitionLifecycleService {
         activeVersionRepo.save(activePointer);
 
         // Mark this version as ACTIVE
-        version.setLifecycleStatus("ACTIVE");
+        version.setLifecycleStatus(ProductDefinitionStateMachine.ACTIVE);
         version.setActivatedBy(actorUserId);
         version.setActivatedAt(now);
         version.setRegistryVersion(newRegistryVersion);
@@ -401,7 +403,7 @@ public class ProductDefinitionLifecycleService {
                 .findByDefinitionIdAndVersionId(definitionId, currentVersionId)
                 .orElse(null);
         if (currentVersion != null) {
-            currentVersion.setLifecycleStatus("SUPERSEDED");
+            currentVersion.setLifecycleStatus(ProductDefinitionStateMachine.SUPERSEDED);
             currentVersion.setRolledBackBy(actorUserId);
             currentVersion.setRolledBackAt(now);
             currentVersion.setRollbackReason(reason);
@@ -409,7 +411,7 @@ public class ProductDefinitionLifecycleService {
         }
 
         // Restore previous version to ACTIVE
-        previousVersion.setLifecycleStatus("ACTIVE");
+        previousVersion.setLifecycleStatus(ProductDefinitionStateMachine.ACTIVE);
         previousVersion.setActivatedBy(actorUserId);
         previousVersion.setActivatedAt(now);
         previousVersion.setRegistryVersion(newRegistryVersion);
@@ -511,20 +513,27 @@ public class ProductDefinitionLifecycleService {
     }
 
     /**
-     * Guards lifecycle transitions: the version must be in the expected {@code fromStatus}.
+     * Guards lifecycle transitions via the centralized {@link ProductDefinitionStateMachine}.
+     *
+     * <p>The state machine is the single authority for valid transitions — no hard-coded
+     * string comparisons are used here.  {@link ProductDefinitionLifecycleException} is
+     * caught and re-wrapped as {@link IllegalArgumentException} so callers continue to
+     * receive a consistent exception type at the service boundary.
      */
     private void validateTransition(
             ProductDefinitionVersion version,
-            String fromStatus,
             String toStatus,
             String correlationId) {
 
-        if (!fromStatus.equals(version.getLifecycleStatus())) {
+        String currentStatus = version.getLifecycleStatus();
+        try {
+            ProductDefinitionStateMachine.validateTransition(currentStatus, toStatus);
+        } catch (ProductDefinitionLifecycleException e) {
+            log.warn("[{}] Lifecycle transition rejected for version {}: {} — {}",
+                    correlationId, version.getVersionId(), e.getErrorCode(), e.getMessage());
             throw new IllegalArgumentException(
                     "Cannot transition version " + version.getVersionId()
-                    + " to " + toStatus + ": current status is " + version.getLifecycleStatus()
-                    + " but " + fromStatus + " is required. "
-                    + "Check the current lifecycle state before retrying.");
+                    + " to " + toStatus + ": " + e.getMessage());
         }
     }
 

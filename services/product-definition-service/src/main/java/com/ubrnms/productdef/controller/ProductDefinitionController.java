@@ -1,5 +1,6 @@
 package com.ubrnms.productdef.controller;
 
+import com.ubrnms.productdef.lifecycle.ProductDefinitionLifecycleException;
 import com.ubrnms.productdef.model.ProductDefinitionLifecycleEvent;
 import com.ubrnms.productdef.model.ProductDefinitionVersion;
 import com.ubrnms.productdef.model.ValidationReport;
@@ -159,6 +160,10 @@ public class ProductDefinitionController {
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(errorBody("VERSION_NOT_FOUND", e.getMessage()));
+        } catch (ProductDefinitionLifecycleException e) {
+            log.warn("[{}] Stage rejected — {}: {}", correlationId, e.getErrorCode(), e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(errorBody(e.getErrorCode(), e.getMessage()));
         } catch (IllegalArgumentException e) {
             log.warn("[{}] Stage rejected: {}", correlationId, e.getMessage());
             return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)

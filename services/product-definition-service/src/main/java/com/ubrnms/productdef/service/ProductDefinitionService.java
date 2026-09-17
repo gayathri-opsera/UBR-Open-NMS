@@ -1,6 +1,7 @@
 package com.ubrnms.productdef.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ubrnms.productdef.lifecycle.ProductDefinitionStateMachine;
 import com.ubrnms.productdef.model.*;
 import com.ubrnms.productdef.repository.ProductDefinitionVersionRepository;
 import com.ubrnms.productdef.repository.ValidationReportRepository;
@@ -135,7 +136,7 @@ public class ProductDefinitionService {
         version.setName(normalized != null ? normalized.getName() : null);
         version.setVendor(normalized != null ? normalized.getVendor() : null);
         version.setModel(normalized != null ? normalized.getModel() : null);
-        version.setLifecycleStatus("DRAFT");
+        version.setLifecycleStatus(ProductDefinitionStateMachine.DRAFT);
         version.setValidationStatus(report.getStatus());
         version.setContentHash(contentHash);
         version.setUploadedFormat(format);

@@ -43,10 +43,40 @@ PUBLISHED → ROLLED_BACK → DRAFT (prior version restored)
 
 ## State Machine Enforcement (WO-019)
 
-All transitions are enforced by the centralized state machine in the Product Definition Service.
-- No service may change lifecycle state by writing directly to MongoDB — all transitions go through `ProductDefinitionStateMachine.transition(command)`.
-- Invalid transition attempts return `HTTP 409 CONFLICT` with error code `INVALID_LIFECYCLE_TRANSITION`.
-- The state machine emits a lifecycle event to the `product-definition.lifecycle` Kafka topic on every successful transition (WO-018).
+All transitions are enforced by the centralized state machine in the Product Definition Service:
+`com.ubrnms.productdef.lifecycle.ProductDefinitionStateMachine`
+
+- **Single authority**: No service, controller, or background worker may mutate `lifecycleStatus` without first calling `ProductDefinitionStateMachine.validateTransition(from, to)`.
+- **Invalid transitions** return `HTTP 409 CONFLICT` with machine-readable error code `INVALID_LIFECYCLE_TRANSITION`.
+- **Unknown state** returns `HTTP 409 CONFLICT` with error code `UNKNOWN_LIFECYCLE_STATE`.
+- **Lifecycle events** are emitted to the `product-definition.lifecycle.events` Kafka topic on every successful transition (WO-018).
+
+### Canonical States (WO-019)
+
+| State | Description | Mutable |
+|-------|-------------|---------|
+| `DRAFT` | Uploaded artifact; validation complete; no registry impact | Yes |
+| `STAGED` | VALID definition held for admin review before activation | No |
+| `ACTIVE` | Live; fingerprint and parameter registries built from this version | No |
+| `SUPERSEDED` | Displaced by a newer activation; historical record preserved | No |
+| `ARCHIVED` | Manually retired; no longer in active registry; terminal state | No |
+
+### Transition Matrix (WO-019)
+
+| From | To | Trigger | Prerequisite |
+|------|----|---------|-------------|
+| `DRAFT` | `STAGED` | Admin stages for review | `validationStatus` must be `VALID` |
+| `DRAFT` | `ARCHIVED` | Admin discards unwanted draft | — |
+| `STAGED` | `ACTIVE` | Admin activates; registries rebuilt | Conflict check must pass |
+| `STAGED` | `DRAFT` | Admin retracts for revision | — |
+| `STAGED` | `ARCHIVED` | Admin discards staged version | — |
+| `ACTIVE` | `SUPERSEDED` | System displaces on newer activation | — |
+| `ACTIVE` | `ARCHIVED` | Admin retires active definition | — |
+| `SUPERSEDED` | `ACTIVE` | System restores during rollback | Previous version metadata must be present |
+| `SUPERSEDED` | `ARCHIVED` | Admin archives superseded version | — |
+| `ARCHIVED` | *(none)* | Terminal — no outbound transitions | — |
+
+All other transitions (e.g. `DRAFT → ACTIVE`, `ACTIVE → DRAFT`) are invalid and return `INVALID_LIFECYCLE_TRANSITION`.
 
 ## Publish Validation Gates (WO-021)
 
