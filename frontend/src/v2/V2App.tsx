@@ -36,6 +36,10 @@ const V2UnifiedOnboardingPage = lazy(() => import('./pages/V2UnifiedOnboardingPa
 const V2ReleaseValidationPage = lazy(() => import('./pages/V2ReleaseValidationPage'));
 const V2CompliancePage    = lazy(() => import('./pages/V2CompliancePage'));
 const V2DiscoveryPage     = lazy(() => import('./pages/V2DiscoveryPage'));
+// WO-014: Adaptive device parameter panels page (metadata-driven, role-aware)
+const AdaptiveDeviceParameterPanelsPage = lazy(
+  () => import('./pages/AdaptiveDeviceParameterPanelsPage'),
+);
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
@@ -152,6 +156,16 @@ export function V2App() {
                   }
                 />
                 <Route path="discovery" element={<V2DiscoveryPage />} />
+                {/*
+                  WO-014: Adaptive device parameter panels — mounted at
+                  /v2/devices/:id/framework-parameters so it is a sub-route
+                  of the existing device detail page and shares the same id param.
+                  Only reachable when productDefinitionId is present on the device.
+                */}
+                <Route
+                  path="devices/:id/framework-parameters"
+                  element={<AdaptiveDeviceParameterPanelsPage />}
+                />
                 <Route path="*" element={<V2NotFoundPage />} />
               </Routes>
             </Suspense>
