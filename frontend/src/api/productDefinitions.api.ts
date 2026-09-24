@@ -16,6 +16,7 @@ import type {
   DefinitionSummary,
   ProductDefinitionVersion,
   ValidationReport,
+  ValidationFinding,
   LifecycleActionResult,
   ActivationResult,
   LifecycleEvent,
@@ -31,11 +32,26 @@ const BASE = '/framework/product-definitions';
  * Falls back to a generic error when the response body is not a framework envelope.
  */
 export function extractApiError(err: unknown): FrameworkApiError {
-  const axiosErr = err as AxiosError<{ status: string; error?: { code: string; message: string; details?: string; correlationId?: string } }>;
+  const axiosErr = err as AxiosError<Record<string, unknown>>;
   const body = axiosErr?.response?.data;
-  if (body?.status === 'error' && body.error) {
-    return body as FrameworkApiError;
+
+  // Format A: canonical envelope { status: 'error', error: { code, message } }
+  if (body?.status === 'error' && body.error && typeof body.error === 'object') {
+    return body as unknown as FrameworkApiError;
   }
+
+  // Format B: Java controller flat format { error: 'CODE', message: 'text' }
+  // The Java errorBody() helper returns Map.of("error", code, "message", message).
+  if (body && typeof body['error'] === 'string' && typeof body['message'] === 'string') {
+    return {
+      status: 'error',
+      error: {
+        code:    body['error'] as string,
+        message: body['message'] as string,
+      },
+    };
+  }
+
   const httpStatus = axiosErr?.response?.status;
   const message = axiosErr?.message ?? 'Unexpected error';
   return {
@@ -57,13 +73,30 @@ export function extractApiError(err: unknown): FrameworkApiError {
  */
 export async function listProductDefinitions(): Promise<DefinitionSummary[]> {
   try {
-    const res = await apiClient.get<DefinitionSummary[] | { definitions: DefinitionSummary[] }>(
+    // The backend listDefinitions() returns keys: productDefinitionId, vendor, model,
+    // activeVersionId, registryVersion.  Normalise here so the rest of the UI can use
+    // the canonical DefinitionSummary shape (definitionId, name, …) without change.
+    const res = await apiClient.get<Record<string, unknown>[] | { definitions: Record<string, unknown>[] }>(
       BASE,
     );
-    const data = res.data;
-    if (Array.isArray(data)) return data;
-    if (data && 'definitions' in data && Array.isArray(data.definitions)) return data.definitions;
-    return [];
+    const raw: Record<string, unknown>[] = Array.isArray(res.data)
+      ? res.data
+      : (res.data && 'definitions' in res.data && Array.isArray((res.data as { definitions: unknown[] }).definitions))
+        ? (res.data as { definitions: Record<string, unknown>[] }).definitions
+        : [];
+
+    return raw.map((r): DefinitionSummary => ({
+      // Backend uses productDefinitionId; fall back to id or definitionId for future schema alignment
+      definitionId:       String(r['productDefinitionId'] ?? r['definitionId'] ?? r['id'] ?? ''),
+      name:               String(r['name'] ?? r['model'] ?? ''),
+      vendor:             String(r['vendor'] ?? ''),
+      model:              String(r['model'] ?? ''),
+      versionCount:       typeof r['versionCount'] === 'number' ? r['versionCount'] : 0,
+      activeVersionId:    r['activeVersionId'] != null ? String(r['activeVersionId']) : undefined,
+      activeVersionStatus: r['activeVersionStatus'] as DefinitionSummary['activeVersionStatus'] | undefined,
+      registryVersion:    typeof r['registryVersion'] === 'number' ? r['registryVersion'] : undefined,
+      updatedAt:          String(r['updatedAt'] ?? r['createdAt'] ?? new Date().toISOString()),
+    }));
   } catch (err) {
     throw extractApiError(err);
   }
@@ -104,10 +137,32 @@ export async function getProductDefinitionValidationReport(
   versionId: string,
 ): Promise<ValidationReport> {
   try {
-    const res = await apiClient.get<ValidationReport>(
-      `${BASE}/${definitionId}/versions/${versionId}/validation-report`,
+    const res = await apiClient.get<Record<string, unknown>>(
+      `${BASE}/${definitionId}/versions/${versionId}/report`,
     );
-    return res.data;
+    const raw = res.data;
+    // The Java service uses { status, errors[], warnings[] } rather than
+    // { validationStatus, findings[] } as declared in the TS DTO.
+    // Normalise here so both shapes work in the UI.
+    const errors   = Array.isArray(raw['errors'])   ? (raw['errors']   as ValidationFinding[]) : [];
+    const warnings = Array.isArray(raw['warnings']) ? (raw['warnings'] as ValidationFinding[]) : [];
+    return {
+      definitionId:    String(raw['definitionId']    ?? definitionId),
+      versionId:       String(raw['versionId']       ?? versionId),
+      validationStatus: (raw['validationStatus'] ?? raw['status'] ?? 'UNKNOWN') as ValidationReport['validationStatus'],
+      errorCount:      errors.length,
+      warningCount:    warnings.length,
+      infoCount:       0,
+      // Merge errors + warnings into findings so the drawer renders correctly.
+      findings:        [...errors, ...warnings],
+      validatedAt:     raw['createdAt'] as string | undefined,
+      correlationId:   raw['correlationId'] as string | undefined,
+      // Pass through extra Java fields so the drawer can display them.
+      ...(raw['normalizedSummary']  ? { normalizedSummary:  raw['normalizedSummary']  } : {}),
+      ...(raw['fingerprintCount']   ? { fingerprintCount:   raw['fingerprintCount']   } : {}),
+      ...(raw['parameterCount']     ? { parameterCount:     raw['parameterCount']     } : {}),
+      ...(raw['protocolCount']      ? { protocolCount:      raw['protocolCount']      } : {}),
+    } as unknown as ValidationReport;
   } catch (err) {
     throw extractApiError(err);
   }
@@ -175,8 +230,21 @@ export async function uploadProductDefinition(
   if (correlationId) form.append('correlationId', correlationId);
 
   try {
-    const res = await apiClient.post<ProductDefinitionVersion>(BASE, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+    // The apiClient instance has a global "Content-Type: application/json" default.
+    // For FormData uploads the browser must set Content-Type automatically so it can
+    // include the multipart boundary.  We strip Content-Type inside transformRequest
+    // (the only hook that sees the fully-merged headers object) so the browser's
+    // XMLHttpRequest takes over and sets "multipart/form-data; boundary=<token>".
+    const res = await apiClient.post<ProductDefinitionVersion>(`${BASE}/upload`, form, {
+      transformRequest: [
+        (data: unknown, headers: Record<string, unknown> | undefined) => {
+          if (headers) {
+            delete headers['Content-Type'];
+            delete headers['content-type'];
+          }
+          return data; // pass FormData through as-is; browser handles serialisation
+        },
+      ],
     });
     return res.data;
   } catch (err) {
@@ -258,6 +326,70 @@ export async function rollbackProductDefinition(
   }
 }
 
+// ── Admin: global upload history ─────────────────────────────────────────────
+
+/**
+ * Returns every uploaded version across ALL definitions, newest first.
+ * Restricted to Admin / SuperAdmin at the gateway.
+ */
+export async function listAllUploadHistory(): Promise<ProductDefinitionVersion[]> {
+  try {
+    const res = await apiClient.get<ProductDefinitionVersion[]>(`${BASE}/history`);
+    return Array.isArray(res.data) ? res.data : [];
+  } catch (err) {
+    throw extractApiError(err);
+  }
+}
+
+// ── Version Diff ──────────────────────────────────────────────────────────────
+
+export interface VersionDiffParamChange {
+  parameterId: string;
+  label: string | null;
+  fromGroupId: string | null;
+  toGroupId: string | null;
+  fromDataType: string | null;
+  toDataType: string | null;
+  fromReadOnly: boolean | null;
+  toReadOnly: boolean | null;
+  summary: string;
+}
+
+export interface VersionDiffResult {
+  definitionId: string;
+  fromVersionId: string;
+  toVersionId: string;
+  vendor: string | null;
+  model: string | null;
+  fromParamCount: number;
+  toParamCount: number;
+  added: VersionDiffParamChange[];
+  removed: VersionDiffParamChange[];
+  modified: VersionDiffParamChange[];
+  moved: VersionDiffParamChange[];
+  permissionChanged: VersionDiffParamChange[];
+}
+
+/**
+ * Fetch a parameter-level diff between two Product Definition versions.
+ * The backend uses {@code normalizedMetadataJson} stored on each version record
+ * so no re-parsing of the original file is required.
+ */
+export async function getVersionDiff(
+  definitionId: string,
+  fromVersionId: string,
+  toVersionId: string,
+): Promise<VersionDiffResult> {
+  try {
+    const res = await apiClient.get<VersionDiffResult>(
+      `${BASE}/${definitionId}/versions/${fromVersionId}/diff/${toVersionId}`,
+    );
+    return res.data;
+  } catch (err) {
+    throw extractApiError(err);
+  }
+}
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 /**
@@ -267,4 +399,138 @@ export async function rollbackProductDefinition(
  */
 export function generateIdempotencyKey(): string {
   return crypto.randomUUID();
+}
+
+// ── Product Definition Schema (for dynamic Discovery + Config forms) ──────────
+
+/** One parameter field parsed from a product definition's normalizedMetadataJson. */
+export interface PdSchemaParameter {
+  id: string;
+  displayName: string;
+  /** GAUGE | COUNTER | STRING | ENUM | FLOAT | BOOLEAN */
+  dataType: string;
+  unit?: string;
+  minValue?: number;
+  maxValue?: number;
+  enumValues?: string[];
+  snmpOid?: string;
+  cliCommand?: string;
+  thresholdHigh?: string;
+  thresholdLow?: string;
+}
+
+/** One parameter group from a product definition. */
+export interface PdSchemaGroup {
+  groupName: string;
+  parameters: PdSchemaParameter[];
+}
+
+/** SNMP fingerprint entry from a product definition. */
+export interface PdFingerprint {
+  sysObjectId: string;
+  sysDescrPattern?: string;
+  firmwareFrom?: string;
+  firmwareTo?: string;
+}
+
+/** Full parsed schema for a product definition version. */
+export interface ProductDefinitionSchema {
+  definitionId: string;
+  versionId: string;
+  vendor: string;
+  model: string;
+  name: string;
+  productFamily?: string;
+  fingerprints: PdFingerprint[];
+  protocols: string[];
+  groups: PdSchemaGroup[];
+}
+
+/**
+ * Fetches a product definition version record and parses its
+ * {@code normalizedMetadataJson} into a typed schema that drives the
+ * dynamic Discovery and Config form renderers.
+ *
+ * Returns null when the version record has no normalized metadata
+ * (e.g. the upload failed validation before normalization ran).
+ */
+export async function getVersionSchema(
+  definitionId: string,
+  versionId: string,
+): Promise<ProductDefinitionSchema | null> {
+  try {
+    const res = await apiClient.get<Record<string, unknown>>(
+      `${BASE}/${definitionId}/versions/${versionId}`,
+    );
+    const record = res.data;
+    const jsonStr = record['normalizedMetadataJson'];
+    if (!jsonStr || typeof jsonStr !== 'string') return null;
+
+    const meta = JSON.parse(jsonStr) as Record<string, unknown>;
+    const identity = (meta['identity'] ?? meta) as Record<string, unknown>;
+
+    // ── Parse parameter groups ── (XML and JSON formats differ slightly)
+    const rawGroups: PdSchemaGroup[] = [];
+    const rawParams = meta['parameterGroups'] ?? meta['parameters'];
+
+    if (Array.isArray(rawParams)) {
+      for (const g of rawParams as Record<string, unknown>[]) {
+        const groupName = String(g['groupName'] ?? g['name'] ?? 'parameters');
+        const rawFields = (g['parameters'] ?? []) as Record<string, unknown>[];
+        rawGroups.push({
+          groupName,
+          parameters: rawFields.map((p) => ({
+            id:           String(p['id'] ?? ''),
+            displayName:  String(p['displayName'] ?? p['id'] ?? ''),
+            dataType:     String(p['dataType'] ?? 'STRING').toUpperCase(),
+            unit:         p['unit'] != null ? String(p['unit']) : undefined,
+            minValue:     typeof p['minValue'] === 'number' ? p['minValue'] : undefined,
+            maxValue:     typeof p['maxValue'] === 'number' ? p['maxValue'] : undefined,
+            enumValues:   Array.isArray(p['enumValues'])
+              ? (p['enumValues'] as string[])
+              : (typeof p['enumValues'] === 'string'
+                ? (p['enumValues'] as string).split(',').map((v: string) => v.trim())
+                : undefined),
+            // NormalizedProductDefinition.ParameterEntry stores snmpOid directly;
+            // raw XML/JSON upload formats may use a nested snmpMapping.oid.
+            snmpOid:      p['snmpOid'] as string | undefined ??
+                          (p['snmpMapping'] as Record<string,unknown>)?.['oid'] as string | undefined,
+            cliCommand:   p['cliCommand'] as string | undefined ??
+                          (p['cliMapping'] as Record<string,unknown>)?.['command'] as string | undefined,
+            thresholdHigh: p['thresholdHigh'] != null ? String(p['thresholdHigh']) : undefined,
+            thresholdLow:  p['thresholdLow']  != null ? String(p['thresholdLow'])  : undefined,
+          })),
+        });
+      }
+    }
+
+    // ── Parse fingerprints ────────────────────────────────────────────────────
+    const rawFps = (meta['fingerprints'] ?? []) as Record<string, unknown>[];
+    const fingerprints: PdFingerprint[] = rawFps.map((f) => ({
+      sysObjectId:      String(f['sysObjectId'] ?? ''),
+      sysDescrPattern:  f['sysDescrPattern'] != null ? String(f['sysDescrPattern']) : undefined,
+      firmwareFrom:     f['firmwareFrom']     != null ? String(f['firmwareFrom'])    : undefined,
+      firmwareTo:       f['firmwareTo']       != null ? String(f['firmwareTo'])      : undefined,
+    }));
+
+    // ── Parse supported protocols ─────────────────────────────────────────────
+    const rawProtos = (meta['supportedProtocols'] ?? []) as unknown[];
+    const protocols = rawProtos.map((p) =>
+      typeof p === 'string' ? p : String((p as Record<string,unknown>)['type'] ?? p),
+    );
+
+    return {
+      definitionId,
+      versionId,
+      vendor:        String(identity['vendor'] ?? record['vendor'] ?? ''),
+      model:         String(identity['model']  ?? record['model']  ?? ''),
+      name:          String(identity['name']   ?? record['name']   ?? ''),
+      productFamily: identity['productFamily'] != null ? String(identity['productFamily']) : undefined,
+      fingerprints,
+      protocols,
+      groups: rawGroups,
+    };
+  } catch {
+    return null;
+  }
 }

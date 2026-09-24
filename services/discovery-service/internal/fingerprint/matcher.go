@@ -97,6 +97,7 @@ func (m *Matcher) Match(ctx context.Context, evidence ProbeEvidence) *MatchResul
 			FirmwareVersion:          evidence.FirmwareVersion,
 			MatchConfidence:          m0.confidence,
 			MatchEvidence:            m0.evidence,
+			DeviceType:               m0.entry.DeviceType,
 		}
 
 	default:
@@ -144,6 +145,7 @@ func (m *Matcher) Match(ctx context.Context, evidence ProbeEvidence) *MatchResul
 			FirmwareVersion:          evidence.FirmwareVersion,
 			MatchConfidence:          best.confidence,
 			MatchEvidence:            best.evidence,
+			DeviceType:               best.entry.DeviceType,
 		}
 	}
 }

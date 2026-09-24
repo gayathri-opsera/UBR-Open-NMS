@@ -1,7 +1,9 @@
 package com.ubrnms.alarm.model;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Value;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 
@@ -16,9 +18,16 @@ import java.time.Instant;
  *   must not receive, log, or store any authentication material.
  * - Only fresh, numeric parameter values are submitted; stale, unmapped,
  *   or non-numeric values are filtered by the caller before submission.
+ *
+ * Note: @Data + @NoArgsConstructor + @AllArgsConstructor is the Lombok pattern
+ * required for Jackson deserialization compatibility.  The previously-used
+ * @Value/@Builder combination produced an immutable class with no no-arg
+ * constructor, which Jackson cannot instantiate from JSON.
  */
-@Value
+@Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class FrameworkThresholdEvaluationRequest {
 
     /** Inventory device identifier. */

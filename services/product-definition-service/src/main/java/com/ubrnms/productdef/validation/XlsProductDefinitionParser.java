@@ -119,7 +119,8 @@ public class XlsProductDefinitionParser {
                .model(kv.get("model"))
                .firmwareFrom(kv.get("firmwarefrom"))
                .firmwareTo(kv.get("firmwareto"))
-               .productFamily(kv.get("productfamily"));
+               .productFamily(kv.get("productfamily"))
+               .deviceType(kv.get("devicetype"));
     }
 
     private Map<String, String> readKeyValueSheet(Sheet sheet) {

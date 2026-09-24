@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<productDefinition xmlns="urn:nms:productdef:1.0">
+
+  <identity>
+    <name>SRX300</name>
+    <vendor>Juniper</vendor>
+    <model>SRX300</model>
+    <firmwareFrom>19.1</firmwareFrom>
+    <firmwareTo>23.2</firmwareTo>
+    <productFamily>SRX Series</productFamily>
+  </identity>
+
+  <fingerprints>
+    <fingerprint>
+      <sysObjectId>.1.3.6.1.4.1.2636.1.1.1.2.151</sysObjectId>
+      <sysDescrPattern>.*Juniper.*SRX300.*</sysDescrPattern>
+      <firmwareFrom>19.1</firmwareFrom>
+      <firmwareTo>23.2</firmwareTo>
+    </fingerprint>
+  </fingerprints>
+
+  <protocols>
+    <protocol><type>SNMP</type></protocol>
+    <protocol><type>CLI</type></protocol>
+    <protocol><type>REST</type></protocol>
+  </protocols>
+
+  <parameters>
+    <group name="cpu">
+      <parameter>
+        <id>routing_engine_cpu</id>
+        <displayName>Routing Engine CPU</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>%</unit>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+        <thresholdHigh>90</thresholdHigh>
+        <stalenessSeconds>60</stalenessSeconds>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.2636.3.1.13.1.8.9.1.0.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+
+    <group name="security">
+      <parameter>
+        <id>active_sessions</id>
+        <displayName>Active Security Sessions</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>sessions</unit>
+        <thresholdHigh>90000</thresholdHigh>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.2636.3.39.1.12.1.1.1.2.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>max_sessions</id>
+        <displayName>Maximum Sessions Capacity</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>sessions</unit>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.2636.3.39.1.12.1.1.1.3.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>failed_logins</id>
+        <displayName>Failed Login Attempts</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>attempts</unit>
+        <thresholdHigh>10</thresholdHigh>
+        <cliMapping>
+          <command>show security log</command>
+        </cliMapping>
+        <uiVisibleTo>FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+
+    <group name="vpn">
+      <parameter>
+        <id>ike_sa_count</id>
+        <displayName>IKE Security Associations</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>SAs</unit>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.2636.3.52.1.1.1.1.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>ipsec_sa_count</id>
+        <displayName>IPsec Security Associations</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>SAs</unit>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.2636.3.52.1.1.2.1.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+
+    <group name="interface">
+      <parameter>
+        <id>if_in_octets</id>
+        <displayName>Interface Inbound Octets</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>bytes</unit>
+        <snmpMapping>
+          <oid>.1.3.6.1.2.1.2.2.1.10</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>if_out_octets</id>
+        <displayName>Interface Outbound Octets</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>bytes</unit>
+        <snmpMapping>
+          <oid>.1.3.6.1.2.1.2.2.1.16</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+
+    <group name="environment">
+      <parameter>
+        <id>temp_chassis</id>
+        <displayName>Chassis Temperature</displayName>
+        <dataType>FLOAT</dataType>
+        <unit>Celsius</unit>
+        <minValue>0</minValue>
+        <maxValue>80</maxValue>
+        <thresholdHigh>70</thresholdHigh>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.2636.3.1.13.1.7.9.1.0.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+  </parameters>
+
+</productDefinition>

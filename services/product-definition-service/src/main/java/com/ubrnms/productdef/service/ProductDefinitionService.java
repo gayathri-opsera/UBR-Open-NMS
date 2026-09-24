@@ -136,6 +136,7 @@ public class ProductDefinitionService {
         version.setName(normalized != null ? normalized.getName() : null);
         version.setVendor(normalized != null ? normalized.getVendor() : null);
         version.setModel(normalized != null ? normalized.getModel() : null);
+        version.setDeviceType(normalized != null ? normalized.getDeviceType() : null);
         version.setLifecycleStatus(ProductDefinitionStateMachine.DRAFT);
         version.setValidationStatus(report.getStatus());
         version.setContentHash(contentHash);
@@ -146,6 +147,15 @@ public class ProductDefinitionService {
         version.setActorRole(actorRole);
         version.setCorrelationId(correlationId);
         version.setNormalizedMetadataJson(normalizedJson);
+        // Derive the canonical schema version from the upload format so the METADATA_COMPLETENESS_GATE
+        // can confirm a recognized schema contract was used. These URN values match the namespace
+        // declared in XML files and the $schema field declared in JSON files.
+        version.setSchemaVersion(switch (format) {
+            case "XML"  -> "urn:nms:productdef:1.0";
+            case "JSON" -> "urn:nms:productdef:json:1.0";
+            case "XLS"  -> "urn:nms:productdef:xls:1.0";
+            default     -> format;
+        });
 
         ProductDefinitionVersion saved = versionRepository.save(version);
         reportRepository.save(report);
@@ -168,6 +178,11 @@ public class ProductDefinitionService {
         return versionRepository.findByDefinitionIdOrderByCreatedAtDesc(definitionId);
     }
 
+    /** Returns every uploaded version across all definitions, newest first. Admin-only. */
+    public List<ProductDefinitionVersion> listAllVersions() {
+        return versionRepository.findAllByOrderByCreatedAtDesc();
+    }
+
     public ValidationReport getReport(String definitionId, String versionId) {
         return reportRepository.findByDefinitionIdAndVersionId(definitionId, versionId)
                 .orElseThrow(() -> new NoSuchElementException(
@@ -183,8 +198,11 @@ public class ProductDefinitionService {
     private String detectFormat(byte[] bytes, String contentType) {
         if (contentType != null) {
             String ct = contentType.toLowerCase();
-            if (ct.contains("xml"))                  return "XML";
+            // XLS/XLSX check must precede the generic "xml" check because the OOXML MIME type
+            // "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" contains the
+            // substring "xml" and would otherwise be misidentified as an XML file.
             if (ct.contains("spreadsheet") || ct.contains("excel") || ct.contains("xls")) return "XLS";
+            if (ct.contains("xml"))                  return "XML";
             if (ct.contains("json"))                 return "JSON";
         }
         // Magic bytes: XLSX = PK\x03\x04 (ZIP); XML = <?xml or <

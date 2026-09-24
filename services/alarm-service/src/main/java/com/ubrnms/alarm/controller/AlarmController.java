@@ -2,6 +2,8 @@ package com.ubrnms.alarm.controller;
 
 import com.ubrnms.alarm.model.Alarm;
 import com.ubrnms.alarm.model.AlarmThreshold;
+import com.ubrnms.alarm.model.FrameworkThresholdEvaluationRequest;
+import com.ubrnms.alarm.model.FrameworkDriftEvaluationRequest;
 import com.ubrnms.alarm.service.AlarmService;
 import com.ubrnms.alarm.service.ExportService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -85,5 +87,46 @@ public class AlarmController {
     public ResponseEntity<Alarm> ingest(@RequestBody Map<String, Object> raw) {
         Alarm result = alarmService.processRawAlarm(raw);
         return result != null ? ResponseEntity.ok(result) : ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Framework parameter threshold evaluation endpoint.
+     *
+     * <p>Called by the parameter poller after each poll cycle when a parameter value
+     * crosses a threshold defined in the active Product Definition.  The alarm service
+     * evaluates the breach, deduplicates within the configured window, and raises a
+     * FRAMEWORK_THRESHOLD alarm when required.
+     *
+     * <p>Returns 200 with the raised alarm when a new alarm was created, or 204 when
+     * the event was deduplicated (no new alarm raised).
+     */
+    @PostMapping("/framework-threshold/evaluate")
+    public ResponseEntity<Alarm> evaluateFrameworkThreshold(
+            @RequestBody FrameworkThresholdEvaluationRequest request) {
+        return alarmService.evaluateFrameworkThreshold(request)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /**
+     * POST /api/v1/alarms/framework-drift/evaluate
+     *
+     * <p>Evaluates whether a polled parameter value violates the schema-declared
+     * min/max bounds from the active Product Definition registry. Raises a
+     * FRAMEWORK_DRIFT alarm when the value is out of range, and clears it when
+     * the value returns within bounds.
+     *
+     * <p>Called by the parameter-poller service after each successful poll cycle
+     * for parameters with schema-declared min/max constraints and no operational
+     * threshold configured.
+     *
+     * @return 200 with the raised/updated alarm, or 204 when no alarm action was taken.
+     */
+    @PostMapping("/framework-drift/evaluate")
+    public ResponseEntity<Alarm> evaluateFrameworkDrift(
+            @RequestBody FrameworkDriftEvaluationRequest request) {
+        return alarmService.evaluateFrameworkDrift(request)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 }

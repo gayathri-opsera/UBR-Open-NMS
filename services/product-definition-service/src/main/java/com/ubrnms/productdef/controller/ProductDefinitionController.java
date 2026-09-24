@@ -4,10 +4,12 @@ import com.ubrnms.productdef.lifecycle.ProductDefinitionLifecycleException;
 import com.ubrnms.productdef.model.ProductDefinitionLifecycleEvent;
 import com.ubrnms.productdef.model.ProductDefinitionVersion;
 import com.ubrnms.productdef.model.ValidationReport;
+import com.ubrnms.productdef.model.VersionDiffResult;
 import com.ubrnms.productdef.service.ProductDefinitionAuditService;
 import com.ubrnms.productdef.service.ProductDefinitionLifecycleService;
 import com.ubrnms.productdef.service.ProductDefinitionService;
 import com.ubrnms.productdef.service.PublishGateViolation;
+import com.ubrnms.productdef.service.VersionDiffService;
 import java.util.ConcurrentModificationException;
 import org.springframework.data.domain.Page;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +40,7 @@ public class ProductDefinitionController {
     private final ProductDefinitionService          service;
     private final ProductDefinitionLifecycleService lifecycleService;
     private final ProductDefinitionAuditService     auditService;
+    private final VersionDiffService                versionDiffService;
 
     // ── POST /upload ──────────────────────────────────────────────────────────
 
@@ -79,6 +82,22 @@ public class ProductDefinitionController {
         }
     }
 
+    // ── GET /history ──────────────────────────────────────────────────────────
+    // Returns every uploaded version across all definitions, newest first.
+    // Restricted to Admin/SuperAdmin at the gateway; used by the All-Uploads admin view.
+
+    @GetMapping("/history")
+    public ResponseEntity<?> listAllVersionHistory() {
+        try {
+            List<ProductDefinitionVersion> all = service.listAllVersions();
+            return ResponseEntity.ok(all);
+        } catch (Exception e) {
+            log.error("Error retrieving global version history", e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to retrieve upload history"));
+        }
+    }
+
     // ── GET /{definitionId}/versions ──────────────────────────────────────────
 
     @GetMapping("/{definitionId}/versions")
@@ -112,6 +131,25 @@ public class ProductDefinitionController {
     }
 
     // ── GET /{definitionId}/versions/{versionId}/report ───────────────────────
+
+    @GetMapping("/{definitionId}/versions/{fromVersionId}/diff/{toVersionId}")
+    public ResponseEntity<?> diffVersions(
+            @PathVariable String definitionId,
+            @PathVariable String fromVersionId,
+            @PathVariable String toVersionId) {
+        try {
+            VersionDiffResult result = versionDiffService.diff(definitionId, fromVersionId, toVersionId);
+            return ResponseEntity.ok(result);
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(errorBody("NOT_FOUND", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Error diffing versions definitionId={} from={} to={}",
+                    definitionId, fromVersionId, toVersionId, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to compute version diff"));
+        }
+    }
 
     @GetMapping("/{definitionId}/versions/{versionId}/report")
     public ResponseEntity<?> getValidationReport(@PathVariable String definitionId,

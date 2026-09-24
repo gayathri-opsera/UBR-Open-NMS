@@ -133,33 +133,50 @@ type CurrentValueError struct {
 // Credential references stay as opaque strings — no secret values appear here.
 type RegistryParamRef struct {
 	// ParameterID is the stable parameter identifier.
-	ParameterID string
+	ParameterID string `json:"ParameterID"`
 	// Label is the human-readable parameter label.
-	Label string
+	Label string `json:"Label"`
 	// DataType is the declared type.
-	DataType string
+	DataType string `json:"DataType"`
 	// Unit is the unit string.
-	Unit string
+	Unit string `json:"Unit"`
 	// Protocol is the preferred read protocol for this parameter (SNMP, CLI, REST, gRPC).
-	Protocol string
+	Protocol string `json:"Protocol"`
 	// ReadRef is the protocol-specific read reference (OID, CLI command, REST path, gRPC method).
-	ReadRef string
+	ReadRef string `json:"ReadRef"`
 	// CredentialRef is the opaque credential identifier for adapter auth.
 	// Never contains the actual credential secret.
-	CredentialRef string
+	CredentialRef string `json:"CredentialRef"`
+	// ThresholdHigh is the optional high-value alarm threshold from the Product Definition.
+	// Nil means no high threshold is configured.
+	ThresholdHigh *float64 `json:"ThresholdHigh,omitempty"`
+	// ThresholdLow is the optional low-value alarm threshold from the Product Definition.
+	// Nil means no low threshold is configured.
+	ThresholdLow *float64 `json:"ThresholdLow,omitempty"`
+	// MinValue is the schema-declared minimum value for this parameter.
+	// A polled value below MinValue indicates a configuration drift condition.
+	// Nil means no minimum constraint is declared in the Product Definition.
+	MinValue *float64 `json:"MinValue,omitempty"`
+	// MaxValue is the schema-declared maximum value for this parameter.
+	// A polled value above MaxValue indicates a configuration drift condition.
+	// Nil means no maximum constraint is declared in the Product Definition.
+	MaxValue *float64 `json:"MaxValue,omitempty"`
 }
 
 // RegistryGroupMetadata is the polling metadata for a parameter group from the active registry.
 type RegistryGroupMetadata struct {
-	GroupID             string
-	Label               string
-	PollIntervalSeconds int
-	Parameters          []RegistryParamRef
+	GroupID             string             `json:"GroupID"`
+	Label               string             `json:"Label"`
+	PollIntervalSeconds int                `json:"PollIntervalSeconds"`
+	Parameters          []RegistryParamRef `json:"Parameters"`
 }
 
 // RegistryDeviceProfile is the full polling profile for a device from the active registry.
 type RegistryDeviceProfile struct {
 	DeviceID            string
+	// DeviceIP is the management IP address used by adapters as the poll target.
+	// Empty means the adapter should fall back to DeviceID (legacy / test mode).
+	DeviceIP            string
 	ProductDefinitionID string
 	RegistryVersion     string
 	Groups              []RegistryGroupMetadata

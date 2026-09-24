@@ -23,8 +23,25 @@ function normaliseModel(d: Device): Device {
   return mapped ? { ...d, model: mapped } : d;
 }
 
+const LEGACY_DEVICE_TYPES = new Set(['BTS', 'CPE', 'IDU']);
+
+function devicesListUrlForType(type: string): string {
+  if (LEGACY_DEVICE_TYPES.has(type)) {
+    return `/v2/devices?deviceType=${encodeURIComponent(type)}`;
+  }
+  return `/v2/devices?genericDeviceType=${encodeURIComponent(type)}`;
+}
+
+function deviceTypeFilterParams(type: string): Record<string, string> {
+  if (LEGACY_DEVICE_TYPES.has(type)) {
+    return { deviceType: type };
+  }
+  return { genericDeviceType: type };
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
-type DashboardMode = 'ALL' | 'BTS' | 'CPE' | 'IDU';
+// Opened to string so any genericDeviceType (switch, access_point, gateway…) works as a filter mode
+type DashboardMode = string;
 type TabId = 1 | 2 | 3;
 type WidgetId =
   | 'stat-summary' | 'online-pie' | 'alarm-severity-pie' | 'alarm-bar'
@@ -108,12 +125,19 @@ const TOOLTIP_STYLE = {
   borderRadius: 8, color: '#e2e8f0', fontSize: 12,
   boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
 };
-const MODE_BG: Record<DashboardMode, string> = {
+// Mode backgrounds — legacy BTS/CPE/IDU get their original colours; dynamic types get a hash-derived gradient
+const LEGACY_MODE_BG: Record<string, string> = {
   ALL: 'linear-gradient(135deg, #1e3a5f 0%, #1967D2 100%)',
   BTS: 'linear-gradient(135deg, #14532d 0%, #0f9d58 100%)',
   CPE: 'linear-gradient(135deg, #78350f 0%, #f4b400 100%)',
   IDU: 'linear-gradient(135deg, #3b0764 0%, #a142f4 100%)',
 };
+const DYNAMIC_MODE_COLORS = ['#22c55e','#a78bfa','#22d3ee','#fb923c','#f59e0b','#f472b6','#34d399','#60a5fa'];
+function modeBg(mode: string, idx = 0): string {
+  if (LEGACY_MODE_BG[mode]) return LEGACY_MODE_BG[mode];
+  const c = DYNAMIC_MODE_COLORS[idx % DYNAMIC_MODE_COLORS.length];
+  return `linear-gradient(135deg, ${c}40 0%, ${c}99 100%)`;
+}
 
 function rel(iso: string | undefined | null) {
   if (!iso) return '—';
@@ -164,6 +188,7 @@ export default function V2DashboardPage() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [showWidgets, setShowWidgets] = useState(false);
+  const [showAdvancedWidgets, setShowAdvancedWidgets] = useState(false);
   const [dragId,   setDragId]   = useState<WidgetId | null>(null);
   const [dragOver, setDragOver] = useState<WidgetId | null>(null);
 
@@ -263,7 +288,11 @@ export default function V2DashboardPage() {
   const firmwares = useMemo(() => [...new Set(devices.map((d) => d.firmwareVersion).filter(Boolean))], [devices]);
 
   const filtered = useMemo(() => devices.filter((d) => {
-    if (mode !== 'ALL' && d.deviceType !== mode) return false;
+    if (mode !== 'ALL') {
+      // Match against genericDeviceType first (switch, access_point, gateway…) then legacy deviceType
+      const effectiveType = d.genericDeviceType || d.deviceType || 'Unknown';
+      if (effectiveType.toLowerCase() !== mode.toLowerCase()) return false;
+    }
     if (filterCircle && !d.tags?.some((t) => t.key === 'circle' && t.value === filterCircle)) return false;
     if (filterModel && d.model !== filterModel) return false;
     if (filterFirmware && d.firmwareVersion !== filterFirmware) return false;
@@ -298,11 +327,47 @@ export default function V2DashboardPage() {
       .map(([name, value], i) => ({ name, value, color: CHART_COLORS[i % CHART_COLORS.length] }));
   }, [filtered]);
 
-  const deviceTypeBarData = useMemo(() => [
-    { name: 'BTS', count: devices.filter((d) => d.deviceType === 'BTS').length, fill: '#60a5fa' },
-    { name: 'CPE', count: devices.filter((d) => d.deviceType === 'CPE').length, fill: '#a78bfa' },
-    { name: 'IDU', count: devices.filter((d) => d.deviceType === 'IDU').length, fill: '#22d3ee' },
-  ].filter((d) => d.count > 0), [devices]);
+  // Dynamic device type breakdown — supports any type returned from inventory, not just BTS/CPE/IDU
+  const deviceTypeBarData = useMemo(() => {
+    const TYPE_COLORS = ['#60a5fa','#a78bfa','#22d3ee','#f59e0b','#22c55e','#fb923c','#f472b6','#34d399'];
+    const counts: Record<string, number> = {};
+    devices.forEach((d) => { const t = d.genericDeviceType || d.deviceType || 'Unknown'; counts[t] = (counts[t] ?? 0) + 1; });
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count], i) => ({ name, count, fill: TYPE_COLORS[i % TYPE_COLORS.length] }));
+  }, [devices]);
+
+  // Device type cards for Node View navigation
+  const deviceTypeCards = useMemo(() => {
+    const TYPE_ICONS: Record<string, string> = {
+      BTS: '🗼', CPE: '📡', IDU: '🔧', Switch: '🔀', Router: '🌐',
+      'Access Point': '📶', AP: '📶', Camera: '📷', PDU: '⚡',
+      'Switch Extender': '🔌', Unknown: '❓',
+    };
+    const TYPE_COLORS_MAP: Record<string, string> = {
+      BTS: '#60a5fa', CPE: '#a78bfa', IDU: '#22d3ee', Switch: '#22c55e',
+      Router: '#f59e0b', 'Access Point': '#fb923c', AP: '#fb923c',
+      Camera: '#f472b6', PDU: '#34d399', 'Switch Extender': '#60a5fa', Unknown: '#94a3b8',
+    };
+    const FALLBACK_COLORS = ['#60a5fa','#a78bfa','#22d3ee','#f59e0b','#22c55e','#fb923c'];
+    const counts: Record<string, { total: number; online: number }> = {};
+    filtered.forEach((d) => {
+      const t = d.genericDeviceType || d.deviceType || 'Unknown';
+      if (!counts[t]) counts[t] = { total: 0, online: 0 };
+      counts[t].total++;
+      if (d.status === 'ONLINE') counts[t].online++;
+    });
+    return Object.entries(counts)
+      .sort((a, b) => b[1].total - a[1].total)
+      .map(([type, c], i) => ({
+        type,
+        icon: TYPE_ICONS[type] ?? '📦',
+        color: TYPE_COLORS_MAP[type] ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length],
+        total: c.total,
+        online: c.online,
+        offline: c.total - c.online,
+      }));
+  }, [filtered]);
 
   const btsDevices = useMemo(() => filtered.filter((d) => d.deviceType === 'BTS'), [filtered]);
   const cpeDevices = useMemo(() => filtered.filter((d) => d.deviceType === 'CPE'), [filtered]);
@@ -325,10 +390,57 @@ export default function V2DashboardPage() {
   const onlineCount   = filtered.filter((d) => d.status === 'ONLINE').length;
   const offlineCount  = filtered.filter((d) => d.status === 'OFFLINE').length;
   const provCount     = filtered.filter((d) => d.status === 'PROVISIONING').length;
+  const unknownCount  = filtered.filter((d) => d.status === 'UNKNOWN').length;
   const critCount     = activeAlarms.filter((a) => a.severity === 'CRITICAL').length;
   const majorCount    = activeAlarms.filter((a) => a.severity === 'MAJOR').length;
   const onlinePct     = filtered.length > 0 ? Math.round((onlineCount / filtered.length) * 100) : 0;
   const show          = (id: WidgetId) => visibleWidgets.includes(id);
+
+  // ── Network Dashboard donut chart ────────────────────────────────────────────
+  // CSS conic-gradient donut — same approach as the HTML reference design
+  const totalFiltered = filtered.length;
+  const donutSegments = [
+    { color: '#22c55e', count: onlineCount,  label: 'Online' },
+    { color: '#ef4444', count: offlineCount, label: 'Offline' },
+    { color: '#f59e0b', count: provCount,    label: 'Provisioning' },
+    { color: '#64748b', count: unknownCount, label: 'Unknown' },
+  ].filter((s) => s.count > 0);
+  let acc = 0;
+  const donutGradient = totalFiltered > 0
+    ? `conic-gradient(${donutSegments.map((s) => {
+        const pct = (s.count / totalFiltered) * 100;
+        const seg = `${s.color} ${acc.toFixed(1)}% ${(acc + pct).toFixed(1)}%`;
+        acc += pct;
+        return seg;
+      }).join(', ')})`
+    : '#1e293b';
+  const donutLegend = donutSegments.map((s) => ({
+    ...s, pct: totalFiltered > 0 ? Math.round((s.count / totalFiltered) * 100) : 0,
+  }));
+
+  // ── SVG icons for device types ───────────────────────────────────────────────
+  const DEVICE_TYPE_ICONS: Record<string, string> = {
+    switch: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/><circle cx="7" cy="7" r="0.5" fill="currentColor"/><circle cx="7" cy="17" r="0.5" fill="currentColor"/></svg>`,
+    router: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="10" width="18" height="7" rx="1"/><path d="M7 10V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v3"/><circle cx="7" cy="13.5" r="0.5" fill="currentColor"/></svg>`,
+    access_point: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20v-6"/><circle cx="12" cy="11" r="2"/><path d="M7 8a7 7 0 0 1 10 0M4.5 5.5a11 11 0 0 1 15 0"/></svg>`,
+    p2p: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="12" r="2.5"/><path d="M7.5 12h9"/></svg>`,
+    pdu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="7" y="2" width="10" height="20" rx="1"/><path d="M10 8h.01M14 8h.01M10 14h.01M14 14h.01"/></svg>`,
+    camera: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="7" width="14" height="11" rx="2"/><path d="m16 10 5-3v10l-5-3"/></svg>`,
+    switch_extender: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="6" rx="1"/><path d="M12 10v10M8 16h8"/></svg>`,
+    bts: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v20M4.9 9.9a10 10 0 0 0 14.2 0M2.5 7a14 14 0 0 0 19 0"/></svg>`,
+    cpe: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>`,
+    idu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 6V4M17 6V4"/></svg>`,
+  };
+  function deviceTypeIcon(type: string): string {
+    const key = type.toLowerCase().replace(/[\s-]/g, '_');
+    return DEVICE_TYPE_ICONS[key] || `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12h6M12 9v6"/></svg>`;
+  }
+
+  // Devices needing attention (OFFLINE or UNKNOWN)
+  const attentionDevices = filtered
+    .filter((d) => d.status === 'OFFLINE' || d.status === 'UNKNOWN' || d.status === 'PROVISIONING')
+    .slice(0, 8);
+  const STATUS_CLR: Record<string, string> = { OFFLINE: '#ef4444', UNKNOWN: '#64748b', PROVISIONING: '#f59e0b', ONLINE: '#22c55e' };
 
   return (
     <div style={{ fontFamily: 'var(--vf-font-sans)', background: 'var(--vf-canvas)', minHeight: '100%' }}>
@@ -410,10 +522,133 @@ export default function V2DashboardPage() {
         </button>
       </div>
 
-      <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        {/* ── NETWORK DASHBOARD HEADER ────────────────────────────────────── */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <div>
+            <h1 style={{ fontSize: 26, fontWeight: 700, margin: '0 0 4px 0', color: 'var(--vf-text-primary)' }}>
+              Network Dashboard
+            </h1>
+            <p style={{ fontSize: 13, color: '#64748b', margin: 0, maxWidth: '80ch' }}>
+              Status and device-type counts below are generated live from discovered devices and their active product
+              definitions — no fixed device catalog is baked into this page.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              onClick={() => setShowAdvancedWidgets((v) => !v)}
+              style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--vf-border-subtle)', background: showAdvancedWidgets ? 'var(--vf-accent-subtle)' : 'var(--vf-elevated)', color: showAdvancedWidgets ? 'var(--vf-accent)' : 'var(--vf-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+              ⚙ Advanced Widgets {showAdvancedWidgets ? '▲' : '▼'}
+            </button>
+          </div>
+        </div>
+
+        {/* ── STATUS CARDS — 4 columns with colored top borders ──────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+          {[
+            { label: 'ONLINE',  value: onlineCount,  color: '#22c55e', href: '/v2/devices?status=ONLINE'  },
+            { label: 'OFFLINE', value: offlineCount, color: '#ef4444', href: '/v2/devices?status=OFFLINE' },
+            { label: 'UNKNOWN', value: unknownCount, color: '#64748b', href: '/v2/devices?status=UNKNOWN' },
+            { label: 'TOTAL',   value: totalFiltered, color: '#3b82f6', href: '/v2/devices'               },
+          ].map((card) => (
+            <button
+              key={card.label}
+              onClick={() => navigate(card.href)}
+              style={{
+                textAlign: 'left', cursor: 'pointer', background: '#111827',
+                border: '1px solid #1e293b', borderTop: `3px solid ${card.color}`,
+                borderRadius: 8, padding: 16,
+                transition: 'transform 0.12s, box-shadow 0.12s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 4px 16px ${card.color}22`; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = ''; (e.currentTarget as HTMLButtonElement).style.boxShadow = ''; }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#94a3b8' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: card.color, display: 'inline-block' }} />
+                {card.label}
+              </div>
+              <div style={{ fontSize: 32, fontWeight: 700, marginTop: 6, color: card.color, lineHeight: 1 }}>
+                {card.value}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* ── 2-COLUMN: DEVICE STATUS + DEVICE TYPES ─────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+
+          {/* Device Status donut chart */}
+          <div style={{ background: '#111827', border: '1px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: 8, padding: 20 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2, color: 'var(--vf-text-primary)' }}>Device Status</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>All Devices · {totalFiltered} total</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+              {/* Donut ring using conic-gradient */}
+              <div style={{ width: 160, height: 160, flexShrink: 0, borderRadius: '50%', background: donutGradient, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: 90, height: 90, borderRadius: '50%', background: '#111827', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e', lineHeight: 1 }}>{onlinePct}%</div>
+                  <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>online</div>
+                </div>
+              </div>
+              {/* Legend */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {donutLegend.map((l) => (
+                  <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}
+                    onClick={() => navigate(`/v2/devices?status=${l.label.toUpperCase()}`)}>
+                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: l.color, display: 'inline-block', flexShrink: 0 }} />
+                    <span style={{ color: 'var(--vf-text-secondary)' }}>{l.label}</span>
+                    <span style={{ color: '#64748b', marginLeft: 2 }}>{l.pct}%</span>
+                    <span style={{ color: l.color, fontWeight: 700, marginLeft: 2 }}>({l.count})</span>
+                  </div>
+                ))}
+                {totalFiltered === 0 && <div style={{ color: '#64748b', fontSize: 13 }}>No devices discovered yet.</div>}
+              </div>
+            </div>
+          </div>
+
+          {/* Device Types grid */}
+          <div style={{ background: '#111827', border: '1px solid #1e293b', borderTop: '3px solid #a78bfa', borderRadius: 8, padding: 20 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2, color: 'var(--vf-text-primary)' }}>Device Types</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>Click a type to view its devices</div>
+            {deviceTypeCards.length === 0 ? (
+              <div style={{ fontSize: 13, color: '#64748b' }}>No devices discovered yet.</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                {deviceTypeCards.map((t) => (
+                  <button
+                    key={t.type}
+                    onClick={() => navigate(devicesListUrlForType(t.type))}
+                    style={{
+                      background: '#0d1326', border: '1px solid #1e293b', borderRadius: 6,
+                      padding: '14px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center',
+                      textAlign: 'center', gap: 6, cursor: 'pointer',
+                      transition: 'background 0.12s, border-color 0.12s',
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#1e293b'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#3b82f6'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#0d1326'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#1e293b'; }}
+                  >
+                    <span
+                      style={{ width: 22, height: 22, color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      dangerouslySetInnerHTML={{ __html: deviceTypeIcon(t.type) }}
+                    />
+                    <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1 }}>
+                      <span style={{ color: '#4ade80' }}>{t.online}</span>
+                      <span style={{ color: '#475569' }}>/{t.total}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.2 }}>{t.type}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── ADVANCED WIDGETS (collapsible — appears ABOVE Needs Attention) ── */}
+        {showAdvancedWidgets && <div style={{ height: 1, background: 'var(--vf-border-subtle)' }} />}
+        {showAdvancedWidgets && <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vf-text-muted)' }}>Advanced Widgets</div>}
 
         {/* ── Tab label badge ───────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {showAdvancedWidgets && <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{
             background: 'var(--vf-accent-subtle)', border: '1px solid var(--vf-accent)',
             color: 'var(--vf-accent)', padding: '3px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700,
@@ -423,10 +658,10 @@ export default function V2DashboardPage() {
           <span style={{ color: 'var(--vf-text-muted)', fontSize: 11 }}>
             Filters &amp; widget layout are saved automatically. Use + to create custom dashboards.
           </span>
-        </div>
+        </div>}
 
         {/* ── Widget picker ─────────────────────────────────────────────────── */}
-        {showWidgets && (
+        {showAdvancedWidgets && showWidgets && (
           <div style={{
             background: 'var(--vf-surface)', border: 'var(--vf-card-border)',
             borderRadius: 10, padding: '14px 18px', boxShadow: 'var(--vf-shadow-low)',
@@ -453,14 +688,14 @@ export default function V2DashboardPage() {
           </div>
         )}
 
-        {/* ── Device type chips ─────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {(['ALL', 'BTS', 'CPE', 'IDU'] as DashboardMode[]).map((m) => (
+        {/* ── Device type chips — dynamic from live inventory ─────────────── */}
+        {showAdvancedWidgets && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {(['ALL', ...deviceTypeCards.map((c) => c.type)] as DashboardMode[]).map((m, idx) => (
             <button key={m} onClick={() => setMode(m)}
               style={{
                 padding: '6px 18px', borderRadius: 20, cursor: 'pointer',
                 fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
-                background: mode === m ? MODE_BG[m] : 'var(--vf-elevated)',
+                background: mode === m ? modeBg(m, idx - 1) : 'var(--vf-elevated)',
                 color: mode === m ? '#fff' : 'var(--vf-text-secondary)',
                 boxShadow: mode === m ? '0 2px 10px rgba(0,0,0,0.18)' : 'none',
                 border: mode === m ? '1px solid transparent' : '1px solid var(--vf-border-subtle)',
@@ -482,10 +717,10 @@ export default function V2DashboardPage() {
               {c}
             </button>
           ))}
-        </div>
+        </div>}
 
         {/* ── Filter bar ────────────────────────────────────────────────────── */}
-        <div style={{
+        {showAdvancedWidgets && <div style={{
           background: 'var(--vf-surface)', border: 'var(--vf-card-border)',
           borderRadius: 10, padding: '12px 18px', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center',
           boxShadow: 'var(--vf-shadow-low)',
@@ -519,7 +754,7 @@ export default function V2DashboardPage() {
               {filtered.length} / {devices.length}
             </span>
           </div>
-        </div>
+        </div>}
 
         {/* ── Error banner ──────────────────────────────────────────────────── */}
         {error && (
@@ -530,11 +765,15 @@ export default function V2DashboardPage() {
         )}
 
         {/* ── Summary KPI tiles ─────────────────────────────────────────────── */}
-        {show('stat-summary') && (() => {
-          // Build mode-aware URLs for tiles (defined here so they pick up current `mode`)
+        {showAdvancedWidgets && show('stat-summary') && (() => {
+          // Build mode-aware URLs — legacy BTS/CPE/IDU use deviceType, everything else uses genericDeviceType
+          const LEGACY_TYPES = new Set(['BTS', 'CPE', 'IDU']);
           const dUrl = (extra: Record<string, string> = {}) => {
             const p = new URLSearchParams();
-            if (mode !== 'ALL') p.set('deviceType', mode);
+            if (mode !== 'ALL') {
+              if (LEGACY_TYPES.has(mode)) p.set('deviceType', mode);
+              else p.set('genericDeviceType', mode);
+            }
             Object.entries(extra).forEach(([k, v]) => p.set(k, v));
             const qs = p.toString(); return `/v2/devices${qs ? '?' + qs : ''}`;
           };
@@ -556,8 +795,8 @@ export default function V2DashboardPage() {
           );
         })()}
 
-        {/* BTS mode extras */}
-        {mode === 'BTS' && btsDevices.length > 0 && (
+        {/* ── Mode-specific KPI extras — BTS/CPE legacy extras + dynamic type total/online/offline ── */}
+        {showAdvancedWidgets && mode === 'BTS' && btsDevices.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
             <KpiTile icon="🗼" label="BTS Total"    value={btsDevices.length}                                                       color="#60a5fa" grad="rgba(96,165,250,0.08)"  onClick={() => navigate('/v2/devices?deviceType=BTS')} />
             <KpiTile icon="🟢" label="BTS Online"   value={btsDevices.filter((d) => d.status === 'ONLINE').length}   total={btsDevices.length} color="#22c55e" grad="rgba(34,197,94,0.08)"  onClick={() => navigate('/v2/devices?deviceType=BTS&status=ONLINE')} />
@@ -565,7 +804,7 @@ export default function V2DashboardPage() {
             <KpiTile icon="📡" label="Avg CPEs/BTS" value={Math.round(devices.filter((d) => d.deviceType === 'CPE').length / Math.max(btsDevices.length, 1))} color="#a78bfa" grad="rgba(167,139,250,0.08)" onClick={() => navigate('/v2/devices?deviceType=CPE')} />
           </div>
         )}
-        {mode === 'CPE' && cpeDevices.length > 0 && (
+        {showAdvancedWidgets && mode === 'CPE' && cpeDevices.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
             <KpiTile icon="📡" label="CPE Total"   value={cpeDevices.length}                                                      color="#a78bfa" grad="rgba(167,139,250,0.08)" onClick={() => navigate('/v2/devices?deviceType=CPE')} />
             <KpiTile icon="🟢" label="CPE Online"  value={cpeDevices.filter((d) => d.status === 'ONLINE').length} total={cpeDevices.length} color="#22c55e" grad="rgba(34,197,94,0.08)" onClick={() => navigate('/v2/devices?deviceType=CPE&status=ONLINE')} />
@@ -573,9 +812,81 @@ export default function V2DashboardPage() {
             <KpiTile icon="🔌" label="IDU Total"   value={devices.filter((d) => d.deviceType === 'IDU').length}                  color="#22d3ee" grad="rgba(34,211,238,0.08)" onClick={() => navigate('/v2/devices?deviceType=IDU')} />
           </div>
         )}
+        {/* Generic type extras: when a non-legacy genericDeviceType mode is active, show total/online/offline tiles */}
+        {showAdvancedWidgets && mode !== 'ALL' && !['BTS','CPE','IDU'].includes(mode) && filtered.length > 0 && (() => {
+          const onlineCt = filtered.filter((d) => d.status === 'ONLINE').length;
+          const offlineCt = filtered.filter((d) => d.status === 'OFFLINE').length;
+          const typeCard = deviceTypeCards.find((c) => c.type === mode);
+          const icon = typeCard?.icon ?? '📦';
+          const color = typeCard?.color ?? '#60a5fa';
+          const typeUrl = (extra: Record<string, string> = {}) => {
+            const p = new URLSearchParams({ genericDeviceType: mode, ...extra });
+            return `/v2/devices?${p.toString()}`;
+          };
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
+              <KpiTile icon={icon}  label={`${mode} Total`}   value={filtered.length} color={color}     grad={`${color}22`}              onClick={() => navigate(typeUrl())} />
+              <KpiTile icon="🟢"   label={`${mode} Online`}  value={onlineCt} total={filtered.length} color="#22c55e" grad="rgba(34,197,94,0.08)"  onClick={() => navigate(typeUrl({ status: 'ONLINE' }))} />
+              {offlineCt > 0 && <KpiTile icon="⚠" label={`${mode} Offline`} value={offlineCt} color="#ef4444" grad="rgba(239,68,68,0.08)"  onClick={() => navigate(typeUrl({ status: 'OFFLINE' }))} />}
+            </div>
+          );
+        })()}
+
+        {/* ── Device Types — click any card to open Node View list ──────────── */}
+        {showAdvancedWidgets && deviceTypeCards.length > 0 && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vf-text-muted)' }}>
+                Device Types
+              </span>
+              <button
+                onClick={() => navigate('/v2/devices')}
+                style={{ background: 'none', border: 'none', color: 'var(--vf-accent)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                View All Inventory →
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+              {deviceTypeCards.map((card) => (
+                <button
+                  key={card.type}
+                  onClick={() => navigate(devicesListUrlForType(card.type))}
+                  style={{
+                    background: `linear-gradient(135deg, ${card.color}11, ${card.color}22)`,
+                    border: `1px solid ${card.color}33`,
+                    borderRadius: 12, padding: '14px 16px', cursor: 'pointer', textAlign: 'left',
+                    transition: 'transform 0.1s, box-shadow 0.1s',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 4px 20px ${card.color}22`; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = ''; (e.currentTarget as HTMLButtonElement).style.boxShadow = ''; }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span style={{ fontSize: 20 }}>{card.icon}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--vf-text-primary)' }}>{card.type}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: card.color, lineHeight: 1 }}>{card.total}</div>
+                      <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginTop: 2 }}>total</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e', lineHeight: 1 }}>{card.online}</div>
+                      <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginTop: 2 }}>online</div>
+                    </div>
+                    {card.offline > 0 && (
+                      <div>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: '#ef4444', lineHeight: 1 }}>{card.offline}</div>
+                        <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginTop: 2 }}>offline</div>
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Unified draggable widget grid (3-col: 3 pies row1, bar+bar row2) ─ */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        {showAdvancedWidgets && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
           {orderedVisible.map((id) => {
             const span = WIDGET_SPAN[id] ?? 1;
             const isBeingDragged = dragId === id;
@@ -591,9 +902,14 @@ export default function V2DashboardPage() {
             };
 
             // ── Drilldown URL builder — preserves current mode filter ────────
+            // Legacy BTS/CPE/IDU use deviceType param; generic types use genericDeviceType
+            const LEGACY_TYPES_W = new Set(['BTS', 'CPE', 'IDU']);
             const devUrl = (extra: Record<string, string> = {}) => {
               const p = new URLSearchParams();
-              if (mode !== 'ALL') p.set('deviceType', mode);
+              if (mode !== 'ALL') {
+                if (LEGACY_TYPES_W.has(mode)) p.set('deviceType', mode);
+                else p.set('genericDeviceType', mode);
+              }
               Object.entries(extra).forEach(([k, v]) => p.set(k, v));
               const qs = p.toString();
               return `/v2/devices${qs ? '?' + qs : ''}`;
@@ -687,7 +1003,7 @@ export default function V2DashboardPage() {
                       <ResponsiveContainer width="100%" height={220}>
                         <BarChart data={deviceTypeBarData} margin={{ top: 8, right: 16 }}
                           style={{ cursor: 'pointer' }}
-                          onClick={(e: unknown) => { const p = (e as { activePayload?: { payload?: { name?: string } }[] })?.activePayload?.[0]?.payload?.name; if (p) navigate(devUrl({ deviceType: p })); }}>
+                          onClick={(e: unknown) => { const p = (e as { activePayload?: { payload?: { name?: string } }[] })?.activePayload?.[0]?.payload?.name; if (p) navigate(devUrl(deviceTypeFilterParams(p))); }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(77,158,255,0.06)" vertical={false} />
                           <XAxis dataKey="name" stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 12, fill: 'var(--vf-text-secondary)' }} axisLine={false} />
                           <YAxis stroke="rgba(148,163,184,0.3)" tick={{ fontSize: 11, fill: 'var(--vf-text-muted)' }} axisLine={false} tickLine={false} />
@@ -814,7 +1130,9 @@ export default function V2DashboardPage() {
                 action={<a href="/v2/devices" style={{ color: '#60a5fa', fontSize: 12, textDecoration: 'none', fontWeight: 600 }}>View all →</a>}>
                 {filtered.filter((d) => d.status === 'OFFLINE').length === 0
                   ? <EmptyFeed icon="🟢" title="All devices online" sub="No unreachable devices" />
-                  : filtered.filter((d) => d.status === 'OFFLINE').slice(0, 8).map((d) => (
+                  : filtered.filter((d) => d.status === 'OFFLINE').slice(0, 8).map((d) => {
+                    const displayType = d.genericDeviceType || d.deviceType || 'Unknown';
+                    return (
                     <FeedRow
                       key={d.id || d.serialNumber}
                       accent="#ef4444"
@@ -829,13 +1147,18 @@ export default function V2DashboardPage() {
                       <span style={{ color: '#ef4444' }}>●</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ color: 'var(--vf-text-primary)', fontSize: 12, fontWeight: 600 }}>
-                          {d.deviceType === 'BTS' ? '🗼 ' : d.deviceType === 'IDU' ? '🔌 ' : '📡 '}{d.serialNumber}
+                          {displayType === 'BTS' ? '🗼 ' : displayType === 'IDU' ? '🔌 ' : displayType === 'switch' ? '🔀 ' : '📡 '}{d.serialNumber}
                         </div>
-                        <div style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontFamily: 'var(--vf-font-mono)' }}>{d.ipAddress}</div>
+                        <div style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontFamily: 'var(--vf-font-mono)' }}>{d.ipAddress} · {displayType}</div>
                       </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); navigate(`/v2/devices/${d.id}`); }}
+                        style={{ background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        Node View
+                      </button>
                       {d.lastSeenAt && <time style={{ color: 'var(--vf-text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>{rel(d.lastSeenAt)}</time>}
                     </FeedRow>
-                  ))}
+                  );})}
               </FeedCard>
             );
             else if (id === 'stat-summary') content = null; // rendered above the grid
@@ -856,6 +1179,42 @@ export default function V2DashboardPage() {
             );
           })}
 
+        </div>}
+
+        {/* ── NEEDS ATTENTION — always visible, below any expanded widgets ─── */}
+        <div style={{ background: '#111827', border: '1px solid #1e293b', borderTop: '3px solid #ef4444', borderRadius: 8, padding: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--vf-text-primary)' }}>Needs Attention</div>
+            <button
+              onClick={() => navigate('/v2/devices?status=OFFLINE')}
+              style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 12, fontWeight: 600, cursor: 'pointer', textDecoration: 'none' }}>
+              View all →
+            </button>
+          </div>
+          {attentionDevices.length === 0 ? (
+            <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+              <span style={{ color: '#22c55e', marginRight: 6 }}>●</span>All devices online.
+            </p>
+          ) : (
+            attentionDevices.map((d) => (
+              <button
+                key={d.id}
+                onClick={() => navigate(`/v2/devices/${d.id}`)}
+                style={{
+                  display: 'flex', width: '100%', alignItems: 'center', gap: 10, padding: '9px 0',
+                  borderBottom: '1px solid #1e293b', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(96,165,250,0.04)'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_CLR[d.status] || '#64748b', display: 'inline-block', flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, color: 'var(--vf-text-primary)' }}>{d.serialNumber}</span>
+                <span style={{ color: '#64748b' }}>{d.genericDeviceType || d.manufacturer} {d.model} · {d.ipAddress}</span>
+                <span style={{ marginLeft: 'auto', color: STATUS_CLR[d.status] || '#64748b', fontSize: 11, textTransform: 'uppercase', fontWeight: 700 }}>{d.status}</span>
+                <span style={{ color: '#60a5fa', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>Node View →</span>
+              </button>
+            ))
+          )}
         </div>
 
       </div>

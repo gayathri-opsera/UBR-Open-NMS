@@ -37,9 +37,20 @@ const router = express.Router();
 
 const serviceUrl = config.services.productDefinition || 'http://localhost:8093';
 
-function productDefinitionProxy() {
+function productDefinitionProxy(opts = {}) {
   return httpProxy(serviceUrl, {
-    timeout: 60000, // upload can be up to 10 MB
+    // Per-route callers can pass { timeout: N } to override.
+    // Activation rebuilds registries + publishes Kafka events and may exceed 60 s.
+    timeout: opts.timeout || 60000,
+    // express-http-proxy mounts inside a sub-router so req.url is the stripped
+    // sub-path (e.g. "/upload"). Use req.originalUrl to forward the full path
+    // ("/api/v1/framework/product-definitions/upload") to the downstream service.
+    proxyReqPathResolver: (req) => req.originalUrl,
+    // For multipart/form-data (file upload) requests parseReqBody must be false so
+    // express-http-proxy does not buffer-and-re-serialise the body, which strips the
+    // multipart boundary and causes Spring's MultipartResolver to return 400.
+    // Callers opt-in per-route via { parseReqBody: false }.
+    parseReqBody: opts.parseReqBody !== undefined ? opts.parseReqBody : true,
     proxyReqOptDecorator(proxyReqOpts, srcReq) {
       // Forward gateway-populated identity headers so the downstream service
       // can persist actor information without touching the JWT itself.
@@ -78,7 +89,9 @@ router.get('/health', productDefinitionProxy());
 router.post('/upload',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'product-definitions.upload'),
   detectCredentials,
-  productDefinitionProxy(),
+  // parseReqBody: false — stream the raw multipart body directly to avoid
+  // express-http-proxy re-serialising it and stripping the boundary.
+  productDefinitionProxy({ parseReqBody: false }),
 );
 
 // List all definitions (summary): ReadOnly+
@@ -87,9 +100,20 @@ router.get('/',
   productDefinitionProxy(),
 );
 
+// Global upload history across all definitions — Admin/SuperAdmin only.
+// Must be registered before /:definitionId/* routes so "history" is not treated as a definitionId.
+router.get('/history',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.Admin, 'product-definitions.history'),
+  productDefinitionProxy(),
+);
+
 // Read endpoints: ReadOnly+
 router.get('/:definitionId/versions',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.versions.list'),
+  productDefinitionProxy(),
+);
+router.get('/:definitionId/versions/:fromVersionId/diff/:toVersionId',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.versions.diff'),
   productDefinitionProxy(),
 );
 router.get('/:definitionId/versions/:versionId',
@@ -125,16 +149,19 @@ router.put('/:definitionId/versions/:versionId/stage',
 );
 router.put('/:definitionId/versions/:versionId/activate',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.activate'),
-  productDefinitionProxy(),
+  // Activation rebuilds fingerprint + parameter registries and publishes Kafka events —
+  // give it 120 s to avoid timing out before the backend completes.
+  productDefinitionProxy({ timeout: 120000 }),
 );
 router.put('/:definitionId/rollback',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.rollback'),
-  productDefinitionProxy(),
+  // Rollback rebuilds registries and publishes Kafka events — allow up to 90 s.
+  productDefinitionProxy({ timeout: 90000 }),
 );
 // WO-017: Targeted rollback to specific version — POST with {targetVersionId, reason} body
 router.post('/:definitionId/rollback',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.rollback.targeted'),
-  productDefinitionProxy(),
+  productDefinitionProxy({ timeout: 90000 }),
 );
 
 module.exports = router;

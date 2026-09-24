@@ -90,7 +90,8 @@ public class JsonProductDefinitionParser {
                .model(str(identity, "model"))
                .firmwareFrom(str(identity, "firmwareFrom"))
                .firmwareTo(str(identity, "firmwareTo"))
-               .productFamily(str(identity, "productFamily"));
+               .productFamily(str(identity, "productFamily"))
+               .deviceType(str(identity, "deviceType"));
     }
 
     // ── Fingerprints ──────────────────────────────────────────────────────────

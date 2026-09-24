@@ -19,11 +19,28 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       acks: all
+      properties:
+        # Cap the time kafkaTemplate.send() blocks waiting for topic metadata.
+        # Without this, a missing Kafka broker causes the HTTP thread to stall for
+        # the default 60 s (two consecutive sends = 2×60s), making every alarm
+        # evaluation request time out from the caller.  In dev Kafka is optional;
+        # when absent the publish is logged and skipped (non-fatal in 1-2s total).
+        max.block.ms: 1000
+        request.timeout.ms: 2000
+        delivery.timeout.ms: 5000
     listener:
       ack-mode: MANUAL_IMMEDIATE
 
 server:
   port: ${PORT:8083}
+
+logging:
+  level:
+    # Spring Kafka's LoggingProducerListener logs ERROR for every failed async send.
+    # Kafka is optional in dev (no broker running); suppress to WARN so it doesn't
+    # flood monitors.  Real alarm data is already persisted in MongoDB before publish.
+    org.springframework.kafka.support.LoggingProducerListener: WARN
+    org.apache.kafka.clients.NetworkClient: WARN
 
 management:
   endpoints:

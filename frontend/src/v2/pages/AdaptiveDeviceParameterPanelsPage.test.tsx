@@ -59,6 +59,24 @@ vi.mock('../../api/framework-parameters.api', () => ({
   countByFreshnessState: vi.fn(() => ({})),
 }));
 
+// Mock devices.api so the page header device fetch is non-blocking and has no
+// side-effects on the test DOM. fetchDevices returns an empty array → device
+// header falls back to the deviceId string, which does not affect template rendering.
+vi.mock('../../api/devices.api', () => ({
+  fetchDevices: vi.fn().mockResolvedValue([]),
+}));
+
+// Mock AuthContext — the panel rendering context sidebar reads the user's role.
+// Returning a minimal Operator user satisfies all role-display assertions.
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: vi.fn(() => ({
+    user: { username: 'test-operator', role: 'Operator' },
+    isAuthenticated: true,
+    isLoading: false,
+  })),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 import { getDeviceUiTemplate } from '../../api/framework-panels.api';
 import { getDeviceCurrentParameterValues } from '../../api/framework-parameters.api';
 
@@ -387,7 +405,7 @@ describe('WO-015 fixture identity alignment', () => {
     for (const resp of allResponses) {
       for (const group of resp.data?.groups ?? []) {
         for (const param of group.parameters ?? []) {
-          const reason = (param as Record<string, unknown>).failureReason as string | undefined;
+          const reason = (param as unknown as Record<string, unknown>).failureReason as string | undefined;
           if (reason) {
             for (const kw of credentialKeywords) {
               expect(

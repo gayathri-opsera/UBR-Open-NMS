@@ -109,16 +109,32 @@ func (c *HTTPClient) refresh(ctx context.Context) error {
 		return fmt.Errorf("%w: read body: %v", ErrRegistryUnavailable, err)
 	}
 
+	// wireProfile is the JSON shape returned by the product-definition-service
+	// internal endpoint. Fields map to RegistryDeviceProfile with Go-style names.
+	type wireProfile struct {
+		DeviceID            string                       `json:"DeviceID"`
+		DeviceIP            string                       `json:"DeviceIP"`
+		ProductDefinitionID string                       `json:"ProductDefinitionID"`
+		RegistryVersion     string                       `json:"RegistryVersion"`
+		Groups              []model.RegistryGroupMetadata `json:"Groups"`
+	}
 	var envelope struct {
-		Version  string                           `json:"version"`
-		Profiles []*model.RegistryDeviceProfile   `json:"profiles"`
+		Version  string         `json:"version"`
+		Profiles []wireProfile  `json:"profiles"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return fmt.Errorf("%w: unmarshal: %v", ErrRegistryUnavailable, err)
 	}
 
 	index := make(map[string]*model.RegistryDeviceProfile, len(envelope.Profiles))
-	for _, p := range envelope.Profiles {
+	for _, wp := range envelope.Profiles {
+		p := &model.RegistryDeviceProfile{
+			DeviceID:            wp.DeviceID,
+			DeviceIP:            wp.DeviceIP,
+			ProductDefinitionID: wp.ProductDefinitionID,
+			RegistryVersion:     wp.RegistryVersion,
+			Groups:              wp.Groups,
+		}
 		index[p.DeviceID] = p
 	}
 

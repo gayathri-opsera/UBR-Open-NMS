@@ -9,8 +9,13 @@ package fingerprint
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -148,4 +153,106 @@ func (r *InMemoryRegistryReader) ListActive(_ context.Context) ([]RegistryEntry,
 	out := make([]RegistryEntry, len(r.entries))
 	copy(out, r.entries)
 	return out, r.version, nil
+}
+
+// ── HTTPRegistryReader ────────────────────────────────────────────────────────
+
+// HTTPRegistryReader loads active fingerprint entries from the product-definition-service
+// GET /internal/fingerprint-registry endpoint.
+type HTTPRegistryReader struct {
+	baseURL    string
+	httpClient *http.Client
+}
+
+// NewHTTPRegistryReader creates a reader pointed at the product-definition-service base URL.
+func NewHTTPRegistryReader(baseURL string) *HTTPRegistryReader {
+	return &HTTPRegistryReader{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+	}
+}
+
+type registryWireResponse struct {
+	RegistryVersion string              `json:"registryVersion"`
+	Entries         []registryWireEntry `json:"entries"`
+}
+
+// registryWireEntry mirrors the PascalCase JSON emitted by InternalRegistryController.
+type registryWireEntry struct {
+	RegistryEntryID          string   `json:"RegistryEntryID"`
+	ProductDefinitionID      string   `json:"ProductDefinitionID"`
+	ProductDefinitionVersion string   `json:"ProductDefinitionVersion"`
+	RegistryVersion          string   `json:"RegistryVersion"`
+	SNMPOIDExact             string   `json:"SNMPOIDExact"`
+	SNMPOIDPrefix            string   `json:"SNMPOIDPrefix"`
+	SSHBannerSubstring       string   `json:"SSHBannerSubstring"`
+	HTTPHeaderKey            string   `json:"HTTPHeaderKey"`
+	HTTPHeaderContains       string   `json:"HTTPHeaderContains"`
+	HTTPBodyContains         string   `json:"HTTPBodyContains"`
+	GRPCServiceExact         string   `json:"GRPCServiceExact"`
+	FirmwareMin              string   `json:"FirmwareMin"`
+	FirmwareMax              string   `json:"FirmwareMax"`
+	PreferredProtocol        string   `json:"PreferredProtocol"`
+	SupportedProtocols       []string `json:"SupportedProtocols"`
+	DeviceType               string   `json:"DeviceType"`
+}
+
+func (r *HTTPRegistryReader) ListActive(ctx context.Context) ([]RegistryEntry, string, error) {
+	url := r.baseURL + "/internal/fingerprint-registry"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("fingerprint registry: build request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("fingerprint registry: fetch failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("fingerprint registry: HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("fingerprint registry: read body: %w", err)
+	}
+
+	var wire registryWireResponse
+	if err := json.Unmarshal(body, &wire); err != nil {
+		return nil, "", fmt.Errorf("fingerprint registry: decode response: %w", err)
+	}
+
+	entries := make([]RegistryEntry, 0, len(wire.Entries))
+	for _, we := range wire.Entries {
+		entries = append(entries, RegistryEntry{
+			RegistryEntryID:          we.RegistryEntryID,
+			ProductDefinitionID:      we.ProductDefinitionID,
+			ProductDefinitionVersion: we.ProductDefinitionVersion,
+			RegistryVersion:          we.RegistryVersion,
+			SNMPOIDExact:             we.SNMPOIDExact,
+			SNMPOIDPrefix:            we.SNMPOIDPrefix,
+			SSHBannerSubstring:       we.SSHBannerSubstring,
+			HTTPHeaderKey:            we.HTTPHeaderKey,
+			HTTPHeaderContains:       we.HTTPHeaderContains,
+			HTTPBodyContains:         we.HTTPBodyContains,
+			GRPCServiceExact:         we.GRPCServiceExact,
+			FirmwareMin:              we.FirmwareMin,
+			FirmwareMax:              we.FirmwareMax,
+			PreferredProtocol:        we.PreferredProtocol,
+			SupportedProtocols:       we.SupportedProtocols,
+			DeviceType:               we.DeviceType,
+		})
+	}
+
+	version := wire.RegistryVersion
+	if version == "" && len(entries) > 0 {
+		version = entries[0].RegistryVersion
+	}
+
+	return entries, version, nil
 }

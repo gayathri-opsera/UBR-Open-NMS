@@ -20,6 +20,7 @@ import {
   listProductDefinitions,
   listProductDefinitionVersions,
   getProductDefinitionValidationReport,
+  getVersionDiff,
   extractApiError,
 } from '../../api/productDefinitions.api';
 import type {
@@ -28,6 +29,7 @@ import type {
   ValidationReport,
   FrameworkApiError,
 } from '../../api/productDefinitions.types';
+import type { VersionDiffResult, VersionDiffParamChange } from '../../api/productDefinitions.api';
 
 const WRITE_ROLES = ['admin', 'super_admin', 'superadmin'];
 
@@ -151,6 +153,13 @@ export function ProductDefinitionAdminPage() {
   const [report, setReport]                     = useState<ValidationReport | null>(null);
   const [loadingReport, setLoadingReport]       = useState(false);
 
+  // ── Version diff state ──────────────────────────────────────────────────────
+  const [diffTarget, setDiffTarget]     = useState<ProductDefinitionVersion | null>(null);
+  const [diff, setDiff]                 = useState<VersionDiffResult | null>(null);
+  const [loadingDiff, setLoadingDiff]   = useState(false);
+  const [diffError, setDiffError]       = useState<string | null>(null);
+  const [diffOpen, setDiffOpen]         = useState(false);
+
   // ── Load definition list ────────────────────────────────────────────────────
 
   const loadDefinitions = useCallback(async () => {
@@ -210,6 +219,42 @@ export function ProductDefinitionAdminPage() {
   function handleSelectVersion(version: ProductDefinitionVersion) {
     setSelectedVersion(version);
     void loadReport(version);
+  }
+
+  // ── Version diff ───────────────────────────────────────────────────────────
+
+  async function handleOpenDiff(baseVersion: ProductDefinitionVersion) {
+    if (!selectedDef) return;
+    // Determine the active version in the current list to compare against
+    const activeVersion = versions.find((v) => v.lifecycleStatus === 'ACTIVE');
+    if (!activeVersion) {
+      setDiffError('No ACTIVE version found to compare against.');
+      setDiffOpen(true);
+      return;
+    }
+    if (activeVersion.versionId === baseVersion.versionId) {
+      setDiffError('Selected version is already the active version — nothing to diff.');
+      setDiffOpen(true);
+      return;
+    }
+    setDiffTarget(baseVersion);
+    setDiff(null);
+    setDiffError(null);
+    setDiffOpen(true);
+    setLoadingDiff(true);
+    try {
+      const result = await getVersionDiff(
+        selectedDef.definitionId,
+        activeVersion.versionId,  // from = current active
+        baseVersion.versionId,    // to   = selected version
+      );
+      setDiff(result);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDiffError(`Failed to load diff: ${msg}`);
+    } finally {
+      setLoadingDiff(false);
+    }
   }
 
   // ── After a lifecycle action, refresh the definition + version list ────────
@@ -328,6 +373,20 @@ export function ProductDefinitionAdminPage() {
                   )}
                 </div>
 
+                {/* Compare to Active button (show for non-active versions) */}
+                {selectedVersion.lifecycleStatus !== 'ACTIVE' && versions.some((v) => v.lifecycleStatus === 'ACTIVE') && (
+                  <div style={{ marginBottom: 12 }}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void handleOpenDiff(selectedVersion)}
+                      style={{ fontSize: 12 }}
+                    >
+                      Compare to Active Version
+                    </Button>
+                  </div>
+                )}
+
                 {/* Lifecycle actions */}
                 <ProductDefinitionLifecycleActions
                   version={selectedVersion}
@@ -353,6 +412,134 @@ export function ProductDefinitionAdminPage() {
           </>
         )}
       </div>
+
+      {/* ── Version diff slide-over drawer ── */}
+      {diffOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Version diff"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            display: 'flex', justifyContent: 'flex-end',
+          }}
+        >
+          {/* Backdrop */}
+          <div
+            onClick={() => setDiffOpen(false)}
+            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)' }}
+            aria-hidden="true"
+          />
+          {/* Panel */}
+          <div style={{
+            position: 'relative', zIndex: 1,
+            width: '580px', maxWidth: '95vw',
+            height: '100%', overflowY: 'auto',
+            background: 'var(--vf-background)',
+            borderLeft: '1px solid var(--vf-border-subtle)',
+            boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
+            padding: '24px 24px 40px',
+            display: 'flex', flexDirection: 'column', gap: 16,
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Version Diff</h2>
+                {diffTarget && (
+                  <p style={{ fontSize: 12, color: 'var(--vf-text-secondary)', margin: '4px 0 0' }}>
+                    Active → {diffTarget.versionId.slice(0, 12)}…
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setDiffOpen(false)}
+                aria-label="Close diff panel"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--vf-text-secondary)', padding: 4 }}
+              >
+                ×
+              </button>
+            </div>
+
+            {loadingDiff && (
+              <div style={{ fontSize: 13, color: 'var(--vf-text-secondary)', textAlign: 'center', padding: 32 }}>
+                Computing diff…
+              </div>
+            )}
+
+            {diffError && (
+              <div style={{ padding: 14, background: 'var(--vf-danger-subtle)', border: '1px solid var(--vf-danger)', borderRadius: 8, fontSize: 13, color: 'var(--vf-danger)' }}>
+                {diffError}
+              </div>
+            )}
+
+            {!loadingDiff && !diffError && diff && (
+              <>
+                {/* Summary chips */}
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {[
+                    { label: `${diff.added.length} Added`,   color: 'var(--vf-success)',  bg: 'var(--vf-success-subtle)'  },
+                    { label: `${diff.removed.length} Removed`, color: 'var(--vf-danger)',  bg: 'var(--vf-danger-subtle)'   },
+                    { label: `${diff.modified.length} Modified`, color: 'var(--vf-warning)', bg: 'var(--vf-warning-subtle)'  },
+                    { label: `${diff.moved.length} Moved`,    color: 'var(--vf-accent)',   bg: 'var(--vf-elevated)'        },
+                    { label: `${diff.permissionChanged.length} Permission`, color: 'var(--vf-text-secondary)', bg: 'var(--vf-surface)' },
+                  ].map(({ label, color, bg }) => (
+                    <span key={label} style={{
+                      padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                      background: bg, color,
+                    }}>
+                      {label}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Change sections */}
+                {([
+                  { title: '➕ Added', items: diff.added,             color: 'var(--vf-success)' },
+                  { title: '➖ Removed', items: diff.removed,          color: 'var(--vf-danger)'  },
+                  { title: '✏️ Modified', items: diff.modified,        color: 'var(--vf-warning)' },
+                  { title: '↕ Moved', items: diff.moved,              color: 'var(--vf-accent)'  },
+                  { title: '🔐 Permission Changed', items: diff.permissionChanged, color: 'var(--vf-text-secondary)' },
+                ] as { title: string; items: VersionDiffParamChange[]; color: string }[]).map(({ title, items, color }) => items.length > 0 && (
+                  <div key={title}>
+                    <h3 style={{ fontSize: 13, fontWeight: 700, color, margin: '0 0 8px' }}>{title}</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {items.map((change) => (
+                        <div key={change.parameterId} style={{
+                          background: 'var(--vf-surface)',
+                          border: '1px solid var(--vf-border-subtle)',
+                          borderRadius: 8, padding: '10px 14px',
+                        }}>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>
+                            {change.label ?? change.parameterId}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--vf-text-secondary)', fontFamily: 'monospace', marginTop: 2 }}>
+                            {change.parameterId}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginTop: 4 }}>
+                            {change.summary}
+                          </div>
+                          {change.fromGroupId !== change.toGroupId && change.fromGroupId && change.toGroupId && (
+                            <div style={{ fontSize: 11, color: 'var(--vf-text-tertiary)', marginTop: 2 }}>
+                              Group: {change.fromGroupId} → {change.toGroupId}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {diff.added.length === 0 && diff.removed.length === 0 && diff.modified.length === 0
+                  && diff.moved.length === 0 && diff.permissionChanged.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 32, color: 'var(--vf-text-muted)', fontSize: 13 }}>
+                    ✓ No parameter changes between these versions.
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

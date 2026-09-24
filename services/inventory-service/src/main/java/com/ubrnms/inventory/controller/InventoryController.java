@@ -42,6 +42,7 @@ public class InventoryController {
             @RequestParam(required = false) String mac,
             @RequestParam(required = false) String ip,
             @RequestParam(required = false) String deviceType,
+            @RequestParam(required = false) String genericDeviceType,
             @RequestParam(required = false) String status,
             @RequestParam(required = false, defaultValue = "0") int page,
             @RequestParam(required = false, defaultValue = "100") int limit) {
@@ -62,7 +63,8 @@ public class InventoryController {
         }
         // List all devices with optional type/status filters — DB-level pagination (WO-008).
         try {
-            PagedResponse<Device> paged = inventoryService.listDevices(deviceType, status, page, limit);
+            PagedResponse<Device> paged = inventoryService.listDevices(
+                    deviceType, status, genericDeviceType, page, limit);
             return ResponseEntity.ok(paged);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()
@@ -83,6 +85,21 @@ public class InventoryController {
     public ResponseEntity<Device> update(@PathVariable String id, @RequestBody Device updates) {
         try {
             return ResponseEntity.ok(inventoryService.updateDevice(id, updates));
+        } catch (InventoryService.ResourceNotFoundException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * Partial update: applies only the fields present in the request body.
+     * Used by the discovery service to write framework identity fields
+     * (productDefinitionId, genericDeviceType, frameworkStatus) after a
+     * successful fingerprint match without overwriting authoritative fields.
+     */
+    @PatchMapping("/{id}")
+    public ResponseEntity<Device> patch(@PathVariable String id, @RequestBody Map<String, Object> fields) {
+        try {
+            return ResponseEntity.ok(inventoryService.patchDevice(id, fields));
         } catch (InventoryService.ResourceNotFoundException e) {
             return ResponseEntity.notFound().build();
         }

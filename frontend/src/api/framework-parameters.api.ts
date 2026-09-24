@@ -10,7 +10,8 @@
  * axios instance supplied to each function.
  */
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { type AxiosInstance, type AxiosError } from 'axios';
+import { getAccessToken } from '../auth/tokens';
 import type {
   ParameterCurrentValueResponse,
   ParameterCurrentValueError,
@@ -32,6 +33,18 @@ export type { ParameterReadStatus, PollFailureCategory } from './framework-param
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BASE = '/api/framework/v1';
+
+/**
+ * Shared framework axios instance — same origin as the page so Vite proxies it,
+ * but with the Bearer token injected per request (cannot use apiClient because
+ * its baseURL prefix would corrupt the /api/framework/v1 path).
+ */
+const frameworkAxios: AxiosInstance = axios.create();
+frameworkAxios.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
 
 // ── Error normalisation ───────────────────────────────────────────────────────
 
@@ -116,7 +129,9 @@ export function normaliseCurrentValueResponse(
 export async function getDeviceCurrentParameterValues(
   deviceId: string,
   correlationId?: string,
-  instance: AxiosInstance = axios as unknown as AxiosInstance,
+  // Default to the framework-specific axios instance that injects Bearer tokens.
+  // Tests can inject a mock instance via the third parameter.
+  instance: AxiosInstance = frameworkAxios,
 ): Promise<ParameterCurrentValueResponse> {
   try {
     const headers: Record<string, string> = {};
@@ -156,6 +171,43 @@ export function countByFreshnessState(
  */
 export function flattenParameterValues(groups: ParameterCurrentValueGroup[]): ParameterCurrentValue[] {
   return groups.flatMap((g) => g.parameters);
+}
+
+// ── Parameter write ───────────────────────────────────────────────────────────
+
+export interface ParameterWriteResult {
+  parameterId: string;
+  accepted: boolean;
+  message?: string;
+}
+
+/**
+ * Write a new value to a writable parameter on a device.
+ *
+ * The gateway proxies this to the parameter-poller service which validates
+ * the value against the registry schema (dataType, minValue, maxValue,
+ * enumValues) before applying the change.
+ *
+ * Only parameters with {@code readOnly = false} in the active product
+ * definition registry may be written. The server enforces this regardless
+ * of the client-side check.
+ *
+ * @param deviceId   - Device serial number or inventory ID.
+ * @param parameterId - Stable parameter ID from the registry.
+ * @param value      - New value as a string (number, enum label, or boolean string).
+ * @param instance   - Optional axios instance override (useful in tests).
+ */
+export async function updateDeviceParameter(
+  deviceId: string,
+  parameterId: string,
+  value: string,
+  instance: AxiosInstance = frameworkAxios,
+): Promise<ParameterWriteResult> {
+  const res = await instance.put<ParameterWriteResult>(
+    `/api/framework/v1/devices/${deviceId}/parameters/${parameterId}`,
+    { value },
+  );
+  return res.data;
 }
 
 /**

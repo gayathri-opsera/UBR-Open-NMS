@@ -12,9 +12,15 @@ public interface AlarmRepository extends MongoRepository<Alarm, String> {
 
     Optional<Alarm> findByAlarmId(String alarmId);
 
-    // Dedup window lookup
+    // Dedup window lookup (time-bounded — used for non-persistent alarm sources)
     Optional<Alarm> findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
             String deviceId, String alarmType, String state, Instant windowStart);
+
+    // Persistent-condition dedup: find any ACTIVE alarm regardless of age.
+    // Used for threshold alarms that remain breached indefinitely (e.g. sys_uptime
+    // always above threshold) so that only one alarm exists until it clears.
+    Optional<Alarm> findTopByDeviceIdAndAlarmTypeAndStateOrderByRaisedAtDesc(
+            String deviceId, String alarmType, String state);
 
     // State-scoped queries
     List<Alarm> findByStateOrderByRaisedAtDesc(String state);

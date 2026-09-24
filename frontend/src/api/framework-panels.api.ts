@@ -16,7 +16,8 @@
  * writability (submit buttons, editable inputs) must not be enabled.
  */
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { type AxiosInstance, type AxiosError } from 'axios';
+import { getAccessToken } from '../auth/tokens';
 import type {
   AdaptiveUiTemplateResponse,
   AdaptivePanelError,
@@ -40,6 +41,18 @@ export type {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BASE = '/api/framework/v1';
+
+/**
+ * Shared framework axios instance — same origin as the page so Vite proxies it,
+ * but with the Bearer token injected per request (cannot use apiClient because
+ * its baseURL prefix would corrupt the /api/framework/v1 path).
+ */
+const frameworkAxios: AxiosInstance = axios.create();
+frameworkAxios.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
 
 // ── Error normalisation ───────────────────────────────────────────────────────
 
@@ -124,7 +137,9 @@ export function selectWidget(param: Omit<AdaptiveParameter, 'effectiveWidget'>):
 export async function getDeviceUiTemplate(
   deviceId: string,
   correlationId?: string,
-  instance: AxiosInstance = axios as unknown as AxiosInstance,
+  // Default to the framework-specific axios instance that injects Bearer tokens.
+  // Tests can inject a mock instance via the third parameter.
+  instance: AxiosInstance = frameworkAxios,
 ): Promise<AdaptiveUiTemplateResponse> {
   try {
     const headers: Record<string, string> = {};

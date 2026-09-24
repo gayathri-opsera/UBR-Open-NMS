@@ -23,6 +23,11 @@ interface ParameterGroupTabsProps {
    * Empty map means no poll data is available yet — unmapped state is shown.
    */
   currentValues: Map<string, ParameterCurrentValue>;
+  /**
+   * Called when the operator submits a new value for a writable parameter.
+   * When omitted, all cards render in display-only mode.
+   */
+  onWrite?: (parameterId: string, value: string) => Promise<void>;
   className?: string;
 }
 
@@ -32,7 +37,7 @@ interface ParameterGroupTabsProps {
  * @example
  *   <ParameterGroupTabs groups={template.groups} currentValues={valueMap} />
  */
-export function ParameterGroupTabs({ groups, currentValues, className }: ParameterGroupTabsProps) {
+export function ParameterGroupTabs({ groups, currentValues, onWrite, className }: ParameterGroupTabsProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const tabListId = useId();
 
@@ -135,6 +140,7 @@ export function ParameterGroupTabs({ groups, currentValues, className }: Paramet
             <ParameterGroupPanel
               group={activeGroup}
               currentValues={currentValues}
+              onWrite={onWrite}
             />
           )}
         </div>
@@ -148,9 +154,10 @@ export function ParameterGroupTabs({ groups, currentValues, className }: Paramet
 interface ParameterGroupPanelProps {
   group: AdaptiveParameterGroup;
   currentValues: Map<string, ParameterCurrentValue>;
+  onWrite?: (parameterId: string, value: string) => Promise<void>;
 }
 
-function ParameterGroupPanel({ group, currentValues }: ParameterGroupPanelProps) {
+function ParameterGroupPanel({ group, currentValues, onWrite }: ParameterGroupPanelProps) {
   if (group.parameters.length === 0) {
     return (
       <EmptyState
@@ -173,6 +180,7 @@ function ParameterGroupPanel({ group, currentValues }: ParameterGroupPanelProps)
           key={param.parameterId}
           parameter={param}
           currentValue={currentValues.get(param.parameterId)}
+          onWrite={onWrite}
         />
       ))}
     </div>

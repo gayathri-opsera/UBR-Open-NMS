@@ -26,10 +26,9 @@ const frameworkProductDefinitions = require('./routes/frameworkProductDefinition
 const frameworkSecurity           = require('./routes/frameworkSecurity.routes');
 const frameworkParameters         = require('./routes/frameworkParameters.routes');
 const framework                   = require('./routes/framework.routes');
-// Alarms stub — serves local alarm data instead of proxying to the external Opsera dev
-// environment.  Without this stub, ALARM_SERVICE_URL (often set to ubr-nms-frontend-dev.
-// agent.opsera.dev) causes a CORS error + 401 for every /api/v1/alarms request.
-const alarmsStub      = require('./routes/alarms.stub');
+// Alarms router — proxies to local alarm-service when ALARM_SERVICE_URL is local,
+// otherwise serves stub data to avoid CORS/auth issues with the external Opsera dev env.
+const alarmsRoutes    = require('./routes/alarms.routes');
 
 function createApp(redisClient) {
   const app = express();
@@ -52,8 +51,8 @@ function createApp(redisClient) {
   app.use('/api/v1/notifications/stream', createSseProxy(config.services.notification));
 
   // ── Stub routers for sub-services (mounted BEFORE proxy routes) ──────────────
-  // Alarms stub — intercepts before the external proxy so local dev never hits Opsera dev.
-  app.use('/api/v1/alarms',        alarmsStub);
+  // Alarms — proxies to local alarm-service (with stub fallback for external envs).
+  app.use('/api/v1/alarms',        alarmsRoutes);
   app.use('/api/v1/admin',         adminStub);
   app.use('/api/v1/organizations', hierarchyStub);
   app.use('/api/v1/groups',        groupsStub);

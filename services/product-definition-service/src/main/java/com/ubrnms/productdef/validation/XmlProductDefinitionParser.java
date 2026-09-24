@@ -120,7 +120,8 @@ public class XmlProductDefinitionParser {
                .model(text(identity, "model"))
                .firmwareFrom(text(identity, "firmwareFrom"))
                .firmwareTo(text(identity, "firmwareTo"))
-               .productFamily(text(identity, "productFamily"));
+               .productFamily(text(identity, "productFamily"))
+               .deviceType(text(identity, "deviceType"));
     }
 
     // ── Fingerprints ──────────────────────────────────────────────────────────

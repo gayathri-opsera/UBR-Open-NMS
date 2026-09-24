@@ -13,4 +13,7 @@ public interface ProductDefinitionVersionRepository extends MongoRepository<Prod
     List<ProductDefinitionVersion> findByDefinitionIdOrderByCreatedAtDesc(String definitionId);
 
     Optional<ProductDefinitionVersion> findByContentHash(String contentHash);
+
+    /** Returns every version in the store, newest first — used by the admin history feed. */
+    List<ProductDefinitionVersion> findAllByOrderByCreatedAtDesc();
 }

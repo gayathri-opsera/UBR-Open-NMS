@@ -64,6 +64,10 @@ type RegistryEntry struct {
 	// SupportedProtocols is the ordered fallback list.
 	SupportedProtocols []string
 
+	// DeviceType is the semantic device category from the product definition
+	// (e.g. switch, router, access_point). Used to populate genericDeviceType in inventory.
+	DeviceType string
+
 	// Metadata
 	CreatedAt time.Time
 }
@@ -141,6 +145,8 @@ type MatchResult struct {
 	MatchConfidence float64
 	// MatchEvidence is a human-readable, credential-free summary of the matched selector.
 	MatchEvidence string
+	// DeviceType is the semantic category resolved from the matched registry entry.
+	DeviceType string
 
 	// ── Set when Status == CONFLICT ───────────────────────────────────────────
 

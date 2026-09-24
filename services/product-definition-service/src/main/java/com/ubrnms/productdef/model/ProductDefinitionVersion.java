@@ -35,6 +35,7 @@ public class ProductDefinitionVersion {
     private String name;
     private String vendor;
     private String model;
+    private String deviceType;
     private String schemaVersion;
 
     /** DRAFT | VALIDATED | STAGED | ACTIVE | SUPERSEDED | ROLLED_BACK | ARCHIVED */

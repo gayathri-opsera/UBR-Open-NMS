@@ -18,7 +18,9 @@ import {
   rollbackProductDefinition,
   generateIdempotencyKey,
   extractApiError,
+  getVersionDiff,
 } from '../../../api/productDefinitions.api';
+import type { VersionDiffResult } from '../../../api/productDefinitions.api';
 
 // ── Action result toast ───────────────────────────────────────────────────────
 
@@ -138,7 +140,7 @@ interface Props {
 type ModalState =
   | { type: 'none' }
   | { type: 'stage' }
-  | { type: 'activate' }
+  | { type: 'activate'; diff: VersionDiffResult | null; loadingDiff: boolean }
   | { type: 'rollback'; reason: string; targetVersionId: string };
 
 export function ProductDefinitionLifecycleActions({ version, allVersions, canWrite, onActionComplete }: Props) {
@@ -261,7 +263,30 @@ export function ProductDefinitionLifecycleActions({ version, allVersions, canWri
           variant="primary"
           size="sm"
           disabled={!canActivate}
-          onClick={() => setModal({ type: 'activate' })}
+          onClick={async () => {
+            // Show the modal immediately with loading diff
+            setModal({ type: 'activate', diff: null, loadingDiff: true });
+            // Try to find the currently active version in allVersions for diff
+            const activeVersion = allVersions.find(
+              (v) => v.definitionId === version.definitionId && v.lifecycleStatus === 'ACTIVE',
+            );
+            if (activeVersion) {
+              try {
+                const diffResult = await getVersionDiff(
+                  version.definitionId,
+                  activeVersion.versionId,
+                  version.versionId,
+                );
+                setModal({ type: 'activate', diff: diffResult, loadingDiff: false });
+              } catch {
+                // Diff failed — show modal without diff (non-blocking)
+                setModal({ type: 'activate', diff: null, loadingDiff: false });
+              }
+            } else {
+              // No current active version (first activation) — skip diff
+              setModal({ type: 'activate', diff: null, loadingDiff: false });
+            }
+          }}
           aria-label={canActivate ? 'Activate this version' : `Cannot activate: lifecycle status is ${version.lifecycleStatus}`}
           title={!canActivate ? `Activate requires STAGED (current: ${version.lifecycleStatus})` : undefined}
         >
@@ -301,7 +326,7 @@ export function ProductDefinitionLifecycleActions({ version, allVersions, canWri
         />
       )}
 
-      {/* Activate modal */}
+      {/* Activate modal with change-impact diff */}
       {modal.type === 'activate' && (
         <ConfirmModal
           title="Activate this version?"
@@ -314,11 +339,78 @@ export function ProductDefinitionLifecycleActions({ version, allVersions, canWri
               <p style={{ margin: '10px 0 0' }}>
                 The currently active version (if any) will be marked <Badge variant="warning">SUPERSEDED</Badge>.
               </p>
+
+              {/* ── Change-impact summary ── */}
+              {modal.loadingDiff && (
+                <div style={{ marginTop: 14, padding: '10px 14px', background: 'var(--vf-elevated)', borderRadius: 8, fontSize: 12, color: 'var(--vf-text-secondary)' }}>
+                  Computing parameter change impact…
+                </div>
+              )}
+
+              {!modal.loadingDiff && modal.diff && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--vf-text-primary)', marginBottom: 8 }}>
+                    Parameter Change Impact
+                  </div>
+                  {/* Summary chips */}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                    {modal.diff.added.length > 0 && (
+                      <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'var(--vf-success-subtle)', color: 'var(--vf-success)' }}>
+                        +{modal.diff.added.length} added
+                      </span>
+                    )}
+                    {modal.diff.removed.length > 0 && (
+                      <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'var(--vf-danger-subtle)', color: 'var(--vf-danger)' }}>
+                        -{modal.diff.removed.length} removed
+                      </span>
+                    )}
+                    {modal.diff.modified.length > 0 && (
+                      <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'var(--vf-warning-subtle)', color: 'var(--vf-warning)' }}>
+                        {modal.diff.modified.length} modified
+                      </span>
+                    )}
+                    {modal.diff.moved.length > 0 && (
+                      <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'var(--vf-elevated)', color: 'var(--vf-accent)' }}>
+                        {modal.diff.moved.length} moved
+                      </span>
+                    )}
+                    {modal.diff.permissionChanged.length > 0 && (
+                      <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'var(--vf-elevated)', color: 'var(--vf-text-secondary)' }}>
+                        {modal.diff.permissionChanged.length} permission
+                      </span>
+                    )}
+                    {modal.diff.added.length === 0 && modal.diff.removed.length === 0 &&
+                     modal.diff.modified.length === 0 && modal.diff.moved.length === 0 &&
+                     modal.diff.permissionChanged.length === 0 && (
+                      <span style={{ fontSize: 11, color: 'var(--vf-success)' }}>
+                        ✓ No parameter changes from active version
+                      </span>
+                    )}
+                  </div>
+                  {/* List of changes (capped to 8 for modal brevity) */}
+                  {[...modal.diff.removed, ...modal.diff.added, ...modal.diff.modified].slice(0, 8).map((ch) => (
+                    <div key={ch.parameterId} style={{ fontSize: 11, color: 'var(--vf-text-secondary)', padding: '3px 0', borderBottom: '1px solid var(--vf-border-subtle)' }}>
+                      {ch.summary}
+                    </div>
+                  ))}
+                  {modal.diff.removed.length + modal.diff.added.length + modal.diff.modified.length > 8 && (
+                    <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 4 }}>
+                      … and {modal.diff.removed.length + modal.diff.added.length + modal.diff.modified.length - 8} more changes
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!modal.loadingDiff && !modal.diff && (
+                <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--vf-text-muted)' }}>
+                  This will be the first active version — no previous parameters to compare.
+                </p>
+              )}
             </>
           }
-          confirmLabel="Activate"
+          confirmLabel={modal.loadingDiff ? 'Loading diff…' : 'Activate'}
           destructive
-          onConfirm={doActivate}
+          onConfirm={modal.loadingDiff ? async () => {} : doActivate}
           onCancel={() => setModal({ type: 'none' })}
           busy={busy}
         />

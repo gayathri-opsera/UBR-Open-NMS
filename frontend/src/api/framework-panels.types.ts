@@ -104,6 +104,8 @@ export interface AdapterContext {
 
 /** Success payload for GET /devices/{deviceId}/ui-template. */
 export interface AdaptiveUiTemplateData {
+  /** Device type / model identifier (e.g. 'CISCO_CATALYST_9300', 'GENERIC'). */
+  deviceType?: string;
   deviceId: string;
   productDefinitionId: string;
   registryVersion: string;

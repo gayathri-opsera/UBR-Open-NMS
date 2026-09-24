@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/airtel-ubrnms/parameter-poller/internal/alarm"
 	"github.com/airtel-ubrnms/parameter-poller/internal/model"
 	pollerregistry "github.com/airtel-ubrnms/parameter-poller/internal/registry"
 	"github.com/airtel-ubrnms/parameter-poller/internal/store"
@@ -67,12 +68,22 @@ func (r *adapterResolverMap) Resolve(protocol string) (AdapterClient, bool) {
 	return c, ok
 }
 
+// AlarmEvaluator submits threshold and drift evaluation requests to the alarm service.
+type AlarmEvaluator interface {
+	EvaluateThreshold(ctx context.Context, req alarm.ThresholdEvaluationRequest) error
+	// RaiseDrift evaluates whether a polled value violates the schema-declared
+	// min/max constraints from the Product Definition registry, raising or clearing
+	// a FRAMEWORK_DRIFT alarm as appropriate.
+	RaiseDrift(ctx context.Context, req alarm.DriftEvaluationRequest) error
+}
+
 // Poller orchestrates parameter poll cycles.
 // It is safe for concurrent use; each call to PollDevice is independent.
 type Poller struct {
 	registry  pollerregistry.Reader
 	store     store.Store
 	adapters  AdapterResolver
+	alarms    AlarmEvaluator
 	log       *slog.Logger
 	// clock allows deterministic time injection in tests.
 	clock func() time.Time
@@ -84,9 +95,16 @@ func New(reg pollerregistry.Reader, st store.Store, adapters AdapterResolver, lo
 		registry: reg,
 		store:    st,
 		adapters: adapters,
+		alarms:   &alarm.NoOpClient{},
 		log:      log,
 		clock:    time.Now,
 	}
+}
+
+// WithAlarmEvaluator sets the alarm evaluator used to report threshold breaches.
+func (p *Poller) WithAlarmEvaluator(a AlarmEvaluator) *Poller {
+	p.alarms = a
+	return p
 }
 
 // WithClock replaces the default clock. Used in tests only.
@@ -179,7 +197,13 @@ func (p *Poller) pollGroup(
 			keys[i] = p.ReadRef
 		}
 
-		results, err := adapter.Get(ctx, deviceID, keys)
+		// Use the device management IP when available; fall back to deviceID
+		// for backwards compatibility with in-memory test fixtures.
+		target := profile.DeviceIP
+		if target == "" {
+			target = deviceID
+		}
+		results, err := adapter.Get(ctx, target, keys)
 		if err != nil {
 			// Classify the adapter error and persist per-parameter failure.
 			status, category, reason := classifyAdapterError(err)
@@ -197,13 +221,68 @@ func (p *Poller) pollGroup(
 			continue
 		}
 
-		// Persist each result.
+		// Persist each result, evaluate operational thresholds, and detect schema drift.
 		for _, param := range params {
 			raw := results[param.ReadRef]
 			numericPtr := store.CoerceNumeric(raw)
 			p.persistParamResult(ctx, deviceID, profile, group, param, now,
 				model.ParameterReadStatusSuccess, "", "", raw, numericPtr,
 			)
+
+			corrID := fmt.Sprintf("%s-%s-%d", deviceID, param.ParameterID, now.Unix())
+
+			// Threshold evaluation: operational limits configured in the registry.
+			if numericPtr != nil && (param.ThresholdHigh != nil || param.ThresholdLow != nil) {
+				evalReq := alarm.ThresholdEvaluationRequest{
+					DeviceID:            deviceID,
+					DeviceType:          "SWITCH",
+					ProductDefinitionID: profile.ProductDefinitionID,
+					RegistryVersion:     profile.RegistryVersion,
+					GroupID:             group.GroupID,
+					ParameterID:         param.ParameterID,
+					ValueNumeric:        *numericPtr,
+					CollectedAt:         now,
+					ThresholdHigh:       param.ThresholdHigh,
+					ThresholdLow:        param.ThresholdLow,
+					CorrelationID:       corrID,
+				}
+				if err := p.alarms.EvaluateThreshold(ctx, evalReq); err != nil {
+					p.log.Warn("threshold evaluation failed",
+						slog.String("deviceID", deviceID),
+						slog.String("parameterId", param.ParameterID),
+						slog.Any("err", err),
+					)
+				}
+			}
+
+			// Schema drift detection: schema-declared min/max constraints.
+			// A value outside [MinValue, MaxValue] indicates a configuration drift
+			// condition — the device is operating outside its validated parameter range.
+			// Only evaluated when no operational threshold is configured (threshold takes
+			// precedence as it captures the same intent with user-defined severity).
+			if numericPtr != nil && (param.MinValue != nil || param.MaxValue != nil) &&
+				param.ThresholdHigh == nil && param.ThresholdLow == nil {
+				driftReq := alarm.DriftEvaluationRequest{
+					DeviceID:            deviceID,
+					DeviceType:          "SWITCH",
+					ProductDefinitionID: profile.ProductDefinitionID,
+					RegistryVersion:     profile.RegistryVersion,
+					GroupID:             group.GroupID,
+					ParameterID:         param.ParameterID,
+					ValueNumeric:        *numericPtr,
+					CollectedAt:         now,
+					MinValue:            param.MinValue,
+					MaxValue:            param.MaxValue,
+					CorrelationID:       corrID + "-drift",
+				}
+				if err := p.alarms.RaiseDrift(ctx, driftReq); err != nil {
+					p.log.Warn("drift evaluation failed",
+						slog.String("deviceID", deviceID),
+						slog.String("parameterId", param.ParameterID),
+						slog.Any("err", err),
+					)
+				}
+			}
 		}
 	}
 }

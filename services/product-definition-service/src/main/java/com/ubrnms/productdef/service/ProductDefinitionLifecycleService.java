@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Orchestrates the Product Definition lifecycle: stage, activate, rollback.
@@ -899,6 +900,9 @@ public class ProductDefinitionLifecycleService {
             int fingerprintCount,
             int parameterCount,
             String correlationId) {
+        // Fire-and-forget: run Kafka publish on a virtual thread so it never blocks the HTTP response.
+        // max.block.ms=3000 ensures the thread exits quickly even when Kafka is unreachable.
+        CompletableFuture.runAsync(() -> {
         try {
             // Sanitised event payload — no credential values, no file content
             Map<String, Object> payload = Map.of(
@@ -921,6 +925,7 @@ public class ProductDefinitionLifecycleService {
             log.warn("[{}] Failed to publish lifecycle event {} to Kafka — downstream consumers will miss this event",
                     correlationId, eventType, e);
         }
+        }); // end CompletableFuture.runAsync
     }
 
     private Map<String, Object> buildActivationResult(

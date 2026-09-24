@@ -120,6 +120,16 @@ public class ParameterRegistryEntry {
      */
     private boolean readOnly;
 
+    /**
+     * Display sort order for this parameter within its group in the adaptive UI.
+     * Lower values appear first. Defaults to {@code 0} (natural insertion order).
+     *
+     * <p>An admin can adjust the order by updating this field directly in the
+     * registry. The gateway's ui-template endpoint sorts parameters by this
+     * field before returning the group to the frontend.
+     */
+    private int displayOrder;
+
     // ── Registry versioning ──────────────────────────────────────────────────
 
     /**

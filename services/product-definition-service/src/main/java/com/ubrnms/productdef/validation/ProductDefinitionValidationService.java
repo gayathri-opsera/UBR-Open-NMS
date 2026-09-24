@@ -38,10 +38,13 @@ public class ProductDefinitionValidationService {
     private static final Pattern CREDENTIAL_PATTERN = Pattern.compile(
             "(?i)(password|passwd|secret|community|apikey|api_key|token|private_?key|auth)\\s*[:=]\\s*\\S+");
 
-    // Allowed dataType values
+    // Allowed dataType values — includes canonical NMS types plus SNMP-native aliases
+    // (TIMETICKS, COUNTER32, COUNTER64, GAUGE32, UNSIGNED32) so definitions using
+    // SNMP-idiomatic type names validate without requiring a translation layer.
     private static final List<String> VALID_DATA_TYPES = List.of(
             "STRING", "INTEGER", "LONG", "FLOAT", "DOUBLE",
-            "BOOLEAN", "ENUM", "OID", "IPADDRESS", "DATETIME", "COUNTER", "GAUGE");
+            "BOOLEAN", "ENUM", "OID", "IPADDRESS", "DATETIME", "COUNTER", "GAUGE",
+            "TIMETICKS", "COUNTER32", "COUNTER64", "GAUGE32", "UNSIGNED32", "OCTETSTRING");
 
     // Allowed protocol types
     private static final List<String> VALID_PROTOCOL_TYPES = List.of(

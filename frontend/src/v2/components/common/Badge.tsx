@@ -11,6 +11,8 @@ export interface BadgeProps {
   children: React.ReactNode;
   style?: React.CSSProperties;
   className?: string;
+  'aria-label'?: string;
+  title?: string;
 }
 
 const variantMap: Record<BadgeVariant, { color: string; bg: string }> = {
@@ -30,13 +32,14 @@ const variantMap: Record<BadgeVariant, { color: string; bg: string }> = {
   unknown:  { color: 'var(--vf-status-unknown)',     bg: 'var(--vf-elevated)' },
 };
 
-export function Badge({ variant = 'default', dot = false, children, style, className }: BadgeProps) {
+export function Badge({ variant = 'default', dot = false, children, style, className, ...rest }: BadgeProps) {
   const { color, bg } = variantMap[variant];
 
   return (
     <span
       role="status"
       className={className}
+      {...rest}
       style={{
         display: 'inline-flex',
         alignItems: 'center',

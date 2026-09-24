@@ -9,7 +9,8 @@
  * axiosInstance from this module).
  */
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { type AxiosInstance, type AxiosError } from 'axios';
+import { getAccessToken } from '../auth/tokens';
 import type {
   FrameworkApiError,
   DeviceFrameworkIdentity,
@@ -56,6 +57,13 @@ export const axiosInstance: AxiosInstance = axios.create({
   baseURL: '',
   headers: { 'Content-Type': 'application/json' },
   timeout: 30_000,
+});
+
+// Attach the JWT bearer token on every request — mirrors the apiClient interceptor.
+axiosInstance.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
 });
 
 // ── Device Framework Identity ─────────────────────────────────────────────────

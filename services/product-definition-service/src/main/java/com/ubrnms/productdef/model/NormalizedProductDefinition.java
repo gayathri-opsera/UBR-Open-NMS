@@ -37,6 +37,7 @@ public class NormalizedProductDefinition {
     private String firmwareFrom;
     private String firmwareTo;
     private String productFamily;
+    private String deviceType;
 
     // ── Fingerprints ─────────────────────────────────────────────────────────
 

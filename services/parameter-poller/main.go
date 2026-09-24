@@ -22,10 +22,12 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/robfig/cron/v3"
 
+	"github.com/airtel-ubrnms/parameter-poller/internal/alarm"
 	"github.com/airtel-ubrnms/parameter-poller/internal/handler"
 	"github.com/airtel-ubrnms/parameter-poller/internal/model"
 	"github.com/airtel-ubrnms/parameter-poller/internal/poller"
 	"github.com/airtel-ubrnms/parameter-poller/internal/registry"
+	"github.com/airtel-ubrnms/parameter-poller/internal/snmpadapter"
 	"github.com/airtel-ubrnms/parameter-poller/internal/store"
 )
 
@@ -60,17 +62,36 @@ func main() {
 	// Current-value store.
 	st := store.NewInMemoryStore()
 
-	// Adapter map — no live adapters in P0; the null adapter returns unmapped
-	// so poll cycles persist safe UNMAPPED records instead of failing.
+	// SNMP adapter configuration.
+	// SNMP_DEFAULT_COMMUNITY: community string for the SNMP adapter (default "public").
+	// SNMP_PORT: UDP port for SNMP (default 161; test simulator uses 1161).
+	snmpCommunity := envOrDefault("SNMP_DEFAULT_COMMUNITY", "public")
+	snmpPortStr   := envOrDefault("SNMP_PORT", "161")
+	snmpPort      := uint16(161)
+	if n, err := strconv.Atoi(snmpPortStr); err == nil && n > 0 && n <= 65535 {
+		snmpPort = uint16(n)
+	}
+	snmpClient := snmpadapter.New(snmpCommunity, snmpPort, 5*time.Second)
+
+	log.Info("adapter config",
+		slog.String("snmpCommunity", snmpCommunity),
+		slog.Uint64("snmpPort", uint64(snmpPort)),
+	)
+
+	// Adapter map — SNMP uses the real adapter; CLI/REST remain null stubs for P0.
 	nullAdapter := &nullAdapterClient{}
 	adapters := poller.NewAdapterResolver(map[string]poller.AdapterClient{
-		"SNMP": nullAdapter,
+		"SNMP": snmpClient,
 		"CLI":  nullAdapter,
 		"REST": nullAdapter,
 		"GRPC": nullAdapter,
 	})
 
-	p := poller.New(reg, st, adapters, log)
+	// Alarm client — evaluates threshold breaches with the alarm service.
+	alarmBaseURL := envOrDefault("ALARM_SERVICE_URL", "http://alarm-service:8083")
+	alarmClient  := alarm.NewClient(alarmBaseURL, log)
+
+	p := poller.New(reg, st, adapters, log).WithAlarmEvaluator(alarmClient)
 
 	// --- Scheduled polling ---
 	c := cron.New()

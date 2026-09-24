@@ -90,6 +90,7 @@ func (h *DiscoveryHandler) applyFingerprintMatch(ctx context.Context, result *mo
 		result.ActiveAdapterCandidate = mr.ActiveAdapterCandidate
 		result.MatchConfidence = mr.MatchConfidence
 		result.MatchEvidence = mr.MatchEvidence
+		result.GenericDeviceType = mr.DeviceType
 	case fingerprint.FingerprintStatusConflict:
 		result.FingerprintConflictReason = mr.ConflictReason
 		result.RegistryVersion = mr.RegistryVersion
@@ -579,7 +580,26 @@ func (h *DiscoveryHandler) ProvisionDiscoveredHosts(w http.ResponseWriter, r *ht
 	provisioned, failed := 0, 0
 
 	for _, host := range req.Hosts {
+		var productDefinitionID, genericDeviceType, frameworkStatus string
+		if h.matcher != nil {
+			ev := fingerprint.ProbeEvidence{
+				IP:                 host.IP,
+				RunID:              runID,
+				CorrelationID:      corrID,
+				SNMPOIDSysObjectID: host.SysObjectID,
+				SNMPSysDescr:       host.SysDescr,
+			}
+			if mr := h.matcher.Match(r.Context(), ev); mr != nil && mr.Status == fingerprint.FingerprintStatusMatched {
+				productDefinitionID = mr.ProductDefinitionID
+				genericDeviceType = mr.DeviceType
+				frameworkStatus = string(mr.Status)
+			}
+		}
+
 		result := provisionOneHost(httpClient, inventoryURL, runID, host)
+		if result.Status == "provisioned" && result.DeviceID != "" && result.DeviceID != "unknown" {
+			h.patchInventoryFramework(r.Context(), result.DeviceID, productDefinitionID, genericDeviceType, frameworkStatus)
+		}
 		results = append(results, result)
 		if result.Status == "provisioned" {
 			provisioned++
@@ -600,6 +620,39 @@ func (h *DiscoveryHandler) ProvisionDiscoveredHosts(w http.ResponseWriter, r *ht
 	}
 
 	writeJSON(w, status, resp)
+}
+
+func (h *DiscoveryHandler) patchInventoryFramework(ctx context.Context, deviceID, productDefinitionID, genericDeviceType, frameworkStatus string) {
+	if deviceID == "" || productDefinitionID == "" {
+		return
+	}
+	inventoryURL := os.Getenv("INVENTORY_SERVICE_URL")
+	if inventoryURL == "" {
+		inventoryURL = "http://inventory:8082"
+	}
+	body := map[string]interface{}{
+		"productDefinitionId": productDefinitionID,
+		"frameworkStatus":     frameworkStatus,
+	}
+	if genericDeviceType != "" {
+		body["genericDeviceType"] = genericDeviceType
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch,
+		inventoryURL+"/api/v1/devices/"+deviceID, bytes.NewReader(bodyBytes))
+	if err != nil {
+		slog.Warn("patch-framework: could not build request", "deviceId", deviceID, "err", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Warn("patch-framework: inventory PATCH failed", "deviceId", deviceID, "err", err)
+		return
+	}
+	defer resp.Body.Close()
+	slog.Info("patch-framework: inventory updated", "deviceId", deviceID, "productDefinitionId", productDefinitionID, "genericDeviceType", genericDeviceType, "status", resp.StatusCode)
 }
 
 // provisionOneHost attempts to create a single device in the inventory-service via HTTP.

@@ -581,11 +581,45 @@ services:
       DIAGNOSTICS_SERVICE_URL: "http://diagnostics-service:8090"
       PRODUCT_DEFINITION_URL: "http://product-definition-service:8093"
       EVENT_COLLECTOR_URL: "http://event-collector:9090"
+      PARAMETER_POLLER_URL: "http://parameter-poller:8084"
     ports:
       - "3100:3000"   # host 3100 → container 3000 (avoids conflict with aitutor-frontend)
     networks: [nms-net]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      <<: *healthcheck-http
+
+  # ── Parameter Poller (WO-012) ─────────────────────────────────────────────
+  # Reads active Product Definition registry, dispatches SNMP/CLI/REST/gRPC
+  # reads via southbound adapters, and stores current parameter values.
+
+  parameter-poller:
+    build:
+      context: services/parameter-poller
+      dockerfile: Dockerfile
+    container_name: nms-parameter-poller
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+    environment:
+      PORT: "8084"
+      REGISTRY_URL: "http://product-definition-service:8093"
+      ALARM_SERVICE_URL: "http://alarm-service:8083"
+      INVENTORY_SERVICE_URL: "http://inventory-service:8082"
+      POLL_INTERVAL_SECONDS: "60"
+      FRESHNESS_MULTIPLIER: "2"
+      LOG_LEVEL: info
+      # DEV_FIXTURE_PROFILES: comma-separated device IDs to seed the in-memory store
+      # in development mode; leave empty to poll from registry only.
+      DEV_FIXTURE_PROFILES: ""
+    ports:
+      - "8094:8084"   # host 8094 → container 8084 (config-service uses 8084 on host)
+    networks: [nms-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/healthz"]
       <<: *healthcheck-http
 
   # ── Forwarders (Go) ────────────────────────────────────────────────────────

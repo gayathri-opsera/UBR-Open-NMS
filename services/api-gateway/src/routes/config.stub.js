@@ -211,6 +211,117 @@ function buildJobResponse(job) {
 }
 
 // ── Templates (MongoDB-backed, in-memory fallback if DB unreachable) ──────────
+/**
+ * GET /templates/from-definition/:deviceId
+ *
+ * Builds a writable-parameter config template from the parameter registry for the
+ * device's associated product definition (resolved via inventory device records).
+ */
+router.get('/templates/from-definition/:deviceId', async (req, res) => {
+  const { deviceId } = req.params;
+
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'MongoDB is not connected — cannot resolve device or parameter registry',
+    });
+  }
+
+  try {
+    let inventoryDevice = null;
+    for (const dbName of ['ubrnms', 'ubrnms_inventory']) {
+      try {
+        const col = mongoose.connection.client.db(dbName).collection('devices');
+        inventoryDevice = await col.findOne({
+          $or: [{ _id: deviceId }, { serialNumber: deviceId }, { ipAddress: deviceId }, { deviceId }],
+        });
+        if (inventoryDevice) break;
+      } catch (_) { /* try next db */ }
+    }
+
+    if (!inventoryDevice) {
+      return res.status(404).json({
+        code: 'DEVICE_NOT_FOUND',
+        message: `No device found for id "${deviceId}" in ubrnms or ubrnms_inventory`,
+      });
+    }
+
+    let productDefinitionId = inventoryDevice.productDefinitionId;
+    const deviceModel = (inventoryDevice.model || '').toLowerCase();
+
+    if (!productDefinitionId && deviceModel) {
+      const fpCol = mongoose.connection.db.collection('fingerprint_registry_entries');
+      const fingerprints = await fpCol.find({}).toArray();
+      const match = fingerprints.find((fp) => {
+        const fpModel = (fp.model || '').toLowerCase();
+        const fpVendor = (fp.vendor || '').toLowerCase();
+        return (
+          deviceModel.includes(fpVendor)
+          || fpVendor.includes(deviceModel)
+          || deviceModel.includes((fpModel.split('-')[0] || ''))
+          || fpModel.includes(deviceModel.split(' ')[0] || '')
+        );
+      });
+      if (match) {
+        productDefinitionId = match.productDefinitionId;
+      }
+    }
+
+    if (!productDefinitionId) {
+      const activeCol = mongoose.connection.db.collection('product_definition_active_versions');
+      const firstActive = await activeCol.findOne({});
+      productDefinitionId = firstActive?.productDefinitionId;
+    }
+
+    if (!productDefinitionId) {
+      return res.status(404).json({
+        code: 'NO_PRODUCT_DEFINITION',
+        message: `Device "${deviceId}" has no productDefinitionId and model "${inventoryDevice.model || ''}" could not be matched`,
+      });
+    }
+
+    const paramCol = mongoose.connection.client.db('ubrnms').collection('parameter_registry_entries');
+    const writableEntries = await paramCol
+      .find({ productDefinitionId, readOnly: false })
+      .toArray();
+
+    if (!writableEntries.length) {
+      return res.status(404).json({
+        code: 'NO_WRITABLE_PARAMETERS',
+        message: `No writable parameters (readOnly=false) found for product definition "${productDefinitionId}"`,
+      });
+    }
+
+    const groupMap = new Map();
+    for (const e of writableEntries) {
+      const groupId = e.groupId || 'default';
+      if (!groupMap.has(groupId)) {
+        groupMap.set(groupId, {
+          groupId,
+          label: groupId.charAt(0).toUpperCase() + groupId.slice(1),
+          parameters: [],
+        });
+      }
+      groupMap.get(groupId).parameters.push({
+        parameterId: e.parameterId,
+        displayName: e.displayName || e.parameterId,
+        dataType: (e.dataType || 'STRING').toUpperCase(),
+        unit: e.unit || '',
+        currentValue: null,
+      });
+    }
+
+    return res.json({
+      deviceId,
+      productDefinitionId,
+      groups: Array.from(groupMap.values()),
+    });
+  } catch (e) {
+    console.error('[config-stub] from-definition template error:', e.message);
+    return res.status(500).json({ code: 'INTERNAL_ERROR', message: e.message });
+  }
+});
+
 router.get('/templates', async (_req, res) => {
   try {
     const col = await getCol();

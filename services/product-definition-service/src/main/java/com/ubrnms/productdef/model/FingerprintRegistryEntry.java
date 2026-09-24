@@ -70,6 +70,7 @@ public class FingerprintRegistryEntry {
     private String vendor;
     private String model;
     private String productFamily;
+    private String deviceType;
 
     /** Lower bound of the firmware version range this fingerprint covers (inclusive). */
     private String firmwareFrom;
