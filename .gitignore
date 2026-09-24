@@ -47,6 +47,11 @@ dev/*.pfx
 *.pem
 *.key
 .env.dev
+
+# Generated locally by dev/k8s-local/gen_values.py — embeds the JWT private key
+dev/k8s-local/values-kind.yaml
+# Local kind cluster kubeconfig — cluster client cert/key material
+dev/k8s-local/kubeconfig.yaml
 .env.production
 .forge/hook-version
 .forge/changed-files.log

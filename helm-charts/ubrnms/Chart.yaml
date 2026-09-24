@@ -53,3 +53,6 @@ dependencies:
   - name: health-monitor
     version: "1.0.0"
     repository: "file://../health-monitor"
+  - name: frontend
+    version: "1.0.0"
+    repository: "file://../frontend"

@@ -65,7 +65,7 @@ Standard liveness probe
 */}}
 {{- define "ubrnms-common.livenessProbe" -}}
 httpGet:
-  path: /healthz
+  path: {{ .Values.probes.liveness.path | default "/healthz" }}
   port: http
 initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds | default 30 }}
 periodSeconds: {{ .Values.probes.liveness.periodSeconds | default 15 }}
@@ -78,7 +78,7 @@ Standard readiness probe
 */}}
 {{- define "ubrnms-common.readinessProbe" -}}
 httpGet:
-  path: /readyz
+  path: {{ .Values.probes.readiness.path | default "/readyz" }}
   port: http
 initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds | default 10 }}
 periodSeconds: {{ .Values.probes.readiness.periodSeconds | default 10 }}
