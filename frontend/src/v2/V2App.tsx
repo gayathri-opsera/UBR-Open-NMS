@@ -36,6 +36,16 @@ const V2UnifiedOnboardingPage = lazy(() => import('./pages/V2UnifiedOnboardingPa
 const V2ReleaseValidationPage = lazy(() => import('./pages/V2ReleaseValidationPage'));
 const V2CompliancePage    = lazy(() => import('./pages/V2CompliancePage'));
 const V2DiscoveryPage     = lazy(() => import('./pages/V2DiscoveryPage'));
+// WO-014: Adaptive device parameter panels page (metadata-driven, role-aware)
+const AdaptiveDeviceParameterPanelsPage = lazy(
+  () => import('./pages/AdaptiveDeviceParameterPanelsPage'),
+);
+// Framework Operations Dashboard — live multi-vendor health, adapter status, guided failures
+const V2FrameworkOperationsPage = lazy(() => import('./pages/V2FrameworkOperationsPage'));
+// Security, API, and Audit Settings — zero-trust controls, RBAC mapping, credential vault
+const V2SecurityAuditPage = lazy(() => import('./pages/V2SecurityAuditPage'));
+// Product Definition Lifecycle — upload XML/XLS/JSON, validate, stage, activate, rollback
+const V2ProductDefinitionPage = lazy(() => import('./pages/V2ProductDefinitionPage'));
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
@@ -152,6 +162,36 @@ export function V2App() {
                   }
                 />
                 <Route path="discovery" element={<V2DiscoveryPage />} />
+                {/*
+                  WO-014: Adaptive device parameter panels — mounted at
+                  /v2/devices/:id/framework-parameters so it is a sub-route
+                  of the existing device detail page and shares the same id param.
+                  Only reachable when productDefinitionId is present on the device.
+                */}
+                <Route
+                  path="devices/:id/framework-parameters"
+                  element={<AdaptiveDeviceParameterPanelsPage />}
+                />
+                {/* Framework Operations Dashboard — multi-vendor health and guided failures */}
+                <Route path="framework" element={<V2FrameworkOperationsPage />} />
+                {/* Security, API, and Audit Settings — zero-trust, RBAC, vault */}
+                <Route
+                  path="security-audit"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2SecurityAuditPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                {/* Product Definition Lifecycle — upload/validate/stage/activate/rollback */}
+                <Route
+                  path="product-definitions"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                      <V2ProductDefinitionPage />
+                    </V2ProtectedRoute>
+                  }
+                />
                 <Route path="*" element={<V2NotFoundPage />} />
               </Routes>
             </Suspense>

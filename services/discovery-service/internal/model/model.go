@@ -1,7 +1,9 @@
 // Package model defines the Discovery Service domain types.
 package model
 
-import "time"
+import (
+	"time"
+)
 
 // CheckInRequest is the full UBR device periodic check-in payload (WO-021).
 // All optional commissioning fields (GPS, azimuth) are recorded as pending when absent.
@@ -162,7 +164,7 @@ type ScopeEntry struct {
 	Tags            []string `json:"tags,omitempty"`            // Optional tags
 }
 
-// DiscoveryRunRequest is the request payload for POST /api/v1/discovery/runs (WO-011, WO-027).
+// DiscoveryRunRequest is the request payload for POST /api/v1/discovery/runs (WO-011, WO-027, WO-008).
 type DiscoveryRunRequest struct {
 	Scope          []ScopeEntry `json:"scope"`
 	Protocol       string       `json:"protocol,omitempty"`       // SNMP_V1, SNMP_V2C
@@ -170,6 +172,10 @@ type DiscoveryRunRequest struct {
 	Community      string       `json:"community,omitempty"`      // ephemeral v1/v2c community (never persisted)
 	TimeoutSeconds int          `json:"timeoutSeconds,omitempty"`
 	Retries        int          `json:"retries,omitempty"`
+	// WO-008: trigger mode and correlation identifier for multi-mode deterministic probing.
+	// TriggerMode defaults to MANUAL when absent.
+	TriggerMode   TriggerMode  `json:"triggerMode,omitempty"`
+	CorrelationID string       `json:"correlationId,omitempty"`
 }
 
 // DiscoveryRunResponse is the successful response for creating a discovery run (WO-011).
@@ -228,9 +234,40 @@ type DiscoveryHostResult struct {
 	// Empty string when the device doesn't expose the IF-MIB or when only scalar GETs
 	// were attempted (e.g. community string restricted to MIB-II scalars only).
 	MACAddress           string `json:"macAddress,omitempty"`
+
+	// ── WO-011: Guided failure detail (nil when result is not failed/degraded) ─
+	// GuidedFailure is populated for any failed, auth-failed, timeout, partial,
+	// or degraded host result. It provides machine-readable category, operator
+	// guidance, retryability, and last successful protocol without credential material.
+	// Nil for healthy MATCHED results.
+	GuidedFailure *GuidedFailure `json:"guidedFailure,omitempty"`
+
+	// ── WO-010: Framework identity fields (additive, nullable) ────────────────
+	// These fields are populated by the FingerprintMatcher after probe evidence is
+	// matched against the active Product Definition registry. They are never written
+	// by UBR call-home and must not overwrite authoritative identity fields.
+
+	// ProductDefinitionID is the matched Product Definition identifier.
+	// Nil/empty when the device is UNKNOWN, CONFLICT, or registry is unavailable.
+	ProductDefinitionID string `json:"productDefinitionId,omitempty"`
+	// ProductDefinitionVersion is the PD version that produced the match.
+	ProductDefinitionVersion string `json:"productDefinitionVersion,omitempty"`
+	// RegistryVersion identifies the fingerprint registry snapshot used for matching.
+	RegistryVersion string `json:"registryVersion,omitempty"`
+	// ActiveAdapterCandidate is the preferred protocol for this product (e.g. SNMP, SSH).
+	ActiveAdapterCandidate string `json:"activeAdapterCandidate,omitempty"`
+	// FingerprintStatus is the matching outcome: MATCHED, UNKNOWN, CONFLICT,
+	// VERSION_MISMATCH, or REGISTRY_UNAVAILABLE.
+	FingerprintStatus string `json:"fingerprintStatus,omitempty"`
+	// FingerprintConflictReason describes which definitions conflicted (set on CONFLICT).
+	FingerprintConflictReason string `json:"fingerprintConflictReason,omitempty"`
+	// MatchConfidence is a float in [0,1] representing matching strength (set on MATCHED).
+	MatchConfidence float64 `json:"matchConfidence,omitempty"`
+	// MatchEvidence is a credential-free summary of the matched selector (set on MATCHED).
+	MatchEvidence string `json:"matchEvidence,omitempty"`
 }
 
-// DiscoveryRun represents a stored discovery run record (WO-011).
+// DiscoveryRun represents a stored discovery run record (WO-011, WO-008).
 type DiscoveryRun struct {
 	ID              string
 	NormalizedScope []ScopeEntry
@@ -255,6 +292,12 @@ type DiscoveryRun struct {
 	Sweep           *SweepProgress
 	Results         []DiscoveryHostResult
 	DevicesFound    int
+	// WO-008: multi-mode deterministic probe fields (additive — nil-safe for legacy records).
+	TriggerMode         TriggerMode    // MANUAL, SCHEDULED, EVENT_SNMP_TRAP, EVENT_SYSLOG, EVENT_DHCP
+	CorrelationID       string         // request-scoped correlation identifier
+	ProbeAttempts       []ProbeAttempt // ordered probe attempt chain per run (aggregated across all targets)
+	SuccessfulProbeType ProbeType      // first probe type that produced usable evidence
+	RetryAt             *time.Time     // when this run should be retried (event-driven runs)
 }
 
 // DiscoveryRunSummary is the list-row shape for GET /discovery/runs (WO-003).
@@ -283,6 +326,13 @@ type DiscoveryRunDetailResponse struct {
 	Protocol          string         `json:"protocol,omitempty"`
 	SnmpAttemptCount  int            `json:"snmpAttemptCount,omitempty"`
 	SnmpSuccessCount  int            `json:"snmpSuccessCount,omitempty"`
+	// WO-008: multi-mode probe fields (additive; omitted for legacy runs without probe chains).
+	TriggerMode         TriggerMode    `json:"triggerMode,omitempty"`
+	CorrelationID       string         `json:"correlationId,omitempty"`
+	ProbeAttempts       []ProbeAttempt `json:"probeAttempts,omitempty"`
+	SuccessfulProbeType ProbeType      `json:"successfulProbeType,omitempty"`
+	RetryAt             *time.Time     `json:"retryAt,omitempty"`
+	ProbeAttemptCount   int            `json:"probeAttemptCount,omitempty"`
 }
 
 // PaginatedRunsResponse wraps a page of discovery run summaries.
@@ -444,6 +494,105 @@ type ProvisionResponse struct {
 type InventoryCreateResponse struct {
 	ID       string `json:"id"`
 	DeviceID string `json:"deviceId"`
+}
+
+// ── WO-008: Multi-mode deterministic discovery probe models ──────────────────
+
+// TriggerMode identifies the source that initiated a discovery run.
+type TriggerMode string
+
+const (
+	TriggerModeManual       TriggerMode = "MANUAL"
+	TriggerModeScheduled    TriggerMode = "SCHEDULED"
+	TriggerModeEventTrap    TriggerMode = "EVENT_SNMP_TRAP"
+	TriggerModeEventSyslog  TriggerMode = "EVENT_SYSLOG"
+	TriggerModeEventDHCP    TriggerMode = "EVENT_DHCP"
+)
+
+// ValidTriggerModes is the allowlist for trigger mode values.
+var ValidTriggerModes = map[TriggerMode]bool{
+	TriggerModeManual:      true,
+	TriggerModeScheduled:   true,
+	TriggerModeEventTrap:   true,
+	TriggerModeEventSyslog: true,
+	TriggerModeEventDHCP:   true,
+}
+
+// ProbeType identifies the protocol used in a single probe attempt.
+type ProbeType string
+
+const (
+	ProbeTypeICMP     ProbeType = "ICMP"
+	ProbeTypeSNMP     ProbeType = "SNMP"
+	ProbeTypeSSH      ProbeType = "SSH"
+	ProbeTypeHTTP     ProbeType = "HTTP"
+	ProbeTypeHTTPS    ProbeType = "HTTPS"
+	ProbeTypeGRPC     ProbeType = "GRPC_HEALTH"
+)
+
+// ProbeAttemptStatus is the outcome of a single probe attempt.
+type ProbeAttemptStatus string
+
+const (
+	ProbeAttemptSuccess   ProbeAttemptStatus = "success"
+	ProbeAttemptTimeout   ProbeAttemptStatus = "timeout"
+	ProbeAttemptUnreachable ProbeAttemptStatus = "unreachable"
+	ProbeAttemptAuthFailed ProbeAttemptStatus = "auth_failed"
+	ProbeAttemptSkipped   ProbeAttemptStatus = "skipped"
+	ProbeAttemptFailed    ProbeAttemptStatus = "failed"
+)
+
+// ProbeAttempt records the outcome of a single protocol probe against one target.
+// Credential material (community strings, SSH passwords) is NEVER included.
+type ProbeAttempt struct {
+	// ProbeType is the protocol used (ICMP, SNMP, SSH, HTTP, HTTPS, GRPC_HEALTH).
+	ProbeType ProbeType `json:"probeType"`
+	// Status is the outcome of this probe attempt.
+	Status ProbeAttemptStatus `json:"status"`
+	// StartedAt is the ISO-8601 UTC timestamp when the probe started.
+	StartedAt time.Time `json:"startedAt"`
+	// CompletedAt is the ISO-8601 UTC timestamp when the probe ended.
+	CompletedAt time.Time `json:"completedAt"`
+	// LatencyMs is the round-trip latency in milliseconds. 0 if the probe failed immediately.
+	LatencyMs int64 `json:"latencyMs"`
+	// FailureCategory is a machine-readable reason code (e.g. TIMEOUT, AUTH_FAILED).
+	// Empty when status is success.
+	FailureCategory string `json:"failureCategory,omitempty"`
+	// FailureReason is a human-readable message describing why the probe failed.
+	// Never contains credential values.
+	FailureReason string `json:"failureReason,omitempty"`
+	// SafeEvidenceSummary is a credential-free summary of the probe evidence
+	// (e.g. sysDescr snippet, SSH banner prefix, HTTP server header).
+	SafeEvidenceSummary string `json:"safeEvidenceSummary,omitempty"`
+	// Retryable indicates whether this probe type should be reattempted.
+	Retryable bool `json:"retryable"`
+}
+
+// ── WO-011: Guided failure model ──────────────────────────────────────────────
+
+// GuidedFailure is the structured failure detail attached to a failed or degraded
+// discovery result. Every field is operator-visible; credential material must NEVER
+// appear in any field of this struct.
+type GuidedFailure struct {
+	// Category is the top-level machine-readable failure class.
+	Category string `json:"category"`
+	// Code is a specific sub-category code within Category.
+	Code string `json:"code"`
+	// ExplicitReason is a human-readable, credential-free description of the failure.
+	ExplicitReason string `json:"explicitReason"`
+	// Retryable is true when submitting a new discovery run may resolve the issue.
+	Retryable bool `json:"retryable"`
+	// RetryAfter is the earliest UTC time the caller may retry, if known.
+	RetryAfter *time.Time `json:"retryAfter,omitempty"`
+	// LastSuccessfulProtocolAttempt is the last protocol that produced usable evidence.
+	// Empty when no protocol has ever succeeded for this target.
+	LastSuccessfulProtocolAttempt string `json:"lastSuccessfulProtocolAttempt,omitempty"`
+	// LastAttemptedProtocol is the final protocol tried.
+	LastAttemptedProtocol string `json:"lastAttemptedProtocol,omitempty"`
+	// RecommendedNextAction is a human-readable guidance string for operators.
+	RecommendedNextAction string `json:"recommendedNextAction"`
+	// CorrelationID links this failure record to the backend log for this operation.
+	CorrelationID string `json:"correlationId,omitempty"`
 }
 
 // PortProbeResultEvent is published to discovery.port.results after probing

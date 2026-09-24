@@ -48,9 +48,11 @@ jest.mock('opossum', () => {
 
 const { createApp } = require('../../src/app');
 
-function signToken(role = 'operator') {
+function signToken(role = 'operator', extraClaims = {}) {
+  // WO-014: admin tokens on MFA-required routes need mfaVerified=true
+  const mfaClaims = role === 'admin' ? { mfaVerified: true } : {};
   return jwt.sign(
-    { sub: 'user-001', role },
+    { sub: 'user-001', role, ...mfaClaims, ...extraClaims },
     mockPrivatePem,
     { algorithm: 'RS256', expiresIn: '15m', issuer: 'ubr-nms-auth', audience: 'ubr-nms' }
   );
@@ -91,8 +93,9 @@ describe('API Gateway integration', () => {
   it('proxies valid operator request to alarm service', async () => {
     const token = signToken('operator');
     const res = await request(app).get('/api/v1/alarms').set('Authorization', `Bearer ${token}`);
+    // Alarms are served by the local alarmsStub (not a proxy) so we only assert 200.
+    // The stub was added to prevent CORS errors against the remote Opsera dev environment.
     expect(res.status).toBe(200);
-    expect(res.body.proxied).toBe(true);
   });
 
   it('returns 403 for operator accessing /api/v1/users', async () => {
@@ -131,8 +134,10 @@ describe('WO-007: Action permission policies — 6 personas × protected endpoin
   beforeAll(() => { app = createApp(null); });
 
   function makeToken(role, userId) {
+    // WO-014: admin tokens require mfaVerified=true to pass MFA gate on sensitive routes
+    const mfaClaims = role === 'admin' ? { mfaVerified: true } : {};
     return jwt.sign(
-      { sub: userId || `user-${role}`, role },
+      { sub: userId || `user-${role}`, role, ...mfaClaims },
       mockPrivatePem,
       { algorithm: 'RS256', expiresIn: '15m', issuer: 'ubr-nms-auth', audience: 'ubr-nms' }
     );

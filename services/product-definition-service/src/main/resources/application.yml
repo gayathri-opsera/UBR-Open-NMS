@@ -1,0 +1,50 @@
+spring:
+  threads:
+    virtual:
+      enabled: true  # Java 21 Virtual Threads
+  application:
+    name: product-definition-service
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ubrnms_productdef}
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${MAX_UPLOAD_SIZE:10MB}
+      max-request-size: ${MAX_UPLOAD_SIZE:10MB}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        # Fail fast if Kafka is unreachable — lifecycle mutations must not block on Kafka.
+        # The publishLifecycleEvent method swallows exceptions, so a short timeout is safe.
+        max.block.ms: 3000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+
+server:
+  port: ${PORT:8093}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+product-definition:
+  upload:
+    max-file-size-bytes: ${MAX_UPLOAD_BYTES:10485760}  # 10 MB
+
+# Internal service-to-service integration
+inventory:
+  service:
+    url: ${INVENTORY_SERVICE_URL:http://inventory:8082}
+
+logging:
+  level:
+    com.ubrnms: ${LOG_LEVEL:INFO}

@@ -108,7 +108,15 @@ public class InventoryService {
      * @throws IllegalArgumentException if page or limit is invalid
      */
     public PagedResponse<Device> listDevices(String deviceType, String status, int page, int limit) {
-        return listDevices(deviceType, status, null, page, limit);
+        return listDevices(deviceType, status, null, null, page, limit);
+    }
+
+    /**
+     * Lists devices with optional {@code genericDeviceType} filter (SNMP-classified types).
+     */
+    public PagedResponse<Device> listDevices(
+            String deviceType, String status, String genericDeviceType, int page, int limit) {
+        return listDevices(deviceType, status, null, genericDeviceType, page, limit);
     }
 
     /**
@@ -116,7 +124,8 @@ public class InventoryService {
      *
      * @throws IllegalArgumentException if page is negative or limit is out of 1–500 range
      */
-    public PagedResponse<Device> listDevices(String deviceType, String status, String sysObjectID, int page, int limit) {
+    public PagedResponse<Device> listDevices(
+            String deviceType, String status, String sysObjectID, String genericDeviceType, int page, int limit) {
         // Validate and normalise pagination parameters.
         if (page < 0) {
             throw new IllegalArgumentException("page must be >= 0, got: " + page);
@@ -135,6 +144,9 @@ public class InventoryService {
         }
         if (sysObjectID != null && !sysObjectID.isBlank()) {
             predicates.add(Criteria.where("sysObjectID").is(sysObjectID.trim()));
+        }
+        if (genericDeviceType != null && !genericDeviceType.isBlank()) {
+            predicates.add(Criteria.where("genericDeviceType").regex("^" + genericDeviceType.trim() + "$", "i"));
         }
 
         Query query = new Query();
@@ -190,6 +202,29 @@ public class InventoryService {
         }
         Device saved = deviceRepo.save(existing);
         publishInventorySync(saved);
+        return saved;
+    }
+
+    /**
+     * Applies a partial field set to a device by ID.
+     * Uses the same {@link #applyField} dispatch as generic-discovery upsert so
+     * all authority rules and field allow-lists are respected.
+     *
+     * @param id     MongoDB document ID of the device to update
+     * @param fields Map of field names to new values (only present keys are applied)
+     * @return the updated device
+     * @throws ResourceNotFoundException when no device with that ID exists
+     */
+    public Device patchDevice(String id, Map<String, Object> fields) {
+        Device existing = deviceRepo.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Device not found: " + id));
+        if (fields != null) {
+            fields.forEach((field, value) -> applyField(existing, field, value, "GENERIC"));
+        }
+        existing.setLastFrameworkSeenAt(java.time.Instant.now());
+        Device saved = deviceRepo.save(existing);
+        publishInventorySync(saved);
+        log.info("patchDevice: applied {} fields to device id={}", fields != null ? fields.size() : 0, id);
         return saved;
     }
 
@@ -739,6 +774,13 @@ public class InventoryService {
             case "classificationStatus" -> device.setClassificationStatus(str(value));
             case "classificationDeferReason" -> device.setClassificationDeferReason(str(value));
             case "classificationCorrelationId" -> device.setClassificationCorrelationId(str(value));
+            // WO-010: framework identity fields (additive — discovery service PATCH after fingerprint match)
+            case "productDefinitionId"       -> device.setProductDefinitionId(str(value));
+            case "productDefinitionVersion"  -> device.setProductDefinitionVersion(str(value));
+            case "frameworkStatus"           -> device.setFrameworkStatus(str(value));
+            case "activeAdapter"             -> device.setActiveAdapter(str(value));
+            case "observedFirmwareVersion"   -> device.setObservedFirmwareVersion(str(value));
+            case "lastFrameworkFailureSummary" -> device.setLastFrameworkFailureSummary(str(value));
             case "latitude" -> {
                 double lat = toDouble(value);
                 device.setLatitude(lat);
@@ -829,6 +871,75 @@ public class InventoryService {
         } catch (Exception e) {
             log.error("Failed to publish inventory-sync for device serial=[redacted]", e);
         }
+    }
+
+    // ── WO-010: Framework identity association ───────────────────────────────
+
+    /**
+     * Applies framework identity fields (productDefinitionId, activeAdapter, frameworkStatus,
+     * observedFirmwareVersion, lastFrameworkSeenAt, lastFrameworkFailureSummary) to an existing
+     * device record using additive-only semantics.
+     *
+     * <p>Protected fields (serial, MAC, deviceType, identityAuthority, bootstrapState,
+     * credentialRef) are NEVER touched by this method — only the nullable framework
+     * identity fields defined in WO-010 are written.
+     *
+     * <p>If the device is not found, the method logs a warning and returns without error.
+     * The caller is responsible for deciding whether to retry.
+     *
+     * @param ipAddress         Management IP of the device (used to locate the record).
+     * @param frameworkIdentity Map of framework identity fields to apply. Accepted keys:
+     *                          productDefinitionId, productDefinitionVersion,
+     *                          observedFirmwareVersion, activeAdapter,
+     *                          frameworkStatus, lastFrameworkFailureSummary.
+     * @param correlationId     Tracing correlation ID for this update.
+     */
+    public void applyFrameworkIdentity(String ipAddress, Map<String, Object> frameworkIdentity, String correlationId) {
+        if (ipAddress == null || ipAddress.isBlank()) {
+            log.warn("applyFrameworkIdentity: ipAddress is blank — skipping; correlationId={}", correlationId);
+            return;
+        }
+        if (frameworkIdentity == null || frameworkIdentity.isEmpty()) {
+            log.debug("applyFrameworkIdentity: empty identity map — skipping; correlationId={}", correlationId);
+            return;
+        }
+
+        Query query = new Query(Criteria.where("ipAddress").is(ipAddress));
+        Optional<Device> maybeDevice = Optional.ofNullable(mongoTemplate.findOne(query, Device.class));
+
+        if (maybeDevice.isEmpty()) {
+            log.warn("applyFrameworkIdentity: no device found for ip=[redacted]; correlationId={}", correlationId);
+            return;
+        }
+
+        Device device = maybeDevice.get();
+
+        // Apply only the allowed additive framework fields — never touch protected fields.
+        if (frameworkIdentity.containsKey("productDefinitionId")) {
+            device.setProductDefinitionId(str(frameworkIdentity.get("productDefinitionId")));
+        }
+        if (frameworkIdentity.containsKey("productDefinitionVersion")) {
+            device.setProductDefinitionVersion(str(frameworkIdentity.get("productDefinitionVersion")));
+        }
+        if (frameworkIdentity.containsKey("observedFirmwareVersion")) {
+            device.setObservedFirmwareVersion(str(frameworkIdentity.get("observedFirmwareVersion")));
+        }
+        if (frameworkIdentity.containsKey("activeAdapter")) {
+            device.setActiveAdapter(str(frameworkIdentity.get("activeAdapter")));
+        }
+        if (frameworkIdentity.containsKey("frameworkStatus")) {
+            device.setFrameworkStatus(str(frameworkIdentity.get("frameworkStatus")));
+        }
+        if (frameworkIdentity.containsKey("lastFrameworkFailureSummary")) {
+            device.setLastFrameworkFailureSummary(str(frameworkIdentity.get("lastFrameworkFailureSummary")));
+        }
+        device.setLastFrameworkSeenAt(Instant.now());
+
+        deviceRepo.save(device);
+        publishInventorySync(device);
+
+        log.info("applyFrameworkIdentity: updated frameworkStatus={} pdId=[{}] ip=[redacted] correlationId={}",
+            device.getFrameworkStatus(), device.getProductDefinitionId(), correlationId);
     }
 
     // ── Type coercions ────────────────────────────────────────────────────────

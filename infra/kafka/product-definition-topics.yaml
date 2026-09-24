@@ -1,0 +1,86 @@
+# Product Definition Kafka Topic Configuration
+# Managed by: Product Definition Service (WO-018)
+# Consumer groups should use the prefix "pd-" to avoid collision with other services.
+#
+# Topic creation in production is handled by Confluent Control Center or kafka-topics.sh.
+# In dev/test environments, KAFKA_AUTO_CREATE_TOPICS_ENABLE=true handles this.
+# For staging/production, apply this config via the Kafka Admin API or CI pipeline.
+
+topics:
+  # Primary lifecycle event stream
+  - name: product-definition.lifecycle
+    description: >
+      All Product Definition lifecycle transition events.
+      Key: definitionId (UUID) — ensures per-definition event ordering within a partition.
+      Consumers: audit-service, state-machine-enforcer, registry-rebuild-worker, northbound-API.
+    partitions: 12
+    replication_factor: 3          # override to 1 in dev (single-broker)
+    config:
+      # 30-day retention supports audit replay and catch-up after consumer downtime
+      retention.ms: 2592000000     # 30 days
+      retention.bytes: -1          # unlimited size retention
+      cleanup.policy: delete
+      compression.type: lz4
+      max.message.bytes: 1048576   # 1 MB max event size
+      min.insync.replicas: 2       # production; override to 1 in dev
+    schema:
+      file: shared-libs/json-schemas/kafka/product-definition-lifecycle.schema.json
+      compatibility: BACKWARD      # new optional fields allowed; field removal requires version bump
+
+  # Dead-letter queue for undeliverable lifecycle events
+  - name: product-definition.lifecycle.dlq
+    description: >
+      Dead-letter topic for product-definition.lifecycle events that failed consumer processing.
+      Messages include original payload plus error headers (reason, consumer-group, offset).
+    partitions: 3
+    replication_factor: 3
+    config:
+      retention.ms: 7776000000     # 90 days for DLQ — longer window for investigation
+      retention.bytes: -1
+      cleanup.policy: delete
+      compression.type: lz4
+      max.message.bytes: 2097152   # 2 MB — DLQ messages include original + error envelope
+
+consumer_groups:
+  - id: pd-audit-consumer
+    topic: product-definition.lifecycle
+    description: Audit Service consumes all lifecycle events to build immutable audit trail.
+    auto_offset_reset: earliest    # replay all events on first start
+    enable_auto_commit: false      # manual commit after persisting audit record
+
+  - id: pd-registry-rebuild-worker
+    topic: product-definition.lifecycle
+    description: >
+      Registry Rebuild Worker listens for product_definition.published events
+      and rebuilds fingerprint_registry, parameter_registry, and adaptive_ui_cache.
+    auto_offset_reset: latest
+    enable_auto_commit: false
+
+  - id: pd-state-machine-monitor
+    topic: product-definition.lifecycle
+    description: >
+      State machine monitor detects out-of-order or duplicate events and emits
+      consistency alerts. Read-only consumer.
+    auto_offset_reset: earliest
+    enable_auto_commit: true
+
+  - id: pd-northbound-publisher
+    topic: product-definition.lifecycle
+    description: >
+      Northbound API WebSocket/SSE push to subscribed admin clients watching definition status.
+    auto_offset_reset: latest
+    enable_auto_commit: true
+
+message_key_strategy:
+  field: aggregateId
+  type: string
+  format: uuid
+  rationale: >
+    Keying on aggregateId (definitionId) ensures all events for the same Product Definition
+    land on the same partition. This preserves per-definition event ordering for consumers
+    that maintain per-definition state (e.g., registry rebuild, state machine consistency).
+
+dev_overrides:
+  partitions: 1
+  replication_factor: 1
+  min.insync.replicas: 1

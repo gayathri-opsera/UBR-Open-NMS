@@ -1,0 +1,10 @@
+{
+  "$schema": "urn:wrong:schema",
+  "productDefinition": {
+    "identity": {
+      "name": "Test Device",
+      "vendor": "TestVendor",
+      "model": "TestModel"
+    }
+  }
+}

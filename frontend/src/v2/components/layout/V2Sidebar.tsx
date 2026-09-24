@@ -55,6 +55,14 @@ const NAV_GROUPS: NavGroup[] = [
       { path: '/v2/admin',        label: 'Admin',            icon: <AdminIcon />, allowedRoles: ['Admin'] as Role[] },
     ],
   },
+  {
+    label: 'Framework',
+    items: [
+      { path: '/v2/framework',           label: 'Framework Ops',        icon: <FrameworkIcon /> },
+      { path: '/v2/product-definitions', label: 'Product Definitions',  icon: <ProductDefIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
+      { path: '/v2/security-audit',      label: 'Security & Audit',     icon: <AuditIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
+    ],
+  },
 ];
 
 function normalizeRole(role: string): string {
@@ -264,6 +272,12 @@ function DiscoveryIcon() { return <svg width="16" height="16" viewBox="0 0 16 16
 function OnboardIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2a4 4 0 100 8A4 4 0 008 2z" stroke="currentColor" strokeWidth="1.4"/><path d="M5.5 14h5M8 10v4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M6.5 6l1.5 1.5L10 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 function ValidationIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="1" width="12" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5 7l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 function ShieldIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5L3 3v4c0 3 2 5.5 5 7 3-1.5 5-4 5-7V3l-5-1.5z" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M6 7.5l1.5 1.5L10 6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+/** Framework Ops icon — network/grid with a health pulse overlay */
+function FrameworkIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="10" y="1" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="1" y="10" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/><path d="M10 12.5h5M13 10v5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M3.5 13.5V7.5h9V7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>; }
+/** Product Definitions icon — document with upload arrow */
+function ProductDefIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="2" width="9" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><path d="M11 10l2-2 2 2M13 8v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+/** Security & Audit icon — lock with checkmark */
+function AuditIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5 7V5a3 3 0 116 0v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M6.5 11l1.5 1.5 2-2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 
 function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   return collapsed

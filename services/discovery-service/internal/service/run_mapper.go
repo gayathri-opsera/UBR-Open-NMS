@@ -34,19 +34,31 @@ func ToRunDetail(r *model.DiscoveryRun) model.DiscoveryRunDetailResponse {
 		updatedAt = r.CompletedAt
 	}
 	attempts, successes := snmpCounts(r.Results)
+
+	// WO-008: propagate multi-mode probe fields (nil-safe for legacy runs).
+	probeAttempts := r.ProbeAttempts
+	if probeAttempts == nil {
+		probeAttempts = []model.ProbeAttempt{}
+	}
 	return model.DiscoveryRunDetailResponse{
-		RunID:             r.ID,
-		Status:            r.Status,
-		NormalizedScope:   r.NormalizedScope,
-		CreatedBy:         r.CreatedBy,
-		CreatedAt:         r.CreatedAt,
-		UpdatedAt:         updatedAt,
-		ValidationSummary: r.ValidationNotes,
-		Sweep:             r.Sweep,
-		FailureReason:     r.FailureReason,
-		Protocol:          r.Protocol,
-		SnmpAttemptCount:  attempts,
-		SnmpSuccessCount:  successes,
+		RunID:               r.ID,
+		Status:              r.Status,
+		NormalizedScope:     r.NormalizedScope,
+		CreatedBy:           r.CreatedBy,
+		CreatedAt:           r.CreatedAt,
+		UpdatedAt:           updatedAt,
+		ValidationSummary:   r.ValidationNotes,
+		Sweep:               r.Sweep,
+		FailureReason:       r.FailureReason,
+		Protocol:            r.Protocol,
+		SnmpAttemptCount:    attempts,
+		SnmpSuccessCount:    successes,
+		TriggerMode:         r.TriggerMode,
+		CorrelationID:       r.CorrelationID,
+		ProbeAttempts:       probeAttempts,
+		SuccessfulProbeType: r.SuccessfulProbeType,
+		RetryAt:             r.RetryAt,
+		ProbeAttemptCount:   len(probeAttempts),
 	}
 }
 

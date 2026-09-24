@@ -22,10 +22,13 @@ const devicesStub     = require('./routes/devices.stub');
 const dashboardsStub  = require('./routes/dashboards.stub');
 const { createProvisionHandler } = require('./routes/provision.stub');
 const { listIgnored, addIgnored, removeIgnored } = require('./routes/ignore.stub');
-// Alarms stub — serves local alarm data instead of proxying to the external Opsera dev
-// environment.  Without this stub, ALARM_SERVICE_URL (often set to ubr-nms-frontend-dev.
-// agent.opsera.dev) causes a CORS error + 401 for every /api/v1/alarms request.
-const alarmsStub      = require('./routes/alarms.stub');
+const frameworkProductDefinitions = require('./routes/frameworkProductDefinitions');
+const frameworkSecurity           = require('./routes/frameworkSecurity.routes');
+const frameworkParameters         = require('./routes/frameworkParameters.routes');
+const framework                   = require('./routes/framework.routes');
+// Alarms router — proxies to local alarm-service when ALARM_SERVICE_URL is local,
+// otherwise serves stub data to avoid CORS/auth issues with the external Opsera dev env.
+const alarmsRoutes    = require('./routes/alarms.routes');
 
 function createApp(redisClient) {
   const app = express();
@@ -48,13 +51,37 @@ function createApp(redisClient) {
   app.use('/api/v1/notifications/stream', createSseProxy(config.services.notification));
 
   // ── Stub routers for sub-services (mounted BEFORE proxy routes) ──────────────
-  // Alarms stub — intercepts before the external proxy so local dev never hits Opsera dev.
-  app.use('/api/v1/alarms',        alarmsStub);
+  // Alarms — proxies to local alarm-service (with stub fallback for external envs).
+  app.use('/api/v1/alarms',        alarmsRoutes);
   app.use('/api/v1/admin',         adminStub);
   app.use('/api/v1/organizations', hierarchyStub);
   app.use('/api/v1/groups',        groupsStub);
   // Custom dashboards — persisted to MongoDB so they survive browser/device changes
   app.use('/api/v1/dashboards',    dashboardsStub);
+  // Framework Product Definitions — proxied to product-definition-service with RBAC.
+  // Mounted at both the legacy v1 path and the canonical framework path (WO-004).
+  // The WO-004 path (/api/framework/v1/product-definitions) is the authoritative
+  // endpoint for all northbound consumers; the v1 path remains for backward compat.
+  app.use('/api/v1/framework/product-definitions', frameworkProductDefinitions);
+  app.use('/api/framework/v1/product-definitions', frameworkProductDefinitions);
+
+  // WO-005: Framework Security — Credential Reference API
+  // Exposes northbound-safe credential reference CRUD under the protected framework route group.
+  // All routes require SuperAdmin capability; secrets are write-only and stored AES-256-GCM encrypted.
+  app.use('/api/framework/v1/security/credential-references', frameworkSecurity);
+  app.use('/api/v1/framework/security/credential-references', frameworkSecurity); // legacy alias
+
+  // WO-006: Framework Parameter Visibility — Device Parameter Routes
+  // Server-side role filtering of parameter groups and parameters based on uiVisibleTo metadata.
+  app.use('/api/framework/v1/devices', frameworkParameters);
+  app.use('/api/v1/framework/devices', frameworkParameters); // legacy alias
+
+  // WO-007: Read-Only Framework API Routes
+  // Device framework identity, discovery run results, guided failures, security status.
+  // Mounted under the same protected path group — JWT + framework RBAC is enforced per-route.
+  app.use('/api/framework/v1', framework);
+  app.use('/api/v1/framework', framework); // legacy alias
+
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);
   // Diagnostics stub — Java diagnostics-service returns 503 in local dev

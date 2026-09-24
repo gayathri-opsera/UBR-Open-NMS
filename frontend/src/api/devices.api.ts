@@ -19,9 +19,17 @@ export async function fetchDevices(filter: DeviceFilter = {}): Promise<Device[]>
   const all: Device[] = [];
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await apiClient.get('/devices', {
-      params: { limit: PAGE_SIZE, page, ...filter },
-    });
+    const params: Record<string, string | number> = { limit: PAGE_SIZE, page };
+    if (filter.deviceType) params.deviceType = filter.deviceType;
+    if (filter.genericDeviceType) params.genericDeviceType = filter.genericDeviceType;
+    if (filter.status) params.status = filter.status;
+    if (filter.sysObjectID) params.sysObjectID = filter.sysObjectID;
+    if (filter.firmware) params.firmware = filter.firmware;
+    if (filter.organizationId) params.organizationId = filter.organizationId;
+    if (filter.hierarchyId) params.hierarchyId = filter.hierarchyId;
+    if (filter.networkId) params.networkId = filter.networkId;
+    if (filter.limit !== undefined) params.limit = filter.limit;
+    const res = await apiClient.get('/devices', { params });
     const batch = extractBatch(res.data);
     all.push(...batch);
     if (batch.length < PAGE_SIZE) break; // last page reached

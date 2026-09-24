@@ -3,6 +3,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/airtel-ubrnms/discovery-service/internal/auth"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
+	"github.com/airtel-ubrnms/discovery-service/internal/fingerprint"
 	"github.com/airtel-ubrnms/discovery-service/internal/service"
 	"github.com/airtel-ubrnms/discovery-service/internal/southbound"
 )
@@ -25,9 +27,10 @@ import (
 type DiscoveryHandler struct {
 	svc           *service.DiscoveryService
 	store         *service.DeviceStore
-	runStore      *service.DiscoveryRunStore // WO-011
-	runExecutor   *service.RunExecutor       // async ICMP/SNMP pipeline
-	hmacValidator *auth.Validator            // WO-015: nil disables HMAC validation (dev/test)
+	runStore      *service.DiscoveryRunStore  // WO-011
+	runExecutor   *service.RunExecutor        // async ICMP/SNMP pipeline
+	hmacValidator *auth.Validator             // WO-015: nil disables HMAC validation (dev/test)
+	matcher       *fingerprint.Matcher        // WO-010: nil disables fingerprint matching
 }
 
 // New creates a DiscoveryHandler.
@@ -46,6 +49,57 @@ func (h *DiscoveryHandler) WithHMACValidator(v *auth.Validator) *DiscoveryHandle
 func (h *DiscoveryHandler) WithRunExecutor(e *service.RunExecutor) *DiscoveryHandler {
 	h.runExecutor = e
 	return h
+}
+
+// WithMatcher attaches a FingerprintMatcher (WO-010).
+// When set, discovery run results are enriched with framework identity fields
+// by matching probe evidence against the active Product Definition registry.
+func (h *DiscoveryHandler) WithMatcher(m *fingerprint.Matcher) *DiscoveryHandler {
+	h.matcher = m
+	return h
+}
+
+// applyFingerprintMatch enriches a DiscoveryHostResult with the framework identity
+// fields resolved by the FingerprintMatcher for this host. It is a no-op when the
+// matcher is not configured. The host result is mutated in-place.
+func (h *DiscoveryHandler) applyFingerprintMatch(ctx context.Context, result *model.DiscoveryHostResult, runID, correlationID string) {
+	if h.matcher == nil {
+		return
+	}
+	// Build credential-free evidence from the already-collected fingerprint fields.
+	ev := fingerprint.ProbeEvidence{
+		IP:                 result.IP,
+		RunID:              runID,
+		CorrelationID:      correlationID,
+		SNMPOIDSysObjectID: result.SysObjectID,
+		SNMPSysDescr:       result.SysDescr,
+		// SSH banner, HTTP headers/body, and gRPC services are populated by the
+		// probe orchestrator when non-SNMP probes are enabled (WO-008 future).
+	}
+	mr := h.matcher.Match(ctx, ev)
+	if mr == nil {
+		return
+	}
+
+	result.FingerprintStatus = string(mr.Status)
+	switch mr.Status {
+	case fingerprint.FingerprintStatusMatched:
+		result.ProductDefinitionID = mr.ProductDefinitionID
+		result.ProductDefinitionVersion = mr.ProductDefinitionVersion
+		result.RegistryVersion = mr.RegistryVersion
+		result.ActiveAdapterCandidate = mr.ActiveAdapterCandidate
+		result.MatchConfidence = mr.MatchConfidence
+		result.MatchEvidence = mr.MatchEvidence
+		result.GenericDeviceType = mr.DeviceType
+	case fingerprint.FingerprintStatusConflict:
+		result.FingerprintConflictReason = mr.ConflictReason
+		result.RegistryVersion = mr.RegistryVersion
+	case fingerprint.FingerprintStatusVersionMismatch:
+		result.RegistryVersion = mr.RegistryVersion
+		result.FingerprintConflictReason = fmt.Sprintf("firmware %q is outside the range accepted by %s", mr.FirmwareVersion, mr.VersionMismatchEntry)
+	case fingerprint.FingerprintStatusRegistryUnavailable:
+		// Registry read failed — leave other fields empty; callers can retry.
+	}
 }
 
 // CheckIn handles POST /api/v1/discovery/check-in
@@ -452,6 +506,18 @@ func (h *DiscoveryHandler) CreateDiscoveryRun(w http.ResponseWriter, r *http.Req
 			json.NewEncoder(w).Encode(validationErr)
 			return
 		}
+		// WO-008: event-driven duplicate suppression — return existing run ID as 409 Conflict.
+		if errors.Is(err, service.ErrDuplicateInFlightTarget) {
+			writeJSON(w, http.StatusConflict, map[string]interface{}{
+				"status": "error",
+				"error": map[string]interface{}{
+					"code":          "DUPLICATE_IN_FLIGHT_TARGET",
+					"message":       "A discovery run is already in progress for one or more targets in this scope. Use the existing run ID.",
+					"correlationId": corrID,
+				},
+			})
+			return
+		}
 		// Unexpected internal fault: 500
 		southbound.InternalError(w, corrID)
 		return
@@ -514,7 +580,26 @@ func (h *DiscoveryHandler) ProvisionDiscoveredHosts(w http.ResponseWriter, r *ht
 	provisioned, failed := 0, 0
 
 	for _, host := range req.Hosts {
+		var productDefinitionID, genericDeviceType, frameworkStatus string
+		if h.matcher != nil {
+			ev := fingerprint.ProbeEvidence{
+				IP:                 host.IP,
+				RunID:              runID,
+				CorrelationID:      corrID,
+				SNMPOIDSysObjectID: host.SysObjectID,
+				SNMPSysDescr:       host.SysDescr,
+			}
+			if mr := h.matcher.Match(r.Context(), ev); mr != nil && mr.Status == fingerprint.FingerprintStatusMatched {
+				productDefinitionID = mr.ProductDefinitionID
+				genericDeviceType = mr.DeviceType
+				frameworkStatus = string(mr.Status)
+			}
+		}
+
 		result := provisionOneHost(httpClient, inventoryURL, runID, host)
+		if result.Status == "provisioned" && result.DeviceID != "" && result.DeviceID != "unknown" {
+			h.patchInventoryFramework(r.Context(), result.DeviceID, productDefinitionID, genericDeviceType, frameworkStatus)
+		}
 		results = append(results, result)
 		if result.Status == "provisioned" {
 			provisioned++
@@ -535,6 +620,39 @@ func (h *DiscoveryHandler) ProvisionDiscoveredHosts(w http.ResponseWriter, r *ht
 	}
 
 	writeJSON(w, status, resp)
+}
+
+func (h *DiscoveryHandler) patchInventoryFramework(ctx context.Context, deviceID, productDefinitionID, genericDeviceType, frameworkStatus string) {
+	if deviceID == "" || productDefinitionID == "" {
+		return
+	}
+	inventoryURL := os.Getenv("INVENTORY_SERVICE_URL")
+	if inventoryURL == "" {
+		inventoryURL = "http://inventory:8082"
+	}
+	body := map[string]interface{}{
+		"productDefinitionId": productDefinitionID,
+		"frameworkStatus":     frameworkStatus,
+	}
+	if genericDeviceType != "" {
+		body["genericDeviceType"] = genericDeviceType
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch,
+		inventoryURL+"/api/v1/devices/"+deviceID, bytes.NewReader(bodyBytes))
+	if err != nil {
+		slog.Warn("patch-framework: could not build request", "deviceId", deviceID, "err", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Warn("patch-framework: inventory PATCH failed", "deviceId", deviceID, "err", err)
+		return
+	}
+	defer resp.Body.Close()
+	slog.Info("patch-framework: inventory updated", "deviceId", deviceID, "productDefinitionId", productDefinitionID, "genericDeviceType", genericDeviceType, "status", resp.StatusCode)
 }
 
 // provisionOneHost attempts to create a single device in the inventory-service via HTTP.

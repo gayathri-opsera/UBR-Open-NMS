@@ -114,4 +114,51 @@ public class Alarm {
      * Must never contain certificates, HMAC signatures, nonces, or raw secrets.
      */
     private Map<String, Object> evidenceContext;
+
+    // ── WO-013: Framework parameter threshold fields (additive, nullable) ─────────
+
+    /**
+     * Product Definition identifier for framework-originated threshold alarms.
+     * Null for alarms raised by non-framework sources (SNMP, syslog, etc.).
+     */
+    private String productDefinitionId;
+
+    /**
+     * Active registry version at the time the threshold alarm was raised.
+     * Null for non-framework alarms.
+     */
+    private String registryVersion;
+
+    /**
+     * Parameter group identifier from the Product Definition.
+     * Null for non-framework alarms.
+     */
+    private String groupId;
+
+    /**
+     * Stable parameter identifier from the Product Definition.
+     * Null for non-framework alarms.
+     */
+    private String parameterId;
+
+    /**
+     * Observed numeric parameter value that caused the threshold breach.
+     * Stored for operator context in alarm detail views.
+     * Zero for non-threshold or non-framework alarms.
+     */
+    private double observedValue;
+
+    /**
+     * Threshold value (high or low) that was breached.
+     * Stored alongside metricValue for deterministic alarm clear matching.
+     * Zero for non-threshold or non-framework alarms.
+     */
+    private double thresholdValue;
+
+    /**
+     * Threshold condition that triggered this alarm.
+     * Values: "HIGH" (value >= thresholdHigh), "LOW" (value <= thresholdLow).
+     * Null for non-framework threshold alarms.
+     */
+    private String thresholdCondition;
 }

@@ -1,0 +1,382 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# WO-015: Framework Monitoring Scenario Suite
+#
+# Validates the complete read-only monitoring critical path:
+#   discovery association -> parameter polling -> threshold alarms -> adaptive UI
+#
+# Prerequisites: simulator profiles from
+#   test-harness/device-simulator/profiles/framework-monitoring.yaml
+# must be loaded before running these scenarios.
+#
+# All scenarios run against mocked / simulator-backed services.
+# No real credentials or production network access is required.
+# ──────────────────────────────────────────────────────────────────────────────
+
+---
+name: framework-monitoring-successful-path
+description: "WO-015: Discovered framework device produces current parameter values within one poll interval"
+timeout_seconds: 120
+
+setup:
+  - action: load_simulator_profile
+    profile: "test-harness/device-simulator/profiles/framework-monitoring.yaml"
+    device_filter: ["fw-dev-success-001"]
+
+steps:
+  - name: verify-pd-association
+    action: http_get
+    url: "${INVENTORY_URL}/api/v1/devices/${FW_DEVICE_SUCCESS_ID:fw-dev-success-001}"
+    expect_status: 200
+    expect_body_contains: "pd-framework-router-v1"
+    retry:
+      times: 10
+      delay_seconds: 2
+
+  - name: poll-for-current-values
+    action: http_get
+    url: "${PARAMETER_POLLER_URL:http://localhost:8084}/api/framework/v1/devices/${FW_DEVICE_SUCCESS_ID:fw-dev-success-001}/parameters/current"
+    expect_status: 200
+    retry:
+      times: 15
+      delay_seconds: 4
+
+  - name: assert-all-parameters-fresh
+    action: framework_assert
+    type: all_freshness_states
+    groups_context_key: "current_values_groups"
+    expected_state: "FRESH"
+
+  - name: assert-registry-consistency
+    action: framework_assert
+    type: registry_consistency
+    groups_context_key: "current_values_groups"
+    expected_registry_version: "registry-fw-001"
+    expected_product_definition_id: "pd-framework-router-v1"
+
+  - name: assert-no-credential-leak
+    action: framework_assert
+    type: no_credential_leak
+    text_context_key: "current_values_raw_json"
+    label: "successful-path current-value response"
+
+assertions:
+  - type: "not_empty"
+    actual: "${current_values_groups}"
+    description: "Parameter groups are non-empty after successful poll"
+
+  - type: "equals"
+    actual: "${freshness_state_violations}"
+    expected: "0"
+    description: "No STALE or FAILED parameters on successful device"
+
+  - type: "equals"
+    actual: "${registry_version_violations}"
+    expected: "0"
+    description: "All parameters share the same registry version"
+
+---
+name: framework-monitoring-stale-telemetry
+description: "WO-015: Delayed values cross the staleness boundary; scenario asserts STALE state and last_success_at is preserved"
+timeout_seconds: 120
+
+setup:
+  - action: load_simulator_profile
+    profile: "test-harness/device-simulator/profiles/framework-monitoring.yaml"
+    device_filter: ["fw-dev-stale-001"]
+
+steps:
+  - name: poll-for-stale-values
+    action: http_get
+    url: "${PARAMETER_POLLER_URL:http://localhost:8084}/api/framework/v1/devices/${FW_DEVICE_STALE_ID:fw-dev-stale-001}/parameters/current"
+    expect_status: 200
+    retry:
+      times: 15
+      delay_seconds: 4
+
+  - name: assert-all-parameters-stale
+    action: framework_assert
+    type: all_freshness_states
+    groups_context_key: "current_values_groups"
+    expected_state: "STALE"
+
+  - name: assert-stale-values-preserved
+    action: assert
+    condition: "${stale_params_with_last_success_at} > 0"
+    fail_message: "Stale parameters must retain last_success_at from prior successful collection"
+
+  - name: assert-no-credential-leak
+    action: framework_assert
+    type: no_credential_leak
+    text_context_key: "current_values_raw_json"
+    label: "stale-telemetry failure-reason fields"
+
+assertions:
+  - type: "equals"
+    actual: "${freshness_state_violations}"
+    expected: "0"
+    description: "All parameters are STALE with no FRESH or FAILED mismatch"
+
+---
+name: framework-monitoring-protocol-timeout
+description: "WO-015: Device does not respond; parameters transition to STALE with TIMEOUT failure category"
+timeout_seconds: 120
+
+setup:
+  - action: load_simulator_profile
+    profile: "test-harness/device-simulator/profiles/framework-monitoring.yaml"
+    device_filter: ["fw-dev-timeout-001"]
+
+steps:
+  - name: poll-for-timeout-values
+    action: http_get
+    url: "${PARAMETER_POLLER_URL:http://localhost:8084}/api/framework/v1/devices/${FW_DEVICE_TIMEOUT_ID:fw-dev-timeout-001}/parameters/current"
+    expect_status: 200
+    retry:
+      times: 15
+      delay_seconds: 4
+
+  - name: assert-failure-category-is-timeout
+    action: assert
+    condition: "${failure_categories} contains 'TIMEOUT'"
+    fail_message: "Expected TIMEOUT failure_category in at least one parameter"
+
+  - name: assert-no-credential-leak
+    action: framework_assert
+    type: no_credential_leak
+    text_context_key: "current_values_raw_json"
+    label: "timeout-failure failure-reason fields"
+
+assertions:
+  - type: "equals"
+    actual: "${auth_failure_count}"
+    expected: "0"
+    description: "Timeout must not be misclassified as AUTH_FAILURE"
+
+  - type: "equals"
+    actual: "${credential_leak_count}"
+    expected: "0"
+    description: "No credential material in operator-visible failure reasons"
+
+---
+name: framework-monitoring-auth-failure
+description: "WO-015: Device rejects management access; all parameters transition to FAILED with AUTH_FAILURE category"
+timeout_seconds: 120
+
+setup:
+  - action: load_simulator_profile
+    profile: "test-harness/device-simulator/profiles/framework-monitoring.yaml"
+    device_filter: ["fw-dev-authfail-001"]
+
+steps:
+  - name: poll-for-auth-failure-values
+    action: http_get
+    url: "${PARAMETER_POLLER_URL:http://localhost:8084}/api/framework/v1/devices/${FW_DEVICE_AUTHFAIL_ID:fw-dev-authfail-001}/parameters/current"
+    expect_status: 200
+    retry:
+      times: 15
+      delay_seconds: 4
+
+  - name: assert-all-parameters-failed
+    action: framework_assert
+    type: all_freshness_states
+    groups_context_key: "current_values_groups"
+    expected_state: "FAILED"
+
+  - name: assert-failure-category-is-auth-failure
+    action: assert
+    condition: "${failure_categories} contains 'AUTH_FAILURE'"
+    fail_message: "Expected AUTH_FAILURE failure_category in all parameters"
+
+  - name: assert-no-credential-leak
+    action: framework_assert
+    type: no_credential_leak
+    text_context_key: "current_values_raw_json"
+    label: "auth-failure failure-reason fields"
+
+assertions:
+  - type: "equals"
+    actual: "${credential_leak_count}"
+    expected: "0"
+    description: "No credential material in operator-visible failure reasons"
+
+  - type: "equals"
+    actual: "${timeout_count}"
+    expected: "0"
+    description: "Auth failure must not be misclassified as TIMEOUT"
+
+---
+name: framework-monitoring-threshold-high
+description: "WO-015: Metadata-driven alarm raised when cpu_load exceeds the 90% high threshold"
+timeout_seconds: 180
+
+setup:
+  - action: load_simulator_profile
+    profile: "test-harness/device-simulator/profiles/framework-monitoring.yaml"
+    device_filter: ["fw-dev-threshold-high-001"]
+
+steps:
+  - name: wait-for-parameter-poll
+    action: http_get
+    url: "${PARAMETER_POLLER_URL:http://localhost:8084}/api/framework/v1/devices/${FW_DEVICE_THRESHOLD_HIGH_ID:fw-dev-threshold-high-001}/parameters/current"
+    expect_status: 200
+    retry:
+      times: 20
+      delay_seconds: 4
+
+  - name: verify-alarm-raised
+    action: http_get
+    url: "${ALARM_URL}/api/v1/alarms?deviceId=${FW_DEVICE_THRESHOLD_HIGH_ID:fw-dev-threshold-high-001}&state=ACTIVE"
+    expect_status: 200
+    expect_body_contains: "cpu_load"
+    retry:
+      times: 15
+      delay_seconds: 2
+
+  - name: assert-alarm-fields
+    action: framework_assert
+    type: threshold_alarm
+    alarm_context_key: "active_alarm"
+    expected_condition: "HIGH"
+    expected_parameter_id: "cpu_load"
+    expected_device_id: "${FW_DEVICE_THRESHOLD_HIGH_ID:fw-dev-threshold-high-001}"
+    expected_product_definition_id: "pd-framework-router-v1"
+
+assertions:
+  - type: "not_empty"
+    actual: "${active_alarm_id}"
+    description: "An alarm record exists for the threshold breach"
+
+  - type: "equals"
+    actual: "${alarm_condition}"
+    expected: "HIGH"
+    description: "Alarm condition is HIGH for cpu_load breach"
+
+  - type: "not_empty"
+    actual: "${alarm_registry_version}"
+    description: "Alarm records registry_version from the parameter registry"
+
+  - type: "equals"
+    actual: "${alarm_parameter_id}"
+    expected: "cpu_load"
+    description: "Alarm parameterId matches the breached parameter"
+
+---
+name: framework-monitoring-threshold-low
+description: "WO-015: Metadata-driven alarm raised when rx_power drops below the -10 dBm low threshold"
+timeout_seconds: 180
+
+setup:
+  - action: load_simulator_profile
+    profile: "test-harness/device-simulator/profiles/framework-monitoring.yaml"
+    device_filter: ["fw-dev-threshold-low-001"]
+
+steps:
+  - name: wait-for-parameter-poll
+    action: http_get
+    url: "${PARAMETER_POLLER_URL:http://localhost:8084}/api/framework/v1/devices/${FW_DEVICE_THRESHOLD_LOW_ID:fw-dev-threshold-low-001}/parameters/current"
+    expect_status: 200
+    retry:
+      times: 20
+      delay_seconds: 4
+
+  - name: verify-alarm-raised
+    action: http_get
+    url: "${ALARM_URL}/api/v1/alarms?deviceId=${FW_DEVICE_THRESHOLD_LOW_ID:fw-dev-threshold-low-001}&state=ACTIVE"
+    expect_status: 200
+    expect_body_contains: "rx_power"
+    retry:
+      times: 15
+      delay_seconds: 2
+
+  - name: assert-alarm-fields
+    action: framework_assert
+    type: threshold_alarm
+    alarm_context_key: "active_alarm"
+    expected_condition: "LOW"
+    expected_parameter_id: "rx_power"
+    expected_device_id: "${FW_DEVICE_THRESHOLD_LOW_ID:fw-dev-threshold-low-001}"
+    expected_product_definition_id: "pd-framework-router-v1"
+
+assertions:
+  - type: "not_empty"
+    actual: "${active_alarm_id}"
+    description: "An alarm record exists for the low threshold breach"
+
+  - type: "equals"
+    actual: "${alarm_condition}"
+    expected: "LOW"
+    description: "Alarm condition is LOW for rx_power breach"
+
+  - type: "equals"
+    actual: "${alarm_parameter_id}"
+    expected: "rx_power"
+    description: "Alarm parameterId matches the breached parameter"
+
+---
+name: framework-monitoring-role-filtered-ui
+description: "WO-015: Adaptive UI template excludes unauthorized parameters and groups for restricted_viewer role"
+timeout_seconds: 60
+
+setup:
+  - action: load_simulator_profile
+    profile: "test-harness/device-simulator/profiles/framework-monitoring.yaml"
+    device_filter: ["fw-dev-success-001"]
+
+steps:
+  - name: fetch-ui-template-as-restricted-viewer
+    action: http_get
+    url: "${API_GW_URL}/api/framework/v1/devices/${FW_DEVICE_SUCCESS_ID:fw-dev-success-001}/ui-template"
+    headers:
+      Authorization: "Bearer ${RESTRICTED_VIEWER_TOKEN}"
+    expect_status: 200
+    retry:
+      times: 5
+      delay_seconds: 1
+
+  - name: assert-optical-group-absent
+    action: framework_assert
+    type: role_filtered_absence
+    response_context_key: "ui_template_response"
+    absent_group_ids: ["grp-optical"]
+    absent_parameter_ids: ["rx_power", "tx_power"]
+
+  - name: assert-chassis-group-present
+    action: assert
+    condition: "${visible_group_ids} contains 'grp-chassis'"
+    fail_message: "restricted_viewer must still see grp-chassis"
+
+assertions:
+  - type: "equals"
+    actual: "${optical_group_present}"
+    expected: "false"
+    description: "grp-optical is absent from restricted_viewer response"
+
+  - type: "equals"
+    actual: "${chassis_group_present}"
+    expected: "true"
+    description: "grp-chassis is visible to restricted_viewer"
+
+---
+name: framework-monitoring-rerun-idempotency
+description: "WO-015: Scenario reruns must not pass because of stale persisted values from a prior run"
+timeout_seconds: 60
+
+steps:
+  - name: wait-for-new-values
+    action: http_get
+    url: "${PARAMETER_POLLER_URL:http://localhost:8084}/api/framework/v1/devices/${FW_DEVICE_SUCCESS_ID:fw-dev-success-001}/parameters/current"
+    expect_status: 200
+    retry:
+      times: 10
+      delay_seconds: 4
+
+  - name: assert-collected-at-is-recent
+    action: assert
+    condition: "${max_collected_at_age_seconds} < 120"
+    fail_message: "All parameter values must have been collected within the last 2 minutes, not from a prior run"
+
+assertions:
+  - type: "equals"
+    actual: "${stale_carried_over}"
+    expected: "false"
+    description: "No values carried over from a prior scenario run"

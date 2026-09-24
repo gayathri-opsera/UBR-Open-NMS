@@ -215,12 +215,138 @@ function emitDeniedAuditEvent(action, user, resourceType, correlationId, req) {
   }
 }
 
+// ── WO-004: Framework Authorization ───────────────────────────────────────────
+
+/**
+ * Framework capability levels for /api/framework/v1 routes.
+ * Platform roles are normalised to one of three framework capabilities.
+ *
+ * SuperAdmin — full lifecycle control (upload, stage, activate, rollback, audit)
+ * Operator   — read + lifecycle mutations (stage, activate, rollback)
+ * ReadOnly   — read-only access (list, get version, get report, lifecycle history)
+ */
+const FRAMEWORK_CAPABILITY = {
+  SuperAdmin: 3,
+  Operator:   2,
+  ReadOnly:   1,
+};
+
+/**
+ * Deterministic mapping of every platform role (case-insensitive) to a
+ * framework capability level. Unknown roles map to 0 (deny-by-default).
+ *
+ * ADMIN / FRAMEWORK_ADMIN / SYSTEM_ADMIN → SuperAdmin (3)
+ * OPERATOR / NMS_OPERATOR / network_engineer / noc_operator → Operator (2)
+ * VIEWER / viewer / compliance / auditor / ReadOnly → ReadOnly (1)
+ */
+const PLATFORM_ROLE_TO_FRAMEWORK_CAPABILITY = {
+  // SuperAdmin tier
+  admin:            FRAMEWORK_CAPABILITY.SuperAdmin,
+  super_admin:      FRAMEWORK_CAPABILITY.SuperAdmin,
+  framework_admin:  FRAMEWORK_CAPABILITY.SuperAdmin,
+  system_admin:     FRAMEWORK_CAPABILITY.SuperAdmin,
+  // Operator tier
+  operator:         FRAMEWORK_CAPABILITY.Operator,
+  nms_operator:     FRAMEWORK_CAPABILITY.Operator,
+  network_engineer: FRAMEWORK_CAPABILITY.Operator,
+  noc_operator:     FRAMEWORK_CAPABILITY.Operator,
+  // ReadOnly tier
+  viewer:           FRAMEWORK_CAPABILITY.ReadOnly,
+  readonly:         FRAMEWORK_CAPABILITY.ReadOnly,
+  compliance:       FRAMEWORK_CAPABILITY.ReadOnly,
+  auditor:          FRAMEWORK_CAPABILITY.ReadOnly,
+  user:             FRAMEWORK_CAPABILITY.ReadOnly,
+};
+
+/**
+ * Resolves a JWT role string to a framework capability level.
+ * Handles mixed-case, multiple role claims (first element wins).
+ *
+ * @param {string|string[]} role - Raw role value from the token
+ * @returns {number} Numeric capability level (0 = deny)
+ */
+function resolveFrameworkCapability(role) {
+  if (!role) return 0;
+  // Accept the first element if the token carries an array of roles
+  const raw = Array.isArray(role) ? role[0] : role;
+  const normalised = String(raw).toLowerCase().trim().replace(/\s+/g, '_');
+  return PLATFORM_ROLE_TO_FRAMEWORK_CAPABILITY[normalised] || 0;
+}
+
+/**
+ * Framework RBAC middleware factory.
+ * Requires the authenticated user to hold at least the specified capability.
+ *
+ * Responds with the structured framework error envelope:
+ *   { status: 'error', error: { code, message, details: {}, correlationId } }
+ *
+ * Emits a denied-action audit event on every rejection.
+ * Never includes token material in responses, logs, or audit payloads.
+ *
+ * @param {number} requiredCapability - Minimum FRAMEWORK_CAPABILITY level
+ * @param {string} routeLabel         - Human-readable label for audit events
+ */
+function requireFrameworkCapability(requiredCapability, routeLabel) {
+  return (req, res, next) => {
+    const correlationId =
+      (req.headers && req.headers['x-correlation-id']) || uuidv4();
+
+    // Missing user means authenticate() did not run or token was absent → 401
+    if (!req.user) {
+      return res.status(401).json({
+        status: 'error',
+        error: {
+          code:          'UNAUTHENTICATED',
+          message:       'A valid bearer token is required to access this resource.',
+          details:       {},
+          correlationId,
+        },
+      });
+    }
+
+    const userCapability = resolveFrameworkCapability(req.user.role);
+
+    if (userCapability < requiredCapability) {
+      // Emit denied-action audit event (best-effort, non-blocking)
+      emitDeniedAuditEvent(
+        `framework.${routeLabel || 'route'}.denied`,
+        req.user,
+        routeLabel || req.path,
+        correlationId,
+        req,
+      );
+
+      return res.status(403).json({
+        status: 'error',
+        error: {
+          code:    'FORBIDDEN_ACTION',
+          message: `Role '${req.user.role}' does not have the required framework capability for this route.`,
+          details: {
+            requiredCapability: Object.keys(FRAMEWORK_CAPABILITY).find(
+              (k) => FRAMEWORK_CAPABILITY[k] === requiredCapability,
+            ) || String(requiredCapability),
+            route:  routeLabel || req.path,
+            method: req.method,
+          },
+          correlationId,
+        },
+      });
+    }
+
+    next();
+  };
+}
+
 module.exports = {
   requireRole,
   checkActionPermission,
   checkActionPermission_mw,
+  requireFrameworkCapability,
+  resolveFrameworkCapability,
   ROUTE_PERMISSIONS,
   ROLE_HIERARCHY,
   ACTION_PERMISSIONS,
   MFA_REQUIRED_ADMIN_ROUTES,
+  FRAMEWORK_CAPABILITY,
+  PLATFORM_ROLE_TO_FRAMEWORK_CAPABILITY,
 };

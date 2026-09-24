@@ -1,0 +1,170 @@
+{
+  "$schema": "urn:nms:productdef:json:1.0",
+  "productDefinition": {
+    "identity": {
+      "name": "ASR 9000",
+      "vendor": "Cisco",
+      "model": "ASR-9001",
+      "firmwareFrom": "6.5",
+      "firmwareTo": "7.10",
+      "productFamily": "ASR 9000 Series"
+    },
+    "fingerprints": [
+      {
+        "sysObjectId": ".1.3.6.1.4.1.9.1.1639",
+        "sysDescrPattern": ".*Cisco.*ASR-9001.*",
+        "firmwareFrom": "6.5",
+        "firmwareTo": "7.10"
+      },
+      {
+        "sysObjectId": ".1.3.6.1.4.1.9.1.1640",
+        "sysDescrPattern": ".*Cisco.*ASR 9001.*"
+      }
+    ],
+    "protocols": [
+      { "type": "SNMP" },
+      { "type": "CLI" }
+    ],
+    "parameters": [
+      {
+        "groupName": "cpu",
+        "parameters": [
+          {
+            "id": "cpu_util_5sec",
+            "displayName": "CPU Utilization (5 sec)",
+            "dataType": "GAUGE",
+            "unit": "%",
+            "minValue": 0,
+            "maxValue": 100,
+            "thresholdHigh": "85",
+            "stalenessSeconds": 30,
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.9.9.109.1.1.1.1.3.1" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "cpu_util_1min",
+            "displayName": "CPU Utilization (1 min)",
+            "dataType": "GAUGE",
+            "unit": "%",
+            "minValue": 0,
+            "maxValue": 100,
+            "thresholdHigh": "80",
+            "stalenessSeconds": 120,
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.9.9.109.1.1.1.1.4.1" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      },
+      {
+        "groupName": "memory",
+        "parameters": [
+          {
+            "id": "mem_total_bytes",
+            "displayName": "Total Memory",
+            "dataType": "GAUGE",
+            "unit": "bytes",
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.9.9.48.1.1.1.5.1" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "mem_used_bytes",
+            "displayName": "Memory Used",
+            "dataType": "GAUGE",
+            "unit": "bytes",
+            "thresholdHigh": "90",
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.9.9.48.1.1.1.6.1" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      },
+      {
+        "groupName": "mpls",
+        "parameters": [
+          {
+            "id": "mpls_label_count",
+            "displayName": "MPLS Labels in Use",
+            "dataType": "GAUGE",
+            "unit": "labels",
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.10.166.1.1.1.0" },
+            "uiVisibleTo": ["FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "ldp_session_state",
+            "displayName": "LDP Session State",
+            "dataType": "ENUM",
+            "enumValues": ["nonexistent", "initialized", "openrec", "opensent", "operational"],
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.10.166.4.1.2.1.1" },
+            "uiVisibleTo": ["FRAMEWORK_ADMIN"]
+          }
+        ]
+      },
+      {
+        "groupName": "bgp",
+        "parameters": [
+          {
+            "id": "bgp_established_peers",
+            "displayName": "BGP Established Peers",
+            "dataType": "GAUGE",
+            "unit": "peers",
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.15.3.1.2" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "bgp_prefixes_received",
+            "displayName": "BGP Prefixes Received",
+            "dataType": "GAUGE",
+            "unit": "prefixes",
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.15.3.1.11" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      },
+      {
+        "groupName": "interface",
+        "parameters": [
+          {
+            "id": "if_in_octets_hc",
+            "displayName": "Interface Inbound Octets (HC)",
+            "dataType": "COUNTER",
+            "unit": "bytes",
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.31.1.1.1.6" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "if_out_octets_hc",
+            "displayName": "Interface Outbound Octets (HC)",
+            "dataType": "COUNTER",
+            "unit": "bytes",
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.31.1.1.1.10" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "if_in_errors",
+            "displayName": "Interface Inbound Errors",
+            "dataType": "COUNTER",
+            "unit": "errors",
+            "thresholdHigh": "100",
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.2.2.1.14" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      },
+      {
+        "groupName": "environment",
+        "parameters": [
+          {
+            "id": "temp_inlet",
+            "displayName": "Inlet Temperature",
+            "dataType": "FLOAT",
+            "unit": "Celsius",
+            "minValue": 0,
+            "maxValue": 75,
+            "thresholdHigh": "65",
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.9.9.13.1.3.1.3.1" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cisco Catalyst 9300 Series — Product Definition v2
+  Changes from v1:
+    - Firmware range extended to 17.13.99
+    - Added fingerprint for IOS-XE 17.10+ variants
+    - cpu.cpuUtil: thresholdHigh lowered 85 → 75 (tighter SLA)
+    - NEW param: cpu.cpuUtil5Min
+    - interfaces: added ifOperStatus, ifInErrors, ifOutErrors
+    - NEW group: memory (memUsed, memFree, memUtil)
+    - NEW group: environment (inletTemp, psuStatus, fanStatus)
+    - NEW group: security (aaaAuthFails, aclDenyCount)
+-->
+<ProductDefinition xmlns="urn:nms:productdef:1.0">
+
+  <identity>
+    <name>Cisco Catalyst 9300 Series</name>
+    <vendor>Cisco</vendor>
+    <model>Catalyst-9300-20260917-140208</model>
+    <firmwareFrom>17.9.1</firmwareFrom>
+    <firmwareTo>17.13.99</firmwareTo>
+    <productFamily>Enterprise Switching</productFamily>
+  </identity>
+
+  <fingerprints>
+    <fingerprint>
+      <sysObjectId>1.3.6.1.4.1.9.1.2271</sysObjectId>
+      <sysDescrPattern>Catalyst 9300</sysDescrPattern>
+      <firmwareFrom>17.9.1</firmwareFrom>
+      <firmwareTo>17.13.99</firmwareTo>
+    </fingerprint>
+    <!-- NEW in v2: covers IOS-XE 17.10+ build variants -->
+    <fingerprint>
+      <sysObjectId>1.3.6.1.4.1.9.1.2348</sysObjectId>
+      <sysDescrPattern>Catalyst 9300L</sysDescrPattern>
+      <firmwareFrom>17.10.1</firmwareFrom>
+      <firmwareTo>17.13.99</firmwareTo>
+    </fingerprint>
+  </fingerprints>
+
+  <protocols>
+    <protocol><type>SNMP</type></protocol>
+    <protocol><type>CLI</type></protocol>
+  </protocols>
+
+  <parameters>
+
+    <!-- ── System ────────────────────────────────────────────────────── -->
+    <group name="system">
+      <parameter>
+        <id>sysDescr</id>
+        <displayName>System Description</displayName>
+        <dataType>STRING</dataType>
+        <uiVisibleTo>ReadOnly</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.2.1.1.1.0</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>sysUpTime</id>
+        <displayName>Uptime</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>centiseconds</unit>
+        <uiVisibleTo>ReadOnly</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.2.1.1.3.0</oid></snmpMapping>
+      </parameter>
+      <!-- NEW in v2 -->
+      <parameter>
+        <id>sysContact</id>
+        <displayName>System Contact</displayName>
+        <dataType>STRING</dataType>
+        <uiVisibleTo>ReadOnly</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.2.1.1.4.0</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>sysLocation</id>
+        <displayName>System Location</displayName>
+        <dataType>STRING</dataType>
+        <uiVisibleTo>ReadOnly</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.2.1.1.6.0</oid></snmpMapping>
+      </parameter>
+    </group>
+
+    <!-- ── CPU — thresholdHigh tightened 85→75 in v2 ────────────────── -->
+    <group name="cpu">
+      <parameter>
+        <id>cpuUtil</id>
+        <displayName>CPU Utilization (5 sec)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>percent</unit>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+        <thresholdHigh>75</thresholdHigh>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.109.1.1.1.1.8.1</oid></snmpMapping>
+      </parameter>
+      <!-- NEW in v2 -->
+      <parameter>
+        <id>cpuUtil5Min</id>
+        <displayName>CPU Utilization (5 min)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>percent</unit>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+        <thresholdHigh>70</thresholdHigh>
+        <stalenessSeconds>300</stalenessSeconds>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.109.1.1.1.1.5.1</oid></snmpMapping>
+      </parameter>
+    </group>
+
+    <!-- ── Memory — NEW group in v2 ──────────────────────────────────── -->
+    <group name="memory">
+      <parameter>
+        <id>memUsed</id>
+        <displayName>Memory Used</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>bytes</unit>
+        <thresholdHigh>90</thresholdHigh>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.48.1.1.1.5.1</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>memFree</id>
+        <displayName>Memory Free</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>bytes</unit>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.48.1.1.1.6.1</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>memUtil</id>
+        <displayName>Memory Utilization</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>percent</unit>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+        <thresholdHigh>85</thresholdHigh>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.48.1.1.1.5.1</oid></snmpMapping>
+      </parameter>
+    </group>
+
+    <!-- ── Interfaces — added status + error counters in v2 ──────────── -->
+    <group name="interfaces">
+      <parameter>
+        <id>ifInOctets</id>
+        <displayName>Inbound Octets</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>bytes</unit>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.2.1.2.2.1.10.1</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>ifOutOctets</id>
+        <displayName>Outbound Octets</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>bytes</unit>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.2.1.2.2.1.16.1</oid></snmpMapping>
+      </parameter>
+      <!-- NEW in v2 -->
+      <parameter>
+        <id>ifOperStatus</id>
+        <displayName>Interface Operational Status</displayName>
+        <dataType>ENUM</dataType>
+        <enumValues>up,down,testing,unknown,dormant,notPresent,lowerLayerDown</enumValues>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.2.1.2.2.1.8.1</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>ifInErrors</id>
+        <displayName>Inbound Errors</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>packets</unit>
+        <thresholdHigh>50</thresholdHigh>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.2.1.2.2.1.14.1</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>ifOutErrors</id>
+        <displayName>Outbound Errors</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>packets</unit>
+        <thresholdHigh>50</thresholdHigh>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.2.1.2.2.1.20.1</oid></snmpMapping>
+      </parameter>
+    </group>
+
+    <!-- ── Environment — NEW group in v2 ─────────────────────────────── -->
+    <group name="environment">
+      <parameter>
+        <id>inletTemp</id>
+        <displayName>Inlet Temperature</displayName>
+        <dataType>FLOAT</dataType>
+        <unit>Celsius</unit>
+        <minValue>-10</minValue>
+        <maxValue>75</maxValue>
+        <thresholdHigh>65</thresholdHigh>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.13.1.3.1.3.1</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>psuStatus</id>
+        <displayName>Power Supply Status</displayName>
+        <dataType>ENUM</dataType>
+        <enumValues>normal,warning,critical,shutdown,notPresent,notFunctioning</enumValues>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.13.1.5.1.3.1</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>fanStatus</id>
+        <displayName>Fan Status</displayName>
+        <dataType>ENUM</dataType>
+        <enumValues>ok,fail,absent</enumValues>
+        <uiVisibleTo>Operator</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.13.1.4.1.2.1</oid></snmpMapping>
+      </parameter>
+    </group>
+
+    <!-- ── Security — NEW group in v2 ────────────────────────────────── -->
+    <group name="security">
+      <parameter>
+        <id>aaaAuthFails</id>
+        <displayName>AAA Auth Failures (15 min)</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>count</unit>
+        <thresholdHigh>5</thresholdHigh>
+        <uiVisibleTo>Admin</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.661.1.1.1.1.3.0</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>aclDenyCount</id>
+        <displayName>ACL Deny Counter</displayName>
+        <dataType>COUNTER</dataType>
+        <unit>packets</unit>
+        <uiVisibleTo>Admin</uiVisibleTo>
+        <snmpMapping><oid>1.3.6.1.4.1.9.9.315.1.1.1.1.6.0</oid></snmpMapping>
+      </parameter>
+      <parameter>
+        <id>loginAuthMethod</id>
+        <displayName>Login Auth Method</displayName>
+        <dataType>ENUM</dataType>
+        <enumValues>local,radius,tacacs,none</enumValues>
+        <uiVisibleTo>Admin</uiVisibleTo>
+        <cliMapping><command>show aaa servers</command></cliMapping>
+      </parameter>
+    </group>
+
+  </parameters>
+
+</ProductDefinition>

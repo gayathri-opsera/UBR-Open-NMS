@@ -82,9 +82,12 @@ import { Modal } from '../components/common/Modal';
 import { MetricCard } from '../components/common/MetricCard';
 import { LoadingState, EmptyState } from '../components/common/States';
 import { useToast } from '../components/common/Toast';
+// WO-003: Product Definition Control Plane workspace (admin/super_admin only)
+import { ProductDefinitionAdminPage } from './ProductDefinitionAdminPage';
 import { logger } from '../utils/logger';
 
-type AdminTab = 'users' | 'sessions' | 'health' | 'hierarchy' | 'audit' | 'backup' | 'northbound' | 'redundancy' | 'security';
+// WO-003: added 'product-definitions' tab for Admin/SuperAdmin roles
+type AdminTab = 'users' | 'sessions' | 'health' | 'hierarchy' | 'audit' | 'backup' | 'northbound' | 'redundancy' | 'security' | 'product-definitions';
 
 const ROLE_OPTIONS = [
   { value: 'admin',            label: 'Admin' },
@@ -114,7 +117,11 @@ function getVisibleTabs(role: string | undefined): AdminTab[] {
   if (r === 'auditor') return ['audit', 'health'];
   if (r === 'compliance') return ['audit', 'health', 'hierarchy'];
   // Admin, operator, and specialist roles see all tabs
-  return ['users', 'sessions', 'health', 'hierarchy', 'audit', 'backup', 'northbound', 'redundancy', 'security'];
+  // WO-003: 'product-definitions' tab is admin/super_admin only — operators and lower-privilege roles do not see it
+  if (r === 'operator' || r === 'network_engineer' || r === 'noc_operator') {
+    return ['sessions', 'health', 'hierarchy', 'audit', 'northbound', 'redundancy'];
+  }
+  return ['users', 'sessions', 'health', 'hierarchy', 'audit', 'backup', 'northbound', 'redundancy', 'security', 'product-definitions'];
 }
 
 interface UserFormState {
@@ -1374,6 +1381,8 @@ export default function V2AdminPage() {
     users: 'Users', sessions: 'Sessions', health: 'System Health',
     hierarchy: 'Hierarchy', audit: 'Audit Log', backup: 'Backup & Restore',
     northbound: 'Northbound', redundancy: 'Redundancy', security: 'Security / SSO',
+    // WO-003: Product Definition Control Plane workspace
+    'product-definitions': 'Product Definitions',
   };
 
   return (
@@ -1401,6 +1410,8 @@ export default function V2AdminPage() {
       {tab === 'northbound' && visibleTabs.includes('northbound') && <NorthboundTab />}
       {tab === 'redundancy' && visibleTabs.includes('redundancy') && <RedundancyTab />}
       {tab === 'security'   && visibleTabs.includes('security')   && <SecurityTab />}
+      {/* WO-003: Product Definition Control Plane workspace — admin/super_admin only */}
+      {tab === 'product-definitions' && visibleTabs.includes('product-definitions') && <ProductDefinitionAdminPage />}
     </div>
   );
 }

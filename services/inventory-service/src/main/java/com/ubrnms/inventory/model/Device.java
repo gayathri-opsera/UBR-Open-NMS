@@ -260,6 +260,60 @@ public class Device {
      */
     private String classificationCorrelationId;
 
+    // ── WO-010: Framework identity fields (additive, nullable) ──────────────────
+    //
+    // These fields are populated by the FingerprintMatcher in the discovery service
+    // and stored additively — they must NEVER overwrite UBR_PROTECTED_FIELDS such as
+    // serialNumber, macAddress, deviceType, identityAuthority, bootstrapState, or credentialRef.
+    // All fields are nullable (null when unknown or not yet matched).
+
+    /**
+     * Product Definition identifier resolved from the active fingerprint registry.
+     * Null when the device has not been matched or when matching produced UNKNOWN/CONFLICT.
+     */
+    @Indexed
+    private String productDefinitionId;
+
+    /**
+     * Version of the Product Definition that produced the match.
+     * Null when productDefinitionId is null.
+     */
+    private String productDefinitionVersion;
+
+    /**
+     * Firmware version string observed during discovery (from SNMP sysDescr, SSH banner, etc.).
+     * Null when firmware was not determinable from available evidence.
+     */
+    private String observedFirmwareVersion;
+
+    /**
+     * Preferred southbound protocol for this product (e.g. SNMP, SSH, REST, GRPC).
+     * Populated by the adapter selector after a successful fingerprint match.
+     * Null before matching or when the protocol is not determinable.
+     */
+    private String activeAdapter;
+
+    /**
+     * Outcome of the last fingerprint matching attempt.
+     * Values: MATCHED, UNKNOWN, CONFLICT, VERSION_MISMATCH, REGISTRY_UNAVAILABLE.
+     * Null before the first matching attempt.
+     */
+    @Indexed
+    private String frameworkStatus;
+
+    /**
+     * Human-readable summary of the last framework identity failure, if any.
+     * Set when frameworkStatus is CONFLICT, VERSION_MISMATCH, or REGISTRY_UNAVAILABLE.
+     * Never contains credential material or raw OIDs.
+     */
+    private String lastFrameworkFailureSummary;
+
+    /**
+     * Timestamp of the last successful fingerprint match or framework status update.
+     * Used by operators to detect stale identities after registry updates.
+     */
+    private Instant lastFrameworkSeenAt;
+
     @CreatedDate
     private Instant createdAt;
 

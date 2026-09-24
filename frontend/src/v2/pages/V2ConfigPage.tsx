@@ -17,6 +17,12 @@ import type { ConfigTemplate, ConfigJob, ConfigVersion, PushResult, CustomFieldE
 import { validateTemplate } from '../../api/config.types';
 import { fetchDevices } from '../../api/devices.api';
 import type { Device } from '../../api/devices.types';
+import {
+  listAllUploadHistory,
+  getVersionSchema,
+} from '../../api/productDefinitions.api';
+import type { ProductDefinitionSchema } from '../../api/productDefinitions.api';
+import type { ProductDefinitionVersion } from '../../api/productDefinitions.types';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
@@ -665,6 +671,52 @@ function ParamField({ def, value, onChange }: {
   );
 }
 
+// ── Group icon map (mirrors DiscoveryTriggerForm) ────────────────────────────
+const GROUP_ICON_MAP: Record<string, string> = {
+  cpu: '⚙️', memory: '💾', interface: '🔌', environment: '🌡️',
+  bgp: '🔗', spanning_tree: '🌳', wireless: '📶', radio: '📡',
+  network: '🌐', vlan: '🔀', qos: '⚡', management: '🛠',
+  routing: '🗺️', security: '🔒', snmp: '📡', system: '🖥️',
+  power: '⚡', fan: '💨', port: '🔌', switching: '🔀',
+};
+
+/**
+ * Converts a ProductDefinitionSchema's parameter groups into SectionDef[]
+ * so they can drive the config template editor exactly like the hardcoded
+ * BTS_SECTIONS / CPE_SECTIONS arrays do.
+ */
+function pdSchemaToSections(schema: ProductDefinitionSchema): SectionDef[] {
+  return schema.groups.map((g) => {
+    const groupKey = g.groupName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    const icon = GROUP_ICON_MAP[groupKey] ?? '📋';
+    const title = g.groupName.charAt(0).toUpperCase() + g.groupName.slice(1).replace(/_/g, ' ');
+    return {
+      title,
+      icon,
+      fields: g.parameters.map((p): FieldDef => {
+        const dt = p.dataType.toUpperCase();
+        // NormalizedProductDefinition uses NUMERIC; raw files use GAUGE/COUNTER/FLOAT/INTEGER
+        const fieldType: FieldDef['type'] =
+          dt === 'BOOLEAN'                                                      ? 'boolean' :
+          dt === 'ENUM'                                                         ? 'select'  :
+          (dt === 'NUMERIC' || dt === 'GAUGE' || dt === 'COUNTER' ||
+           dt === 'FLOAT'   || dt === 'INTEGER')                               ? 'number'  :
+          'text';
+        return {
+          key:         p.id,
+          label:       p.displayName,
+          type:        fieldType,
+          unit:        p.unit,
+          min:         p.minValue,
+          max:         p.maxValue,
+          placeholder: p.snmpOid ? `OID: ${p.snmpOid}` : undefined,
+          options:     p.enumValues,
+        };
+      }),
+    };
+  });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 1. Templates tab — split-view master-detail (no modal)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -678,6 +730,44 @@ function TemplatesTab() {
   const [saving, setSaving]       = useState(false);
   const [dirty, setDirty]         = useState(false);
   const [customizeMode, setCustomizeMode] = useState(false);
+
+  // ── Product Definition dynamic sections ─────────────────────────────────
+  // Admins can choose an uploaded product definition to dynamically populate
+  // the template editor with parameter groups extracted from the XML/JSON/XLS.
+  const [uploadedVersions, setUploadedVersions] = useState<ProductDefinitionVersion[]>([]);
+  const [selectedVersionKey, setSelectedVersionKey] = useState<string>('');
+  const [pdSchema, setPdSchema]    = useState<ProductDefinitionSchema | null>(null);
+  const [pdLoading, setPdLoading]  = useState(false);
+
+  useEffect(() => {
+    listAllUploadHistory()
+      .then(setUploadedVersions)
+      .catch(() => {/* non-fatal */});
+  }, []);
+
+  useEffect(() => {
+    if (!selectedVersionKey) { setPdSchema(null); return; }
+    const [definitionId, versionId] = selectedVersionKey.split('::');
+    if (!definitionId || !versionId) { setPdSchema(null); return; }
+    setPdLoading(true);
+    getVersionSchema(definitionId, versionId)
+      .then(setPdSchema)
+      .catch(() => setPdSchema(null))
+      .finally(() => setPdLoading(false));
+  }, [selectedVersionKey]);
+
+  // Sections are either from the product definition (if one is selected) or
+  // from the hardcoded device-type arrays.
+  const dynamicSections: SectionDef[] | null = pdSchema ? pdSchemaToSections(pdSchema) : null;
+
+  const pdVersionOptions = [
+    { value: '', label: '— Use device type defaults —' },
+    ...uploadedVersions.map((v) => ({
+      // Use versionId (UUID) not id (MongoDB ObjectId) — the API route expects the UUID
+      value: `${v.definitionId}::${v.versionId}`,
+      label: `${v.vendor ?? ''} ${v.model ?? v.name ?? ''} · v${v.registryVersion ?? v.versionId?.slice(-6)} [${v.lifecycleStatus}]`,
+    })),
+  ];
 
   const load = useCallback(() => {
     setLoading(true);
@@ -741,7 +831,9 @@ function TemplatesTab() {
     setDirty(true);
   };
 
-  const sections = editing ? getEffectiveSections(editing) : getSections(undefined);
+  // Use dynamically generated sections when a product definition is selected;
+  // otherwise fall back to the hardcoded device-type section definitions.
+  const sections = dynamicSections ?? (editing ? getEffectiveSections(editing) : getSections(undefined));
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 0, minHeight: 600, border: '1px solid var(--vf-border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
@@ -852,6 +944,79 @@ function TemplatesTab() {
               </label>
 
               <hr style={{ border: 'none', borderTop: '1px solid var(--vf-border-subtle)', margin: 0 }} />
+
+              {/* ── Product Definition Loader ─────────────────────────────────────────
+                  When an admin selects an uploaded product definition, the parameter
+                  groups from that XML/JSON/XLS file dynamically replace the static
+                  device-type sections below. This gives a fully model-driven form.   */}
+              {uploadedVersions.length > 0 && (
+                <div style={{
+                  background: 'rgba(96,165,250,0.04)',
+                  border: '1px solid rgba(96,165,250,0.15)',
+                  borderRadius: 8, padding: '12px 14px',
+                  display: 'flex', flexDirection: 'column', gap: 10,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 16 }}>📂</span>
+                    <span style={{ fontWeight: 700, fontSize: 12, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Load Fields from Product Definition
+                    </span>
+                    {pdLoading && (
+                      <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginLeft: 4 }}>Loading…</span>
+                    )}
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--vf-text-secondary)', letterSpacing: '0.03em', display: 'block', marginBottom: 4 }}>
+                      Uploaded Product Definition
+                    </label>
+                    <select
+                      value={selectedVersionKey}
+                      onChange={(e) => { setSelectedVersionKey(e.target.value); }}
+                      style={{ ...INLINE_INPUT, width: '100%' }}
+                    >
+                      {pdVersionOptions.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 3, display: 'block' }}>
+                      Selecting a definition replaces the sections below with parameter groups from the uploaded file
+                    </span>
+                  </div>
+                  {pdSchema && !pdLoading && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--vf-text-primary)' }}>
+                        {pdSchema.vendor} {pdSchema.model}
+                      </span>
+                      {pdSchema.groups.map((g) => (
+                        <span key={g.groupName} style={{
+                          fontSize: 10, padding: '2px 7px', borderRadius: 10,
+                          background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.25)',
+                          color: '#60a5fa',
+                        }}>
+                          {g.groupName} ({g.parameters.length})
+                        </span>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Pre-populate template name from the schema if empty
+                          if (!editing?.name) {
+                            setEditing((e) => e ? { ...e, name: `${pdSchema.vendor} ${pdSchema.model} Template` } : e);
+                          }
+                          addToast(`Loaded ${pdSchema.groups.length} parameter groups from ${pdSchema.vendor} ${pdSchema.model}`, 'success');
+                        }}
+                        style={{
+                          marginLeft: 'auto', fontSize: 11, padding: '3px 10px',
+                          background: 'rgba(96,165,250,0.15)', border: '1px solid rgba(96,165,250,0.3)',
+                          borderRadius: 6, color: '#60a5fa', cursor: 'pointer', fontWeight: 600,
+                        }}
+                      >
+                        ✓ Apply
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ── Field Schema Editor (admin mode) ── */}
               {customizeMode && (

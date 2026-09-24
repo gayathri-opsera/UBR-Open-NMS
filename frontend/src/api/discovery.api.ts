@@ -1,5 +1,55 @@
 import { apiClient } from './client';
 
+// ── WO-008: Multi-mode deterministic discovery probe types ────────────────────
+
+/**
+ * Trigger mode — identifies the source that initiated a discovery run.
+ * The gateway accepts all five values; MANUAL is the default when absent.
+ */
+export type TriggerMode =
+  | 'MANUAL'
+  | 'SCHEDULED'
+  | 'EVENT_SNMP_TRAP'
+  | 'EVENT_SYSLOG'
+  | 'EVENT_DHCP';
+
+/** Protocol used in a single probe attempt. */
+export type ProbeType = 'ICMP' | 'SNMP' | 'SSH' | 'HTTP' | 'HTTPS' | 'GRPC_HEALTH';
+
+/** Outcome of a single probe attempt. */
+export type ProbeAttemptStatus =
+  | 'success'
+  | 'timeout'
+  | 'unreachable'
+  | 'auth_failed'
+  | 'skipped'
+  | 'failed';
+
+/**
+ * Records the outcome of a single protocol probe against one target.
+ * Credential material (SNMP community strings, SSH passwords) is NEVER included.
+ */
+export interface ProbeAttempt {
+  /** Protocol used for this probe attempt. */
+  probeType:            ProbeType;
+  /** Outcome of the probe. */
+  status:               ProbeAttemptStatus;
+  /** ISO-8601 UTC timestamp when the probe started. */
+  startedAt:            string;
+  /** ISO-8601 UTC timestamp when the probe completed. */
+  completedAt:          string;
+  /** Round-trip latency in milliseconds. 0 when the probe failed immediately. */
+  latencyMs:            number;
+  /** Machine-readable failure category (e.g. TIMEOUT, AUTH_FAILED). Empty on success. */
+  failureCategory?:     string;
+  /** Human-readable failure message. Never contains credential values. */
+  failureReason?:       string;
+  /** Credential-free evidence summary (e.g. sysDescr snippet, SSH banner prefix). */
+  safeEvidenceSummary?: string;
+  /** Whether this probe type should be retried on a subsequent run. */
+  retryable:            boolean;
+}
+
 // ── WO-011: Discovery scope intake types and API ─────────────────────────────
 
 export type ScopeEntryType = 'CIDR' | 'IP' | 'SEED';
@@ -43,11 +93,22 @@ export interface SnmpDiscoveryRunRequest {
   timeoutSeconds?: number;
   /** Number of SNMP retries on timeout (default: 2). Auth failures are never retried). */
   retries?: number;
+  /** WO-008: Trigger mode. Defaults to MANUAL when absent. */
+  triggerMode?: TriggerMode;
+  /** WO-008: Caller-supplied correlation ID for end-to-end tracing. */
+  correlationId?: string;
 }
 
 /** Backward-compatible alias for the basic scope-only request (WO-011). */
 export interface DiscoveryRunRequest {
   scope: ScopeEntry[];
+  /**
+   * WO-008: Trigger mode for multi-mode deterministic probing.
+   * Defaults to MANUAL on the backend when absent.
+   */
+  triggerMode?:   TriggerMode;
+  /** WO-008: Caller-supplied correlation ID for end-to-end tracing. */
+  correlationId?: string;
 }
 
 export interface DiscoveryRunResponse {
@@ -126,7 +187,103 @@ export interface DiscoveryResult {
    * Empty string / undefined when the device doesn't expose IF-MIB or the walk was skipped.
    */
   macAddress?: string;
+
+  // ── WO-010: Framework identity fields (additive, nullable) ─────────────────
+  //
+  // Populated by the FingerprintMatcher after probe evidence is matched against
+  // the active Product Definition registry. Only present when matching was attempted.
+
+  /** Matching outcome: MATCHED, UNKNOWN, CONFLICT, VERSION_MISMATCH, or REGISTRY_UNAVAILABLE. */
+  fingerprintStatus?: FingerprintStatus;
+  /** Product Definition identifier — set only when fingerprintStatus === 'MATCHED'. */
+  productDefinitionId?: string;
+  /** Product Definition version that produced the match. */
+  productDefinitionVersion?: string;
+  /** Registry snapshot version used for this match. */
+  registryVersion?: string;
+  /** Preferred southbound protocol for this product (e.g. SNMP, SSH). */
+  activeAdapterCandidate?: string;
+  /**
+   * Match confidence score in [0,1]. Higher means stronger evidence.
+   * 1.0 = exact SNMP OID match, 0.65 = HTTP body substring match.
+   */
+  matchConfidence?: number;
+  /** Credential-free summary of the matched selector. */
+  matchEvidence?: string;
+  /** Conflict/mismatch reason — set when fingerprintStatus === 'CONFLICT' or 'VERSION_MISMATCH'. */
+  fingerprintConflictReason?: string;
+
+  // ── WO-011: Guided failure detail ─────────────────────────────────────────
+  /**
+   * Structured failure detail populated for any failed, auth-failed, timeout,
+   * partial, or degraded result. Undefined for healthy MATCHED results.
+   * Never contains credential material.
+   */
+  guidedFailure?: GuidedFailure;
 }
+
+/**
+ * Fingerprint matching outcome returned alongside each DiscoveryResult.
+ * MATCHED — exactly one Product Definition matched with unique evidence.
+ * UNKNOWN — no registry entry matched any probe evidence.
+ * CONFLICT — two or more definitions matched at equal confidence; no inventory write allowed.
+ * VERSION_MISMATCH — OID matched but firmware falls outside the definition's range.
+ * REGISTRY_UNAVAILABLE — the registry could not be read; evidence was recorded but not matched.
+ */
+export type FingerprintStatus =
+  | 'MATCHED'
+  | 'UNKNOWN'
+  | 'CONFLICT'
+  | 'VERSION_MISMATCH'
+  | 'REGISTRY_UNAVAILABLE';
+
+// ── WO-011: Guided discovery failure model ────────────────────────────────────
+
+/**
+ * Structured failure detail attached to failed or degraded discovery results (WO-011).
+ * All fields are operator-visible; credential material is never present.
+ */
+export interface GuidedFailure {
+  /** Top-level machine-readable failure category. */
+  category: DiscoveryFailureCategory;
+  /** Specific sub-category code within the category. */
+  code: string;
+  /** Human-readable, credential-free description of the failure. */
+  explicitReason: string;
+  /** True when submitting a new discovery run may resolve the issue. */
+  retryable: boolean;
+  /**
+   * Earliest ISO-8601 UTC time the caller may retry.
+   * Undefined means retry immediately.
+   */
+  retryAfter?: string;
+  /**
+   * Last protocol that produced usable fingerprint evidence.
+   * Empty/undefined when no protocol has ever succeeded for this target.
+   */
+  lastSuccessfulProtocolAttempt?: string;
+  /** Final protocol attempted (whether it succeeded or failed). */
+  lastAttemptedProtocol?: string;
+  /** Human-readable operator guidance for resolving this failure. */
+  recommendedNextAction: string;
+  /** Correlation ID linking this failure to the backend log entry. */
+  correlationId?: string;
+}
+
+/**
+ * Top-level discovery failure categories.
+ * Maps to taxonomy.Category constants in the Go discovery service.
+ */
+export type DiscoveryFailureCategory =
+  | 'REACHABILITY_FAILURE'
+  | 'CREDENTIAL_FAILURE'
+  | 'PROTOCOL_TIMEOUT'
+  | 'UNKNOWN_FINGERPRINT'
+  | 'CONFLICTING_FINGERPRINT'
+  | 'REGISTRY_UNAVAILABLE'
+  | 'UNSUPPORTED_PROTOCOL'
+  | 'ADAPTER_HEALTH_FAILURE'
+  | 'INTERNAL_ERROR';
 
 // ── WO-016: Parallel ICMP sweep progress and scheduling ──────────────────────
 
@@ -151,7 +308,8 @@ export type DiscoveryRunStatus =
   | 'CANCELLED';
 
 /**
- * Extended discovery run detail with sweep progress and SNMP metadata.
+ * Extended discovery run detail with sweep progress, SNMP metadata, and
+ * WO-008 multi-mode probe chain fields.
  * Returned by GET /discovery/runs/:runId.
  */
 export interface DiscoveryRunDetail extends Omit<DiscoveryRunResponse, 'status'> {
@@ -169,6 +327,22 @@ export interface DiscoveryRunDetail extends Omit<DiscoveryRunResponse, 'status'>
   snmpAttemptCount?: number;
   /** Number of hosts for which SNMP fingerprinting succeeded. */
   snmpSuccessCount?: number;
+  // ── WO-008: multi-mode probe fields (absent on legacy runs) ─────────────
+  /** Trigger mode that initiated this run (MANUAL, SCHEDULED, EVENT_*). */
+  triggerMode?: TriggerMode;
+  /** End-to-end correlation identifier for this run. */
+  correlationId?: string;
+  /** Ordered probe attempt chain across all targets in this run. */
+  probeAttempts?: ProbeAttempt[];
+  /** Total number of probe attempts recorded. */
+  probeAttemptCount?: number;
+  /** First probe type that produced usable fingerprint evidence. */
+  successfulProbeType?: ProbeType;
+  /**
+   * ISO-8601 timestamp when this event-driven run should be retried.
+   * Present only for EVENT_* trigger modes when the run fails transiently.
+   */
+  retryAt?: string;
 }
 
 // ── API functions ─────────────────────────────────────────────────────────────

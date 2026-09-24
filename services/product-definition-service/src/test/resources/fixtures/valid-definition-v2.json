@@ -1,0 +1,43 @@
+{
+  "$schema": "urn:nms:productdef:json:1.0",
+  "productDefinition": {
+    "identity": {
+      "name": "Radio 4480 v2",
+      "vendor": "Ericsson",
+      "model": "AIR 4480",
+      "firmwareFrom": "24.Q1",
+      "firmwareTo": "25.Q4",
+      "productFamily": "Ericsson Radio Series"
+    },
+    "fingerprints": [
+      {
+        "sysObjectId": ".1.3.6.1.4.1.193.81.3.4.4",
+        "sysDescrPattern": ".*Ericsson.*AIR 4480.*v2.*",
+        "firmwareFrom": "24.Q1",
+        "firmwareTo": "25.Q4"
+      }
+    ],
+    "protocols": [
+      { "type": "SNMP" },
+      { "type": "REST" }
+    ],
+    "parameters": [
+      {
+        "groupName": "radio",
+        "parameters": [
+          {
+            "id": "rsrp_v2",
+            "displayName": "Reference Signal Received Power v2",
+            "dataType": "FLOAT",
+            "unit": "dBm",
+            "minValue": -140,
+            "maxValue": -44,
+            "thresholdLow": "-110",
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.193.81.2.12.1.1.2" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      }
+    ]
+  }
+}

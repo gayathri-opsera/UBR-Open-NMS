@@ -46,12 +46,14 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 // Model is strictly derived from device type — no other models allowed
 const TYPE_MODEL_MAP: Record<string, string> = { BTS: 'A60', CPE: 'A61', IDU: 'IDU' };
 
-const TYPE_OPTIONS = [
-  { value: '', label: 'All types' },
-  { value: 'BTS', label: 'BTS' },
-  { value: 'CPE', label: 'CPE' },
-  { value: 'IDU', label: 'IDU' },
-];
+const LEGACY_DEVICE_TYPES = new Set(['BTS', 'CPE', 'IDU']);
+
+function applyDeviceTypeFilter(type: string): Pick<DeviceFilter, 'deviceType' | 'genericDeviceType'> {
+  if (!type || LEGACY_DEVICE_TYPES.has(type)) {
+    return { deviceType: (type as DeviceType) || undefined, genericDeviceType: undefined };
+  }
+  return { deviceType: undefined, genericDeviceType: type };
+}
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: 'ONLINE', label: 'Online' },
@@ -544,9 +546,11 @@ export default function V2DevicesPage() {
     const init: DeviceFilter = {};
     const status     = searchParams.get('status') as DeviceStatus | null;
     const deviceType = searchParams.get('deviceType') as DeviceType | null;
+    const genericDeviceType = searchParams.get('genericDeviceType');
     const firmware   = searchParams.get('firmware');
     if (status) init.status = status;
     if (deviceType) init.deviceType = deviceType;
+    if (genericDeviceType) init.genericDeviceType = genericDeviceType;
     if (firmware) init.firmware = firmware;
     return init;
   });
@@ -646,7 +650,7 @@ export default function V2DevicesPage() {
         </span>
       ),
     },
-    { key: 'deviceType', header: 'Type', sortable: true, render: (d) => <Badge variant="default">{d.deviceType}</Badge>, width: 80 },
+    { key: 'deviceType', header: 'Type', sortable: true, render: (d) => <Badge variant="default">{d.genericDeviceType || d.deviceType}</Badge>, width: 80 },
     {
       key: 'status', header: 'Status', sortable: true,
       render: (d) => <Badge variant={statusVariant(d.status)} dot>{d.status}</Badge>, width: 120,
@@ -679,32 +683,75 @@ export default function V2DevicesPage() {
         </div>
       ),
     },
-    // Actions column — Admin only
-    ...(isAdmin ? [{
+    // Actions column — View Node always visible; Edit/Delete Admin only
+    {
       key: '_actions' as keyof Device,
       header: 'Actions',
-      width: 120,
+      width: isAdmin ? 180 : 110,
       render: (d: Device) => (
         <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
           <button
-            onClick={() => setEditDevice(d)}
-            style={{ background: 'var(--vf-elevated)', border: 'var(--vf-card-border)', color: 'var(--vf-text-secondary)', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
-            Edit
+            onClick={() => navigate(`/v2/devices/${d.id}`)}
+            style={{ background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+            Node View
           </button>
-          <button
-            onClick={() => setDeleteDevice_(d)}
-            style={{ background: 'none', border: '1px solid var(--vf-danger)', color: 'var(--vf-danger)', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
-            Delete
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => setEditDevice(d)}
+                style={{ background: 'var(--vf-elevated)', border: 'var(--vf-card-border)', color: 'var(--vf-text-secondary)', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                Edit
+              </button>
+              <button
+                onClick={() => setDeleteDevice_(d)}
+                style={{ background: 'none', border: '1px solid var(--vf-danger)', color: 'var(--vf-danger)', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                Del
+              </button>
+            </>
+          )}
         </div>
       ),
-    }] : []),
+    },
   ];
 
   const online  = devices.filter((d) => d.status === 'ONLINE').length;
   const offline = devices.filter((d) => d.status === 'OFFLINE').length;
   const btsCount = devices.filter((d) => d.deviceType === 'BTS').length;
   const cpeCount = devices.filter((d) => d.deviceType === 'CPE').length;
+
+  // Dynamic device type breakdown — counts all distinct types including vendor-defined ones
+  const deviceTypeCounts = devices.reduce<Record<string, { total: number; online: number }>>((acc, d) => {
+    const t = d.genericDeviceType || d.deviceType || 'Unknown';
+    if (!acc[t]) acc[t] = { total: 0, online: 0 };
+    acc[t].total++;
+    if (d.status === 'ONLINE') acc[t].online++;
+    return acc;
+  }, {});
+  const deviceTypeEntries = Object.entries(deviceTypeCounts).sort((a, b) => b[1].total - a[1].total);
+
+  const distinctTypes = useMemo(() => {
+    const seen = new Set<string>();
+    const legacy = ['BTS', 'CPE', 'IDU'];
+    legacy.forEach((t) => seen.add(t));
+    devices.forEach((d) => {
+      if (d.genericDeviceType) seen.add(d.genericDeviceType);
+      if (d.deviceType) seen.add(d.deviceType);
+    });
+    return Array.from(seen).sort();
+  }, [devices]);
+
+  const typeSelectOptions = useMemo(
+    () => [
+      { value: '', label: 'All types' },
+      ...distinctTypes.map((t) => ({
+        value: t,
+        label: t.charAt(0).toUpperCase() + t.slice(1),
+      })),
+    ],
+    [distinctTypes],
+  );
+
+  const activeTypeFilter = filter.genericDeviceType || filter.deviceType;
 
   const handleExport = async (fmt: 'csv' | 'xls') => {
     try {
@@ -776,28 +823,51 @@ export default function V2DevicesPage() {
       )}
 
       {/* Summary */}
-      <div className="vf-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+      <div className="vf-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))' }}>
         <MetricCard label="Total"   value={devices.length} loading={loading} />
-        <MetricCard label="Online"  value={online}         variant="success" loading={loading} />
-        <MetricCard label="Offline" value={offline}        variant={offline > 0 ? 'danger' : 'default'} loading={loading} />
-        <MetricCard label="BTS"     value={btsCount}       loading={loading} />
-        <MetricCard label="CPE"     value={cpeCount}       loading={loading} />
+        <MetricCard label="Online"  value={online}  variant="success" loading={loading}
+          onClick={() => setFilter((f) => ({ ...f, status: 'ONLINE' }))} />
+        <MetricCard label="Offline" value={offline} variant={offline > 0 ? 'danger' : 'default'} loading={loading}
+          onClick={() => setFilter((f) => ({ ...f, status: 'OFFLINE' }))} />
+        {deviceTypeEntries.map(([type, counts]) => (
+          <MetricCard
+            key={type}
+            label={type}
+            value={`${counts.online}/${counts.total}`}
+            loading={loading}
+            onClick={() => setFilter((f) => ({ ...f, ...applyDeviceTypeFilter(type) }))}
+            variant={counts.online === counts.total ? 'success' : counts.online === 0 ? 'danger' : 'default'}
+          />
+        ))}
       </div>
+      {deviceTypeEntries.length > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: -8 }}>
+          ↑ Click a device type to filter list below &nbsp;·&nbsp; values show online/total
+        </div>
+      )}
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <Input placeholder="Search by serial, IP, model…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 280 }} />
-        <Select options={TYPE_OPTIONS} value={filter.deviceType ?? ''} onChange={(e) => setFilter((f) => ({ ...f, deviceType: (e.target.value as DeviceType) || undefined }))} style={{ width: 140 }} />
+        <Select
+          options={typeSelectOptions}
+          value={activeTypeFilter ?? ''}
+          onChange={(e) => {
+            const newType = e.target.value;
+            setFilter((f) => ({ ...f, ...applyDeviceTypeFilter(newType) }));
+          }}
+          style={{ width: 140 }}
+        />
         <Select options={STATUS_OPTIONS} value={filter.status ?? ''} onChange={(e) => setFilter((f) => ({ ...f, status: (e.target.value as DeviceStatus) || undefined }))} style={{ width: 160 }} />
         <Button variant="ghost" size="sm" onClick={() => { setFilter({}); setSearch(''); }}>Clear</Button>
       </div>
 
       {/* Drilldown banner */}
-      {(filter.status || filter.deviceType || filter.firmware) && (
+      {(filter.status || filter.deviceType || filter.genericDeviceType || filter.firmware) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'var(--vf-accent-subtle)', border: '1px solid var(--vf-accent)', borderRadius: 8, fontSize: 12 }}>
           <span style={{ color: 'var(--vf-accent)', fontWeight: 700 }}>Drilldown filter active:</span>
           {filter.status     && <span style={{ background: 'var(--vf-elevated)', padding: '2px 8px', borderRadius: 4 }}>Status: {filter.status}</span>}
-          {filter.deviceType && <span style={{ background: 'var(--vf-elevated)', padding: '2px 8px', borderRadius: 4 }}>Type: {filter.deviceType}</span>}
+          {activeTypeFilter && <span style={{ background: 'var(--vf-elevated)', padding: '2px 8px', borderRadius: 4 }}>Type: {activeTypeFilter}</span>}
           {filter.firmware   && <span style={{ background: 'var(--vf-elevated)', padding: '2px 8px', borderRadius: 4 }}>Firmware: {filter.firmware}</span>}
           <button onClick={() => setFilter({})} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vf-accent)', fontSize: 12, fontWeight: 600 }}>✕ Clear</button>
         </div>

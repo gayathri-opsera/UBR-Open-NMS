@@ -20,6 +20,8 @@ export interface Device {
   ipAddress: string;
   manufacturer: string;
   model: string;
+  /** Generic device type from SNMP classification (switch, router, access_point, etc.) */
+  genericDeviceType?: string;
   firmwareVersion: string;
   status: DeviceStatus;
   location?: GpsLocation;
@@ -59,11 +61,22 @@ export interface Device {
   commissioningPendingFields?: string;
   realtimeConnectionId?: string;
   realtimeStatusReason?: string;
+
+  // ── WO-010: Framework identity fields (additive, nullable) ─────────────────
+  productDefinitionId?: string;
+  productDefinitionVersion?: string;
+  observedFirmwareVersion?: string;
+  activeAdapter?: string;
+  frameworkStatus?: string;
+  lastFrameworkFailureSummary?: string;
+  lastFrameworkSeenAt?: string;
 }
 
 export interface DeviceFilter {
   search?: string;
   deviceType?: DeviceType;
+  /** Filter by genericDeviceType (switch, router, access_point, etc.) */
+  genericDeviceType?: string;
   status?: DeviceStatus;
   firmware?: string;
   organizationId?: string;

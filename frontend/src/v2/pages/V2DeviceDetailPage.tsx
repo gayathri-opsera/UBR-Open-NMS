@@ -23,9 +23,15 @@ import { KpiMiniChart } from '../components/kpi/KpiMiniChart';
 import { useToast } from '../components/common/Toast';
 import { logger } from '../utils/logger';
 import { WirelessConfigTab } from '../components/device/WirelessConfigTab';
+import { ParameterGroupTabs } from '../components/framework/parameters/ParameterGroupTabs';
+import { getDeviceUiTemplate } from '../../api/framework-panels.api';
+import { getDeviceCurrentParameterValues, flattenParameterValues, updateDeviceParameter } from '../../api/framework-parameters.api';
+import type { AdaptiveUiTemplateData } from '../../api/framework-panels.types';
+import type { ParameterCurrentValue } from '../../api/framework-parameters.types';
 
 const TABS = [
-  { id: 'summary',   label: 'Summary' },
+  { id: 'summary',   label: 'Node View' },
+  { id: 'framework', label: 'Parameters' },
   { id: 'wireless',  label: 'Wireless' },
   { id: 'network',   label: 'Network' },
   { id: 'ethernet',  label: 'Ethernet' },
@@ -37,6 +43,35 @@ const TABS = [
   { id: 'logs',      label: 'Logs' },
   { id: 'history',   label: 'Config History' },
 ];
+
+// ── Node View helpers ─────────────────────────────────────────────────────────
+
+/** Parameter group IDs that feed the top-level overview metric cards */
+const OVERVIEW_PARAM_IDS = ['cpu', 'cpuUtil', 'cpuUtilization', 'memory', 'memUtil',
+  'memUtilization', 'uptime', 'sysUpTime', 'temperature', 'txPower', 'txPowerDbm'];
+
+/** Groups that are rendered as an interfaces/ports table instead of cards */
+const INTERFACE_GROUP_IDS = ['interfaces', 'ports', 'port', 'interface'];
+
+/** Groups that are always shown in the Device Information section */
+const SYSTEM_GROUP_IDS = ['system', 'system-info', 'identity', 'management', 'mgmt'];
+
+/** Icon map for known parameter group IDs */
+function groupIcon(groupId: string): string {
+  const id = groupId.toLowerCase();
+  if (id.includes('cpu') || id.includes('performance')) return '⚡';
+  if (id.includes('memory') || id.includes('mem')) return '🧠';
+  if (id.includes('interface') || id.includes('port')) return '🔌';
+  if (id.includes('wireless') || id.includes('radio') || id.includes('wifi')) return '📡';
+  if (id.includes('vlan')) return '🔀';
+  if (id.includes('qos')) return '⚡';
+  if (id.includes('security') || id.includes('auth')) return '🔒';
+  if (id.includes('network') || id.includes('ip')) return '🌐';
+  if (id.includes('system') || id.includes('mgmt')) return '🔧';
+  if (id.includes('environment') || id.includes('temp') || id.includes('power')) return '🌡️';
+  if (id.includes('gps') || id.includes('location')) return '📍';
+  return '📋';
+}
 
 /** Normalise tag objects from any backend format to { key, value } pairs. */
 function normaliseTags(raw: unknown): Array<{ key: string; value: string }> {
@@ -74,9 +109,18 @@ export default function V2DeviceDetailPage() {
   const [confirmDeprovision, setConfirmDeprovision] = useState(false);
   const [deprovisioning, setDeprovisioning] = useState(false);
 
-  // Canonical device identifier — falls back through all possible ID fields.
-  // device.deviceId is often undefined for Java-service devices that only return 'id'.
-  const devId: string = device?.deviceId || device?.serialNumber || device?.id || id || '';
+  // ── Framework tab state ───────────────────────────────────────────────────
+  const [fwTemplate, setFwTemplate]         = useState<AdaptiveUiTemplateData | null>(null);
+  const [fwValues, setFwValues]             = useState<Map<string, ParameterCurrentValue>>(new Map());
+  const [fwLoading, setFwLoading]           = useState(false);
+  const [fwError, setFwError]               = useState<string | null>(null);
+
+  // Canonical device identifier for API calls.
+  // Prefer serialNumber for KPI/availability calls (the KPI stub resolves serial in all
+  // device stores).  Fall through to deviceId then the raw URL param when absent.
+  // device.id (MongoDB _id) is intentionally last because ObjectId string matching
+  // requires extra conversion in each downstream stub.
+  const devId: string = device?.serialNumber || device?.deviceId || device?.id || id || '';
 
   useEffect(() => {
     if (!id) return;
@@ -107,6 +151,63 @@ export default function V2DeviceDetailPage() {
       })
       .catch((e) => logger.warn('Availability summary fetch failed', { error: e }));
   }, [device, tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Framework data: load on both summary (Node View) and framework tabs ─────
+  useEffect(() => {
+    if (!devId || (tab !== 'framework' && tab !== 'summary')) return;
+    setFwLoading(true);
+    setFwError(null);
+
+    Promise.all([
+      getDeviceUiTemplate(devId),
+      getDeviceCurrentParameterValues(devId),
+    ])
+      .then(([templateResp, valuesResp]) => {
+        if (templateResp.status === 'ok' && templateResp.data) {
+          setFwTemplate(templateResp.data);
+        } else {
+          setFwError(
+            templateResp.error?.message ?? 'No active Product Definition framework for this device.',
+          );
+          setFwTemplate(null);
+        }
+        // Flatten current values into a parameterId → value map
+        const valueMap = new Map<string, ParameterCurrentValue>();
+        if (valuesResp.status === 'ok' && valuesResp.data?.groups) {
+          for (const group of valuesResp.data.groups) {
+            for (const param of group.parameters) {
+              valueMap.set(param.parameterId, param);
+            }
+          }
+        }
+        setFwValues(valueMap);
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        setFwError(`Failed to load framework data: ${msg}`);
+      })
+      .finally(() => setFwLoading(false));
+  }, [devId, tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleFrameworkWrite = useCallback(async (parameterId: string, value: string) => {
+    try {
+      await updateDeviceParameter(devId, parameterId, value);
+      addToast(`Parameter "${parameterId}" updated.`, 'success');
+      // Re-fetch values after 2 s to reflect the write
+      setTimeout(async () => {
+        const resp = await getDeviceCurrentParameterValues(devId).catch(() => null);
+        if (resp?.status === 'ok' && resp.data?.groups) {
+          const map = new Map<string, ParameterCurrentValue>();
+          for (const g of resp.data.groups) for (const p of g.parameters) map.set(p.parameterId, p);
+          setFwValues(map);
+        }
+      }, 2000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addToast(`Write failed: ${msg}`, 'error');
+      throw err;
+    }
+  }, [devId, addToast]);
 
   const openEdit = () => {
     setEditForm({
@@ -157,6 +258,15 @@ export default function V2DeviceDetailPage() {
         </div>
         <div className="vf-page-actions">
           <Badge variant="default">{device.firmwareVersion}</Badge>
+          {/* Framework Parameters — always visible; page shows empty state when no PD is associated */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(`/v2/devices/${id}/framework-parameters`)}
+            aria-label="View adaptive framework parameter panels"
+          >
+            🔌 Framework Parameters
+          </Button>
           <Button variant="ghost" size="sm" onClick={openEdit}>✏ Edit Device</Button>
           {/* Deprovision — removes device from managed inventory */}
           {!confirmDeprovision ? (
@@ -272,42 +382,319 @@ export default function V2DeviceDetailPage() {
       {/* Tabs */}
       <Tabs tabs={TABS} activeTab={tab} onChange={setTab}>
         <TabPanel id="summary">
-          {kpiLoading ? (
-            <div style={{ padding: 24 }}><Spinner /></div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 16 }}>
-              {/* WO-041: Availability health badge */}
-              {availabilitySummary && (
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 6 }}>
-                      Operational Health
-                    </div>
-                    <AvailabilityBadge
-                      summary={availabilitySummary}
-                      showReason
-                      showTimestamp
-                    />
+          {/* ── NODE VIEW ─────────────────────────────────────────────────── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingTop: 16 }}>
+
+            {/* ── 1. OVERVIEW METRICS ─────────────────────────────────────── */}
+            {(() => {
+              // Collect overview-level values from framework parameters
+              const overviewMetrics: Array<{ label: string; value: string; unit?: string; status?: 'ok' | 'warn' | 'error' }> = [];
+              if (fwValues.size > 0) {
+                const lookup = (ids: string[]) => {
+                  for (const id of ids) {
+                    const v = fwValues.get(id);
+                    if (v?.value != null && String(v.value) !== '') return v;
+                  }
+                  return null;
+                };
+                const cpu = lookup(['cpuUtil', 'cpu', 'cpuUtilization', 'cpuUtil5Min', 'cpuUtil5Sec']);
+                const mem = lookup(['memUtil', 'memory', 'memUtilization', 'memUsed']);
+                const uptime = lookup(['uptime', 'sysUpTime', 'sysUptime']);
+                const temp = lookup(['temperature', 'inletTemp', 'outletTemp']);
+                if (cpu) {
+                  const val = parseFloat(String(cpu.value));
+                  overviewMetrics.push({ label: 'CPU', value: isNaN(val) ? String(cpu.value) : val.toFixed(1), unit: '%', status: val > 90 ? 'error' : val > 70 ? 'warn' : 'ok' });
+                }
+                if (mem) {
+                  const val = parseFloat(String(mem.value));
+                  overviewMetrics.push({ label: 'Memory', value: isNaN(val) ? String(mem.value) : val.toFixed(1), unit: mem.unit || '%', status: val > 90 ? 'error' : val > 75 ? 'warn' : 'ok' });
+                }
+                if (uptime) overviewMetrics.push({ label: 'Uptime', value: String(uptime.value), unit: uptime.unit, status: 'ok' });
+                if (temp) {
+                  const val = parseFloat(String(temp.value));
+                  overviewMetrics.push({ label: 'Temperature', value: isNaN(val) ? String(temp.value) : val.toFixed(1), unit: temp.unit || '°C', status: val > 70 ? 'error' : val > 55 ? 'warn' : 'ok' });
+                }
+              }
+              // Always add status + availability
+              overviewMetrics.unshift({
+                label: 'Status',
+                value: device.status,
+                status: device.status === 'ONLINE' ? 'ok' : device.status === 'OFFLINE' ? 'error' : 'warn',
+              });
+              const COLOR = { ok: '#22c55e', warn: '#f59e0b', error: '#ef4444' };
+              return (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vf-text-muted)', marginBottom: 10 }}>
+                    Overview
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    {overviewMetrics.map((m) => (
+                      <div key={m.label} style={{ background: 'var(--vf-surface)', border: `1px solid ${m.status ? COLOR[m.status] + '44' : 'var(--vf-border-subtle)'}`, borderRadius: 10, padding: '14px 18px', minWidth: 110, flex: '0 0 auto' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 6 }}>{m.label}</div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+                          <span style={{ fontSize: 22, fontWeight: 700, color: m.status ? COLOR[m.status] : 'var(--vf-text-primary)', lineHeight: 1 }}>
+                            {m.value}
+                          </span>
+                          {m.unit && <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', fontWeight: 500 }}>{m.unit}</span>}
+                        </div>
+                      </div>
+                    ))}
+                    {/* Availability badge inline */}
+                    {availabilitySummary && (
+                      <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '14px 18px', minWidth: 110, flex: '0 0 auto' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 6 }}>Health</div>
+                        <AvailabilityBadge summary={availabilitySummary} showReason={false} showTimestamp={false} />
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
-              <div className="vf-kpi-grid">
-                {kpiData.map((series, ki) => {
-                  const last = series.data[series.data.length - 1];
-                  return (
-                    <MetricCard key={`kpi-${ki}-${series.param}`} label={series.param} value={last ? last.avg.toFixed(1) : '—'} />
-                  );
-                })}
+              );
+            })()}
+
+            {/* ── 2. DEVICE IDENTITY ──────────────────────────────────────── */}
+            <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 16px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--vf-border-subtle)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vf-text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                🔧 Device Identity
+                {fwTemplate && (
+                  <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 500, background: 'rgba(96,165,250,0.12)', color: '#60a5fa', padding: '2px 8px', borderRadius: 6, fontFamily: 'monospace', textTransform: 'none', letterSpacing: 0 }}>
+                    def: {fwTemplate.productDefinitionId} · rv{fwTemplate.registryVersion}
+                  </span>
+                )}
               </div>
-              {kpiData.length > 0 && (
-                <Card title="24h KPI Trends">
-                  <div className="vf-grid vf-grid--2">
-                    {kpiData.slice(0, 6).map((series, ki) => (
-                      <KpiMiniChart key={`mini-${ki}-${series.param}`} series={series} />
-                    ))}
+              <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px 24px' }}>
+                {[
+                  { label: 'Device Name',   value: device.serialNumber      || '—' },
+                  { label: 'Device ID',     value: device.deviceId          || device.id || '—' },
+                  { label: 'Vendor',        value: device.manufacturer      || fwTemplate?.groups?.[0]?.parameters?.[0]?.parameterId?.split('.')?.[0] || '—' },
+                  { label: 'Model',         value: device.model             || '—' },
+                  { label: 'Device Type',   value: fwTemplate?.deviceType   || device.deviceType || '—' },
+                  { label: 'IP Address',    value: device.ipAddress         || '—', mono: true },
+                  { label: 'MAC Address',   value: device.macAddress        || '—', mono: true },
+                  { label: 'Firmware',      value: device.firmwareVersion   || '—', mono: true },
+                  { label: 'Serial No.',    value: device.serialNumber      || '—', mono: true },
+                  { label: 'Network',       value: device.networkId         || '—' },
+                  { label: 'Last Seen',     value: device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : '—' },
+                  { label: 'Registered',    value: device.registeredAt ? new Date(device.registeredAt).toLocaleString() : '—' },
+                ].map(({ label, value, mono }) => (
+                  <div key={label}>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 3 }}>{label}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--vf-text-primary)', wordBreak: 'break-all', fontFamily: mono ? 'var(--vf-font-mono)' : undefined }}>{value}</div>
                   </div>
-                </Card>
+                ))}
+              </div>
+            </div>
+
+            {/* ── 3. DYNAMIC DEVICE-SPECIFIC SECTIONS (from product definition) ─ */}
+            {fwLoading && (
+              <div style={{ padding: 24, textAlign: 'center' }}><Spinner /></div>
+            )}
+            {!fwLoading && fwTemplate && fwTemplate.groups && fwTemplate.groups.length > 0 && (() => {
+              // Partition groups: system → identity section already shown; interfaces → table; rest → cards
+              const interfaceGroups = fwTemplate.groups.filter((g) => INTERFACE_GROUP_IDS.some((id) => g.groupId.toLowerCase().includes(id)));
+              const systemGroups    = fwTemplate.groups.filter((g) => SYSTEM_GROUP_IDS.some((id)    => g.groupId.toLowerCase().includes(id)));
+              const otherGroups     = fwTemplate.groups.filter((g) =>
+                !interfaceGroups.includes(g) && !systemGroups.includes(g)
+              );
+
+              return (
+                <>
+                  {/* System / Management group — shown as Device-Specific Info */}
+                  {systemGroups.map((group) => (
+                    <div key={group.groupId} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
+                      <div style={{ padding: '10px 16px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--vf-border-subtle)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vf-text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {groupIcon(group.groupId)} {group.label || group.groupId}
+                      </div>
+                      <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px 24px' }}>
+                        {group.parameters.map((param) => {
+                          const val = fwValues.get(param.parameterId);
+                          const displayVal = val?.value != null && String(val.value) !== ''
+                            ? String(val.value) : '—';
+                          const isFresh = val?.freshnessState === 'FRESH';
+                          return (
+                            <div key={param.parameterId}>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 3 }}>
+                                {param.label || param.parameterId}
+                              </div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: isFresh ? 'var(--vf-text-primary)' : 'var(--vf-text-muted)', fontFamily: 'var(--vf-font-mono)', wordBreak: 'break-all' }}>
+                                {displayVal}
+                                {val?.unit ? <span style={{ fontSize: 10, fontWeight: 400, marginLeft: 3 }}>{val.unit}</span> : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Other device-specific groups — rendered as card sections */}
+                  {otherGroups.map((group) => (
+                    <div key={group.groupId} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
+                      <div style={{ padding: '10px 16px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--vf-border-subtle)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vf-text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {groupIcon(group.groupId)} {group.label || group.groupId}
+                        <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 500, color: 'var(--vf-text-tertiary)', textTransform: 'none' }}>
+                          {group.parameters.length} parameter{group.parameters.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '14px 24px' }}>
+                        {group.parameters.map((param) => {
+                          const val = fwValues.get(param.parameterId);
+                          const raw = val?.value;
+                          const displayVal = raw != null && String(raw) !== '' ? String(raw) : null;
+                          const isFresh = val?.freshnessState === 'FRESH';
+                          const numVal = displayVal ? parseFloat(displayVal) : NaN;
+                          const statusColor =
+                            !displayVal ? 'var(--vf-text-muted)' :
+                            !isNaN(numVal) && param.parameterId.toLowerCase().includes('cpu') && numVal > 90 ? '#ef4444' :
+                            !isNaN(numVal) && param.parameterId.toLowerCase().includes('mem') && numVal > 90 ? '#ef4444' :
+                            isFresh ? 'var(--vf-text-primary)' : 'var(--vf-text-secondary)';
+                          return (
+                            <div key={param.parameterId}>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 4 }}>
+                                {param.label || param.parameterId}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+                                <span style={{ fontSize: !isNaN(numVal) && displayVal ? 18 : 13, fontWeight: 700, color: statusColor, lineHeight: 1 }}>
+                                  {displayVal ?? 'N/A'}
+                                </span>
+                                {val?.unit && <span style={{ fontSize: 10, color: 'var(--vf-text-muted)' }}>{val.unit}</span>}
+                              </div>
+                              {!isFresh && displayVal && (
+                                <div style={{ fontSize: 9, color: 'var(--vf-text-muted)', marginTop: 2 }}>stale</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Interfaces / Ports table */}
+                  {interfaceGroups.map((group) => (
+                    <div key={group.groupId} style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
+                      <div style={{ padding: '10px 16px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--vf-border-subtle)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vf-text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        🔌 {group.label || 'Interfaces / Ports'}
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+                              <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', borderBottom: '1px solid var(--vf-border-subtle)' }}>Parameter</th>
+                              <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', borderBottom: '1px solid var(--vf-border-subtle)' }}>Value</th>
+                              <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', borderBottom: '1px solid var(--vf-border-subtle)' }}>Unit</th>
+                              <th style={{ padding: '8px 14px', textAlign: 'left', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', borderBottom: '1px solid var(--vf-border-subtle)' }}>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.parameters.map((param, pi) => {
+                              const val = fwValues.get(param.parameterId);
+                              const raw = val?.value;
+                              const displayVal = raw != null && String(raw) !== '' ? String(raw) : 'N/A';
+                              const isUp = displayVal.toLowerCase() === 'up' || displayVal === '1';
+                              const isDown = displayVal.toLowerCase() === 'down' || displayVal === '2';
+                              return (
+                                <tr key={param.parameterId} style={{ borderBottom: pi < group.parameters.length - 1 ? '1px solid var(--vf-border-subtle)' : undefined }}>
+                                  <td style={{ padding: '9px 14px', color: 'var(--vf-text-secondary)', fontFamily: 'var(--vf-font-mono)', fontSize: 11 }}>
+                                    {param.label || param.parameterId}
+                                  </td>
+                                  <td style={{ padding: '9px 14px', fontWeight: 600, color: 'var(--vf-text-primary)', fontFamily: 'var(--vf-font-mono)', fontSize: 12 }}>
+                                    {displayVal}
+                                  </td>
+                                  <td style={{ padding: '9px 14px', color: 'var(--vf-text-muted)', fontSize: 11 }}>
+                                    {val?.unit || '—'}
+                                  </td>
+                                  <td style={{ padding: '9px 14px' }}>
+                                    {isUp ? (
+                                      <span style={{ fontSize: 11, fontWeight: 600, color: '#22c55e', background: 'rgba(34,197,94,0.1)', padding: '2px 8px', borderRadius: 4 }}>UP</span>
+                                    ) : isDown ? (
+                                      <span style={{ fontSize: 11, fontWeight: 600, color: '#ef4444', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 4 }}>DOWN</span>
+                                    ) : val?.freshnessState === 'FRESH' ? (
+                                      <span style={{ fontSize: 10, color: '#22c55e' }}>●</span>
+                                    ) : (
+                                      <span style={{ fontSize: 10, color: 'var(--vf-text-muted)' }}>○</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              );
+            })()}
+
+            {/* No product definition placeholder */}
+            {!fwLoading && !fwTemplate && (
+              <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '20px 16px', fontSize: 13, color: 'var(--vf-text-muted)' }}>
+                📋 No Product Definition linked to this device. Upload and activate a definition in
+                <button onClick={() => navigate('/v2/product-definitions')} style={{ background: 'none', border: 'none', color: 'var(--vf-accent)', cursor: 'pointer', fontSize: 13, marginLeft: 4 }}>
+                  Admin → Framework Definitions
+                </button>{' '}to see dynamic parameters here.
+              </div>
+            )}
+
+            {/* ── 4. KPI CHARTS ──────────────────────────────────────────── */}
+            {kpiData.length > 0 && (
+              <Card title="24h KPI Trends">
+                <div className="vf-grid vf-grid--2">
+                  {kpiData.slice(0, 6).map((series, ki) => (
+                    <KpiMiniChart key={`mini-${ki}-${series.param}`} series={series} />
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Manual refresh + last updated footer */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, fontSize: 11, color: 'var(--vf-text-muted)' }}>
+              {device.lastSeenAt && (
+                <span>Last seen: {new Date(device.lastSeenAt).toLocaleTimeString()}</span>
               )}
+              <button
+                onClick={() => {
+                  // Re-trigger both KPI and framework data
+                  setTab('_refresh_');
+                  setTimeout(() => setTab('summary'), 50);
+                }}
+                style={{ background: 'none', border: '1px solid var(--vf-border-subtle)', borderRadius: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer', color: 'var(--vf-text-secondary)' }}
+              >
+                ↻ Refresh
+              </button>
+            </div>
+
+          </div>
+        </TabPanel>
+        <TabPanel id="framework">
+          {fwLoading ? (
+            <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>
+          ) : fwError ? (
+            <div style={{ padding: 24, background: 'var(--vf-surface)', borderRadius: 8, border: '1px solid var(--vf-border-subtle)', color: 'var(--vf-text-secondary)', fontSize: 13 }}>
+              📋 {fwError}
+            </div>
+          ) : fwTemplate ? (
+            <div style={{ paddingTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--vf-text-primary)' }}>
+                  {fwTemplate.deviceType}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', fontFamily: 'monospace' }}>
+                  {fwTemplate.productDefinitionId}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--vf-text-tertiary)' }}>
+                  reg v{fwTemplate.registryVersion}
+                </span>
+              </div>
+              <ParameterGroupTabs
+                groups={fwTemplate.groups}
+                currentValues={fwValues}
+                onWrite={handleFrameworkWrite}
+              />
+            </div>
+          ) : (
+            <div style={{ padding: 32, textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 13 }}>
+              📋 No Product Definition framework associated with this device.
+              Upload and activate a definition in Admin → Framework Definitions.
             </div>
           )}
         </TabPanel>

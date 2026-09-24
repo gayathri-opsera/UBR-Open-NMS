@@ -1,0 +1,139 @@
+{
+  "$schema": "urn:nms:productdef:json:1.0",
+  "productDefinition": {
+    "identity": {
+      "name": "EX4300-48P",
+      "vendor": "Juniper",
+      "model": "EX4300-48P",
+      "firmwareFrom": "18.1",
+      "firmwareTo": "22.4",
+      "productFamily": "EX Series"
+    },
+    "fingerprints": [
+      {
+        "sysObjectId": ".1.3.6.1.4.1.2636.1.1.1.2.79",
+        "sysDescrPattern": ".*Juniper.*EX4300.*",
+        "firmwareFrom": "18.1",
+        "firmwareTo": "22.4"
+      },
+      {
+        "sysObjectId": ".1.3.6.1.4.1.2636.1.1.1.2.80",
+        "sysDescrPattern": ".*Juniper.*EX4300-48P.*"
+      }
+    ],
+    "protocols": [
+      { "type": "SNMP" },
+      { "type": "CLI" }
+    ],
+    "parameters": [
+      {
+        "groupName": "cpu",
+        "parameters": [
+          {
+            "id": "cpu_util",
+            "displayName": "CPU Utilization",
+            "dataType": "GAUGE",
+            "unit": "%",
+            "minValue": 0,
+            "maxValue": 100,
+            "thresholdHigh": "85",
+            "stalenessSeconds": 60,
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.2636.3.1.13.1.8.9.1.0.0" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      },
+      {
+        "groupName": "memory",
+        "parameters": [
+          {
+            "id": "mem_util",
+            "displayName": "Memory Utilization",
+            "dataType": "GAUGE",
+            "unit": "%",
+            "minValue": 0,
+            "maxValue": 100,
+            "thresholdHigh": "80",
+            "stalenessSeconds": 60,
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.2636.3.1.13.1.11.9.1.0.0" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      },
+      {
+        "groupName": "interface",
+        "parameters": [
+          {
+            "id": "if_in_octets",
+            "displayName": "Interface Inbound Octets",
+            "dataType": "COUNTER",
+            "unit": "bytes",
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.2.2.1.10" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "if_out_octets",
+            "displayName": "Interface Outbound Octets",
+            "dataType": "COUNTER",
+            "unit": "bytes",
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.2.2.1.16" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "if_oper_status",
+            "displayName": "Interface Operational Status",
+            "dataType": "ENUM",
+            "enumValues": ["up", "down", "testing", "unknown", "dormant"],
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.2.2.1.8" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      },
+      {
+        "groupName": "environment",
+        "parameters": [
+          {
+            "id": "chassis_temp",
+            "displayName": "Chassis Temperature",
+            "dataType": "FLOAT",
+            "unit": "Celsius",
+            "minValue": -10,
+            "maxValue": 80,
+            "thresholdHigh": "65",
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.2636.3.1.13.1.7.9.1.0.0" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "fan_speed",
+            "displayName": "Fan Speed",
+            "dataType": "ENUM",
+            "enumValues": ["ok", "fail", "absent"],
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.2636.3.1.13.1.5.9.1.0.0" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          },
+          {
+            "id": "pem_status",
+            "displayName": "Power Entry Module Status",
+            "dataType": "ENUM",
+            "enumValues": ["ok", "fail", "absent", "present"],
+            "snmpMapping": { "oid": ".1.3.6.1.4.1.2636.3.1.13.1.6.9.1.0.0" },
+            "uiVisibleTo": ["NMS_OPERATOR", "FRAMEWORK_ADMIN"]
+          }
+        ]
+      },
+      {
+        "groupName": "bgp",
+        "parameters": [
+          {
+            "id": "bgp_peer_state",
+            "displayName": "BGP Peer State",
+            "dataType": "ENUM",
+            "enumValues": ["idle", "connect", "active", "opensent", "openconfirm", "established"],
+            "snmpMapping": { "oid": ".1.3.6.1.2.1.15.3.1.2" },
+            "uiVisibleTo": ["FRAMEWORK_ADMIN"]
+          }
+        ]
+      }
+    ]
+  }
+}

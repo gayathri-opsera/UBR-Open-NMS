@@ -9,7 +9,10 @@ import type {
   DiscoveryRunResponse,
   DiscoveryResult,
   DiscoverySchedule,
+  GuidedFailure,
   ScopeEntry,
+  ProbeAttempt,
+  TriggerMode,
 } from '../discovery.api';
 
 // ── Scope fixtures ────────────────────────────────────────────────────────────
@@ -164,6 +167,150 @@ export const mockDiscoverySchedule: DiscoverySchedule = {
   createdAt:        '2026-09-01T09:00:00Z',
 };
 
+// ── WO-008: Multi-mode probe chain fixtures ───────────────────────────────────
+
+/** A probe attempt that succeeded via ICMP reachability. */
+export const mockProbeICMPSuccess: ProbeAttempt = {
+  probeType:            'ICMP',
+  status:               'success',
+  startedAt:            '2026-09-09T10:00:00.100Z',
+  completedAt:          '2026-09-09T10:00:00.105Z',
+  latencyMs:            5,
+  safeEvidenceSummary:  'host responded within 5ms',
+  retryable:            false,
+};
+
+/** A probe attempt that timed out on SNMP. */
+export const mockProbeSNMPTimeout: ProbeAttempt = {
+  probeType:        'SNMP',
+  status:           'timeout',
+  startedAt:        '2026-09-09T10:00:00.106Z',
+  completedAt:      '2026-09-09T10:00:05.106Z',
+  latencyMs:        5000,
+  failureCategory:  'SNMP_TIMEOUT',
+  failureReason:    'SNMP GET timed out',
+  retryable:        true,
+};
+
+/** A probe attempt that successfully fingerprinted via SNMP. */
+export const mockProbeSNMPSuccess: ProbeAttempt = {
+  probeType:            'SNMP',
+  status:               'success',
+  startedAt:            '2026-09-09T10:00:00.200Z',
+  completedAt:          '2026-09-09T10:00:00.350Z',
+  latencyMs:            150,
+  safeEvidenceSummary:  'sysObjectID=.1.3.6.1.4.1.9 sysDescr="Cisco IOS Software"',
+  retryable:            false,
+};
+
+/** A probe attempt that grabbed the SSH banner. */
+export const mockProbeSSHSuccess: ProbeAttempt = {
+  probeType:            'SSH',
+  status:               'success',
+  startedAt:            '2026-09-09T10:00:01.000Z',
+  completedAt:          '2026-09-09T10:00:01.080Z',
+  latencyMs:            80,
+  safeEvidenceSummary:  'SSH banner: SSH-2.0-OpenSSH_8.4p1 Ubuntu-6ubuntu2',
+  retryable:            false,
+};
+
+/** A probe attempt where the host was unreachable (ICMP gate failed). */
+export const mockProbeICMPUnreachable: ProbeAttempt = {
+  probeType:       'ICMP',
+  status:          'unreachable',
+  startedAt:       '2026-09-09T10:00:02.000Z',
+  completedAt:     '2026-09-09T10:00:07.000Z',
+  latencyMs:       5000,
+  failureCategory: 'ICMP_UNREACHABLE',
+  failureReason:   'host did not respond to TCP reachability probes on ports 22, 161, 443, 80',
+  retryable:       true,
+};
+
+/** A probe attempt where SNMP credential resolution failed. */
+export const mockProbeSNMPAuthFailed: ProbeAttempt = {
+  probeType:       'SNMP',
+  status:          'auth_failed',
+  startedAt:       '2026-09-09T10:00:00.400Z',
+  completedAt:     '2026-09-09T10:00:00.410Z',
+  latencyMs:       10,
+  failureCategory: 'SNMP_AUTH_FAILED',
+  failureReason:   'SNMP credential resolution failed — no credential configured or credential rejected',
+  retryable:       false,
+};
+
+/** A probe chain for a reachable SNMP device (ICMP + SNMP success). */
+export const mockProbeChainSNMPSuccess: ProbeAttempt[] = [
+  mockProbeICMPSuccess,
+  mockProbeSNMPSuccess,
+];
+
+/** A probe chain for an SSH-banner-only device (ICMP success, SNMP auth failed, SSH success). */
+export const mockProbeChainSSHOnly: ProbeAttempt[] = [
+  mockProbeICMPSuccess,
+  mockProbeSNMPAuthFailed,
+  mockProbeSSHSuccess,
+];
+
+/** A probe chain for an unreachable device (ICMP fails; all other probes skipped). */
+export const mockProbeChainUnreachable: ProbeAttempt[] = [
+  mockProbeICMPUnreachable,
+];
+
+/** A manual discovery run with full SNMP probe chain. */
+export const mockDiscoveryRunManual: DiscoveryRunDetail = {
+  ...mockDiscoveryRunCompleted,
+  runId:               'run-wo008-manual',
+  triggerMode:         'MANUAL' as TriggerMode,
+  correlationId:       'corr-manual-001',
+  probeAttempts:       mockProbeChainSNMPSuccess,
+  probeAttemptCount:   2,
+  successfulProbeType: 'SNMP',
+};
+
+/** A scheduled discovery run with probe chain. */
+export const mockDiscoveryRunScheduled: DiscoveryRunDetail = {
+  ...mockDiscoveryRunCompleted,
+  runId:               'run-wo008-scheduled',
+  triggerMode:         'SCHEDULED' as TriggerMode,
+  correlationId:       'corr-sched-001',
+  probeAttempts:       mockProbeChainSNMPSuccess,
+  probeAttemptCount:   2,
+  successfulProbeType: 'SNMP',
+};
+
+/** An event-driven run (SNMP trap trigger) with probe chain. */
+export const mockDiscoveryRunEventTrap: DiscoveryRunDetail = {
+  ...mockDiscoveryRunCompleted,
+  runId:               'run-wo008-trap',
+  triggerMode:         'EVENT_SNMP_TRAP' as TriggerMode,
+  correlationId:       'corr-trap-001',
+  probeAttempts:       mockProbeChainSSHOnly,
+  probeAttemptCount:   3,
+  successfulProbeType: 'SSH',
+};
+
+/** A run where the device was unreachable (event-driven, all probes failed). */
+export const mockDiscoveryRunUnreachable: DiscoveryRunDetail = {
+  ...mockDiscoveryRunFailed,
+  runId:             'run-wo008-unreachable',
+  triggerMode:       'EVENT_SYSLOG' as TriggerMode,
+  correlationId:     'corr-syslog-001',
+  probeAttempts:     mockProbeChainUnreachable,
+  probeAttemptCount: 1,
+  retryAt:           '2026-09-09T10:05:00Z',
+};
+
+/** A run with an adapter failure (SNMP timeout on all retries). */
+export const mockDiscoveryRunAdapterFailed: DiscoveryRunDetail = {
+  ...mockDiscoveryRunFailed,
+  runId:             'run-wo008-adapter-failed',
+  triggerMode:       'MANUAL' as TriggerMode,
+  correlationId:     'corr-manual-002',
+  probeAttempts:     [mockProbeICMPSuccess, mockProbeSNMPTimeout],
+  probeAttemptCount: 2,
+  failureReason:     'SNMP community resolution failed for all hosts in scope.',
+};
+
 /** Second Cisco switch with different model for comparison tests (WO-030). */
 export const mockResultCiscoSwitchAlt: DiscoveryResult = {
   ...mockResultCiscoSwitch,
@@ -175,4 +322,157 @@ export const mockResultCiscoSwitchAlt: DiscoveryResult = {
 export const mockComparisonDevices: DiscoveryResult[] = [
   mockResultCiscoSwitch,
   mockResultCiscoSwitchAlt,
+];
+
+// ── WO-011: Guided failure injection fixtures ─────────────────────────────────
+//
+// One fixture per failure category. No real IPs, credentials, or OIDs.
+
+/** Guided failure: ICMP reachability failure — host fully unreachable. */
+export const mockGuidedFailureReachability: GuidedFailure = {
+  category:              'REACHABILITY_FAILURE',
+  code:                  'ICMP_UNREACHABLE',
+  explicitReason:        'The host did not respond to ICMP ping — it may be down, unreachable, or ICMP-filtered.',
+  retryable:             true,
+  lastAttemptedProtocol: 'ICMP',
+  recommendedNextAction: 'Verify device IP address, management-network routing, and firewall rules.',
+  correlationId:         'corr-fail-001',
+};
+
+/** Guided failure: SNMP authentication failure (ICMP succeeded). */
+export const mockGuidedFailureCredential: GuidedFailure = {
+  category:                       'CREDENTIAL_FAILURE',
+  code:                           'SNMP_AUTH_FAILED',
+  explicitReason:                 'SNMP authentication failed — the credential was rejected or is not configured.',
+  retryable:                      true,
+  lastSuccessfulProtocolAttempt:  'ICMP',
+  lastAttemptedProtocol:          'SNMP',
+  recommendedNextAction:          'Verify the management credential reference in the credential vault for this device.',
+  correlationId:                  'corr-fail-002',
+};
+
+/** Guided failure: SNMP GET timeout. */
+export const mockGuidedFailureTimeout: GuidedFailure = {
+  category:                       'PROTOCOL_TIMEOUT',
+  code:                           'SNMP_TIMEOUT',
+  explicitReason:                 'SNMP GET request timed out — the device did not respond within the configured timeout.',
+  retryable:                      true,
+  lastSuccessfulProtocolAttempt:  'ICMP',
+  lastAttemptedProtocol:          'SNMP',
+  recommendedNextAction:          'Retry the discovery run after confirming the device is responsive.',
+  correlationId:                  'corr-fail-003',
+};
+
+/** Guided failure: unknown fingerprint — no active Product Definition matched. */
+export const mockGuidedFailureUnknownFingerprint: GuidedFailure = {
+  category:                       'UNKNOWN_FINGERPRINT',
+  code:                           'OID_NOT_IN_SCOPE',
+  explicitReason:                 'No active Product Definition matched the device fingerprint evidence.',
+  retryable:                      false,
+  lastSuccessfulProtocolAttempt:  'SNMP',
+  lastAttemptedProtocol:          'SNMP',
+  recommendedNextAction:          'Activate a matching Product Definition in the Product Definition manager.',
+  correlationId:                  'corr-fail-004',
+};
+
+/** Guided failure: conflicting fingerprint — two PDs matched at equal confidence. */
+export const mockGuidedFailureConflict: GuidedFailure = {
+  category:                       'CONFLICTING_FINGERPRINT',
+  code:                           'FINGERPRINT_CONFLICT',
+  explicitReason:                 'Multiple active Product Definitions matched at equal confidence; no inventory write allowed.',
+  retryable:                      false,
+  lastSuccessfulProtocolAttempt:  'SNMP',
+  lastAttemptedProtocol:          'SNMP',
+  recommendedNextAction:          'Resolve the conflicting Product Definitions in the framework registry before re-running discovery.',
+  correlationId:                  'corr-fail-005',
+};
+
+/** Guided failure: product definition registry unavailable. */
+export const mockGuidedFailureRegistryUnavailable: GuidedFailure = {
+  category:                       'REGISTRY_UNAVAILABLE',
+  code:                           'REGISTRY_READ_FAILED',
+  explicitReason:                 'The Product Definition registry was unavailable during fingerprint matching — probe evidence was recorded but not matched.',
+  retryable:                      true,
+  lastSuccessfulProtocolAttempt:  'SNMP',
+  lastAttemptedProtocol:          'SNMP',
+  recommendedNextAction:          'Wait for the registry service to recover or manually trigger a registry refresh.',
+  correlationId:                  'corr-fail-006',
+};
+
+/** Guided failure: adapter health failure (all adapters unhealthy). */
+export const mockGuidedFailureAdapterHealth: GuidedFailure = {
+  category:              'ADAPTER_HEALTH_FAILURE',
+  code:                  'ADAPTER_UNHEALTHY',
+  explicitReason:        'All supported protocol adapters failed their health checks — device may be unreachable or no credentials are configured.',
+  retryable:             true,
+  lastAttemptedProtocol: 'SNMP',
+  recommendedNextAction: 'Verify that the management protocol is enabled and reachable on the target device.',
+  correlationId:         'corr-fail-007',
+};
+
+// Discovery results with guided failure attached:
+
+/** Discovery result: ICMP unreachable with guided failure detail. */
+export const mockResultUnreachableWithGuidedFailure: DiscoveryResult = {
+  ...mockResultUnreachable,
+  guidedFailure: mockGuidedFailureReachability,
+};
+
+/** Discovery result: SNMP auth failed with guided failure detail. */
+export const mockResultSnmpAuthFailedWithGuidedFailure: DiscoveryResult = {
+  ...mockResultSnmpAuthFailed,
+  guidedFailure: mockGuidedFailureCredential,
+};
+
+/** Discovery result: SNMP timeout with guided failure detail. */
+export const mockResultSnmpTimeout: DiscoveryResult = {
+  ip:                   '192.168.1.50',
+  icmpStatus:           'reachable',
+  snmpStatus:           'timeout',
+  classificationStatus: 'CLASSIFICATION_ERROR',
+  deferReason:          'FINGERPRINT_SNMP_TIMEOUT',
+  correlationId:        'corr-timeout-001',
+  guidedFailure:        mockGuidedFailureTimeout,
+};
+
+/** Discovery result: unknown fingerprint — OID not in active registry. */
+export const mockResultUnknownFingerprint: DiscoveryResult = {
+  ...mockResultUnrecognised,
+  fingerprintStatus: 'UNKNOWN',
+  guidedFailure:     mockGuidedFailureUnknownFingerprint,
+};
+
+/** Discovery result: conflicting fingerprint — two PDs tie. */
+export const mockResultConflictFingerprint: DiscoveryResult = {
+  ip:                        '192.168.1.60',
+  icmpStatus:                'reachable',
+  snmpStatus:                'success',
+  classificationStatus:      'CLASSIFICATION_ERROR',
+  sysObjectID:               '.1.3.6.1.4.1.9.1.2071',
+  fingerprintStatus:         'CONFLICT',
+  fingerprintConflictReason: 'pd-cisco-ios-router vs pd-cisco-ios-router-dc tied at confidence 0.75',
+  correlationId:             'corr-conflict-001',
+  guidedFailure:             mockGuidedFailureConflict,
+};
+
+/** Discovery result: registry unavailable during matching. */
+export const mockResultRegistryUnavailable: DiscoveryResult = {
+  ip:                   '192.168.1.70',
+  icmpStatus:           'reachable',
+  snmpStatus:           'success',
+  classificationStatus: 'CLASSIFICATION_ERROR',
+  sysObjectID:          '.1.3.6.1.4.1.9.1.2071',
+  fingerprintStatus:    'REGISTRY_UNAVAILABLE',
+  correlationId:        'corr-registry-001',
+  guidedFailure:        mockGuidedFailureRegistryUnavailable,
+};
+
+/** All failure-injection fixtures as an array for table-driven tests. */
+export const mockAllFailureResults: DiscoveryResult[] = [
+  mockResultUnreachableWithGuidedFailure,
+  mockResultSnmpAuthFailedWithGuidedFailure,
+  mockResultSnmpTimeout,
+  mockResultUnknownFingerprint,
+  mockResultConflictFingerprint,
+  mockResultRegistryUnavailable,
 ];

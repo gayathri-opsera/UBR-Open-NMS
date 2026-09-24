@@ -8,6 +8,8 @@ from .kafka_messages import (
     RawKPIMessage, ConfigPushMessage, DeviceDiscoveredMessage,
     NetcoolAlarmForwardMessage, MycomKPIExportMessage,
     InventorySyncMessage, EthernetPort, Wireless5GhzRadio,
+    ProductDefinitionLifecycleEvent, ProductDefinitionActor,
+    ProductDefinitionEventType, ProductDefinitionLifecycleState,
 )
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "RawKPIMessage", "ConfigPushMessage", "DeviceDiscoveredMessage",
     "NetcoolAlarmForwardMessage", "MycomKPIExportMessage",
     "InventorySyncMessage", "EthernetPort", "Wireless5GhzRadio",
+    "ProductDefinitionLifecycleEvent", "ProductDefinitionActor",
+    "ProductDefinitionEventType", "ProductDefinitionLifecycleState",
 ]

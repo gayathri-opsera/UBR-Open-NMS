@@ -3,6 +3,8 @@ package com.ubrnms.alarm.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ubrnms.alarm.model.Alarm;
 import com.ubrnms.alarm.model.AlarmThreshold;
+import com.ubrnms.alarm.model.FrameworkThresholdEvaluationRequest;
+import com.ubrnms.alarm.model.FrameworkDriftEvaluationRequest;
 import com.ubrnms.alarm.repository.AlarmRepository;
 import com.ubrnms.alarm.repository.AlarmThresholdRepository;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -53,15 +56,32 @@ public class AlarmService {
             }
 
             // Deduplication
-            Instant windowStart = Instant.now().minus(dedupWindowMinutes, ChronoUnit.MINUTES);
-            Optional<Alarm> existing = alarmRepo
-                    .findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
-                            alarm.getDeviceId(), alarm.getAlarmType(), "ACTIVE", windowStart);
+            // For threshold alarms (source=THRESHOLD / FRAMEWORK_POLLER) the condition
+            // may be permanently breached (e.g. sys_uptime always above threshold).
+            // Use window-free dedup: if ANY ACTIVE alarm exists for this device+type,
+            // just increment its dedupCount rather than creating a new record.
+            // For all other sources use the time-bounded window to allow re-raise after recovery.
+            boolean isThresholdAlarm = "THRESHOLD".equalsIgnoreCase(alarm.getCategory())
+                    || "FRAMEWORK_POLLER".equalsIgnoreCase(alarm.getSourceSystem())
+                    || (alarm.getAlarmType() != null && alarm.getAlarmType().startsWith("FRAMEWORK_THRESHOLD_"));
+
+            Optional<Alarm> existing;
+            if (isThresholdAlarm) {
+                existing = alarmRepo.findTopByDeviceIdAndAlarmTypeAndStateOrderByRaisedAtDesc(
+                        alarm.getDeviceId(), alarm.getAlarmType(), "ACTIVE");
+            } else {
+                Instant windowStart = Instant.now().minus(dedupWindowMinutes, ChronoUnit.MINUTES);
+                existing = alarmRepo
+                        .findTopByDeviceIdAndAlarmTypeAndStateAndDedupWindowStartAfterOrderByRaisedAtDesc(
+                                alarm.getDeviceId(), alarm.getAlarmType(), "ACTIVE", windowStart);
+            }
 
             if (existing.isPresent()) {
                 Alarm dup = existing.get();
                 dup.setDedupCount(dup.getDedupCount() + 1);
-                log.debug("Deduplicated alarm for device={} type={}", alarm.getDeviceId(), alarm.getAlarmType());
+                dup.setMetricValue(alarm.getMetricValue()); // keep observed value current
+                log.debug("Deduplicated alarm for device={} type={} dedupCount={}",
+                        alarm.getDeviceId(), alarm.getAlarmType(), dup.getDedupCount());
                 return alarmRepo.save(dup);
             }
 
@@ -116,6 +136,199 @@ public class AlarmService {
             }
         }
         return Optional.empty();
+    }
+
+    // ── WO-013: Framework metadata threshold evaluation ───────────────────────────
+
+    /**
+     * Evaluate a fresh, numeric framework parameter value against the high and low
+     * thresholds declared in its Product Definition metadata.
+     *
+     * <p>This method is additive — it does not replace or affect the existing
+     * repository-backed {@link #evaluateThreshold} path. Only callers that have
+     * already coerced a numeric value and confirmed freshness should invoke this.
+     *
+     * <p>Behaviour:
+     * <ul>
+     *   <li>If {@code request.getThresholdHigh()} is non-null and
+     *       {@code valueNumeric >= thresholdHigh}, a THRESHOLD_HIGH alarm is raised.</li>
+     *   <li>If {@code request.getThresholdLow()} is non-null and
+     *       {@code valueNumeric <= thresholdLow}, a THRESHOLD_LOW alarm is raised.</li>
+     *   <li>If neither condition is met, or both thresholds are null, the method
+     *       returns {@link Optional#empty()} — no alarm is raised.</li>
+     *   <li>Deduplication is delegated to {@link #processRawAlarm} using the
+     *       same window-based logic as existing alarm sources.</li>
+     * </ul>
+     *
+     * <p>Security: this method must never log, store, or propagate credential
+     * references. The {@code correlationId} from the request is the only
+     * tracking identifier that flows into the alarm record.
+     *
+     * @param request fully-populated threshold evaluation request (non-null)
+     * @return the raised or deduplicated alarm, or {@link Optional#empty()} if no threshold was breached
+     */
+    public Optional<Alarm> evaluateFrameworkThreshold(FrameworkThresholdEvaluationRequest request) {
+        if (request == null) {
+            log.warn("evaluateFrameworkThreshold called with null request — skipping");
+            return Optional.empty();
+        }
+
+        double value = request.getValueNumeric();
+
+        // High threshold evaluation
+        if (request.getThresholdHigh() != null && value >= request.getThresholdHigh()) {
+            return Optional.of(raiseFrameworkThresholdAlarm(request, "HIGH", request.getThresholdHigh()));
+        }
+
+        // Low threshold evaluation
+        if (request.getThresholdLow() != null && value <= request.getThresholdLow()) {
+            return Optional.of(raiseFrameworkThresholdAlarm(request, "LOW", request.getThresholdLow()));
+        }
+
+        // Value is within range — no alarm raised.
+        log.debug("Framework threshold evaluation: in-range for deviceId={} parameterId={} value={}",
+                request.getDeviceId(), request.getParameterId(), value);
+        return Optional.empty();
+    }
+
+    /**
+     * Build and process a single framework threshold alarm.
+     * Uses the same processRawAlarm lifecycle (dedup, correlate, persist, publish)
+     * as all other alarm sources.
+     */
+    private Alarm raiseFrameworkThresholdAlarm(
+            FrameworkThresholdEvaluationRequest request,
+            String condition,      // "HIGH" or "LOW"
+            double breachedThreshold) {
+
+        String alarmType = "FRAMEWORK_THRESHOLD_" + condition + "_" + request.getParameterId().toUpperCase();
+
+        Alarm alarm = new Alarm();
+        alarm.setAlarmId(UUID.randomUUID().toString());
+        alarm.setDeviceId(request.getDeviceId());
+        alarm.setDeviceType(request.getDeviceType() != null ? request.getDeviceType() : "UNKNOWN");
+        alarm.setAlarmType(alarmType);
+        alarm.setAlarmName(request.getParameterId() + " threshold " + condition.toLowerCase() + " breached");
+        // Framework threshold alarms default to MAJOR severity — a future story can
+        // add per-parameter severity metadata to the Product Definition spec.
+        alarm.setSeverity("MAJOR");
+        alarm.setState("ACTIVE");
+        alarm.setSource("THRESHOLD");
+        alarm.setMetricValue(request.getValueNumeric());
+        alarm.setThreshold(breachedThreshold);
+        alarm.setRaisedAt(request.getCollectedAt() != null ? request.getCollectedAt() : Instant.now());
+        alarm.setDedupWindowStart(Instant.now());
+        alarm.setDescription(String.format(
+                "Framework parameter %s=%s=%.4f breached %s threshold=%.4f (pd=%s registry=%s)",
+                request.getGroupId(), request.getParameterId(),
+                request.getValueNumeric(), condition, breachedThreshold,
+                request.getProductDefinitionId(), request.getRegistryVersion()));
+        alarm.setCorrelationId(request.getCorrelationId());
+        alarm.setCategory("THRESHOLD");
+        alarm.setSourceSystem("FRAMEWORK_POLLER");
+        alarm.setSchemaVersion("2.0");
+
+        // Framework-specific fields (WO-013 additions to Alarm model)
+        alarm.setProductDefinitionId(request.getProductDefinitionId());
+        alarm.setRegistryVersion(request.getRegistryVersion());
+        alarm.setGroupId(request.getGroupId());
+        alarm.setParameterId(request.getParameterId());
+        alarm.setObservedValue(request.getValueNumeric());
+        alarm.setThresholdValue(breachedThreshold);
+        alarm.setThresholdCondition(condition);
+
+        log.info("Raising framework threshold alarm: deviceId={} parameterId={} condition={} value={} threshold={} correlationId={}",
+                request.getDeviceId(), request.getParameterId(), condition,
+                request.getValueNumeric(), breachedThreshold, request.getCorrelationId());
+
+        return processRawAlarm(objectMapper.convertValue(alarm, Map.class));
+    }
+
+    // ── Framework drift evaluation ────────────────────────────────────────────
+
+    /**
+     * Evaluates whether a polled parameter value violates the schema-declared
+     * min/max constraints from the Product Definition registry.
+     *
+     * <p>A {@code FRAMEWORK_DRIFT} alarm is raised when the value is outside
+     * {@code [minValue, maxValue]}.  The alarm is cleared (no alarm returned)
+     * when the value is within bounds.
+     *
+     * <p>Drift alarms indicate that a device is operating outside its validated
+     * parameter envelope — distinct from threshold alarms which reflect
+     * user-defined operational limits.
+     *
+     * @return the raised/updated alarm, or empty when no alarm action was taken.
+     */
+    public Optional<Alarm> evaluateFrameworkDrift(FrameworkDriftEvaluationRequest request) {
+        if (request == null) {
+            log.warn("evaluateFrameworkDrift called with null request — skipping");
+            return Optional.empty();
+        }
+
+        double value = request.getValueNumeric();
+        boolean outOfRange = false;
+        String condition = "";
+        double violatedBound = 0.0;
+
+        if (request.getMaxValue() != null && value > request.getMaxValue()) {
+            outOfRange = true;
+            condition   = "HIGH";
+            violatedBound = request.getMaxValue();
+        } else if (request.getMinValue() != null && value < request.getMinValue()) {
+            outOfRange = true;
+            condition   = "LOW";
+            violatedBound = request.getMinValue();
+        }
+
+        if (!outOfRange) {
+            log.debug("Framework drift evaluation: in-range for deviceId={} parameterId={} value={}",
+                    request.getDeviceId(), request.getParameterId(), value);
+            return Optional.empty();
+        }
+
+        String alarmType = "FRAMEWORK_DRIFT_" + condition + "_" + request.getParameterId().toUpperCase();
+
+        Alarm alarm = new Alarm();
+        alarm.setAlarmId(UUID.randomUUID().toString());
+        alarm.setDeviceId(request.getDeviceId());
+        alarm.setDeviceType(request.getDeviceType() != null ? request.getDeviceType() : "UNKNOWN");
+        alarm.setAlarmType(alarmType);
+        alarm.setAlarmName(request.getParameterId() + " schema drift " + condition.toLowerCase());
+        // Drift alarms are MINOR by default — they indicate schema deviation, not
+        // an immediate operational failure. A future WO can add per-parameter drift
+        // severity metadata to the Product Definition spec.
+        alarm.setSeverity("MINOR");
+        alarm.setState("ACTIVE");
+        alarm.setSource("FRAMEWORK_DRIFT");
+        alarm.setMetricValue(request.getValueNumeric());
+        alarm.setThreshold(violatedBound);
+        alarm.setRaisedAt(request.getCollectedAt() != null
+                ? Instant.parse(request.getCollectedAt()) : Instant.now());
+        alarm.setDedupWindowStart(Instant.now());
+        alarm.setDescription(String.format(
+                "Schema drift: parameter %s=%s=%.4f is outside declared bound %s=%.4f (pd=%s registry=%s)",
+                request.getGroupId(), request.getParameterId(),
+                request.getValueNumeric(), condition, violatedBound,
+                request.getProductDefinitionId(), request.getRegistryVersion()));
+        alarm.setCorrelationId(request.getCorrelationId());
+        alarm.setCategory("CONFIG");
+        alarm.setSourceSystem("FRAMEWORK_DRIFT_DETECTOR");
+        alarm.setSchemaVersion("2.0");
+
+        alarm.setProductDefinitionId(request.getProductDefinitionId());
+        alarm.setRegistryVersion(request.getRegistryVersion());
+        alarm.setGroupId(request.getGroupId());
+        alarm.setParameterId(request.getParameterId());
+        alarm.setObservedValue(request.getValueNumeric());
+        alarm.setThresholdValue(violatedBound);
+        alarm.setThresholdCondition(condition);
+
+        log.info("Raising framework DRIFT alarm: deviceId={} parameterId={} condition={} value={} bound={} correlationId={}",
+                request.getDeviceId(), request.getParameterId(), condition,
+                request.getValueNumeric(), violatedBound, request.getCorrelationId());
+
+        return Optional.of(processRawAlarm(objectMapper.convertValue(alarm, Map.class)));
     }
 
     public Alarm acknowledge(String id, String actor) {
@@ -217,6 +430,36 @@ public class AlarmService {
 
         // WO-051: Normalize classification metadata after basic fields are populated.
         normalizeClassification(alarm, raw);
+
+        // WO-013: Map framework threshold fields when present in the raw map.
+        // These are set by raiseFrameworkThresholdAlarm before calling processRawAlarm,
+        // so they survive the Map round-trip through objectMapper.convertValue.
+        if (raw.containsKey("productDefinitionId")) {
+            alarm.setProductDefinitionId((String) raw.get("productDefinitionId"));
+        }
+        if (raw.containsKey("registryVersion")) {
+            alarm.setRegistryVersion((String) raw.get("registryVersion"));
+        }
+        if (raw.containsKey("groupId")) {
+            alarm.setGroupId((String) raw.get("groupId"));
+        }
+        if (raw.containsKey("parameterId")) {
+            alarm.setParameterId((String) raw.get("parameterId"));
+        }
+        if (raw.containsKey("observedValue")) {
+            Object v = raw.get("observedValue");
+            if (v instanceof Number) alarm.setObservedValue(((Number) v).doubleValue());
+        }
+        if (raw.containsKey("thresholdValue")) {
+            Object v = raw.get("thresholdValue");
+            if (v instanceof Number) alarm.setThresholdValue(((Number) v).doubleValue());
+        }
+        if (raw.containsKey("thresholdCondition")) {
+            alarm.setThresholdCondition((String) raw.get("thresholdCondition"));
+        }
+        if (raw.containsKey("correlationId")) {
+            alarm.setCorrelationId((String) raw.get("correlationId"));
+        }
         return alarm;
     }
 
@@ -335,34 +578,42 @@ public class AlarmService {
 
     @SuppressWarnings("unchecked")
     private void publish(String topic, String key, Alarm alarm) {
-        try {
-            kafkaTemplate.send(topic, key, objectMapper.writeValueAsString(alarm));
-        } catch (Exception e) {
-            log.error("Failed to publish alarm to {}", topic, e);
-        }
+        // Fire-and-forget: run on a virtual thread so the HTTP handler returns
+        // immediately.  Kafka unavailability (dev environment without a broker)
+        // is non-fatal — the alarm is already persisted in MongoDB.
+        CompletableFuture.runAsync(() -> {
+            try {
+                kafkaTemplate.send(topic, key, objectMapper.writeValueAsString(alarm));
+            } catch (Exception e) {
+                log.warn("Kafka publish skipped for topic={} alarmId={}: {}", topic, alarm.getAlarmId(), e.getMessage());
+            }
+        });
     }
 
     private void publishNetcool(Alarm alarm) {
-        try {
-            Map<String, Object> netcool = new LinkedHashMap<>();
-            netcool.put("alarmId", alarm.getAlarmId());
-            netcool.put("alarmName", alarm.getAlarmName());
-            netcool.put("severity", alarm.getSeverity());
-            netcool.put("alarmDescription", alarm.getDescription());
-            netcool.put("state", alarm.getState());
-            netcool.put("Time", alarm.getRaisedAt() != null ? alarm.getRaisedAt().toString() : "");
-            // WO-051: include schemaVersion and correlationId for northbound consumer compatibility.
-            netcool.put("schemaVersion", alarm.getSchemaVersion() != null ? alarm.getSchemaVersion() : "1.0");
-            if (alarm.getCorrelationId() != null) netcool.put("correlationId", alarm.getCorrelationId());
-            netcool.put("data", Map.of(
-                    "deviceType", alarm.getDeviceType(),
-                    "deviceId", alarm.getDeviceId()
-            ));
-            kafkaTemplate.send(netcoolTopic, alarm.getAlarmType(),
-                    objectMapper.writeValueAsString(netcool));
-        } catch (Exception e) {
-            log.error("Failed to publish Netcool alarm", e);
-        }
+        // Fire-and-forget: same pattern as publish() — Kafka is optional in dev.
+        CompletableFuture.runAsync(() -> {
+            try {
+                Map<String, Object> netcool = new LinkedHashMap<>();
+                netcool.put("alarmId", alarm.getAlarmId());
+                netcool.put("alarmName", alarm.getAlarmName());
+                netcool.put("severity", alarm.getSeverity());
+                netcool.put("alarmDescription", alarm.getDescription());
+                netcool.put("state", alarm.getState());
+                netcool.put("Time", alarm.getRaisedAt() != null ? alarm.getRaisedAt().toString() : "");
+                // WO-051: include schemaVersion and correlationId for northbound consumer compatibility.
+                netcool.put("schemaVersion", alarm.getSchemaVersion() != null ? alarm.getSchemaVersion() : "1.0");
+                if (alarm.getCorrelationId() != null) netcool.put("correlationId", alarm.getCorrelationId());
+                netcool.put("data", Map.of(
+                        "deviceType", alarm.getDeviceType(),
+                        "deviceId", alarm.getDeviceId()
+                ));
+                kafkaTemplate.send(netcoolTopic, alarm.getAlarmType(),
+                        objectMapper.writeValueAsString(netcool));
+            } catch (Exception e) {
+                log.warn("Kafka netcool publish skipped for alarmId={}: {}", alarm.getAlarmId(), e.getMessage());
+            }
+        });
     }
 
     private String getStr(Map<String, Object> m, String key, String def) {

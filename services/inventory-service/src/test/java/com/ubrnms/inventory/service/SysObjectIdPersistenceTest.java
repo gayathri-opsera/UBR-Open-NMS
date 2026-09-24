@@ -2,6 +2,7 @@ package com.ubrnms.inventory.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ubrnms.inventory.model.Device;
+import com.ubrnms.inventory.model.PagedResponse;
 import com.ubrnms.inventory.repository.BirthCertificateRepository;
 import com.ubrnms.inventory.repository.DeviceRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -188,7 +189,8 @@ class SysObjectIdPersistenceTest {
 
         org.mockito.Mockito.when(deviceRepo.findAll()).thenReturn(List.of(d1, d2, d3));
 
-        List<Device> results = svc.listDevices(null, null, "1.3.6.1.4.1.9", 0, 100);
+        PagedResponse<Device> page = svc.listDevices(null, null, "1.3.6.1.4.1.9", null, 0, 100);
+        List<Device> results = page.getData();
 
         assertThat(results).hasSize(1);
         assertThat(results.get(0).getSysObjectID()).isEqualTo("1.3.6.1.4.1.9");
