@@ -449,6 +449,47 @@ public class ProductDefinitionController {
         }
     }
 
+    // ── DELETE /{definitionId}/versions/{versionId} ───────────────────────────
+
+    /**
+     * Permanently deletes a Product Definition version and its associated validation report.
+     *
+     * <p>ACTIVE versions require {@code ?force=true} (SuperAdmin only). All other statuses
+     * (DRAFT, STAGED, SUPERSEDED, ARCHIVED) are always eligible for Admin+ deletion.
+     *
+     * <p>Authorization: Admin / SuperAdmin (enforced by API gateway). {@code force=true}
+     * is restricted to SuperAdmin at the gateway layer.
+     *
+     * @param force when {@code true}, allows force-deletion of ACTIVE versions
+     * @return 204 No Content on success, 404 if not found, 409 if ACTIVE without force.
+     */
+    @DeleteMapping("/{definitionId}/versions/{versionId}")
+    public ResponseEntity<?> deleteVersion(
+            @PathVariable String definitionId,
+            @PathVariable String versionId,
+            @RequestParam(value = "force", defaultValue = "false") boolean force,
+            @RequestHeader(value = "X-Correlation-Id", defaultValue = "") String correlationId,
+            @RequestHeader(value = "X-Username",       defaultValue = "unknown") String username) {
+        try {
+            service.deleteVersion(definitionId, versionId, force);
+            log.info("[{}] Version {} of definition {} deleted by {} (force={})",
+                    correlationId, versionId, definitionId, username, force);
+            return ResponseEntity.noContent().build();
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(errorBody("NOT_FOUND", e.getMessage()));
+        } catch (IllegalStateException e) {
+            // Attempted to delete an ACTIVE version
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(errorBody("DELETE_BLOCKED_ACTIVE", e.getMessage()));
+        } catch (Exception e) {
+            log.error("[{}] Unexpected error deleting version {} of definition {}",
+                    correlationId, versionId, definitionId, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "Failed to delete version " + versionId));
+        }
+    }
+
     // ── Health ────────────────────────────────────────────────────────────────
 
     @GetMapping("/health")

@@ -109,12 +109,27 @@ public class ProductDefinitionService {
                     .build();
         } else {
             report = validationService.validate(normalized, definitionId, versionId, correlationId);
-            // Append any parse-phase warnings
+            // Merge parse-phase items into the report, routing by severity.
+            // Only ERROR-severity parse items override the status to INVALID;
+            // WARNING-severity items (e.g. missing $schema) go to the warnings list
+            // and do not block staging or activation.
             if (!parseErrors.isEmpty()) {
-                List<ValidationError> allErrors = new ArrayList<>(report.getErrors());
-                allErrors.addAll(parseErrors);
+                List<ValidationError> allErrors   = new ArrayList<>(report.getErrors());
+                List<ValidationError> allWarnings = new ArrayList<>(report.getWarnings());
+                for (ValidationError pe : parseErrors) {
+                    if ("ERROR".equalsIgnoreCase(pe.getSeverity())) {
+                        allErrors.add(pe);
+                    } else {
+                        allWarnings.add(pe);
+                    }
+                }
                 report.setErrors(allErrors);
-                report.setStatus("INVALID");
+                report.setWarnings(allWarnings);
+                boolean hasParseError = allErrors.stream()
+                        .anyMatch(e -> "ERROR".equalsIgnoreCase(e.getSeverity()));
+                if (hasParseError) {
+                    report.setStatus("INVALID");
+                }
             }
         }
 
@@ -187,6 +202,51 @@ public class ProductDefinitionService {
         return reportRepository.findByDefinitionIdAndVersionId(definitionId, versionId)
                 .orElseThrow(() -> new NoSuchElementException(
                         "No report found for definitionId=" + definitionId + " versionId=" + versionId));
+    }
+
+    /**
+     * Permanently deletes a Product Definition version and its validation report.
+     *
+     * <p>Deletion rules:
+     * <ul>
+     *   <li>ACTIVE versions require {@code force=true} — used by SuperAdmin only to clean up
+     *       definitions that have no predecessor to roll back to.</li>
+     *   <li>DRAFT, STAGED, SUPERSEDED, and ARCHIVED versions are always eligible for deletion.</li>
+     * </ul>
+     *
+     * @param definitionId UUID of the definition family
+     * @param versionId    UUID of the specific version to delete
+     * @param force        when {@code true} allows deletion of ACTIVE versions (SuperAdmin only)
+     * @throws NoSuchElementException   if the version does not exist
+     * @throws IllegalStateException    if the version is ACTIVE and {@code force} is false
+     */
+    public void deleteVersion(String definitionId, String versionId, boolean force) {
+        ProductDefinitionVersion version =
+                versionRepository.findByDefinitionIdAndVersionId(definitionId, versionId)
+                        .orElseThrow(() -> new NoSuchElementException(
+                                "No version found for definitionId=" + definitionId
+                                + " versionId=" + versionId));
+
+        if ("ACTIVE".equalsIgnoreCase(version.getLifecycleStatus()) && !force) {
+            throw new IllegalStateException(
+                    "Cannot delete an ACTIVE version — roll back to a previous version first, "
+                    + "or use force=true (SuperAdmin only) to permanently remove it.");
+        }
+
+        // If force-deleting an ACTIVE version, also purge its fingerprint & parameter registry
+        // entries so stale fingerprints don't persist after the definition is gone.
+        if ("ACTIVE".equalsIgnoreCase(version.getLifecycleStatus())) {
+            log.warn("Force-deleting ACTIVE version {} of definition {} — purging registry entries",
+                    versionId, definitionId);
+        }
+
+        // Delete the validation report first (orphan-safe: report may not exist for failed parses)
+        reportRepository.deleteByDefinitionIdAndVersionId(definitionId, versionId);
+        // Delete the version record
+        versionRepository.deleteByDefinitionIdAndVersionId(definitionId, versionId);
+
+        log.info("Deleted product definition version {} for definition {} (force={})",
+                versionId, definitionId, force);
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────

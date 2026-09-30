@@ -187,6 +187,10 @@ export default function V2DashboardPage() {
   const [alarms, setAlarms]     = useState<Alarm[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
+
+  // Demo discovery
+  const [scanRunning,  setScanRunning]  = useState(false);
+  const [scanBanner,   setScanBanner]   = useState<string | null>(null);
   const [showWidgets, setShowWidgets] = useState(false);
   const [showAdvancedWidgets, setShowAdvancedWidgets] = useState(false);
   const [dragId,   setDragId]   = useState<WidgetId | null>(null);
@@ -280,6 +284,21 @@ export default function V2DashboardPage() {
 
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, [load]);
 
+  const handleDemoDiscovery = useCallback(async () => {
+    setScanRunning(true);
+    setScanBanner(null);
+    try {
+      const res = await apiClient.post('/discovery/scans', { subnets: ['10.100.1.0/24'] });
+      const msg = (res.data as { message?: string }).message || 'Discovery complete';
+      setScanBanner(`✅ ${msg}`);
+      setTimeout(load, 1500); // refresh inventory after seeding
+    } catch {
+      setScanBanner('⚠ Discovery scan failed — check gateway logs');
+    } finally {
+      setScanRunning(false);
+    }
+  }, [load]);
+
   // Derived data
   const circles   = useMemo(() => [...new Set(devices.flatMap((d) => (d.tags ?? []).filter((t) => t.key === 'circle' && !!t.value).map((t) => t.value)))].filter(Boolean), [devices]);
   // Only allowed models — filter out any legacy Senao model names from the backend
@@ -369,8 +388,14 @@ export default function V2DashboardPage() {
       }));
   }, [filtered]);
 
-  const btsDevices = useMemo(() => filtered.filter((d) => d.deviceType === 'BTS'), [filtered]);
-  const cpeDevices = useMemo(() => filtered.filter((d) => d.deviceType === 'CPE'), [filtered]);
+  const btsDevices   = useMemo(() => filtered.filter((d) => d.deviceType === 'BTS'), [filtered]);
+  const cpeDevices   = useMemo(() => filtered.filter((d) => d.deviceType === 'CPE'), [filtered]);
+  // Generic/non-standard device types (RADIO, SWITCH, etc.) — includes EOC640 backhaul radios.
+  // Requires deviceType to be explicitly set (non-null, non-legacy) so Java devices with
+  // deviceType=null don't inflate this count.
+  const radioDevices = useMemo(() => filtered.filter(
+    (d) => d.deviceType != null && (d.deviceType as string) !== '' && !['BTS', 'CPE', 'IDU'].includes(d.deviceType),
+  ), [filtered]);
   const btsChannelData = useMemo(() => {
     const counts: Record<string, number> = {};
     btsDevices.forEach((d) => { const ch = (d as Device & { channel?: string }).channel; if (ch) counts[ch] = (counts[ch] ?? 0) + 1; });
@@ -520,7 +545,33 @@ export default function V2DashboardPage() {
           <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none' }}>↻</span>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
+
+        {/* Demo discovery button */}
+        <button onClick={handleDemoDiscovery} disabled={scanRunning}
+          title="Trigger auto-discovery scan — provisions EOC640 demo devices into inventory"
+          style={{
+            background: scanRunning ? 'rgba(245,158,11,0.15)' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+            border: 'none', color: scanRunning ? '#f59e0b' : '#fff',
+            padding: '6px 14px', borderRadius: 6,
+            cursor: scanRunning ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 600,
+            opacity: scanRunning ? 0.8 : 1, display: 'flex', alignItems: 'center', gap: 5,
+          }}>
+          <span style={{ display: 'inline-block', animation: scanRunning ? 'spin 1s linear infinite' : 'none' }}>🔍</span>
+          {scanRunning ? 'Scanning…' : 'Demo Discovery'}
+        </button>
       </div>
+      {scanBanner && (
+        <div style={{
+          background: scanBanner.startsWith('✅') ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+          border: `1px solid ${scanBanner.startsWith('✅') ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+          borderRadius: 6, padding: '8px 16px', fontSize: 12, fontWeight: 600,
+          color: scanBanner.startsWith('✅') ? '#22c55e' : '#f87171',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span>{scanBanner}</span>
+          <button onClick={() => setScanBanner(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 14 }}>×</button>
+        </div>
+      )}
 
       <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
@@ -810,6 +861,14 @@ export default function V2DashboardPage() {
             <KpiTile icon="🟢" label="CPE Online"  value={cpeDevices.filter((d) => d.status === 'ONLINE').length} total={cpeDevices.length} color="#22c55e" grad="rgba(34,197,94,0.08)" onClick={() => navigate('/v2/devices?deviceType=CPE&status=ONLINE')} />
             <KpiTile icon="⚠"  label="CPE Offline" value={cpeDevices.filter((d) => d.status === 'OFFLINE').length}              color="#ef4444" grad="rgba(239,68,68,0.08)"  onClick={() => navigate('/v2/devices?deviceType=CPE&status=OFFLINE')} />
             <KpiTile icon="🔌" label="IDU Total"   value={devices.filter((d) => d.deviceType === 'IDU').length}                  color="#22d3ee" grad="rgba(34,211,238,0.08)" onClick={() => navigate('/v2/devices?deviceType=IDU')} />
+          </div>
+        )}
+        {/* Radio / Backhaul section — shows EOC640 and other non-standard device types */}
+        {radioDevices.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
+            <KpiTile icon="📻" label="Radio Total"  value={radioDevices.length}                                                     color="#f59e0b" grad="rgba(245,158,11,0.08)"  onClick={() => navigate('/v2/devices?genericDeviceType=RADIO')} />
+            <KpiTile icon="🟢" label="Radio Online" value={radioDevices.filter((d) => d.status === 'ONLINE').length} total={radioDevices.length} color="#22c55e" grad="rgba(34,197,94,0.08)" onClick={() => navigate('/v2/devices?genericDeviceType=RADIO&status=ONLINE')} />
+            <KpiTile icon="⚠"  label="Radio Faulty" value={radioDevices.filter((d) => d.status === 'OFFLINE').length}              color="#ef4444" grad="rgba(239,68,68,0.08)"  onClick={() => navigate('/v2/devices?genericDeviceType=RADIO&status=OFFLINE')} />
           </div>
         )}
         {/* Generic type extras: when a non-legacy genericDeviceType mode is active, show total/online/offline tiles */}

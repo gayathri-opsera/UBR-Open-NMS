@@ -16,4 +16,7 @@ public interface ProductDefinitionVersionRepository extends MongoRepository<Prod
 
     /** Returns every version in the store, newest first — used by the admin history feed. */
     List<ProductDefinitionVersion> findAllByOrderByCreatedAtDesc();
+
+    /** Delete a single version record by its composite key. */
+    void deleteByDefinitionIdAndVersionId(String definitionId, String versionId);
 }

@@ -24,6 +24,7 @@
 const express = require('express');
 const httpProxy = require('express-http-proxy');
 const config = require('../config');
+const logger = require('../utils/logger');
 const {
   requireFrameworkCapability,
   FRAMEWORK_CAPABILITY,
@@ -61,16 +62,50 @@ function productDefinitionProxy(opts = {}) {
       return proxyReqOpts;
     },
     proxyErrorHandler(err, res, next) {
+      // ── CRITICAL: Check if the upstream already sent a response ────────────
+      // When parseReqBody: false, the proxy streams the request body to the
+      // upstream while simultaneously receiving the upstream's response.
+      // For duplicate-file uploads, Spring Boot reads the full body, detects
+      // the duplicate, sends a 422 back, and closes the connection.  The proxy
+      // has already forwarded the 422 to the client but may still receive an
+      // ECONNRESET because it was still piping the request body when the
+      // upstream closed the socket.  If the client already has the real
+      // response, silently swallow the error — don't send a second response.
+      if (res.headersSent) {
+        // Log for observability but do NOT call next(err) — the client already
+        // received the upstream's error/success response.
+        const level = (err.code === 'ECONNRESET' || err.message?.includes('socket hang up'))
+          ? 'debug'
+          : 'warn';
+        logger[level]({
+          msg:  'Proxy stream error after response sent (headers already flushed)',
+          code: err.code,
+          err:  err.message,
+        });
+        return;
+      }
+
+      // ── Connection-level errors (no upstream response received) ────────────
       if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
         return res.status(503).json({
-          code: 'SERVICE_UNAVAILABLE',
-          message: 'product-definition-service is not reachable — check deployment status',
+          status:  'error',
+          error: { code: 'SERVICE_UNAVAILABLE',
+                   message: 'product-definition-service is not reachable — check deployment status' },
         });
       }
       if (err.code === 'ETIMEDOUT') {
         return res.status(504).json({
-          code: 'GATEWAY_TIMEOUT',
-          message: 'product-definition-service did not respond in time',
+          status:  'error',
+          error: { code: 'GATEWAY_TIMEOUT',
+                   message: 'product-definition-service did not respond in time' },
+        });
+      }
+      // ECONNRESET / "socket hang up" without a prior response — upstream died.
+      if (err.code === 'ECONNRESET' || err.message?.includes('socket hang up')) {
+        return res.status(502).json({
+          status:  'error',
+          error: { code: 'UPSTREAM_RESET',
+                   message: 'product-definition-service closed the connection unexpectedly' },
         });
       }
       next(err);
@@ -162,6 +197,13 @@ router.put('/:definitionId/rollback',
 router.post('/:definitionId/rollback',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.rollback.targeted'),
   productDefinitionProxy({ timeout: 90000 }),
+);
+
+// Delete a non-ACTIVE version — SuperAdmin only.
+// ACTIVE versions are protected by the backend (returns 409 CONFLICT).
+router.delete('/:definitionId/versions/:versionId',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'product-definitions.versions.delete'),
+  productDefinitionProxy(),
 );
 
 module.exports = router;

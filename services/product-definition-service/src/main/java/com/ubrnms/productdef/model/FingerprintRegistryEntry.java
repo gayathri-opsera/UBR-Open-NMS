@@ -65,6 +65,19 @@ public class FingerprintRegistryEntry {
     @Indexed
     private String fingerprintValue;
 
+    /**
+     * SNMP sysObjectID in dotted-numeric form.  Present on SNMP_OID entries and
+     * on combined entries that carry both OID and pattern.  Null for banner-only devices.
+     */
+    private String sysObjectId;
+
+    /**
+     * Regex pattern matched against sysDescr, SSH banner, or HTTP response to identify
+     * the device model.  Present on BANNER entries.  May also be set on SNMP_OID entries
+     * as a secondary confirmation signal.
+     */
+    private String sysDescrPattern;
+
     // ── Product identity ────────────────────────────────────────────────────
 
     private String vendor;

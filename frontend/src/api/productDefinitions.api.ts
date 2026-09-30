@@ -32,10 +32,17 @@ const BASE = '/framework/product-definitions';
  * Falls back to a generic error when the response body is not a framework envelope.
  */
 export function extractApiError(err: unknown): FrameworkApiError {
+  // Fast-path: err is already a FrameworkApiError (e.g. re-thrown by a lower-level API helper).
+  // Returning it directly avoids losing the structured code/message when callers double-wrap.
+  const plain = err as Record<string, unknown>;
+  if (plain?.status === 'error' && typeof plain.error === 'object' && plain.error !== null) {
+    return plain as unknown as FrameworkApiError;
+  }
+
   const axiosErr = err as AxiosError<Record<string, unknown>>;
   const body = axiosErr?.response?.data;
 
-  // Format A: canonical envelope { status: 'error', error: { code, message } }
+  // Format A: canonical gateway/service envelope { status: 'error', error: { code, message } }
   if (body?.status === 'error' && body.error && typeof body.error === 'object') {
     return body as unknown as FrameworkApiError;
   }
@@ -52,14 +59,32 @@ export function extractApiError(err: unknown): FrameworkApiError {
     };
   }
 
+  // Format C: old-style gateway flat format { code: 'CODE', message: 'text' }
+  // Emitted by gateway error handlers before the envelope was standardised.
+  if (body && typeof body['code'] === 'string' && typeof body['message'] === 'string') {
+    return {
+      status: 'error',
+      error: {
+        code:    body['code'] as string,
+        message: body['message'] as string,
+      },
+    };
+  }
+
+  // Fallback: derive a code from the HTTP status and use the Axios network message.
   const httpStatus = axiosErr?.response?.status;
-  const message = axiosErr?.message ?? 'Unexpected error';
+  const message    = axiosErr?.message ?? 'Unexpected error';
+  const code =
+    httpStatus === 409 ? 'CONFLICT'       :
+    httpStatus === 404 ? 'NOT_FOUND'      :
+    httpStatus === 422 ? 'UPLOAD_REJECTED':
+    httpStatus === 502 ? 'UPSTREAM_RESET' :
+    httpStatus === 503 ? 'SERVICE_UNAVAILABLE' :
+    httpStatus === 504 ? 'GATEWAY_TIMEOUT':
+    'INTERNAL_ERROR';
   return {
     status: 'error',
-    error: {
-      code: httpStatus === 409 ? 'CONFLICT' : httpStatus === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
-      message,
-    },
+    error: { code, message },
   };
 }
 
@@ -248,7 +273,14 @@ export async function uploadProductDefinition(
     });
     return res.data;
   } catch (err) {
-    throw extractApiError(err);
+    // Normalize to FrameworkApiError.  extractApiError fast-paths already-normalised errors,
+    // so callers that catch this and call extractApiError again get the same structured value.
+    const apiError = extractApiError(err);
+    // Attach the original HTTP status as a non-enumerable property so callers can read it
+    // without having to unwrap the raw Axios error themselves.
+    const httpStatus = (err as AxiosError)?.response?.status;
+    if (httpStatus) Object.defineProperty(apiError, '_httpStatus', { value: httpStatus, enumerable: false });
+    throw apiError;
   }
 }
 
@@ -385,6 +417,37 @@ export async function getVersionDiff(
       `${BASE}/${definitionId}/versions/${fromVersionId}/diff/${toVersionId}`,
     );
     return res.data;
+  } catch (err) {
+    throw extractApiError(err);
+  }
+}
+
+// ── Delete ────────────────────────────────────────────────────────────────────
+
+/**
+ * Permanently deletes a Product Definition version and its validation report.
+ *
+ * ACTIVE versions require {@code force=true} (SuperAdmin only).
+ * DRAFT, STAGED, SUPERSEDED, and ARCHIVED versions are always eligible.
+ *
+ * @param definitionId UUID of the definition family.
+ * @param versionId    UUID of the version to delete.
+ * @param force        Pass true to force-delete an ACTIVE version (SuperAdmin only).
+ * @throws {@link FrameworkApiError} with code DELETE_BLOCKED_ACTIVE (HTTP 409) when
+ *   trying to delete the currently ACTIVE version without force=true.
+ * @throws {@link FrameworkApiError} with code NOT_FOUND (HTTP 404) when the version
+ *   does not exist.
+ */
+export async function deleteProductDefinitionVersion(
+  definitionId: string,
+  versionId: string,
+  force = false,
+): Promise<void> {
+  try {
+    const url = force
+      ? `${BASE}/${definitionId}/versions/${versionId}?force=true`
+      : `${BASE}/${definitionId}/versions/${versionId}`;
+    await apiClient.delete(url);
   } catch (err) {
     throw extractApiError(err);
   }

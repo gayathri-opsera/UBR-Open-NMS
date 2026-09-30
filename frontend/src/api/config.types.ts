@@ -34,7 +34,8 @@ export interface ConfigTemplate {
   id?: string;
   name: string;
   description?: string;
-  deviceType?: 'BTS' | 'CPE' | 'IDU';
+  /** Device type — UBR radio equipment or SNMP-discovered network gear */
+  deviceType?: 'BTS' | 'CPE' | 'IDU' | 'RADIO' | 'SWITCH' | 'ROUTER';
   isDefault: boolean;
   parameters: Record<ConfigParamKey, string | number | boolean>;
   /** Admin-added custom field definitions saved with this template */

@@ -234,9 +234,172 @@ const IDU_SECTIONS: SectionDef[] = [
   },
 ];
 
+// ── SWITCH sections — for SNMP-discovered Cisco / Juniper / multivendor switches ──
+const SWITCH_SECTIONS: SectionDef[] = [
+  {
+    title: 'Management', icon: '🛠',
+    fields: [
+      { key: 'hostname',       label: 'Hostname',               type: 'text',   placeholder: 'sw-core-01' },
+      { key: 'snmpCommunity',  label: 'SNMP Community (RO)',    type: 'text',   placeholder: 'public' },
+      { key: 'snmpTrapHost',   label: 'SNMP Trap Host',         type: 'text',   placeholder: '10.0.0.1' },
+      { key: 'snmpVersion',    label: 'SNMP Version',           type: 'select', options: ['v1','v2c','v3'] },
+      { key: 'ntpServer',      label: 'NTP Server',             type: 'text',   placeholder: 'pool.ntp.org' },
+      { key: 'syslogServer',   label: 'Syslog Server',          type: 'text',   placeholder: '10.0.0.2' },
+      { key: 'logLevel',       label: 'Log Level',              type: 'select', options: ['DEBUG','INFO','WARNING','ERROR','CRITICAL'] },
+    ],
+  },
+  {
+    title: 'Network (IP)', icon: '🌐',
+    fields: [
+      { key: 'mgmtInterface',   label: 'Management Interface',  type: 'text',   placeholder: 'Vlan1 or GigabitEthernet0/0' },
+      { key: 'mgmtIpMode',      label: 'Management IP Mode',    type: 'select', options: ['DHCP','Static'] },
+      { key: 'mgmtIpAddress',   label: 'Management IP',         type: 'text',   placeholder: '192.168.1.1', showIf: (p) => p.mgmtIpMode === 'Static' },
+      { key: 'mgmtSubnetMask',  label: 'Subnet Mask',           type: 'text',   placeholder: '255.255.255.0', showIf: (p) => p.mgmtIpMode === 'Static' },
+      { key: 'mgmtGateway',     label: 'Default Gateway',       type: 'text',   placeholder: '192.168.1.254', showIf: (p) => p.mgmtIpMode === 'Static' },
+      { key: 'dnsServer',       label: 'DNS Server',            type: 'text',   placeholder: '8.8.8.8' },
+    ],
+  },
+  {
+    title: 'VLANs', icon: '🔀',
+    fields: [
+      { key: 'nativeVlan',      label: 'Native VLAN',           type: 'number', min: 1, max: 4094, placeholder: '1' },
+      { key: 'mgmtVlan',        label: 'Management VLAN',       type: 'number', min: 1, max: 4094, placeholder: '100' },
+      { key: 'voiceVlan',       label: 'Voice VLAN',            type: 'number', min: 1, max: 4094, placeholder: '200' },
+      { key: 'allowedVlans',    label: 'Allowed VLANs (trunk)', type: 'text',   placeholder: '10,20,100-200' },
+    ],
+  },
+  {
+    title: 'Spanning Tree', icon: '🌳',
+    fields: [
+      { key: 'stpMode',         label: 'STP Mode',              type: 'select', options: ['PVST+','Rapid-PVST+','MST','RSTP'] },
+      { key: 'stpPriority',     label: 'Bridge Priority',       type: 'select', options: ['4096','8192','16384','24576','32768','40960','49152','57344','61440'] },
+      { key: 'portFast',        label: 'PortFast (edge ports)',  type: 'boolean' },
+      { key: 'bpduGuard',       label: 'BPDU Guard',            type: 'boolean' },
+    ],
+  },
+  {
+    title: 'Port Settings', icon: '🔌',
+    fields: [
+      { key: 'defaultPortMode', label: 'Default Port Mode',     type: 'select', options: ['access','trunk','dynamic'] },
+      { key: 'portSpeed',       label: 'Default Speed',         type: 'select', options: ['Auto','10','100','1000','10000'] },
+      { key: 'portDuplex',      label: 'Duplex',                type: 'select', options: ['auto','full','half'] },
+      { key: 'poeEnabled',      label: 'PoE Enabled',           type: 'boolean' },
+      { key: 'stormControl',    label: 'Storm Control',         type: 'boolean' },
+    ],
+  },
+  {
+    title: 'Security', icon: '🔐',
+    fields: [
+      { key: 'portSecurity',    label: 'Port Security',         type: 'boolean' },
+      { key: 'dhcpSnooping',    label: 'DHCP Snooping',         type: 'boolean' },
+      { key: 'arpInspection',   label: 'Dynamic ARP Inspection',type: 'boolean' },
+      { key: 'dot1xAuth',       label: '802.1X Authentication', type: 'boolean' },
+    ],
+  },
+];
+
+// ── ROUTER sections — for Cisco IOS, Juniper JunOS, multivendor routers ──────
+const ROUTER_SECTIONS: SectionDef[] = [
+  {
+    title: 'Management', icon: '🛠',
+    fields: [
+      { key: 'hostname',       label: 'Hostname',               type: 'text',   placeholder: 'rtr-edge-01' },
+      { key: 'snmpCommunity',  label: 'SNMP Community (RO)',    type: 'text',   placeholder: 'public' },
+      { key: 'snmpVersion',    label: 'SNMP Version',           type: 'select', options: ['v1','v2c','v3'] },
+      { key: 'ntpServer',      label: 'NTP Server',             type: 'text',   placeholder: 'pool.ntp.org' },
+      { key: 'syslogServer',   label: 'Syslog Server',          type: 'text',   placeholder: '10.0.0.2' },
+    ],
+  },
+  {
+    title: 'Interfaces', icon: '🔌',
+    fields: [
+      { key: 'wanInterface',   label: 'WAN Interface',          type: 'text',   placeholder: 'GigabitEthernet0/0' },
+      { key: 'wanIpMode',      label: 'WAN IP Mode',            type: 'select', options: ['DHCP','Static','PPPoE'] },
+      { key: 'wanIpAddress',   label: 'WAN IP Address',         type: 'text',   placeholder: '203.0.113.1', showIf: (p) => p.wanIpMode === 'Static' },
+      { key: 'wanSubnetMask',  label: 'WAN Subnet Mask',        type: 'text',   placeholder: '255.255.255.252', showIf: (p) => p.wanIpMode === 'Static' },
+      { key: 'lanInterface',   label: 'LAN Interface',          type: 'text',   placeholder: 'GigabitEthernet0/1' },
+      { key: 'lanIpAddress',   label: 'LAN IP Address',         type: 'text',   placeholder: '192.168.1.1' },
+    ],
+  },
+  {
+    title: 'Routing', icon: '🌐',
+    fields: [
+      { key: 'defaultRoute',   label: 'Default Route (nexthop)',type: 'text',   placeholder: '203.0.113.254' },
+      { key: 'ospfEnabled',    label: 'OSPF Enabled',           type: 'boolean' },
+      { key: 'ospfProcessId',  label: 'OSPF Process ID',        type: 'number', min: 1, max: 65535, placeholder: '1', showIf: (p) => Boolean(p.ospfEnabled) },
+      { key: 'ospfAreaId',     label: 'OSPF Area',              type: 'text',   placeholder: '0.0.0.0', showIf: (p) => Boolean(p.ospfEnabled) },
+      { key: 'bgpEnabled',     label: 'BGP Enabled',            type: 'boolean' },
+      { key: 'bgpAsn',         label: 'BGP ASN',                type: 'number', min: 1, max: 4294967295, placeholder: '65001', showIf: (p) => Boolean(p.bgpEnabled) },
+    ],
+  },
+  {
+    title: 'QoS', icon: '⚡',
+    fields: [
+      { key: 'qosPolicy',      label: 'QoS Policy',             type: 'select', options: ['None','DSCP','Cos','Traffic-Shaping'] },
+      { key: 'bandwidthLimit', label: 'WAN Bandwidth Limit',    type: 'number', min: 0, max: 100000, unit: 'Mbps', placeholder: '1000' },
+    ],
+  },
+  {
+    title: 'Security', icon: '🔐',
+    fields: [
+      { key: 'aclInbound',     label: 'ACL Inbound',            type: 'text',   placeholder: 'ACL-WAN-IN' },
+      { key: 'aclOutbound',    label: 'ACL Outbound',           type: 'text',   placeholder: 'ACL-WAN-OUT' },
+      { key: 'natEnabled',     label: 'NAT / PAT',              type: 'boolean' },
+      { key: 'firewallZones',  label: 'Firewall Zones',         type: 'boolean' },
+    ],
+  },
+];
+
+// ── RADIO sections — for EOC640 and other SNMP-discovered radio devices ───────
+// (mirrors BTS but without VLAN double-tagging and UBR-specific QoS profiles)
+const RADIO_SECTIONS: SectionDef[] = [
+  {
+    title: 'Radio (RF)', icon: '📡',
+    fields: [
+      { key: 'operatingFrequency', label: 'Operating Frequency', type: 'select', options: ['5180','5200','5220','5240','5260','5280','5300','5320','5500','5520','5540','5560','5580','5600','5660','5680','5700','5745','5765','5785','5805','5825'], unit: 'MHz' },
+      { key: 'channelBandwidth',   label: 'Channel Bandwidth',   type: 'select', options: ['20','40','80','160'], unit: 'MHz' },
+      { key: 'txPowerDbm',         label: 'TX Power',            type: 'number', min: 0, max: 30, unit: 'dBm', placeholder: '23' },
+      { key: 'antennaGain',        label: 'Antenna Gain',        type: 'number', min: 0, max: 40, unit: 'dBi', placeholder: '16' },
+      { key: 'linkMode',           label: 'Link Mode',           type: 'select', options: ['PtP','PtMP','Mesh'] },
+      { key: 'encryptionType',     label: 'Encryption',          type: 'select', options: ['AES-128','AES-256','None'] },
+    ],
+  },
+  {
+    title: 'Network (IP)', icon: '🌐',
+    fields: [
+      { key: 'ipMode',    label: 'IP Mode',    type: 'select', options: ['DHCP','Static'] },
+      { key: 'ipAddress', label: 'IP Address', type: 'text',   placeholder: '10.100.1.50', showIf: (p) => p.ipMode === 'Static' },
+      { key: 'subnetMask',label: 'Subnet Mask',type: 'text',   placeholder: '255.255.255.0', showIf: (p) => p.ipMode === 'Static' },
+      { key: 'gateway',   label: 'Gateway',    type: 'text',   placeholder: '10.100.1.254', showIf: (p) => p.ipMode === 'Static' },
+      { key: 'dnsServer', label: 'DNS Server', type: 'text',   placeholder: '8.8.8.8' },
+    ],
+  },
+  {
+    title: 'VLAN', icon: '🔀',
+    fields: [
+      { key: 'vlanMode',    label: 'VLAN Mode',     type: 'select', options: ['None','Single'] },
+      { key: 'vlanId',      label: 'VLAN ID',       type: 'number', min: 1, max: 4094, placeholder: '100', showIf: (p) => p.vlanMode === 'Single' },
+    ],
+  },
+  {
+    title: 'Management', icon: '🛠',
+    fields: [
+      { key: 'snmpCommunity', label: 'SNMP Community', type: 'text',   placeholder: 'public' },
+      { key: 'snmpVersion',   label: 'SNMP Version',   type: 'select', options: ['v1','v2c','v3'] },
+      { key: 'snmpTrapHost',  label: 'SNMP Trap Host', type: 'text',   placeholder: '10.0.0.1' },
+      { key: 'ntpServer',     label: 'NTP Server',     type: 'text',   placeholder: 'pool.ntp.org' },
+      { key: 'syslogServer',  label: 'Syslog Server',  type: 'text',   placeholder: '10.0.0.2' },
+      { key: 'webPort',       label: 'Web UI Port',    type: 'number', min: 1, max: 65535, placeholder: '80' },
+    ],
+  },
+];
+
 function getSections(deviceType?: string): SectionDef[] {
-  if (deviceType === 'CPE') return CPE_SECTIONS;
-  if (deviceType === 'IDU') return IDU_SECTIONS;
+  if (deviceType === 'CPE')    return CPE_SECTIONS;
+  if (deviceType === 'IDU')    return IDU_SECTIONS;
+  if (deviceType === 'SWITCH') return SWITCH_SECTIONS;
+  if (deviceType === 'ROUTER') return ROUTER_SECTIONS;
+  if (deviceType === 'RADIO')  return RADIO_SECTIONS;
   return BTS_SECTIONS;
 }
 
@@ -547,7 +710,7 @@ function TemplatePreview({ template }: { template: ConfigTemplate }) {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 16 }}>
-            {template.deviceType === 'BTS' ? '📡' : template.deviceType === 'CPE' ? '🖥' : '📦'}
+            {template.deviceType === 'BTS' ? '📡' : template.deviceType === 'CPE' ? '🖥' : template.deviceType === 'IDU' ? '📦' : template.deviceType === 'SWITCH' ? '🔀' : template.deviceType === 'ROUTER' ? '🌐' : template.deviceType === 'RADIO' ? '📻' : '📦'}
           </span>
           <div>
             <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--vf-text-primary)' }}>{template.name}</div>
@@ -852,7 +1015,7 @@ function TemplatesTab() {
             </div>
           ) : templates.map((t) => {
             const isActive = editing?.id === t.id || (!editing?.id && !t.id);
-            const typeColor: Record<string, string> = { BTS: '#3b82f6', CPE: '#22c55e', IDU: '#f59e0b' };
+            const typeColor: Record<string, string> = { BTS: '#3b82f6', CPE: '#22c55e', IDU: '#f59e0b', SWITCH: '#8b5cf6', ROUTER: '#06b6d4', RADIO: '#ec4899' };
             return (
               <div key={t.id} onClick={() => selectTemplate(t)}
                 style={{
@@ -927,11 +1090,18 @@ function TemplatesTab() {
                 </FieldRow>
                 <FieldRow label="Device Type">
                   <select value={editing.deviceType ?? 'BTS'}
-                    onChange={(e) => { setField('deviceType', e.target.value as 'BTS' | 'CPE' | 'IDU'); setField('parameters', {}); }}
-                    style={{ ...INLINE_INPUT, width: 100 }}>
-                    <option value="BTS">BTS (A60)</option>
-                    <option value="CPE">CPE (A61)</option>
-                    <option value="IDU">IDU</option>
+                    onChange={(e) => { setField('deviceType', e.target.value as 'BTS' | 'CPE' | 'IDU' | 'SWITCH' | 'ROUTER' | 'RADIO'); setField('parameters', {}); }}
+                    style={{ ...INLINE_INPUT, width: 200 }}>
+                    <optgroup label="UBR Radio Equipment">
+                      <option value="BTS">BTS (A60 — Sector Base Station)</option>
+                      <option value="CPE">CPE (A61 — Customer Premises)</option>
+                      <option value="IDU">IDU (Indoor Unit / Backhaul)</option>
+                      <option value="RADIO">RADIO (Generic Wireless Link)</option>
+                    </optgroup>
+                    <optgroup label="SNMP-Discovered Network Equipment">
+                      <option value="SWITCH">SWITCH (Cisco / Juniper / Multivendor)</option>
+                      <option value="ROUTER">ROUTER (Edge / Core Router)</option>
+                    </optgroup>
                   </select>
                 </FieldRow>
               </div>
@@ -1183,7 +1353,7 @@ function PushConfigTab() {
           ) : (
             <FieldRow label="Filter by Type (blank = all)">
               <Select
-                options={[{value:'',label:'All device types'},{value:'BTS',label:'BTS only'},{value:'CPE',label:'CPE only'},{value:'IDU',label:'IDU only'}]}
+                options={[{value:'',label:'All device types'},{value:'BTS',label:'BTS'},{value:'CPE',label:'CPE'},{value:'IDU',label:'IDU'},{value:'RADIO',label:'RADIO'},{value:'SWITCH',label:'SWITCH'},{value:'ROUTER',label:'ROUTER'}]}
                 value={filterType} onChange={(e) => setFilterType(e.target.value)}
               />
             </FieldRow>

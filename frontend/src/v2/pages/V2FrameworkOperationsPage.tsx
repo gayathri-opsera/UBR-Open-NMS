@@ -278,6 +278,11 @@ export default function V2FrameworkOperationsPage() {
   const [severityOpen,   setSeverityOpen]   = useState(false);
   const [actionsOpen,    setActionsOpen]    = useState(false);
 
+  // Auto-discovery scan state
+  const [scanRunning,  setScanRunning]  = useState(false);
+  const [scanResult,   setScanResult]   = useState<{ provisioned: number; message: string } | null>(null);
+  const [scanError,    setScanError]    = useState<string | null>(null);
+
   // ── Load live data ────────────────────────────────────────────────────────
 
   const loadDashboard = useCallback(async () => {
@@ -397,6 +402,29 @@ export default function V2FrameworkOperationsPage() {
   useEffect(() => { void loadDashboard(); }, [loadDashboard]);
 
   const handleRefresh = useCallback(() => { void loadDashboard(); }, [loadDashboard]);
+
+  /** Trigger auto-discovery scan against the default subnet */
+  const handleRunDiscovery = useCallback(async () => {
+    setScanRunning(true);
+    setScanResult(null);
+    setScanError(null);
+    try {
+      const { apiClient } = await import('../../api/client');
+      const res = await apiClient.post('/discovery/scans', {
+        subnets: ['10.100.1.0/24'],
+      });
+      const { scan } = res.data as { scan: { hostsMatched: number } };
+      setScanResult({ provisioned: scan?.hostsMatched ?? 0, message: res.data.message });
+      // Refresh dashboard data so new devices appear in the fingerprint match rate
+      setTimeout(() => void loadDashboard(), 1500);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } }; message?: string })
+        ?.response?.data?.message || (err as { message?: string })?.message || 'Scan failed';
+      setScanError(msg);
+    } finally {
+      setScanRunning(false);
+    }
+  }, [loadDashboard]);
 
   const errorRateColor = (rate: number) =>
     rate < 1.5 ? 'var(--vf-success)' : rate < 4 ? 'var(--vf-warning)' : 'var(--vf-danger)';
@@ -526,8 +554,8 @@ export default function V2FrameworkOperationsPage() {
                   onClose={() => setActionsOpen(false)}
                   items={[
                     {
-                      label: 'Start manual discovery',
-                      onSelect: () => navigate('/v2/discovery'),
+                      label: scanRunning ? '⏳ Discovery running…' : '🔍 Run Auto-Discovery (Demo)',
+                      onSelect: () => { setActionsOpen(false); void handleRunDiscovery(); },
                     },
                     {
                       label: 'Upload Product Definition',
@@ -550,6 +578,29 @@ export default function V2FrameworkOperationsPage() {
             ? 'Refreshing…'
             : `Last refreshed: ${lastRefreshed.toLocaleTimeString()} UTC`}
         </div>
+
+        {/* Auto-discovery scan status banners */}
+        {scanRunning && (
+          <div style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.25)', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: '#60a5fa', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>
+            Running auto-discovery scan on 10.100.1.0/24… matching against BANNER fingerprint registry…
+          </div>
+        )}
+        {scanResult && !scanRunning && (
+          <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: '#22c55e', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>✅ {scanResult.message}</span>
+            <button onClick={() => navigate('/v2/devices?genericDeviceType=RADIO')}
+              style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.4)', color: '#22c55e', padding: '3px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+              View in Inventory →
+            </button>
+          </div>
+        )}
+        {scanError && !scanRunning && (
+          <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: '#f87171', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>⚠ Discovery scan failed: {scanError}</span>
+            <button onClick={() => setScanError(null)} style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', padding: '3px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Dismiss</button>
+          </div>
+        )}
 
         {/* Top-level error banner */}
         {error && (

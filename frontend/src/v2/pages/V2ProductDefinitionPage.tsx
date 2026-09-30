@@ -18,6 +18,7 @@
  * Credential material is never rendered at any step.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type { AxiosError } from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../components/common/Toast';
 import { Button } from '../components/common/Button';
@@ -32,6 +33,7 @@ import {
   stageProductDefinitionVersion,
   activateProductDefinitionVersion,
   rollbackProductDefinition,
+  deleteProductDefinitionVersion,
   generateIdempotencyKey,
   extractApiError,
   getVersionDiff,
@@ -548,6 +550,128 @@ function VersionDetailDrawer({ version, onClose }: VersionDetailDrawerProps) {
   );
 }
 
+// ── Delete confirmation dialog ────────────────────────────────────────────────
+
+function DeleteVersionDialog({
+  version,
+  onConfirm,
+  onCancel,
+  deleting,
+}: {
+  version: ProductDefinitionVersion;
+  onConfirm: () => void;
+  onCancel: () => void;
+  deleting: boolean;
+}) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1100,
+      background: 'rgba(0,0,0,0.6)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)',
+        borderRadius: 'var(--vf-radius-lg)', boxShadow: 'var(--vf-shadow-popover)',
+        padding: '32px 28px', maxWidth: 460, width: '90%',
+      }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Confirm version deletion"
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: '50%',
+            background: 'var(--vf-danger)', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18, fontWeight: 700, flexShrink: 0,
+          }}>🗑</div>
+          <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--vf-text-primary)' }}>
+            Delete this version?
+          </span>
+        </div>
+
+        {/* Version identity */}
+        <div style={{
+          background: 'var(--vf-elevated)', borderRadius: 'var(--vf-radius-md)',
+          padding: '12px 14px', marginBottom: 16,
+          border: '1px solid var(--vf-border-subtle)',
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--vf-text-primary)', marginBottom: 4 }}>
+            {version.name ?? version.model}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', fontFamily: 'var(--vf-font-mono)' }}>
+            {version.versionId}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--vf-text-secondary)', marginTop: 4 }}>
+            {version.vendor} · {version.model} · <strong>{version.lifecycleStatus}</strong>
+          </div>
+        </div>
+
+        <p style={{ fontSize: 13, color: 'var(--vf-text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
+          This will permanently remove the version record and its validation report.
+          <strong> This action cannot be undone.</strong>
+        </p>
+
+        {/* Warning if STAGED */}
+        {version.lifecycleStatus === 'STAGED' && (
+          <div style={{
+            padding: '10px 12px', borderRadius: 6, marginBottom: 16,
+            background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.35)',
+            fontSize: 12, color: '#b45309',
+          }}>
+            ⚠️ This version is currently <strong>STAGED</strong>. Deleting it will remove it before activation.
+          </div>
+        )}
+
+        {/* Strong warning if ACTIVE — force-delete */}
+        {version.lifecycleStatus === 'ACTIVE' && (
+          <div style={{
+            padding: '12px 14px', borderRadius: 6, marginBottom: 16,
+            background: 'rgba(239,68,68,0.1)', border: '2px solid rgba(239,68,68,0.5)',
+            fontSize: 12, color: '#dc2626',
+          }}>
+            🔴 <strong>This is the ACTIVE version.</strong> Force-deleting it will remove all
+            fingerprint and parameter registry entries for this product definition.
+            Devices matching this definition will no longer be auto-discovered until a
+            new version is activated.
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button
+            onClick={onCancel}
+            disabled={deleting}
+            style={{
+              padding: '8px 18px', borderRadius: 'var(--vf-radius-md)',
+              border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-surface)',
+              color: 'var(--vf-text-primary)', cursor: deleting ? 'not-allowed' : 'pointer',
+              fontSize: 13, fontWeight: 500,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={deleting}
+            aria-busy={deleting}
+            style={{
+              padding: '8px 18px', borderRadius: 'var(--vf-radius-md)',
+              border: 'none', background: 'var(--vf-danger)', color: '#fff',
+              cursor: deleting ? 'not-allowed' : 'pointer',
+              fontSize: 13, fontWeight: 700,
+              opacity: deleting ? 0.7 : 1,
+            }}
+          >
+            {deleting ? 'Deleting…' : 'Yes, delete'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function V2ProductDefinitionPage() {
@@ -597,6 +721,10 @@ export default function V2ProductDefinitionPage() {
   // ── Per-row action state (staging/activating individual versions from table) ──
   const [rowStaging,    setRowStaging]    = useState<string | null>(null); // versionId
   const [rowActivating, setRowActivating] = useState<string | null>(null); // versionId
+
+  // ── Delete state ──────────────────────────────────────────────────────────
+  const [deleteTarget,  setDeleteTarget]  = useState<ProductDefinitionVersion | null>(null);
+  const [deleting,      setDeleting]      = useState(false);
 
   // ── Version diff (Compare) drawer ─────────────────────────────────────────
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
@@ -664,15 +792,27 @@ export default function V2ProductDefinitionPage() {
       addToast(`${selectedFile.name} uploaded. Validation complete.`, 'success');
       void loadVersions();
     } catch (err) {
+      // uploadProductDefinition already normalises to FrameworkApiError via extractApiError.
+      // extractApiError fast-paths FrameworkApiError objects, so calling it here is safe
+      // even though the error was already normalised by the API layer.
       const apiErr = extractApiError(err);
-      // UPLOAD_REJECTED = duplicate content hash — surface the server message directly
-      // so the operator knows to upload a different file, not retry the same one.
-      if (apiErr.error.code === 'UPLOAD_REJECTED') {
+
+      // UPLOAD_REJECTED = duplicate content-hash — surface the server message directly.
+      // Also match on the message text as a safety net for any future code-rename.
+      const isDuplicate =
+        apiErr.error.code === 'UPLOAD_REJECTED' ||
+        apiErr.error.message?.toLowerCase().includes('already been uploaded') ||
+        apiErr.error.message?.toLowerCase().includes('already uploaded');
+
+      if (isDuplicate) {
         // Show a persistent dialog instead of a fleeting toast so the operator
         // can read the existing versionId and decide what to do next.
-        setDuplicateMsg(apiErr.error.message);
+        const msg = (apiErr.error.message || '').includes('already')
+          ? apiErr.error.message
+          : 'This file has already been uploaded. Check the Versions tab to find the existing version.';
+        setDuplicateMsg(msg);
       } else {
-        addToast(`Upload failed: ${apiErr.error.message}`, 'error');
+        addToast(`Upload failed: ${apiErr.error.message ?? 'Unexpected error'}`, 'error');
       }
       logger.error('V2ProductDefinitionPage: upload failed', { code: apiErr.error.code, message: apiErr.error.message });
     } finally {
@@ -819,6 +959,37 @@ export default function V2ProductDefinitionPage() {
       setDiffError(apiErr.error.message);
     } finally {
       setDiffLoading(false);
+    }
+  }
+
+  // ── Delete handler ────────────────────────────────────────────────────────
+  async function handleDeleteConfirm() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    // Force-delete is needed when the version is currently ACTIVE
+    const forceDelete = deleteTarget.lifecycleStatus === 'ACTIVE';
+    try {
+      await deleteProductDefinitionVersion(deleteTarget.definitionId, deleteTarget.versionId, forceDelete);
+      addToast(
+        forceDelete
+          ? `Active version deleted. Registry entries cleared.`
+          : `Version deleted successfully.`,
+        'success',
+      );
+      setDeleteTarget(null);
+      void loadVersions();
+      // Also reload history tab if it's currently visible
+      if (rightTab === 'history') void loadHistory();
+    } catch (err) {
+      const apiErr = extractApiError(err);
+      if (apiErr.error.code === 'DELETE_BLOCKED_ACTIVE') {
+        addToast('Cannot delete an ACTIVE version — roll back first, then delete.', 'error');
+      } else {
+        addToast(`Delete failed: ${apiErr.error.message}`, 'error');
+      }
+      logger.error('V2ProductDefinitionPage: delete failed', err);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -1155,6 +1326,16 @@ export default function V2ProductDefinitionPage() {
             })()}
           </aside>
         </>
+      )}
+
+      {/* ── Delete confirmation dialog ── */}
+      {deleteTarget && (
+        <DeleteVersionDialog
+          version={deleteTarget}
+          onConfirm={() => void handleDeleteConfirm()}
+          onCancel={() => setDeleteTarget(null)}
+          deleting={deleting}
+        />
       )}
 
       {/* ── Duplicate file dialog (portal-style overlay) ── */}
@@ -1566,6 +1747,23 @@ export default function V2ProductDefinitionPage() {
                                   {rollingBack === v.versionId ? 'Rolling back…' : '↩ Rollback'}
                                 </button>
                               )}
+
+                              {/* Delete — available for all versions; ACTIVE requires force-confirm */}
+                              <button
+                                style={{
+                                  ...BTN_SECONDARY_SM,
+                                  background: 'rgba(239,68,68,0.08)',
+                                  color: '#ef4444',
+                                  border: '1px solid rgba(239,68,68,0.28)',
+                                }}
+                                onClick={() => setDeleteTarget(v)}
+                                aria-label={`Delete version ${v.versionId}`}
+                                title={v.lifecycleStatus === 'ACTIVE'
+                                  ? 'Force-delete this active version (Admin only)'
+                                  : 'Permanently delete this version'}
+                              >
+                                🗑 Delete
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1602,7 +1800,7 @@ export default function V2ProductDefinitionPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: 'var(--vf-elevated)' }}>
-                      {(['Definition ID', 'Version ID', 'Format', 'Lifecycle', 'Validation', 'Uploaded At'] as const).map((h) => (
+                      {(['Definition ID', 'Version ID', 'Format', 'Lifecycle', 'Validation', 'Uploaded At', 'Action'] as const).map((h) => (
                         <th key={h} scope="col" style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', borderBottom: '2px solid var(--vf-border-subtle)', whiteSpace: 'nowrap' }}>
                           {h}
                         </th>
@@ -1631,6 +1829,25 @@ export default function V2ProductDefinitionPage() {
                         <td style={{ padding: '9px 10px' }}><StatusPill status={v.validationStatus ?? 'UNKNOWN'} /></td>
                         <td style={{ padding: '9px 10px', color: 'var(--vf-text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
                           {v.createdAt ? new Date(v.createdAt).toLocaleString() : '—'}
+                        </td>
+                        {/* Delete action — available for all versions; ACTIVE = force-confirm */}
+                        <td style={{ padding: '9px 10px' }}>
+                          <button
+                            style={{
+                              ...BTN_SECONDARY_SM,
+                              background: 'rgba(239,68,68,0.08)',
+                              color: '#ef4444',
+                              border: '1px solid rgba(239,68,68,0.28)',
+                              whiteSpace: 'nowrap',
+                            }}
+                            onClick={() => setDeleteTarget(v)}
+                            aria-label={`Delete version ${v.versionId}`}
+                            title={v.lifecycleStatus === 'ACTIVE'
+                              ? 'Force-delete this active version (Admin only)'
+                              : 'Permanently delete this version'}
+                          >
+                            🗑 Delete
+                          </button>
                         </td>
                       </tr>
                     ))}

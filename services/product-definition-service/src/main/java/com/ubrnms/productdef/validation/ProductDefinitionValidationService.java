@@ -121,7 +121,15 @@ public class ProductDefinitionValidationService {
             NormalizedProductDefinition.FingerprintEntry fp = def.getFingerprints().get(i);
             String field = "fingerprints[" + i + "]";
             if (fp.getSysObjectId() == null || fp.getSysObjectId().isBlank()) {
-                errors.add(err("REQUIRED_FIELD", field + ".sysObjectId", "sysObjectId is required on every fingerprint"));
+                // sysObjectId is strongly recommended but optional when pattern-based fingerprints
+                // (sysDescrPattern / SSH banner / HTTP header match) are provided instead.
+                if (fp.getSysDescrPattern() == null || fp.getSysDescrPattern().isBlank()) {
+                    errors.add(err("REQUIRED_FIELD", field + ".sysObjectId",
+                            "sysObjectId or sysDescrPattern is required on every fingerprint for device matching"));
+                } else {
+                    warnings.add(warn("MISSING_SNMP_OID", field + ".sysObjectId",
+                            "sysObjectId not set — device matching will rely on sysDescrPattern only"));
+                }
             } else if (!OID_PATTERN.matcher(fp.getSysObjectId()).matches()) {
                 errors.add(err("INVALID_OID", field + ".sysObjectId",
                         "sysObjectId must be a valid OID (e.g. .1.3.6.1.4.1.9.1.1): "

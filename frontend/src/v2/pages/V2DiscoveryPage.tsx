@@ -1107,18 +1107,31 @@ function ModeAdminTab() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type QuickState = 'idle' | 'running' | 'done' | 'error';
+/** Discovery mode: ICMP + SNMP full scan (Java service) or direct SNMP probe (gateway stub) */
+type QuickMode = 'full_scan' | 'direct_probe';
 
 function QuickDiscoveryBar() {
   const { addToast } = useToast();
-  // Default to the Python snmpsim container at its static Docker IP (10.10.10.25).
-  // Switch to host.docker.internal when using iReasoning Agent Simulator on Mac host.
+
+  // Target: IP, CIDR, or host:port for direct-probe (e.g. 192.168.65.254:161)
   const [ip, setIp] = useState('10.10.10.25');
+  // Discovery mode — full scan uses Java ICMP+SNMP; direct probe skips ICMP
+  const [mode, setMode] = useState<QuickMode>('direct_probe');
+  // SNMP configuration — preserved across multi-vendor, multi-device discovery
+  const [snmpProtocol, setSnmpProtocol] = useState<'SNMP_V2C' | 'SNMP_V1'>('SNMP_V2C');
+  const [community, setCommunity] = useState('public');
+
   const [state, setState] = useState<QuickState>('idle');
   const [results, setResults] = useState<DiscoveryResult[]>([]);
+  // Direct-probe results (from snmp-probe endpoint — richer than full-scan when ICMP is blocked)
+  const [probeResults, setProbeResults] = useState<Array<{
+    ip: string; port: number; sysName: string | null; sysDescr: string;
+    sysObjectID: string | null; sysLocation: string | null;
+    vendor: string; model: string; genericDeviceType: string;
+    productDefinitionId: string | null; provisioned: boolean;
+  }>>([]);
   const [errorMsg, setErrorMsg] = useState('');
-  // Track the active run ID so the Provision button can reference it
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  // Track which IPs have been provisioned in this session
   const [provisionedIPs, setProvisionedIPs] = useState<Set<string>>(new Set());
   const [provisioningIP, setProvisioningIP] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1127,7 +1140,49 @@ function QuickDiscoveryBar() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }
 
-  async function handleDiscover() {
+  /** Direct SNMP Probe — calls the gateway snmp-probe endpoint (no ICMP required). */
+  async function handleDirectProbe() {
+    const target = ip.trim();
+    if (!target) { addToast('Enter a host:port target (e.g. 192.168.65.254:161)', 'error'); return; }
+    setState('running');
+    setProbeResults([]);
+    setErrorMsg('');
+    setProvisionedIPs(new Set());
+    try {
+      // Support both plain IP (defaults port 161) and host:port notation
+      const targets = target.includes(',')
+        ? target.split(',').map((t) => t.trim()).filter(Boolean)
+        : [target];
+      const res = await apiClient.post<{
+        probed: number; discovered: number; errors: number;
+        devices: typeof probeResults; errorDetails: Array<{ target: string; error: string }>;
+      }>('/discovery/snmp-probe', {
+        targets,
+        community: community.trim() || 'public',
+        provision: true,
+      });
+      if (res.data.devices.length === 0) {
+        setErrorMsg(
+          res.data.errorDetails.length > 0
+            ? res.data.errorDetails.map((e) => `${e.target}: ${e.error}`).join('; ')
+            : 'No devices responded. Check host:port and community string.',
+        );
+        setState('error');
+      } else {
+        setProbeResults(res.data.devices);
+        // Mark all provisioned
+        setProvisionedIPs(new Set(res.data.devices.map((d) => d.ip)));
+        setState('done');
+      }
+    } catch (e: unknown) {
+      logger.error('QuickDiscoveryBar: snmp-probe failed', e);
+      setErrorMsg('SNMP probe failed. Check the target is reachable and community is correct.');
+      setState('error');
+    }
+  }
+
+  /** Full ICMP + SNMP Scan — calls the Java discovery service (requires ICMP reachability). */
+  async function handleFullScan() {
     if (!ip.trim()) { addToast('Enter an IP address or CIDR to discover', 'error'); return; }
     setState('running');
     setResults([]);
@@ -1138,8 +1193,8 @@ function QuickDiscoveryBar() {
     try {
       const run = await createDiscoveryRun({
         scope: parseScopeInput(ip.trim()),
-        protocol: 'SNMP_V2C',
-        community: 'public',
+        protocol: snmpProtocol,
+        community: community.trim() || 'public',
         timeoutSeconds: 5,
         retries: 2,
       });
@@ -1170,10 +1225,16 @@ function QuickDiscoveryBar() {
     }
   }
 
+  async function handleDiscover() {
+    if (mode === 'direct_probe') return handleDirectProbe();
+    return handleFullScan();
+  }
+
   function handleReset() {
     stopPoll();
     setState('idle');
     setResults([]);
+    setProbeResults([]);
     setErrorMsg('');
     setActiveRunId(null);
     setProvisionedIPs(new Set());
@@ -1247,6 +1308,13 @@ function QuickDiscoveryBar() {
     return s;
   }
 
+  // Label helpers (for full-scan results)
+  const SEL_STYLE: React.CSSProperties = {
+    padding: '6px 10px', borderRadius: 6, border: '1px solid var(--vf-border-subtle)',
+    background: 'var(--vf-surface)', color: 'var(--vf-text-primary)', fontSize: 12,
+    cursor: 'pointer', outline: 'none',
+  };
+
   return (
     <div style={{
       background: 'linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(99,102,241,0.06) 100%)',
@@ -1263,38 +1331,89 @@ function QuickDiscoveryBar() {
             Quick SNMP Discovery
           </div>
           <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginTop: 2 }}>
-            Enter an IP address or CIDR — the system will ICMP-ping then SNMP-fingerprint each host.
+            Discover any multivendor device — Cisco, Juniper, EOC640, iReasoning sim — via real SNMP v2c/v1.
           </div>
+        </div>
+        {/* Mode toggle */}
+        <div style={{ marginLeft: 'auto', display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 8, padding: 3, gap: 2 }}>
+          {(['direct_probe', 'full_scan'] as QuickMode[]).map((m) => (
+            <button key={m} onClick={() => setMode(m)} style={{
+              padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+              background: mode === m ? 'rgba(96,165,250,0.25)' : 'transparent',
+              color: mode === m ? '#60a5fa' : 'var(--vf-text-muted)',
+              transition: 'all 0.15s',
+            }}>
+              {m === 'direct_probe' ? '🔌 Direct Probe' : '📡 Full Scan'}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Input + button row */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 220, maxWidth: 380 }}>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--vf-text-muted)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Target IP / CIDR
+      {/* Mode description */}
+      <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginBottom: 14, padding: '6px 10px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
+        {mode === 'direct_probe'
+          ? '🔌 Direct Probe — sends SNMP GET directly (no ICMP ping). Use for iReasoning simulator, nms-snmpsim, or when ICMP is blocked. Accepts host:port (e.g. 192.168.65.254:161 or 172.30.0.15:1161).'
+          : '📡 Full Scan — ICMP ping sweep followed by SNMP fingerprint via the Java discovery service. Use for production subnets where ICMP is allowed (e.g. 10.10.10.0/24).'}
+      </div>
+
+      {/* Row 1: Target + SNMP config */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
+        {/* Target */}
+        <div style={{ flex: 2, minWidth: 220 }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--vf-text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            {mode === 'direct_probe' ? 'Target(s) — host:port or comma-separated' : 'Target IP / CIDR'}
           </label>
           <Input
             value={ip}
             onChange={(e) => setIp(e.target.value)}
-            placeholder="10.10.10.25 or 192.168.1.0/24"
+            placeholder={mode === 'direct_probe' ? '192.168.65.254:161  or  172.30.0.15:1161' : '10.10.10.25  or  10.10.10.0/24'}
             disabled={state === 'running'}
-            style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 14 }}
+            style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 13 }}
             fullWidth
           />
         </div>
+
+        {/* SNMP Protocol — preserved for multivendor */}
+        <div style={{ minWidth: 160 }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--vf-text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            SNMP Protocol
+          </label>
+          <select value={snmpProtocol} onChange={(e) => setSnmpProtocol(e.target.value as 'SNMP_V2C' | 'SNMP_V1')}
+            disabled={state === 'running'} style={SEL_STYLE}>
+            <option value="SNMP_V2C">SNMPv2c (recommended)</option>
+            <option value="SNMP_V1">SNMPv1</option>
+          </select>
+        </div>
+
+        {/* Community String — preserved for multivendor */}
+        <div style={{ minWidth: 140 }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--vf-text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Community String
+          </label>
+          <input
+            type="password"
+            autoComplete="off"
+            value={community}
+            onChange={(e) => setCommunity(e.target.value)}
+            placeholder="public"
+            disabled={state === 'running'}
+            style={{ ...SEL_STYLE, fontFamily: 'var(--vf-font-mono)', width: '100%', boxSizing: 'border-box' }}
+          />
+        </div>
+
+        {/* Discover button */}
         <Button
           variant="primary"
           size="md"
           onClick={handleDiscover}
           loading={state === 'running'}
           disabled={state === 'running' || !ip.trim()}
-          style={{ minWidth: 140, height: 40, fontSize: 14, fontWeight: 700 }}
+          style={{ minWidth: 140, height: 38, fontSize: 13, fontWeight: 700 }}
         >
           {state === 'running' ? 'Discovering…' : '🔍  Discover'}
         </Button>
         {(state === 'done' || state === 'error') && (
-          <Button variant="ghost" size="md" onClick={handleReset} style={{ height: 40 }}>
+          <Button variant="ghost" size="md" onClick={handleReset} style={{ height: 38 }}>
             Reset
           </Button>
         )}
@@ -1304,7 +1423,7 @@ function QuickDiscoveryBar() {
       {state === 'running' && (
         <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--vf-text-muted)' }}>
           <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
-          <span>Running ICMP sweep → SNMP fingerprint → classification…</span>
+          <span>{mode === 'direct_probe' ? 'Sending SNMP GET → parsing MIB-II system group → classifying device…' : 'Running ICMP sweep → SNMP fingerprint → classification…'}</span>
         </div>
       )}
 
@@ -1315,13 +1434,62 @@ function QuickDiscoveryBar() {
         </div>
       )}
 
-      {/* Results — tree-style cards */}
-      {state === 'done' && results.length === 0 && (
+      {/* ── Direct-probe results ─────────────────────────────────────────────── */}
+      {state === 'done' && mode === 'direct_probe' && probeResults.length > 0 && (
+        <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 12, color: '#22c55e', fontWeight: 700 }}>
+            ✅ SNMP probe complete — {probeResults.length} device{probeResults.length !== 1 ? 's' : ''} discovered &amp; provisioned to inventory
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
+            {probeResults.map((r) => (
+              <div key={`${r.ip}:${r.port}`} style={{
+                background: 'var(--vf-surface)',
+                border: '1px solid rgba(34,197,94,0.4)',
+                borderRadius: 10, padding: '14px 16px', fontFamily: 'var(--vf-font-mono)', fontSize: 13,
+              }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--vf-text-primary)', marginBottom: 8 }}>
+                  {r.ip}:{r.port}
+                  <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                    background: r.genericDeviceType === 'SWITCH' ? 'rgba(139,92,246,0.2)' : r.genericDeviceType === 'RADIO' ? 'rgba(236,72,153,0.2)' : 'rgba(96,165,250,0.2)',
+                    color: r.genericDeviceType === 'SWITCH' ? '#a78bfa' : r.genericDeviceType === 'RADIO' ? '#f472b6' : '#60a5fa',
+                  }}>{r.genericDeviceType}</span>
+                </div>
+                {[
+                  ['Vendor',      r.vendor || 'N/A'],
+                  ['Model',       r.model  || 'N/A'],
+                  ['Hostname',    r.sysName || 'N/A'],
+                  ['Location',    r.sysLocation || 'N/A'],
+                  ['OID',         r.sysObjectID || 'N/A'],
+                  ['Definition',  r.productDefinitionId || '— generic —'],
+                  ['sysDescr',    (r.sysDescr || '').substring(0, 80) || 'N/A'],
+                ].map(([label, value], idx, arr) => (
+                  <div key={label} style={{
+                    display: 'flex', gap: 8, padding: '2px 0',
+                    borderLeft: '2px solid var(--vf-border-subtle)',
+                    marginLeft: 6, paddingLeft: 10, fontSize: 11,
+                  }}>
+                    <span style={{ color: 'var(--vf-text-muted)', minWidth: 24, flexShrink: 0 }}>{idx === arr.length - 1 ? '└──' : '├──'}</span>
+                    <span style={{ color: '#60a5fa', minWidth: 90, flexShrink: 0, fontWeight: 600 }}>{label}:</span>
+                    <span style={{ color: 'var(--vf-text-primary)', wordBreak: 'break-all' }}>{value}</span>
+                  </div>
+                ))}
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--vf-border-subtle)', fontSize: 12, color: '#22c55e', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>✅</span>
+                  <span>Provisioned — visible in Inventory &amp; Topology</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Full-scan results (ICMP+SNMP) ───────────────────────────────────── */}
+      {state === 'done' && mode === 'full_scan' && results.length === 0 && (
         <div style={{ marginTop: 14, fontSize: 13, color: 'var(--vf-text-muted)' }}>
           No hosts responded. Check the IP range and SNMP credentials.
         </div>
       )}
-      {state === 'done' && results.length > 0 && (
+      {state === 'done' && mode === 'full_scan' && results.length > 0 && (
         <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', fontWeight: 600 }}>
             Discovery complete — {results.length} host{results.length !== 1 ? 's' : ''} found
@@ -1333,16 +1501,9 @@ function QuickDiscoveryBar() {
                 <div key={r.ip} style={{
                   background: 'var(--vf-surface)',
                   border: `1px solid ${ok ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.3)'}`,
-                  borderRadius: 10,
-                  padding: '14px 16px',
-                  fontFamily: 'var(--vf-font-mono)',
-                  fontSize: 13,
+                  borderRadius: 10, padding: '14px 16px', fontFamily: 'var(--vf-font-mono)', fontSize: 13,
                 }}>
-                  {/* IP heading */}
-                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--vf-text-primary)', marginBottom: 8 }}>
-                    {r.ip}
-                  </div>
-                  {/* Tree rows */}
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--vf-text-primary)', marginBottom: 8 }}>{r.ip}</div>
                   {[
                     ['ICMP',         icmpLabel(r.icmpStatus)],
                     ['SNMP',         snmpLabel(r.snmpStatus)],
@@ -1356,30 +1517,23 @@ function QuickDiscoveryBar() {
                       borderLeft: '2px solid var(--vf-border-subtle)',
                       marginLeft: 6, paddingLeft: 10, fontSize: 12,
                     }}>
-                      <span style={{ color: 'var(--vf-text-muted)', minWidth: 28, flexShrink: 0 }}>
-                        {idx === arr.length - 1 ? '└──' : '├──'}
-                      </span>
+                      <span style={{ color: 'var(--vf-text-muted)', minWidth: 28, flexShrink: 0 }}>{idx === arr.length - 1 ? '└──' : '├──'}</span>
                       <span style={{ color: '#60a5fa', minWidth: 110, flexShrink: 0, fontWeight: 600 }}>{label}:</span>
                       <span style={{ color: 'var(--vf-text-primary)' }}>{value}</span>
                     </div>
                   ))}
-
-                  {/* Provision action — shown after a successful discovery */}
                   <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--vf-border-subtle)' }}>
                     {provisionedIPs.has(r.ip) ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#22c55e', fontWeight: 600 }}>
-                        <span>✅</span>
-                        <span>Provisioned — visible in Inventory &amp; Topology</span>
+                        <span>✅</span><span>Provisioned — visible in Inventory &amp; Topology</span>
                       </div>
                     ) : (
                       <Button
-                        variant="primary"
-                        size="sm"
+                        variant="primary" size="sm"
                         onClick={() => handleQuickProvision(r)}
                         loading={provisioningIP === r.ip}
                         disabled={!ok || !!provisioningIP}
                         style={{ width: '100%', fontWeight: 700 }}
-                        title={!ok ? 'Device must be reachable via ICMP and SNMP to provision' : 'Provision this device into managed inventory and topology'}
                       >
                         ⚡ Provision Device
                       </Button>

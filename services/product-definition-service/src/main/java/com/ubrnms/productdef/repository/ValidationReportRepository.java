@@ -8,4 +8,7 @@ import java.util.Optional;
 public interface ValidationReportRepository extends MongoRepository<ValidationReport, String> {
 
     Optional<ValidationReport> findByDefinitionIdAndVersionId(String definitionId, String versionId);
+
+    /** Delete the validation report for a specific version. */
+    void deleteByDefinitionIdAndVersionId(String definitionId, String versionId);
 }

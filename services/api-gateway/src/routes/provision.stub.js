@@ -18,10 +18,14 @@
 const mongoose      = require('mongoose');
 const topologyStub  = require('./topology.stub');
 
-const MONGO_URI  = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms';
+const MONGO_URI      = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms';
+const PRODUCTDEF_URI = (process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms')
+                          .replace(/\/[^/?]+(\?|$)/, '/ubrnms_productdef$1');
 const COLLECTION = 'devices';
 
-let _col = null;
+let _col        = null;
+let _fregCol    = null;
+let _fregConn   = null;
 
 async function getDevicesCol() {
   if (_col) return _col;
@@ -35,6 +39,45 @@ async function getDevicesCol() {
   return _col;
 }
 
+/** Returns the fingerprint_registry_entries collection from ubrnms_productdef. */
+async function getFingerprintCol() {
+  if (_fregCol) return _fregCol;
+  if (!_fregConn) {
+    _fregConn = await mongoose.createConnection(PRODUCTDEF_URI, { serverSelectionTimeoutMS: 5000 }).asPromise();
+  }
+  _fregCol = _fregConn.db.collection('fingerprint_registry_entries');
+  return _fregCol;
+}
+
+/**
+ * Given a sysDescr string, query the BANNER fingerprint registry to find a
+ * matching product definition.  Returns { vendor, model, productDefinitionId }
+ * or null when no fingerprint matches.
+ */
+async function resolveBannerFingerprint(sysDescr) {
+  if (!sysDescr) return null;
+  try {
+    const col     = await getFingerprintCol();
+    const banners = await col.find({ fingerprintType: 'BANNER' }).toArray();
+    for (const entry of banners) {
+      try {
+        if (new RegExp(entry.fingerprintValue, 'i').test(sysDescr)) {
+          return {
+            vendor:              entry.vendor,
+            model:               entry.model,
+            productDefinitionId: entry.productDefinitionId,
+          };
+        }
+      } catch {
+        // Invalid regex in registry — skip
+      }
+    }
+  } catch (err) {
+    console.warn('[provision-stub] Fingerprint registry lookup failed:', err.message);
+  }
+  return null;
+}
+
 // Eagerly connect so the first provision request isn't slow.
 getDevicesCol().catch((err) =>
   console.error('[provision-stub] MongoDB connect failed:', err.message),
@@ -42,6 +85,9 @@ getDevicesCol().catch((err) =>
 
 /** Map discovery device type → hardware model string (mirrors devices.stub.js). */
 const TYPE_MODEL = { BTS: 'A60', CPE: 'A61', IDU: 'IDU' };
+
+/** Device types that are always valid without a fingerprint registry match. */
+const BUILTIN_TYPES = new Set(['BTS', 'CPE', 'IDU']);
 
 /**
  * Writes a single ProvisionHost to MongoDB and returns the result object.
@@ -62,15 +108,34 @@ async function provisionOne(host, col) {
     return { ip, deviceId: '', serialNumber, status: 'failed', error: 'ip, serialNumber, and deviceType are required' };
   }
 
-  const validTypes = ['BTS', 'CPE', 'IDU'];
-  if (!validTypes.includes(deviceType)) {
-    return { ip, deviceId: serialNumber, serialNumber, status: 'failed', error: `Invalid deviceType '${deviceType}'. Must be BTS, CPE, or IDU` };
+  // ── Banner fingerprint lookup ──────────────────────────────────────────────
+  // For non-built-in device types (e.g. RADIO, EOC640, BACKHAUL) we check
+  // the fingerprint registry. If sysDescr matches a BANNER fingerprint we
+  // accept the device and use the registry's vendor/model metadata.
+  // Built-in types (BTS/CPE/IDU) bypass the registry check.
+  let fingerprintMeta = null;
+  if (!BUILTIN_TYPES.has(deviceType)) {
+    fingerprintMeta = await resolveBannerFingerprint(sysDescr);
+    if (!fingerprintMeta) {
+      // Unknown type AND no fingerprint match — reject gracefully
+      return {
+        ip, deviceId: serialNumber, serialNumber, status: 'failed',
+        error: `Unknown deviceType '${deviceType}' with no matching fingerprint registry entry. ` +
+               `Upload and activate a product definition that has a sysDescrPattern matching '${sysDescr || '(none)'}'.`,
+      };
+    }
+    console.log(`[provision-stub] Resolved ${serialNumber} sysDescr '${sysDescr}' → productDef '${fingerprintMeta.productDefinitionId}' model '${fingerprintMeta.model}'`);
   }
 
   try {
-    const now          = new Date();
-    const derivedModel = TYPE_MODEL[deviceType] || model || deviceType;
-    const deviceName   = sysName || `${deviceType}-${ip.replace(/\./g, '-')}`;
+    const now = new Date();
+
+    // Prefer fingerprint registry model over caller-supplied model for banner-matched devices
+    const resolvedVendor = fingerprintMeta?.vendor || vendor || 'Unknown';
+    const resolvedModel  = fingerprintMeta?.model  || TYPE_MODEL[deviceType] || model || deviceType;
+    const deviceName     = sysName || `${resolvedModel}-${ip.replace(/\./g, '-')}`;
+    // Discovery paradigm: SNMP for OID-matched, BANNER for pattern-matched
+    const paradigm       = fingerprintMeta ? 'BANNER' : 'SNMP';
 
     const doc = {
       _id:              serialNumber,
@@ -80,22 +145,23 @@ async function provisionOne(host, col) {
       name:             deviceName,
       deviceName,
       deviceType,
-      model:            derivedModel,
-      // Provisioned via SNMP discovery → ONLINE immediately for admin-initiated provision.
+      model:            resolvedModel,
+      productDefinitionId: fingerprintMeta?.productDefinitionId || null,
+      // Provisioned via discovery → ONLINE immediately for admin-initiated provision.
       status:           'ONLINE',
       ipAddress:        ip,
       macAddress:       macAddress || null,
       latitude:         (latitude != null && !isNaN(latitude)) ? parseFloat(latitude) : null,
       longitude:        (longitude != null && !isNaN(longitude)) ? parseFloat(longitude) : null,
       networkId:        networkId || null,
-      manufacturer:     vendor    || 'Unknown',
+      manufacturer:     resolvedVendor,
       sysName:          sysName   || null,
       sysLocation:      sysLocation || null,
       sysObjectID:      sysObjectID || null,
       sysDescr:         sysDescr  || null,
       // Discovery metadata so inventory UI can surface how it was found.
-      discoveryParadigm: 'SNMP',
-      tags:             ['snmp-discovered'],
+      discoveryParadigm: paradigm,
+      tags:             [paradigm.toLowerCase() + '-discovered'],
       uptimeSeconds:    0,
       createdAt:        now,
       updatedAt:        now,

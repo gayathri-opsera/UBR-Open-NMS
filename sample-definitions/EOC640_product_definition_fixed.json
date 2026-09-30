@@ -1,0 +1,546 @@
+{
+  "$schema": "urn:nms:productdef:json:1.0",
+  "productDefinition": {
+    "identity": {
+      "name": "EOC640 Wireless Backhaul Unit",
+      "vendor": "EOC",
+      "model": "EOC640 Wireless Backhaul Unit",
+      "description": "P2MP 60 GHz / 5 GHz backhaul radio supporting BTS and CPE roles",
+      "firmwareFrom": "1.0",
+      "firmwareTo": "99.x",
+      "productFamily": "EOC Wireless Backhaul",
+      "deviceType": "WIRELESS_BACKHAUL"
+    },
+
+    "fingerprints": [
+      {
+        "sysObjectId": ".1.3.6.1.4.1.26928.1.640",
+        "sysDescrPattern": "EOC640.*",
+        "firmwareFrom": "1.0",
+        "firmwareTo": "99.x"
+      },
+      {
+        "sysObjectId": ".1.3.6.1.4.1.26928.1.641",
+        "sysDescrPattern": "EOC-.*",
+        "firmwareFrom": "1.0",
+        "firmwareTo": "99.x"
+      }
+    ],
+
+    "protocols": [
+      { "type": "REST" },
+      { "type": "CLI" }
+    ],
+
+    "parameters": [
+      {
+        "groupName": "radio",
+        "parameters": [
+          {
+            "id": "radioStatus",
+            "displayName": "Radio status",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Enable",
+            "readOnly": false,
+            "enumValues": ["Enable", "Disable"]
+          },
+          {
+            "id": "linktype",
+            "displayName": "LinkType",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "PTMP",
+            "readOnly": false,
+            "enumValues": ["PTP", "PTMP"]
+          },
+          {
+            "id": "radioMode",
+            "displayName": "Radio Mode",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "BTS",
+            "readOnly": false,
+            "enumValues": ["BTS", "CPE"]
+          },
+          {
+            "id": "ssid",
+            "displayName": "SSID",
+            "dataType": "STRING",
+            "uiWidget": "textfield",
+            "defaultValue": "EOC640_R1",
+            "readOnly": false
+          },
+          {
+            "id": "bandwidth",
+            "displayName": "Bandwidth",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "HT80",
+            "readOnly": false,
+            "enumValues": ["HT20", "HT40+", "HT80", "HT160"]
+          },
+          {
+            "id": "country",
+            "displayName": "Country",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "5GHz",
+            "readOnly": false,
+            "enumValues": ["US-Non DFS", "US-5GHz ALL", "Europe", "Canada", "5GHz"]
+          },
+          {
+            "id": "configuredChannel",
+            "displayName": "Configured channel",
+            "dataType": "INTEGER",
+            "uiWidget": "textfield",
+            "defaultValue": "36",
+            "readOnly": false,
+            "minValue": 1,
+            "maxValue": 165
+          },
+          {
+            "id": "encryption",
+            "displayName": "Encryption",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "AES-256",
+            "readOnly": false,
+            "enumValues": ["AES-256", "None"]
+          },
+          {
+            "id": "key",
+            "displayName": "Encryption Key",
+            "dataType": "STRING",
+            "uiWidget": "textfield",
+            "defaultValue": "changeme",
+            "readOnly": false,
+            "minValue": 8,
+            "maxValue": 63
+          },
+          {
+            "id": "maximumSus",
+            "displayName": "Maximum Sus",
+            "dataType": "INTEGER",
+            "uiWidget": "slider",
+            "defaultValue": "16",
+            "readOnly": false,
+            "minValue": 1,
+            "maxValue": 32
+          },
+          {
+            "id": "ofdma",
+            "displayName": "OFDMA",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Disable",
+            "readOnly": false,
+            "enumValues": ["Enable", "Disable"]
+          },
+          {
+            "id": "dlUlRatio",
+            "displayName": "DL/UL Ratio",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "75/25",
+            "readOnly": false,
+            "enumValues": ["Auto", "50/50", "60/40", "70/30", "75/25", "80/20"]
+          },
+          {
+            "id": "ddrsStatus",
+            "displayName": "DDRS Status",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Enable",
+            "readOnly": false,
+            "enumValues": ["Enable", "Disable"]
+          },
+          {
+            "id": "spatialStreamDdrsEnabled",
+            "displayName": "Spatial Stream (DDRS enabled)",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Auto",
+            "readOnly": false,
+            "enumValues": ["Single", "Dual", "Auto"]
+          },
+          {
+            "id": "maxDataRateSingleStream",
+            "displayName": "Max. Data Rate - Single Stream",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "MCS11",
+            "readOnly": false,
+            "enumValues": ["MCS0","MCS1","MCS2","MCS3","MCS4","MCS5","MCS6","MCS7","MCS8","MCS9","MCS10","MCS11"]
+          },
+          {
+            "id": "maxDataRateDualStream",
+            "displayName": "Max. Data Rate - Dual Stream",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "MCS23",
+            "readOnly": false,
+            "enumValues": ["MCS12","MCS13","MCS14","MCS15","MCS16","MCS17","MCS18","MCS19","MCS20","MCS21","MCS22","MCS23"]
+          },
+          {
+            "id": "minModulationIndex",
+            "displayName": "Min. Modulation Index",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "MCS0",
+            "readOnly": false,
+            "enumValues": ["MCS0","MCS1","MCS2","MCS3","MCS4","MCS5","MCS6","MCS7","MCS8","MCS9","MCS10","MCS11","MCS12","MCS13","MCS14","MCS15","MCS16","MCS17","MCS18","MCS19","MCS20","MCS21","MCS22","MCS23"]
+          },
+          {
+            "id": "maxModulationIndex",
+            "displayName": "Max. Modulation Index",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "MCS11",
+            "readOnly": false,
+            "enumValues": ["MCS0","MCS1","MCS2","MCS3","MCS4","MCS5","MCS6","MCS7","MCS8","MCS9","MCS10","MCS11","MCS12","MCS13","MCS14","MCS15","MCS16","MCS17","MCS18","MCS19","MCS20","MCS21","MCS22","MCS23"]
+          },
+          {
+            "id": "spatialStreamDdrsDisabled",
+            "displayName": "Spatial Stream (DDRS disabled)",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Single",
+            "readOnly": false,
+            "enumValues": ["Single", "Dual"]
+          },
+          {
+            "id": "modulationIndex",
+            "displayName": "Modulation Index",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "MCS3",
+            "readOnly": false,
+            "enumValues": ["MCS0","MCS1","MCS2","MCS3","MCS4","MCS5","MCS6","MCS7","MCS8","MCS9","MCS10","MCS11"]
+          },
+          {
+            "id": "atpcStatus",
+            "displayName": "ATPC Status",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Disable",
+            "readOnly": false,
+            "enumValues": ["Disable", "Enable"]
+          },
+          {
+            "id": "transmitPower",
+            "displayName": "Transmit Power",
+            "dataType": "INTEGER",
+            "uiWidget": "slider",
+            "defaultValue": "26",
+            "readOnly": false,
+            "minValue": 0,
+            "maxValue": 26
+          },
+          {
+            "id": "connectorizedAntennaGain",
+            "displayName": "Connectorized Antenna Gain",
+            "dataType": "INTEGER",
+            "uiWidget": "slider",
+            "defaultValue": "23",
+            "readOnly": false,
+            "minValue": 0,
+            "maxValue": 30
+          },
+          {
+            "id": "maximumEirp",
+            "displayName": "Maximum EIRP",
+            "dataType": "INTEGER",
+            "uiWidget": "slider",
+            "defaultValue": "0",
+            "readOnly": false,
+            "minValue": 0,
+            "maxValue": 100
+          },
+          {
+            "id": "dcsStatus",
+            "displayName": "DCS Status",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Disable",
+            "readOnly": false,
+            "enumValues": ["Enable", "Disable"]
+          },
+          {
+            "id": "rtxThreshold",
+            "displayName": "RTX Threshold",
+            "dataType": "INTEGER",
+            "uiWidget": "slider",
+            "defaultValue": "25",
+            "readOnly": false,
+            "minValue": 0,
+            "maxValue": 100
+          },
+          {
+            "id": "backgroundScan",
+            "displayName": "Background Scan",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Disable",
+            "readOnly": false,
+            "enumValues": ["Enable", "Disable"]
+          }
+        ]
+      },
+      {
+        "groupName": "network",
+        "parameters": [
+          {
+            "id": "addressType",
+            "displayName": "Address Type",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Static",
+            "readOnly": false,
+            "enumValues": ["Static", "Dynamic-IPv4", "Dynamic-IPv6"]
+          },
+          {
+            "id": "ipAddress",
+            "displayName": "IP Address",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "192.168.1.1",
+            "readOnly": false
+          },
+          {
+            "id": "subnetMask",
+            "displayName": "Subnet Mask",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "255.255.255.0",
+            "readOnly": false
+          },
+          {
+            "id": "gateway",
+            "displayName": "Gateway",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "192.168.1.1",
+            "readOnly": false
+          },
+          {
+            "id": "ipv6Address",
+            "displayName": "IPv6 Address",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "",
+            "readOnly": false
+          },
+          {
+            "id": "ipv6Gateway",
+            "displayName": "IPv6 Gateway",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "",
+            "readOnly": false
+          },
+          {
+            "id": "mgmtVlanId",
+            "displayName": "Mgmt VLAN ID",
+            "dataType": "INTEGER",
+            "uiWidget": "textfield",
+            "defaultValue": "1",
+            "readOnly": false,
+            "minValue": 1,
+            "maxValue": 4094
+          },
+          {
+            "id": "vlanMode",
+            "displayName": "VLAN Mode",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Transparent",
+            "readOnly": false,
+            "enumValues": ["Transparent", "Access", "Trunk", "Q-in-Q"]
+          },
+          {
+            "id": "trunkOption",
+            "displayName": "Trunk Option",
+            "dataType": "STRING",
+            "uiWidget": "textfield",
+            "defaultValue": "List",
+            "readOnly": false
+          },
+          {
+            "id": "trunkVlanId",
+            "displayName": "Trunk VLAN ID",
+            "dataType": "INTEGER",
+            "uiWidget": "textfield",
+            "defaultValue": "0",
+            "readOnly": false,
+            "minValue": 1,
+            "maxValue": 4094
+          },
+          {
+            "id": "cvlanPriority",
+            "displayName": "CVLAN Priority",
+            "dataType": "INTEGER",
+            "uiWidget": "slider",
+            "defaultValue": "0",
+            "readOnly": false,
+            "minValue": 0,
+            "maxValue": 7
+          },
+          {
+            "id": "cvlanId",
+            "displayName": "CVLAN ID",
+            "dataType": "INTEGER",
+            "uiWidget": "textfield",
+            "defaultValue": "101",
+            "readOnly": false,
+            "minValue": 1,
+            "maxValue": 4094
+          },
+          {
+            "id": "cvlanEthertype",
+            "displayName": "CVLAN EtherType",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "0x8100",
+            "readOnly": false,
+            "enumValues": ["0x8100", "0x88a8"]
+          },
+          {
+            "id": "svlanPriority",
+            "displayName": "SVLAN Priority",
+            "dataType": "INTEGER",
+            "uiWidget": "slider",
+            "defaultValue": "0",
+            "readOnly": false,
+            "minValue": 0,
+            "maxValue": 7
+          },
+          {
+            "id": "svlanId",
+            "displayName": "SVLAN ID",
+            "dataType": "INTEGER",
+            "uiWidget": "textfield",
+            "defaultValue": "100",
+            "readOnly": false,
+            "minValue": 1,
+            "maxValue": 4094
+          },
+          {
+            "id": "svlanEthertype",
+            "displayName": "SVLAN EtherType",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "0x8100",
+            "readOnly": false,
+            "enumValues": ["0x8100", "0x88a8"]
+          },
+          {
+            "id": "speedDuplex",
+            "displayName": "Speed / Duplex",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Auto",
+            "readOnly": false,
+            "enumValues": ["Auto", "100-Full", "1000-Full"]
+          },
+          {
+            "id": "mtu",
+            "displayName": "MTU",
+            "dataType": "INTEGER",
+            "uiWidget": "textfield",
+            "defaultValue": "1500",
+            "readOnly": false,
+            "minValue": 1500,
+            "maxValue": 9000
+          },
+          {
+            "id": "dhcpServer",
+            "displayName": "DHCP Server",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Disable",
+            "readOnly": false,
+            "enumValues": ["Enable", "Disable"]
+          },
+          {
+            "id": "dhcpStartIpAddress",
+            "displayName": "DHCP Start IP Address",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "192.168.1.100",
+            "readOnly": false
+          },
+          {
+            "id": "dhcpEndIpAddress",
+            "displayName": "DHCP End IP Address",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "192.168.1.150",
+            "readOnly": false
+          },
+          {
+            "id": "dhcpLeaseTime",
+            "displayName": "DHCP Lease Time",
+            "dataType": "INTEGER",
+            "uiWidget": "textfield",
+            "defaultValue": "43200",
+            "readOnly": false,
+            "minValue": 120,
+            "maxValue": 86400
+          },
+          {
+            "id": "dhcp24IpAddress",
+            "displayName": "DHCP 2.4 GHz IP Address",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "169.254.254.1",
+            "readOnly": false
+          },
+          {
+            "id": "dhcp24SubnetMask",
+            "displayName": "DHCP 2.4 GHz Subnet Mask",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "255.255.255.0",
+            "readOnly": false
+          },
+          {
+            "id": "dhcpServerPoolConfig",
+            "displayName": "DHCP Server Pool Configuration",
+            "dataType": "ENUM",
+            "uiWidget": "dropdown",
+            "defaultValue": "Enable",
+            "readOnly": false,
+            "enumValues": ["Enable", "Disable"]
+          },
+          {
+            "id": "dhcp24StartIpAddress",
+            "displayName": "DHCP 2.4 GHz Start IP Address",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "169.254.254.100",
+            "readOnly": false
+          },
+          {
+            "id": "dhcp24EndIpAddress",
+            "displayName": "DHCP 2.4 GHz End IP Address",
+            "dataType": "IPADDRESS",
+            "uiWidget": "textfield",
+            "defaultValue": "169.254.254.102",
+            "readOnly": false
+          },
+          {
+            "id": "dhcp24LeaseTime",
+            "displayName": "DHCP 2.4 GHz Lease Time",
+            "dataType": "INTEGER",
+            "uiWidget": "textfield",
+            "defaultValue": "300",
+            "readOnly": false,
+            "minValue": 120,
+            "maxValue": 86400
+          }
+        ]
+      }
+    ]
+  }
+}

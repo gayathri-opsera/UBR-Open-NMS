@@ -109,18 +109,24 @@ function normaliseIdu(doc) {
 //   2. ubrnms.devices — written by POST /api/v1/devices and provision.stub.js
 //   3. ubrnms_inventory.devices — IDU written by call-home / UBR board scripts
 router.get('/', async (req, res, next) => {
-  const { deviceType, limit = '100', page = '0', ...rest } = req.query || {};
+  const { deviceType, genericDeviceType, limit = '100', page = '0', ...rest } = req.query || {};
   const typeUpper = (deviceType || '').toUpperCase();
+  // genericDeviceType targets non-BTS/CPE/IDU devices stored in local MongoDB only
 
   try {
     // ── 1. Java inventory ─────────────────────────────────────────────────────
+    // Skip Java entirely when caller filters by genericDeviceType (e.g. RADIO, SWITCH).
+    // Java only knows BTS/CPE/IDU — its devices have deviceType=null for everything else,
+    // so including them pollutes the filtered result with unrelated records.
     const javaQuery = { limit, page, ...(deviceType ? { deviceType } : {}), ...rest };
     let javaDevices = [];
-    try {
-      const raw = await fetchFromJava(javaQuery);
-      javaDevices = Array.isArray(raw) ? raw : (raw.content || raw.data || raw.devices || []);
-    } catch (err) {
-      console.warn('[devices-stub] Java inventory fetch failed, returning MongoDB only:', err.message);
+    if (!genericDeviceType) {
+      try {
+        const raw = await fetchFromJava(javaQuery);
+        javaDevices = Array.isArray(raw) ? raw : (raw.content || raw.data || raw.devices || []);
+      } catch (err) {
+        console.warn('[devices-stub] Java inventory fetch failed, returning MongoDB only:', err.message);
+      }
     }
 
     // Track serials already covered by Java to avoid duplicates.
@@ -130,7 +136,12 @@ router.get('/', async (req, res, next) => {
     let localDevices = [];
     try {
       const col   = await getCol();
-      const query = typeUpper ? { deviceType: { $regex: typeUpper, $options: 'i' } } : {};
+      // Build query: prefer explicit deviceType, then genericDeviceType (for RADIO etc.)
+      const query = typeUpper
+        ? { deviceType: { $regex: typeUpper, $options: 'i' } }
+        : genericDeviceType
+          ? { deviceType: { $regex: genericDeviceType, $options: 'i' } }
+          : {};
       const docs  = await col.find(query).limit(parseInt(limit, 10) || 500).toArray();
 
       // Deduplicate within the local collection by ipAddress — keep the most recently
@@ -162,8 +173,9 @@ router.get('/', async (req, res, next) => {
 
     // ── 3. IDU devices from ubrnms_inventory ─────────────────────────────────
     // Only when caller has not applied a type filter that excludes IDU.
+    // Skip entirely when genericDeviceType is set (IDU is a legacy type, not generic).
     let iduDevices = [];
-    if (!typeUpper || typeUpper === 'IDU') {
+    if (!genericDeviceType && (!typeUpper || typeUpper === 'IDU')) {
       try {
         const allSerials = new Set([
           ...javaSerials,
@@ -198,7 +210,8 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ code: 'VALIDATION_ERROR', message: 'deviceType is required' });
     }
 
-    // Enforce model derivation
+    // Enforce model derivation — built-in types map to specific hardware models.
+    // Unknown types (e.g. RADIO, EOC640) use caller-supplied model or deviceType as fallback.
     const TYPE_MODEL = { BTS: 'A60', CPE: 'A61', IDU: 'IDU' };
     const model = TYPE_MODEL[body.deviceType] || body.model || body.deviceType;
 

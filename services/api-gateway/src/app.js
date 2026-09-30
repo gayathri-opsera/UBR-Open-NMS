@@ -22,6 +22,7 @@ const devicesStub     = require('./routes/devices.stub');
 const dashboardsStub  = require('./routes/dashboards.stub');
 const { createProvisionHandler } = require('./routes/provision.stub');
 const { listIgnored, addIgnored, removeIgnored } = require('./routes/ignore.stub');
+const discoveryStub = require('./routes/discovery.stub');
 const frameworkProductDefinitions = require('./routes/frameworkProductDefinitions');
 const frameworkSecurity           = require('./routes/frameworkSecurity.routes');
 const frameworkParameters         = require('./routes/frameworkParameters.routes');
@@ -90,18 +91,25 @@ function createApp(redisClient) {
   app.use('/api/v1/kpi',           kpiStub);
   // Topology stub — adds /summary, /link-health, /events, /connections, /search endpoints
   app.use('/api/v1/topology',      topologyStub);
-  // Device stub — GET merges Java inventory (BTS/CPE) with MongoDB IDU devices;
-  // POST/PUT/DELETE bypass Java inventory (Kafka-dependent writes fail there).
-  app.get('/api/v1/devices',           devicesStub);
-  app.post('/api/v1/devices',          devicesStub);
-  app.put('/api/v1/devices/:id',       devicesStub);
-  app.delete('/api/v1/devices/:id',    devicesStub);
-  app.put('/api/v1/devices/:id/tags',  devicesStub);
+  // Device stub — GET merges Java inventory (BTS/CPE) with MongoDB-provisioned devices;
+  // POST/PUT/DELETE bypass Java inventory (Kafka-dependent writes fail in dev).
+  //
+  // IMPORTANT: must be app.use() not app.get/post/put/delete() so Express strips
+  // the '/api/v1/devices' prefix before passing req into the Router.  When mounted
+  // with app.get() the router's internal router.get('/') never matches because the
+  // path is not stripped, causing every request to fall through to the Java proxy.
+  app.use('/api/v1/devices', devicesStub);
 
   // Discovery provision stub — intercepts POST /api/v1/discovery/runs/:runId/provision
   // before the discovery-service proxy so SNMP-discovered devices are written to MongoDB
   // (same store as the devices stub) and immediately appear in inventory + topology.
   app.post('/api/v1/discovery/runs/:runId/provision', createProvisionHandler(config));
+
+  // Auto-discovery stub — scan endpoints + demo seed
+  // POST /api/v1/discovery/scans        → trigger auto-scan (seeds demo EOC640 devices)
+  // GET  /api/v1/discovery/scans        → list past scans
+  // GET  /api/v1/discovery/scans/:id    → get scan details
+  app.use('/api/v1/discovery', discoveryStub);
 
   // Discovery ignore stub — persists admin-suppressed IPs to MongoDB so ignored devices
   // are filtered out of discovery results and never surfaced in inventory/topology.
@@ -255,11 +263,22 @@ function createApp(redisClient) {
   );
   app.use('/api/test-harness', testHarnessProxy);
 
-  app.use((_req, res) => res.status(404).json({ code: 'NOT_FOUND', message: 'Route not found' }));
+  app.use((_req, res) => res.status(404).json({
+    status: 'error', error: { code: 'NOT_FOUND', message: 'Route not found' },
+  }));
 
   app.use((err, req, res, _next) => {
+    // If the proxy already sent a response (e.g. it forwarded a 422 from upstream
+    // but then got ECONNRESET piping the request body), suppress the double-send.
+    if (res.headersSent) {
+      logger.debug({ msg: 'Error after headers sent — suppressing double-response', err: err.message, path: req.path });
+      return;
+    }
     logger.error({ msg: 'Unhandled gateway error', err: err.message, path: req.path });
-    res.status(500).json({ code: 'INTERNAL_ERROR', message: 'Internal gateway error' });
+    res.status(500).json({
+      status: 'error',
+      error: { code: 'INTERNAL_ERROR', message: 'Internal gateway error' },
+    });
   });
 
   return app;

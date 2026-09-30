@@ -51,9 +51,13 @@ public class FingerprintRegistryBuilder {
                 : List.of();
 
         for (NormalizedProductDefinition.FingerprintEntry fp : normalized.getFingerprints()) {
-            if (fp.getSysObjectId() == null || fp.getSysObjectId().isBlank()) {
-                log.warn("Skipping fingerprint entry with null/blank sysObjectId in definition {}",
-                        productDefinitionId);
+            boolean hasOid     = fp.getSysObjectId()    != null && !fp.getSysObjectId().isBlank();
+            boolean hasBanner  = fp.getSysDescrPattern() != null && !fp.getSysDescrPattern().isBlank();
+
+            if (!hasOid && !hasBanner) {
+                // Truly empty fingerprint — skip and warn so operators know to fix the definition
+                log.warn("Skipping completely empty fingerprint (no sysObjectId and no sysDescrPattern) "
+                        + "in definition {} — add at least one identifier", productDefinitionId);
                 continue;
             }
 
@@ -61,30 +65,39 @@ public class FingerprintRegistryBuilder {
             String fwFrom = (fp.getFirmwareFrom() != null) ? fp.getFirmwareFrom() : normalized.getFirmwareFrom();
             String fwTo   = (fp.getFirmwareTo()   != null) ? fp.getFirmwareTo()   : normalized.getFirmwareTo();
 
-            // Primary OID-based fingerprint entry
-            FingerprintRegistryEntry oidEntry = FingerprintRegistryEntry.builder()
-                    .productDefinitionId(productDefinitionId)
-                    .versionId(versionId)
-                    .fingerprintType("SNMP_OID")
-                    .fingerprintValue(fp.getSysObjectId())
-                    .vendor(normalized.getVendor())
-                    .model(normalized.getModel())
-                    .productFamily(normalized.getProductFamily())
-                    .deviceType(normalized.getDeviceType())
-                    .firmwareFrom(fwFrom)
-                    .firmwareTo(fwTo)
-                    .supportedProtocols(protocols)
-                    .registryVersion(registryVersion)
-                    .build();
-            entries.add(oidEntry);
+            // ── SNMP OID entry (classic SNMP sysObjectID fingerprint) ─────────
+            if (hasOid) {
+                FingerprintRegistryEntry oidEntry = FingerprintRegistryEntry.builder()
+                        .productDefinitionId(productDefinitionId)
+                        .versionId(versionId)
+                        .fingerprintType("SNMP_OID")
+                        .fingerprintValue(fp.getSysObjectId())
+                        .sysObjectId(fp.getSysObjectId())
+                        .sysDescrPattern(fp.getSysDescrPattern())   // carry pattern too if present
+                        .vendor(normalized.getVendor())
+                        .model(normalized.getModel())
+                        .productFamily(normalized.getProductFamily())
+                        .deviceType(normalized.getDeviceType())
+                        .firmwareFrom(fwFrom)
+                        .firmwareTo(fwTo)
+                        .supportedProtocols(protocols)
+                        .registryVersion(registryVersion)
+                        .build();
+                entries.add(oidEntry);
+            }
 
-            // Optional sysDescr-pattern entry (banner / header fingerprint)
-            if (fp.getSysDescrPattern() != null && !fp.getSysDescrPattern().isBlank()) {
+            // ── Pattern / banner entry (SSH banner, HTTP header, sysDescr regex) ──
+            // Created when sysDescrPattern is present — regardless of whether sysObjectId
+            // is also present.  This supports devices discovered via REST/SSH/banner
+            // that have no SNMP agent (e.g. EOC640 backhaul radios, non-SNMP CPEs).
+            if (hasBanner) {
                 FingerprintRegistryEntry bannerEntry = FingerprintRegistryEntry.builder()
                         .productDefinitionId(productDefinitionId)
                         .versionId(versionId)
                         .fingerprintType("BANNER")
                         .fingerprintValue(fp.getSysDescrPattern())
+                        .sysObjectId(fp.getSysObjectId())           // may be null for banner-only devices
+                        .sysDescrPattern(fp.getSysDescrPattern())
                         .vendor(normalized.getVendor())
                         .model(normalized.getModel())
                         .productFamily(normalized.getProductFamily())
@@ -95,6 +108,13 @@ public class FingerprintRegistryBuilder {
                         .registryVersion(registryVersion)
                         .build();
                 entries.add(bannerEntry);
+                log.debug("Created BANNER fingerprint entry '{}' for definition {}",
+                        fp.getSysDescrPattern(), productDefinitionId);
+            }
+
+            if (!hasOid) {
+                log.info("Definition {} uses banner-only fingerprint '{}' (no SNMP OID) — "
+                        + "discovery will match via sysDescrPattern", productDefinitionId, fp.getSysDescrPattern());
             }
         }
 
