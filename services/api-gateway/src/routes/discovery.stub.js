@@ -549,6 +549,10 @@ router.post('/snmp-probe', async (req, res) => {
     provision    = true,
     // snmpVersion mirrors the UI dropdown: 'SNMP_V1' | 'SNMP_V2C' (default v2c)
     snmpVersion  = 'SNMP_V2C',
+    // productDefinitionId: caller-supplied definition (from Device Template picker).
+    // When set, ALL responding devices are tagged with this definition — vendor/device independent.
+    // OID classification and banner matching are still attempted but this acts as the override/fallback.
+    productDefinitionId: callerDefinitionId = null,
   } = req.body || {};
 
   // Normalise to the internal 'v1' | 'v2c' format used by snmpGet()
@@ -562,6 +566,29 @@ router.post('/snmp-probe', async (req, res) => {
   }
 
   console.log(`[snmp-probe] Probing ${targets.length} target(s): ${targets.join(', ')}`);
+
+  // ── If caller supplied a definition, pre-load its metadata from the registry ──────────
+  // This enables vendor/device-independent discovery: any device responding to SNMP
+  // gets tagged with the selected definition, regardless of its OID enterprise prefix.
+  let callerDefMeta = null;
+  if (callerDefinitionId) {
+    try {
+      for (const dbName of ['ubrnms_productdef', 'ubrnms']) {
+        const paramCol = mongoose.connection.client.db(dbName).collection('parameter_registry_entries');
+        const sample = await paramCol.findOne({ productDefinitionId: callerDefinitionId });
+        if (sample) { callerDefMeta = { productDefinitionId: callerDefinitionId }; break; }
+        // Also try fingerprint registry for vendor/model
+        const fpCol = mongoose.connection.client.db(dbName).collection('fingerprint_registry_entries');
+        const fp = await fpCol.findOne({ productDefinitionId: callerDefinitionId });
+        if (fp) { callerDefMeta = { productDefinitionId: callerDefinitionId, vendor: fp.vendor, model: fp.model }; break; }
+      }
+    } catch { /* non-fatal — definition metadata unavailable */ }
+    if (!callerDefMeta) {
+      // Definition not in registry yet (e.g. DRAFT not activated) — still use the ID
+      callerDefMeta = { productDefinitionId: callerDefinitionId };
+    }
+    console.log(`[snmp-probe] Caller-specified definition: ${callerDefinitionId} → ${JSON.stringify(callerDefMeta)}`);
+  }
 
   // Load BANNER fingerprints once for classification
   let banners = [];
@@ -581,24 +608,35 @@ router.post('/snmp-probe', async (req, res) => {
       const mib = await snmpGet(host, port, community, 5000, snmpProtoVersion);
       console.log(`[snmp-probe] ✅ ${host}:${port} → sysName=${mib.sysName} sysDescr=${(mib.sysDescr||'').substring(0,50)}`);
 
-      // Classify by OID first, then override with BANNER fingerprint match
+      // Classification priority (highest → lowest):
+      //   1. Caller-supplied productDefinitionId (vendor-independent — user chose the definition)
+      //   2. BANNER fingerprint match from the activated fingerprint registry
+      //   3. OID enterprise prefix (classifyByOid hardcoded map)
       const oidClass = classifyByOid(mib.sysObjectID);
       let resolvedVendor  = oidClass.vendor  || 'Unknown';
       let resolvedModel   = oidClass.model   || 'SNMP Device';
       let resolvedGeneric = oidClass.genericDeviceType || 'SWITCH';
-      // Use OID-based productDefinitionId as default (overridden below if a BANNER fingerprint matches)
+      // Start with OID-based productDefinitionId
       let productDefinitionId = oidClass.productDefinitionId || null;
 
+      // Level 2: BANNER fingerprint match
       for (const entry of banners) {
         try {
           if (new RegExp(entry.fingerprintValue, 'i').test(mib.sysDescr || '')) {
             resolvedVendor       = entry.vendor || resolvedVendor;
             resolvedModel        = entry.model  || resolvedModel;
             productDefinitionId  = entry.productDefinitionId;
-            resolvedGeneric      = 'RADIO'; // BANNER matches are always radio in this system
+            resolvedGeneric      = entry.genericDeviceType || 'RADIO';
             break;
           }
         } catch { /* bad regex */ }
+      }
+
+      // Level 1 (highest priority): caller-specified definition overrides everything
+      if (callerDefMeta) {
+        productDefinitionId = callerDefMeta.productDefinitionId;
+        if (callerDefMeta.vendor) resolvedVendor = callerDefMeta.vendor;
+        if (callerDefMeta.model)  resolvedModel  = callerDefMeta.model;
       }
 
       const serialNumber = mib.sysName
@@ -619,7 +657,7 @@ router.post('/snmp-probe', async (req, res) => {
         genericDeviceType:  resolvedGeneric,
         deviceType:         resolvedGeneric === 'RADIO' ? 'RADIO' : null,
         productDefinitionId,
-        discoveryMethod:    'SNMP_V2C',
+        discoveryMethod:    callerDefinitionId ? 'DEFINITION_PROBE' : 'SNMP_V2C',
       });
     } catch (err) {
       console.warn(`[snmp-probe] ❌ ${host}:${port} → ${err.message}`);

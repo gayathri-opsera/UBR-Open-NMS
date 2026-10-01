@@ -265,7 +265,17 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
     if (!definitionId || !versionId) { setPdSchema(null); return; }
     setPdLoading(true);
     getVersionSchema(definitionId, versionId)
-      .then(setPdSchema)
+      .then((schema) => {
+        setPdSchema(schema);
+        if (!schema) return;
+        // Auto-configure SNMP protocol from the definition's protocols list
+        // (vendor-independent: works for any uploaded definition)
+        if (schema.protocols.some((p) => /SNMP_V1/i.test(p)) && !schema.protocols.some((p) => /SNMP_V2C?/i.test(p))) {
+          setForm((prev) => ({ ...prev, protocol: 'SNMP_V1' }));
+        } else if (schema.protocols.some((p) => /SNMP/i.test(p))) {
+          setForm((prev) => ({ ...prev, protocol: 'SNMP_V2C' }));
+        }
+      })
       .catch(() => setPdSchema(null))
       .finally(() => setPdLoading(false));
   }, [selectedVersionKey]);
@@ -330,6 +340,11 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
       if (!isFormValid(form, currentErrors, usingFallback)) return;
 
       setSubmitting(true);
+      // Extract productDefinitionId from the selected version key (definitionId::versionId)
+      const selectedDefinitionId = selectedVersionKey
+        ? selectedVersionKey.split('::')[0] || undefined
+        : undefined;
+
       try {
         const response = await createDiscoveryRun({
           scope:          parseScopeInput(form.scope),
@@ -340,6 +355,8 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
           ...(usingFallback
             ? { community: form.community.trim() }
             : { credentialId: form.credentialId }),
+          // Vendor-independent: tag all discovered devices with the selected definition
+          ...(selectedDefinitionId ? { productDefinitionId: selectedDefinitionId } : {}),
         });
         addToast(`Discovery run ${response.runId} created`, 'success');
         onRunCreated(response);

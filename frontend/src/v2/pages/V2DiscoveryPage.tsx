@@ -48,6 +48,11 @@ import type {
   ProvisionHostRequest,
 } from '../../api/discovery.api';
 import type { DiscoveryRunSummary } from '../../api/discovery.api';
+import {
+  listAllUploadHistory,
+  getVersionSchema,
+} from '../../api/productDefinitions.api';
+import type { ProductDefinitionVersion } from '../../api/productDefinitions.types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type DiscoveryTab =
@@ -1110,16 +1115,130 @@ type QuickState = 'idle' | 'running' | 'done' | 'error';
 /** Discovery mode: ICMP + SNMP full scan (Java service) or direct SNMP probe (gateway stub) */
 type QuickMode = 'full_scan' | 'direct_probe';
 
+// ── Simulator presets — auto-fill targets for known local simulators ─────────
+interface SimPreset {
+  label:     string;
+  icon:      string;
+  target:    string;
+  community: string;
+  protocol:  'SNMP_V2C' | 'SNMP_V1';
+  mode:      'direct_probe' | 'full_scan';
+  badge:     string;
+  badgeColor: string;
+}
+
+const SIM_PRESETS: SimPreset[] = [
+  {
+    label:     'EOC Configurations_GUI — BTS (A60) + CPE (A61)',
+    icon:      '📡',
+    target:    'host.docker.internal:1162,host.docker.internal:1163',
+    community: 'public',
+    protocol:  'SNMP_V2C',
+    mode:      'direct_probe',
+    badge:     'EOC',
+    badgeColor: '#ec4899',
+  },
+  {
+    label:     'EOC BTS only (A60 — port 1162)',
+    icon:      '🗼',
+    target:    'host.docker.internal:1162',
+    community: 'public',
+    protocol:  'SNMP_V2C',
+    mode:      'direct_probe',
+    badge:     'BTS',
+    badgeColor: '#8b5cf6',
+  },
+  {
+    label:     'EOC CPE only (A61 — port 1163)',
+    icon:      '📶',
+    target:    'host.docker.internal:1163',
+    community: 'public',
+    protocol:  'SNMP_V2C',
+    mode:      'direct_probe',
+    badge:     'CPE',
+    badgeColor: '#22c55e',
+  },
+  {
+    label:     'Cisco Catalyst 2960 (nms-snmpsim — port 1161)',
+    icon:      '🔀',
+    target:    'host.docker.internal:1161',
+    community: 'public',
+    protocol:  'SNMP_V2C',
+    mode:      'direct_probe',
+    badge:     'SWITCH',
+    badgeColor: '#06b6d4',
+  },
+  {
+    label:     'iReasoning Agent (Mac host — port 161)',
+    icon:      '🖥',
+    target:    'host.docker.internal:161',
+    community: 'public',
+    protocol:  'SNMP_V2C',
+    mode:      'direct_probe',
+    badge:     'EXT',
+    badgeColor: '#f59e0b',
+  },
+  {
+    label:     'Full Subnet Scan (10.10.10.0/24)',
+    icon:      '🌐',
+    target:    '10.10.10.0/24',
+    community: 'public',
+    protocol:  'SNMP_V2C',
+    mode:      'full_scan',
+    badge:     'SCAN',
+    badgeColor: '#3b82f6',
+  },
+];
+
 function QuickDiscoveryBar() {
   const { addToast } = useToast();
 
-  // Target: IP, CIDR, or host:port for direct-probe (e.g. 192.168.65.254:161)
-  const [ip, setIp] = useState('10.10.10.25');
+  // Target: IP, CIDR, or host:port for direct-probe (e.g. host.docker.internal:1162)
+  const [ip, setIp] = useState('host.docker.internal:1162,host.docker.internal:1163');
   // Discovery mode — full scan uses Java ICMP+SNMP; direct probe skips ICMP
   const [mode, setMode] = useState<QuickMode>('direct_probe');
   // SNMP configuration — preserved across multi-vendor, multi-device discovery
   const [snmpProtocol, setSnmpProtocol] = useState<'SNMP_V2C' | 'SNMP_V1'>('SNMP_V2C');
   const [community, setCommunity] = useState('public');
+
+  // ── Product Definition (vendor-independent flow) ─────────────────────────
+  // Selecting a definition tags ALL discovered devices with that productDefinitionId,
+  // enabling discovery for ANY vendor/device without hardcoded presets.
+  const [uploadedVersions, setUploadedVersions] = useState<ProductDefinitionVersion[]>([]);
+  const [selectedVersionKey, setSelectedVersionKey] = useState<string>('');
+  const [selectedDefinitionId, setSelectedDefinitionId] = useState<string | null>(null);
+  const [pdSchemaLoading, setPdSchemaLoading] = useState(false);
+
+  // Load all uploaded product definitions on mount
+  useEffect(() => {
+    listAllUploadHistory()
+      .then(setUploadedVersions)
+      .catch(() => {/* non-fatal */});
+  }, []);
+
+  // When the user picks a definition version, load its schema to auto-configure protocol
+  useEffect(() => {
+    if (!selectedVersionKey) {
+      setSelectedDefinitionId(null);
+      return;
+    }
+    const [definitionId, versionId] = selectedVersionKey.split('::');
+    if (!definitionId || !versionId) { setSelectedDefinitionId(null); return; }
+    setSelectedDefinitionId(definitionId);
+    setPdSchemaLoading(true);
+    getVersionSchema(definitionId, versionId)
+      .then((schema) => {
+        if (!schema) return;
+        // Auto-set SNMP protocol from definition protocols list
+        if (schema.protocols.some((p) => /SNMP_V1/i.test(p)) && !schema.protocols.some((p) => /SNMP_V2C?/i.test(p))) {
+          setSnmpProtocol('SNMP_V1');
+        } else {
+          setSnmpProtocol('SNMP_V2C');
+        }
+      })
+      .catch(() => {/* non-fatal */})
+      .finally(() => setPdSchemaLoading(false));
+  }, [selectedVersionKey]);
 
   const [state, setState] = useState<QuickState>('idle');
   const [results, setResults] = useState<DiscoveryResult[]>([]);
@@ -1160,6 +1279,10 @@ function QuickDiscoveryBar() {
         targets,
         community: community.trim() || 'public',
         provision: true,
+        snmpVersion: snmpProtocol,
+        // Vendor-independent: pass the selected definition so ALL responding devices
+        // are tagged with productDefinitionId — works for any uploaded config file.
+        ...(selectedDefinitionId ? { productDefinitionId: selectedDefinitionId } : {}),
       });
       if (res.data.devices.length === 0) {
         setErrorMsg(
@@ -1197,6 +1320,8 @@ function QuickDiscoveryBar() {
         community: community.trim() || 'public',
         timeoutSeconds: 5,
         retries: 2,
+        // Vendor-independent tagging for full ICMP+SNMP scans too
+        ...(selectedDefinitionId ? { productDefinitionId: selectedDefinitionId } : {}),
       });
       setActiveRunId(run.runId);
 
@@ -1356,6 +1481,122 @@ function QuickDiscoveryBar() {
           : '📡 Full Scan — ICMP ping sweep followed by SNMP fingerprint via the Java discovery service. Use for production subnets where ICMP is allowed (e.g. 10.10.10.0/24).'}
       </div>
 
+      {/* ── Row 0: Vendor-independent Product Definition picker ─────────────────
+           Any uploaded config file (any vendor, any device) appears here.
+           Selecting a definition:
+            • tags ALL discovered devices with its productDefinitionId
+            • auto-sets the SNMP protocol from the definition's protocol list
+            • works without any hardcoded vendor logic                         */}
+      <div style={{
+        marginBottom: 14,
+        padding: '12px 14px',
+        background: 'rgba(96,165,250,0.07)',
+        border: '1px solid rgba(96,165,250,0.22)',
+        borderRadius: 10,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 16 }}>📂</span>
+          <span style={{ fontSize: 11, fontWeight: 800, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Product Definition — vendor &amp; device independent
+          </span>
+          {pdSchemaLoading && (
+            <span style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginLeft: 4 }}>Loading schema…</span>
+          )}
+          {selectedDefinitionId && !pdSchemaLoading && (
+            <span style={{
+              marginLeft: 'auto', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8,
+              background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)',
+            }}>✓ Active — devices will be tagged with "{selectedDefinitionId}"</span>
+          )}
+        </div>
+
+        {uploadedVersions.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', fontStyle: 'italic' }}>
+            No product definitions uploaded yet. Upload a config file (XML/JSON) in the Product Definitions section to enable vendor-independent discovery.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--vf-text-secondary)', marginBottom: 4 }}>
+                Select Definition (any vendor)
+              </label>
+              <select
+                value={selectedVersionKey}
+                onChange={(e) => setSelectedVersionKey(e.target.value)}
+                disabled={state === 'running'}
+                style={{
+                  width: '100%', appearance: 'none',
+                  background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)',
+                  borderRadius: 'var(--vf-radius-md)', color: 'var(--vf-text-primary)',
+                  fontSize: 13, padding: '7px 10px',
+                  fontFamily: 'var(--vf-font-sans)', cursor: 'pointer', outline: 'none',
+                }}
+              >
+                <option value="">— None (OID + banner auto-classify) —</option>
+                {uploadedVersions.map((v) => (
+                  <option key={`${v.definitionId}::${v.versionId}`} value={`${v.definitionId}::${v.versionId}`}>
+                    {v.vendor ?? ''} {v.model ?? v.name ?? ''} · v{v.registryVersion ?? v.versionId?.slice(-6)} [{v.lifecycleStatus}]
+                  </option>
+                ))}
+              </select>
+              <span style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginTop: 2, display: 'block' }}>
+                Any device responding to SNMP will be tagged with this definition — works for Cisco, Juniper, EOC, or any vendor
+              </span>
+            </div>
+            {selectedDefinitionId && (
+              <button
+                onClick={() => { setSelectedVersionKey(''); setSelectedDefinitionId(null); }}
+                disabled={state === 'running'}
+                style={{
+                  padding: '6px 12px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)',
+                  background: 'rgba(239,68,68,0.08)', color: '#f87171',
+                  cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                }}
+              >✕ Clear</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Row 0b: Simulator Quick-Fill Presets (secondary — for test environments) */}
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--vf-text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          🎛 Quick Fill — load a simulator target (optional)
+        </label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+          {SIM_PRESETS.map((p) => (
+            <button
+              key={p.label}
+              disabled={state === 'running'}
+              onClick={() => {
+                setIp(p.target);
+                setCommunity(p.community);
+                setSnmpProtocol(p.protocol);
+                setMode(p.mode);
+              }}
+              title={`Target: ${p.target}\nProtocol: ${p.protocol}\nCommunity: ${p.community}`}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '5px 11px', borderRadius: 7, border: `1px solid ${p.badgeColor}55`,
+                background: ip === p.target ? `${p.badgeColor}22` : 'rgba(255,255,255,0.03)',
+                color: ip === p.target ? p.badgeColor : 'var(--vf-text-secondary)',
+                cursor: state === 'running' ? 'not-allowed' : 'pointer',
+                fontSize: 12, fontWeight: ip === p.target ? 700 : 400,
+                transition: 'all 0.15s',
+                outline: ip === p.target ? `2px solid ${p.badgeColor}66` : 'none',
+              }}
+            >
+              <span>{p.icon}</span>
+              <span style={{
+                fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 3,
+                background: p.badgeColor, color: '#fff', letterSpacing: '0.05em',
+              }}>{p.badge}</span>
+              <span>{p.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Row 1: Target + SNMP config */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
         {/* Target */}
@@ -1423,7 +1664,9 @@ function QuickDiscoveryBar() {
       {state === 'running' && (
         <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--vf-text-muted)' }}>
           <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
-          <span>{mode === 'direct_probe' ? 'Sending SNMP GET → parsing MIB-II system group → classifying device…' : 'Running ICMP sweep → SNMP fingerprint → classification…'}</span>
+          <span>{mode === 'direct_probe'
+            ? `Sending SNMP GET → parsing MIB-II system group → classifying device${selectedDefinitionId ? ` as "${selectedDefinitionId}"` : ''}…`
+            : `Running ICMP sweep → SNMP fingerprint → classification${selectedDefinitionId ? ` → tagging as "${selectedDefinitionId}"` : ''}…`}</span>
         </div>
       )}
 
@@ -1455,27 +1698,52 @@ function QuickDiscoveryBar() {
                   }}>{r.genericDeviceType}</span>
                 </div>
                 {[
-                  ['Vendor',      r.vendor || 'N/A'],
-                  ['Model',       r.model  || 'N/A'],
-                  ['Hostname',    r.sysName || 'N/A'],
-                  ['Location',    r.sysLocation || 'N/A'],
-                  ['OID',         r.sysObjectID || 'N/A'],
-                  ['Definition',  r.productDefinitionId || '— generic —'],
-                  ['sysDescr',    (r.sysDescr || '').substring(0, 80) || 'N/A'],
-                ].map(([label, value], idx, arr) => (
+                  ['Vendor',    r.vendor || 'N/A'],
+                  ['Model',     r.model  || 'N/A'],
+                  ['Hostname',  r.sysName || 'N/A'],
+                  ['OID',       r.sysObjectID || 'N/A'],
+                  ['sysDescr',  (r.sysDescr || '').substring(0, 80) || 'N/A'],
+                ].map(([label, value], idx) => (
                   <div key={label} style={{
                     display: 'flex', gap: 8, padding: '2px 0',
                     borderLeft: '2px solid var(--vf-border-subtle)',
                     marginLeft: 6, paddingLeft: 10, fontSize: 11,
                   }}>
-                    <span style={{ color: 'var(--vf-text-muted)', minWidth: 24, flexShrink: 0 }}>{idx === arr.length - 1 ? '└──' : '├──'}</span>
+                    <span style={{ color: 'var(--vf-text-muted)', minWidth: 24, flexShrink: 0 }}>{idx === 4 ? '├──' : '├──'}</span>
                     <span style={{ color: '#60a5fa', minWidth: 90, flexShrink: 0, fontWeight: 600 }}>{label}:</span>
                     <span style={{ color: 'var(--vf-text-primary)', wordBreak: 'break-all' }}>{value}</span>
                   </div>
                 ))}
-                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--vf-border-subtle)', fontSize: 12, color: '#22c55e', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span>✅</span>
-                  <span>Provisioned — visible in Inventory &amp; Topology</span>
+                {/* Product Definition — highlighted row */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  marginTop: 8, padding: '6px 10px', borderRadius: 6,
+                  background: r.productDefinitionId ? 'rgba(236,72,153,0.1)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${r.productDefinitionId ? 'rgba(236,72,153,0.35)' : 'var(--vf-border-subtle)'}`,
+                }}>
+                  <span style={{ fontSize: 11 }}>📋</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#f472b6' }}>Product Def:</span>
+                  <span style={{ fontSize: 11, fontFamily: 'var(--vf-font-mono)', color: r.productDefinitionId ? '#f9a8d4' : 'var(--vf-text-muted)', fontWeight: r.productDefinitionId ? 700 : 400 }}>
+                    {r.productDefinitionId || '— generic / no definition —'}
+                  </span>
+                </div>
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--vf-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ fontSize: 12, color: '#22c55e', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>✅</span>
+                    <span>Provisioned — visible in Inventory &amp; Topology</span>
+                  </div>
+                  {r.productDefinitionId && (
+                    <a
+                      href="/config"
+                      style={{
+                        fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6,
+                        background: 'rgba(236,72,153,0.15)', border: '1px solid rgba(236,72,153,0.4)',
+                        color: '#f472b6', textDecoration: 'none', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Push Config →
+                    </a>
+                  )}
                 </div>
               </div>
             ))}

@@ -97,6 +97,12 @@ export interface SnmpDiscoveryRunRequest {
   triggerMode?: TriggerMode;
   /** WO-008: Caller-supplied correlation ID for end-to-end tracing. */
   correlationId?: string;
+  /**
+   * Optional product definition ID to tag discovered devices with.
+   * Enables vendor-independent discovery: any device responding to SNMP
+   * gets classified under this definition regardless of its OID enterprise prefix.
+   */
+  productDefinitionId?: string;
 }
 
 /** Backward-compatible alias for the basic scope-only request (WO-011). */
