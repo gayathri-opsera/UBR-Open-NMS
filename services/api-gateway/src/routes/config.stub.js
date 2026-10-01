@@ -217,6 +217,67 @@ function buildJobResponse(job) {
  * Builds a writable-parameter config template from the parameter registry for the
  * device's associated product definition (resolved via inventory device records).
  */
+/**
+ * GET /definition-params/:definitionId
+ *
+ * Returns parameter groups directly from parameter_registry_entries for a given
+ * productDefinitionId (e.g. 'eoc-configurations-gui').  Used by getVersionSchema
+ * as a fallback when the Java service returns empty/broken parameterGroups.
+ */
+router.get('/definition-params/:definitionId', async (req, res) => {
+  const { definitionId } = req.params;
+  if (!definitionId) return res.status(400).json({ code: 'BAD_REQUEST', message: 'definitionId required' });
+
+  try {
+    let entries = [];
+    for (const dbName of ['ubrnms_productdef', 'ubrnms']) {
+      try {
+        const col = mongoose.connection.client.db(dbName).collection('parameter_registry_entries');
+        const all = await col.find({ productDefinitionId: definitionId }).toArray();
+        if (all.length) { entries = all; break; }
+      } catch { /* try next */ }
+    }
+
+    if (!entries.length) {
+      return res.status(404).json({ code: 'NO_PARAMETERS', message: `No parameters found for "${definitionId}"` });
+    }
+
+    // Group by groupId
+    const groupMap = new Map();
+    for (const e of entries) {
+      const gid = e.groupId || 'default';
+      if (!groupMap.has(gid)) groupMap.set(gid, { groupId: gid, parameters: [] });
+      groupMap.get(gid).parameters.push({
+        parameterId:  e.parameterId,
+        displayName:  e.displayName || e.parameterId,
+        dataType:     e.dataType || 'STRING',
+        snmpOid:      e.snmpOid   || null,
+        enumValues:   e.enumValues || [],
+        defaultValue: e.defaultValue || null,
+        readOnly:     !!e.readOnly,
+        minValue:     e.minValue ?? null,
+        maxValue:     e.maxValue ?? null,
+        subGroup:     e.subGroup  || null,
+        unit:         e.unit      || null,
+      });
+    }
+
+    return res.json({
+      definitionId,
+      parameterCount: entries.length,
+      groups: Array.from(groupMap.values()),
+    });
+  } catch (e) {
+    return res.status(500).json({ code: 'INTERNAL_ERROR', message: e.message });
+  }
+});
+
+/**
+ * GET /templates/from-definition/:deviceId
+ *
+ * Builds a writable-parameter config template from the parameter registry for the
+ * device's associated product definition (resolved via inventory device records).
+ */
 router.get('/templates/from-definition/:deviceId', async (req, res) => {
   const { deviceId } = req.params;
 
@@ -282,11 +343,23 @@ router.get('/templates/from-definition/:deviceId', async (req, res) => {
 
     // Parameter registry lives in ubrnms_productdef (populated by the Java product-definition-service
     // when a definition is uploaded and activated). Fall back to ubrnms for legacy entries.
+    // Also search by kebab-case alias (e.g. 'Configurations_GUI' → 'eoc-configurations-gui')
+    // to handle the ID mismatch between snmp-probe classification and the Java service.
+    const defIdAliases = [productDefinitionId];
+    const kebab = productDefinitionId.toLowerCase().replace(/[\s_]+/g, '-');
+    if (!defIdAliases.includes(kebab)) defIdAliases.push(kebab);
+    // Also try vendor-prefixed version (e.g. 'Configurations_GUI' → 'eoc-configurations-gui')
+    const vendor = (inventoryDevice.vendor || '').toLowerCase().replace(/\s+/g, '-');
+    if (vendor) {
+      const vendorPrefixed = `${vendor}-${kebab}`;
+      if (!defIdAliases.includes(vendorPrefixed)) defIdAliases.push(vendorPrefixed);
+    }
+
     let writableEntries = [];
     for (const dbName of ['ubrnms_productdef', 'ubrnms']) {
       try {
         const paramCol = mongoose.connection.client.db(dbName).collection('parameter_registry_entries');
-        const all = await paramCol.find({ productDefinitionId }).toArray();
+        const all = await paramCol.find({ productDefinitionId: { $in: defIdAliases } }).toArray();
         if (all.length) {
           // prefer writable params; if none writable return all (read-only display)
           writableEntries = all.filter((e) => !e.readOnly);

@@ -567,6 +567,44 @@ export async function getVersionSchema(
       }
     }
 
+    // ── Detect empty groups (Java normalization bug) ────────────────────────
+    // When the Java product-definition-service normalizes certain XML/JSON formats,
+    // it can produce N groups all named "default" with empty parameters arrays.
+    // In that case, fall back to the gateway's parameter registry which has the
+    // correctly-seeded parameter data for this definition.
+    const allEmpty = rawGroups.length > 0 && rawGroups.every(
+      (g) => g.parameters.length === 0 || g.groupName === 'default',
+    );
+    if (allEmpty) {
+      try {
+        // Gateway registry endpoint: reads parameter_registry_entries by definitionId
+        const regRes = await apiClient.get<Record<string, unknown>>(
+          `/config/definition-params/${definitionId}`,
+        );
+        const regGroups = regRes.data['groups'] as Array<{
+          groupId: string; parameters: Array<Record<string, unknown>>;
+        }>;
+        if (Array.isArray(regGroups) && regGroups.length > 0) {
+          rawGroups.length = 0; // clear the broken default groups
+          for (const g of regGroups) {
+            rawGroups.push({
+              groupName: g.groupId,
+              parameters: (g.parameters ?? []).map((p) => ({
+                id:           String(p['parameterId'] ?? ''),
+                displayName:  String(p['displayName'] ?? p['parameterId'] ?? ''),
+                dataType:     String(p['dataType'] ?? 'STRING').toUpperCase(),
+                unit:         p['unit'] != null ? String(p['unit']) : undefined,
+                snmpOid:      p['snmpOid'] as string | undefined,
+                enumValues:   Array.isArray(p['enumValues']) ? p['enumValues'] as string[] : undefined,
+                minValue:     typeof p['minValue'] === 'number' ? p['minValue'] : undefined,
+                maxValue:     typeof p['maxValue'] === 'number' ? p['maxValue'] : undefined,
+              })),
+            });
+          }
+        }
+      } catch { /* non-fatal — use whatever groups we have */ }
+    }
+
     // ── Parse fingerprints ────────────────────────────────────────────────────
     const rawFps = (meta['fingerprints'] ?? []) as Record<string, unknown>[];
     const fingerprints: PdFingerprint[] = rawFps.map((f) => ({
