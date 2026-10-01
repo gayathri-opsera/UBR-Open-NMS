@@ -68,10 +68,19 @@ export interface ConfigVersion {
   newValues: Record<string, string>;
 }
 
+export interface SnmpSetItem {
+  oid:         string;
+  parameterId: string;
+  displayName: string;
+  value:       string | number | boolean;
+  status:      'SET' | 'FAILED';
+}
+
 export interface PushResult {
   status: 'PUSHED' | 'QUEUED' | 'REJECTED' | 'DEVICE_OFFLINE';
   message: string;
   commandId?: string;
+  snmpSets?: SnmpSetItem[];
 }
 
 export function validateTemplate(params: Record<string, string | number | boolean>): string[] {

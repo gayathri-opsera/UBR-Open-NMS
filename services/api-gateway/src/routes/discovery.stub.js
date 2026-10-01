@@ -207,8 +207,9 @@ function classifyByOid(sysObjectID) {
   if (oid.startsWith('1.3.6.1.4.1.2636.')) return { vendor: 'Juniper',  model: 'JunOS Device', genericDeviceType: 'ROUTER' };
   if (oid.startsWith('1.3.6.1.4.1.2272.')) return { vendor: 'Nortel',   model: 'ERS Switch',   genericDeviceType: 'SWITCH' };
   if (oid.startsWith('1.3.6.1.4.1.4526.')) return { vendor: 'Netgear',  model: 'Smart Switch',  genericDeviceType: 'SWITCH' };
-  if (oid.startsWith('1.3.6.1.4.1.3764.')) return { vendor: 'EOC',      model: 'EOC640',        genericDeviceType: 'RADIO'  };
-  if (oid.startsWith('1.3.6.1.4.1.41112.'))return { vendor: 'Ubiquiti', model: 'UniFi',         genericDeviceType: 'RADIO'  };
+  if (oid.startsWith('1.3.6.1.4.1.3764.')) return { vendor: 'EOC',      model: 'EOC640',                 genericDeviceType: 'RADIO', productDefinitionId: 'EOC640'              };
+  if (oid.startsWith('1.3.6.1.4.1.52619.'))return { vendor: 'EOC',      model: 'Configurations_GUI',     genericDeviceType: 'RADIO', productDefinitionId: 'Configurations_GUI'  };
+  if (oid.startsWith('1.3.6.1.4.1.41112.'))return { vendor: 'Ubiquiti', model: 'UniFi',                  genericDeviceType: 'RADIO'  };
   return { vendor: 'Unknown', model: 'SNMP Device', genericDeviceType: 'SWITCH' };
 }
 
@@ -585,7 +586,8 @@ router.post('/snmp-probe', async (req, res) => {
       let resolvedVendor  = oidClass.vendor  || 'Unknown';
       let resolvedModel   = oidClass.model   || 'SNMP Device';
       let resolvedGeneric = oidClass.genericDeviceType || 'SWITCH';
-      let productDefinitionId = null;
+      // Use OID-based productDefinitionId as default (overridden below if a BANNER fingerprint matches)
+      let productDefinitionId = oidClass.productDefinitionId || null;
 
       for (const entry of banners) {
         try {

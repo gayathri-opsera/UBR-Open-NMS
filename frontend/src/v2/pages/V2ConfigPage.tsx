@@ -12,8 +12,10 @@ import {
   fetchTemplates, createTemplate, updateTemplate, deleteTemplate,
   pushConfig, bulkPush, getJobStatus, getVersionHistory,
   pushFirmware, bulkFirmware,
+  fetchDefinitionParams,
 } from '../../api/config.api';
-import type { ConfigTemplate, ConfigJob, ConfigVersion, PushResult, CustomFieldEntry } from '../../api/config.types';
+import type { DefinitionParam, OidSetItem } from '../../api/config.api';
+import type { ConfigTemplate, ConfigJob, ConfigVersion, PushResult, SnmpSetItem, CustomFieldEntry } from '../../api/config.types';
 import { validateTemplate } from '../../api/config.types';
 import { fetchDevices } from '../../api/devices.api';
 import type { Device } from '../../api/devices.types';
@@ -1258,6 +1260,231 @@ function TemplatesTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ── DefinitionParamPusher: OID-aware push from product definition ─────────────
+interface DefGroup {
+  groupId: string;
+  label: string;
+  subGroups: Array<{ subGroupId: string; label: string; parameters: DefinitionParam[] }>;
+  parameters: DefinitionParam[];
+}
+
+function DefinitionParamPusher({
+  deviceId,
+  onPushComplete,
+}: {
+  deviceId: string;
+  onPushComplete: (result: PushResult) => void;
+}) {
+  const { addToast } = useToast();
+  const [loading, setLoading]   = useState(false);
+  const [groups, setGroups]     = useState<DefGroup[]>([]);
+  const [pdId, setPdId]         = useState('');
+  const [paramCount, setParamCount] = useState(0);
+  const [values, setValues]     = useState<Record<string, string>>({});
+  const [pushing, setPushing]   = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  const loadDef = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchDefinitionParams(deviceId);
+      setGroups(data.groups ?? []);
+      setPdId(data.productDefinitionId);
+      setParamCount(data.parameterCount ?? 0);
+      // Pre-fill defaults
+      const defaults: Record<string, string> = {};
+      for (const g of data.groups ?? []) {
+        for (const p of g.parameters ?? []) {
+          if (p.defaultValue != null) defaults[p.parameterId] = String(p.defaultValue);
+        }
+      }
+      setValues(defaults);
+      // Expand first group by default
+      if (data.groups?.length) setExpanded({ [data.groups[0].groupId]: true });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || (e instanceof Error ? e.message : 'Unknown error');
+      addToast(`Could not load definition: ${msg}`, 'error');
+    } finally { setLoading(false); }
+  };
+
+  const handlePush = async () => {
+    if (!groups.length) { addToast('Load parameters first', 'warning'); return; }
+    setPushing(true);
+    try {
+      // Build OID mapping for all params that have an OID and a value
+      const oidMapping: OidSetItem[] = [];
+      for (const g of groups) {
+        for (const p of g.parameters) {
+          if (p.snmpOid && !p.readOnly && values[p.parameterId] !== undefined && values[p.parameterId] !== '') {
+            oidMapping.push({
+              parameterId: p.parameterId,
+              snmpOid:     p.snmpOid,
+              value:       values[p.parameterId],
+              displayName: p.displayName,
+            });
+          }
+        }
+      }
+      const result = await pushConfig(deviceId, 'definition-push', undefined, oidMapping);
+      onPushComplete(result);
+      addToast(
+        `Config pushed: ${oidMapping.length} OID(s) SET${result.snmpSets ? '' : ''}`,
+        result.status === 'PUSHED' ? 'success' : 'warning',
+      );
+    } catch { addToast('Push failed', 'error'); }
+    finally { setPushing(false); }
+  };
+
+  const setValue = (parameterId: string, val: string) =>
+    setValues((prev) => ({ ...prev, [parameterId]: val }));
+
+  const toggleGroup = (gid: string) =>
+    setExpanded((prev) => ({ ...prev, [gid]: !prev[gid] }));
+
+  const OID_BADGE = (oid: string | null) => oid ? (
+    <span style={{
+      fontSize: 10, fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-muted)',
+      background: 'var(--vf-elevated)', border: '1px solid var(--vf-border-subtle)',
+      borderRadius: 3, padding: '1px 5px', marginLeft: 6,
+    }}>OID: {oid}</span>
+  ) : null;
+
+  return (
+    <div style={{ marginTop: 20, background: 'var(--vf-surface)', border: '1px solid #8b5cf655', borderRadius: 10, padding: 20 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--vf-text-primary)' }}>
+            📋 Push from Product Definition
+            {pdId && <span style={{ fontSize: 12, color: '#8b5cf6', marginLeft: 8 }}>{pdId}</span>}
+          </h3>
+          {paramCount > 0 && (
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--vf-text-muted)' }}>
+              {paramCount} parameter(s) — values with OIDs will be applied via SNMP SET
+            </p>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button variant="ghost" size="sm" onClick={loadDef} loading={loading}>
+            {groups.length ? '🔄 Reload' : '📥 Load Parameters'}
+          </Button>
+          {groups.length > 0 && (
+            <Button variant="primary" size="sm" onClick={handlePush} loading={pushing}>
+              {pushing ? 'Pushing…' : '🚀 Push with OIDs'}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Parameter groups */}
+      {groups.map((g) => (
+        <div key={g.groupId} style={{ marginBottom: 12, border: '1px solid var(--vf-border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+          {/* Group header */}
+          <button
+            onClick={() => toggleGroup(g.groupId)}
+            style={{
+              width: '100%', background: 'var(--vf-elevated)', border: 'none', cursor: 'pointer',
+              padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              color: 'var(--vf-text-primary)', fontSize: 13, fontWeight: 600,
+            }}
+          >
+            <span>📂 {g.label}</span>
+            <span style={{ color: 'var(--vf-text-muted)', fontSize: 11 }}>
+              {g.parameters.length} params {expanded[g.groupId] ? '▲' : '▼'}
+            </span>
+          </button>
+
+          {expanded[g.groupId] && (
+            <div style={{ padding: '12px 14px' }}>
+              {/* If subGroups exist, render by subgroup */}
+              {g.subGroups.length > 0 ? (
+                g.subGroups.map((sg) => (
+                  <div key={sg.subGroupId} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#8b5cf6', textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.05em' }}>
+                      {sg.label}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+                      {sg.parameters.map((p) => (
+                        <div key={p.parameterId} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <label style={{ fontSize: 12, color: 'var(--vf-text-secondary)', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+                            {p.displayName}
+                            {p.readOnly && <span style={{ fontSize: 10, color: '#f59e0b', marginLeft: 6 }}>read-only</span>}
+                            {OID_BADGE(p.snmpOid)}
+                          </label>
+                          {p.enumValues?.length > 0 ? (
+                            <select
+                              value={values[p.parameterId] ?? p.defaultValue ?? ''}
+                              onChange={(e) => setValue(p.parameterId, e.target.value)}
+                              disabled={p.readOnly}
+                              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 5, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)' }}
+                            >
+                              {p.enumValues.map((v) => <option key={v} value={v}>{v}</option>)}
+                            </select>
+                          ) : (
+                            <input
+                              type={p.dataType === 'UINT' || p.dataType === 'NUMERIC' || p.dataType === 'FLOAT' ? 'number' : 'text'}
+                              value={values[p.parameterId] ?? p.defaultValue ?? ''}
+                              onChange={(e) => setValue(p.parameterId, e.target.value)}
+                              disabled={p.readOnly}
+                              min={p.minValue ?? undefined}
+                              max={p.maxValue ?? undefined}
+                              placeholder={p.snmpOid ? `OID: ${p.snmpOid}` : p.displayName}
+                              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 5, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)' }}
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+                  {g.parameters.map((p) => (
+                    <div key={p.parameterId} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label style={{ fontSize: 12, color: 'var(--vf-text-secondary)', display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+                        {p.displayName}
+                        {p.readOnly && <span style={{ fontSize: 10, color: '#f59e0b', marginLeft: 6 }}>read-only</span>}
+                        {OID_BADGE(p.snmpOid)}
+                      </label>
+                      {p.enumValues?.length > 0 ? (
+                        <select
+                          value={values[p.parameterId] ?? p.defaultValue ?? ''}
+                          onChange={(e) => setValue(p.parameterId, e.target.value)}
+                          disabled={p.readOnly}
+                          style={{ fontSize: 12, padding: '5px 8px', borderRadius: 5, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)' }}
+                        >
+                          {p.enumValues.map((v) => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          type={p.dataType === 'UINT' || p.dataType === 'NUMERIC' || p.dataType === 'FLOAT' ? 'number' : 'text'}
+                          value={values[p.parameterId] ?? p.defaultValue ?? ''}
+                          onChange={(e) => setValue(p.parameterId, e.target.value)}
+                          disabled={p.readOnly}
+                          min={p.minValue ?? undefined}
+                          max={p.maxValue ?? undefined}
+                          placeholder={p.snmpOid ? `OID: ${p.snmpOid}` : p.displayName}
+                          style={{ fontSize: 12, padding: '5px 8px', borderRadius: 5, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)' }}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {!groups.length && !loading && (
+        <p style={{ textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 13, padding: '20px 0' }}>
+          Click "Load Parameters" to fetch OID-mapped parameters from the activated product definition.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // 2. Push Config tab (individual + bulk)
 // ═══════════════════════════════════════════════════════════════════════════════
 function PushConfigTab() {
@@ -1374,15 +1601,43 @@ function PushConfigTab() {
         </div>
       </div>
 
+      {/* Definition-based OID push — shown when a single device is selected */}
+      {!bulkMode && selectedDevice && (
+        <DefinitionParamPusher
+          deviceId={selectedDevice}
+          onPushComplete={(r) => setResult(r)}
+        />
+      )}
+
       {/* Result card */}
       {result && (
-        <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '16px 20px' }}>
+        <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '16px 20px', marginTop: 16 }}>
           {isPushResult(result) ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <Badge variant={result.status === 'PUSHED' ? 'success' : 'warning'} dot>{result.status}</Badge>
-              <span style={{ fontSize: 13, color: 'var(--vf-text-secondary)' }}>{result.message}</span>
-              {result.commandId && <span style={{ fontSize: 11, fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-muted)' }}>CMD: {result.commandId}</span>}
-            </div>
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Badge variant={result.status === 'PUSHED' ? 'success' : 'warning'} dot>{result.status}</Badge>
+                <span style={{ fontSize: 13, color: 'var(--vf-text-secondary)' }}>{result.message}</span>
+                {result.commandId && <span style={{ fontSize: 11, fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-muted)' }}>CMD: {result.commandId}</span>}
+              </div>
+              {/* SNMP SET trace table */}
+              {result.snmpSets && result.snmpSets.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--vf-text-secondary)', marginBottom: 6 }}>
+                    🔧 SNMP SET trace ({result.snmpSets.length} OID{result.snmpSets.length > 1 ? 's' : ''})
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {result.snmpSets.map((s: SnmpSetItem) => (
+                      <div key={s.oid} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, background: 'var(--vf-elevated)', borderRadius: 5, padding: '4px 10px' }}>
+                        <Badge variant={s.status === 'SET' ? 'success' : 'danger'} size="sm">{s.status}</Badge>
+                        <span style={{ fontFamily: 'var(--vf-font-mono)', color: '#8b5cf6', minWidth: 200 }}>{s.oid}</span>
+                        <span style={{ color: 'var(--vf-text-secondary)' }}>{s.displayName}</span>
+                        <span style={{ marginLeft: 'auto', fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-accent)' }}>= {String(s.value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div>
               <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>

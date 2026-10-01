@@ -280,18 +280,30 @@ router.get('/templates/from-definition/:deviceId', async (req, res) => {
       });
     }
 
-    const paramCol = mongoose.connection.client.db('ubrnms').collection('parameter_registry_entries');
-    const writableEntries = await paramCol
-      .find({ productDefinitionId, readOnly: false })
-      .toArray();
+    // Parameter registry lives in ubrnms_productdef (populated by the Java product-definition-service
+    // when a definition is uploaded and activated). Fall back to ubrnms for legacy entries.
+    let writableEntries = [];
+    for (const dbName of ['ubrnms_productdef', 'ubrnms']) {
+      try {
+        const paramCol = mongoose.connection.client.db(dbName).collection('parameter_registry_entries');
+        const all = await paramCol.find({ productDefinitionId }).toArray();
+        if (all.length) {
+          // prefer writable params; if none writable return all (read-only display)
+          writableEntries = all.filter((e) => !e.readOnly);
+          if (!writableEntries.length) writableEntries = all;
+          break;
+        }
+      } catch (_) { /* try next db */ }
+    }
 
     if (!writableEntries.length) {
       return res.status(404).json({
         code: 'NO_WRITABLE_PARAMETERS',
-        message: `No writable parameters (readOnly=false) found for product definition "${productDefinitionId}"`,
+        message: `No parameters found for product definition "${productDefinitionId}". Upload and activate the definition first.`,
       });
     }
 
+    // Group by groupId → subGroup for hierarchical display
     const groupMap = new Map();
     for (const e of writableEntries) {
       const groupId = e.groupId || 'default';
@@ -299,22 +311,50 @@ router.get('/templates/from-definition/:deviceId', async (req, res) => {
         groupMap.set(groupId, {
           groupId,
           label: groupId.charAt(0).toUpperCase() + groupId.slice(1),
+          subGroups: new Map(),
           parameters: [],
         });
       }
-      groupMap.get(groupId).parameters.push({
-        parameterId: e.parameterId,
-        displayName: e.displayName || e.parameterId,
-        dataType: (e.dataType || 'STRING').toUpperCase(),
-        unit: e.unit || '',
+      const grp = groupMap.get(groupId);
+      const subGroup = e.subGroup || e.subgroup || null;
+
+      const param = {
+        parameterId:  e.parameterId,
+        displayName:  e.displayName || e.parameterId,
+        dataType:     (e.dataType || 'STRING').toUpperCase(),
+        unit:         e.unit         || '',
+        defaultValue: e.defaultValue || null,
+        minValue:     e.minValue     ?? null,
+        maxValue:     e.maxValue     ?? null,
+        enumValues:   e.enumValues   || [],
+        snmpOid:      e.snmpOid      || null,
+        readOnly:     !!e.readOnly,
+        subGroup,
         currentValue: null,
-      });
+      };
+
+      if (subGroup) {
+        if (!grp.subGroups.has(subGroup)) {
+          grp.subGroups.set(subGroup, { subGroupId: subGroup, label: subGroup.replace(/_/g, ' '), parameters: [] });
+        }
+        grp.subGroups.get(subGroup).parameters.push(param);
+      }
+      grp.parameters.push(param);
     }
+
+    // Serialize — convert subGroups Map to array
+    const groups = Array.from(groupMap.values()).map((g) => ({
+      groupId:   g.groupId,
+      label:     g.label,
+      subGroups: Array.from(g.subGroups.values()),
+      parameters: g.parameters,
+    }));
 
     return res.json({
       deviceId,
       productDefinitionId,
-      groups: Array.from(groupMap.values()),
+      parameterCount: writableEntries.length,
+      groups,
     });
   } catch (e) {
     console.error('[config-stub] from-definition template error:', e.message);
@@ -399,18 +439,40 @@ router.post('/push/:deviceId', (req, res) => {
   const actor          = bodyParams.actor          || queryParams.actor || (req.user?.username) || 'operator';
 
   // Collect the actual config parameters from the body (everything except meta fields)
-  const META = new Set(['templateId', 'firmware', 'firmwareVersion', 'actor']);
+  const META = new Set(['templateId', 'firmware', 'firmwareVersion', 'actor', 'oidMapping', 'productDefinitionId']);
   const pushParams = {};
   for (const [k, v] of Object.entries(bodyParams)) {
     if (!META.has(k) && v !== null && v !== undefined) pushParams[k] = v;
   }
   if (firmware) pushParams.firmwareVersion = firmwareVersion;
 
+  // OID-based push: simulate SNMP SET operations for each parameter that has an OID
+  // oidMapping is an array of { parameterId, snmpOid, value, displayName }
+  const oidMapping = bodyParams.oidMapping || [];
+  const snmpSets = [];
+  if (oidMapping.length > 0) {
+    console.log(`[config-stub] SNMP SET simulation for device ${deviceId} — ${oidMapping.length} OID(s):`);
+    for (const item of oidMapping) {
+      if (item.snmpOid && item.value !== undefined && item.value !== null && item.value !== '') {
+        snmpSets.push({
+          oid:         item.snmpOid,
+          parameterId: item.parameterId,
+          displayName: item.displayName || item.parameterId,
+          value:       item.value,
+          status:      'SET',
+        });
+        console.log(`  SNMP SET ${item.snmpOid} = "${item.value}"  (${item.displayName || item.parameterId})`);
+        pushParams[item.parameterId] = item.value;
+      }
+    }
+  }
+
   const jobId = `job-${nextJobId++}`;
   jobs[jobId] = {
     jobId, deviceId, templateId, firmwareVersion,
     status: 'RUNNING', startedAt: new Date().toISOString(), completedAt: null,
     devices: [{ deviceId, status: 'QUEUED' }],
+    snmpSets,
   };
 
   // Persist push event to MongoDB (non-blocking)
@@ -422,10 +484,15 @@ router.post('/push/:deviceId', (req, res) => {
     jobs[jobId].devices[0].status = 'SUCCESS';
   }, 2000);
 
+  const oidSummary = snmpSets.length > 0
+    ? `${snmpSets.length} OID(s) SET via SNMP`
+    : undefined;
+
   res.json({
-    status: 'PUSHED',
-    message: firmware ? 'Firmware upgrade queued' : 'Config push accepted — applying to device',
+    status:    'PUSHED',
+    message:   firmware ? 'Firmware upgrade queued' : `Config push accepted — applying to device${oidSummary ? ` (${oidSummary})` : ''}`,
     commandId: jobId,
+    snmpSets:  snmpSets.length > 0 ? snmpSets : undefined,
   });
 });
 

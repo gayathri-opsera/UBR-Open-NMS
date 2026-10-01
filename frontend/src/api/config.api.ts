@@ -21,10 +21,18 @@ export async function deleteTemplate(id: string): Promise<void> {
   await apiClient.delete(`/config/templates/${id}`);
 }
 
+export interface OidSetItem {
+  parameterId: string;
+  snmpOid:     string;
+  value:       string | number | boolean;
+  displayName?: string;
+}
+
 export async function pushConfig(
   deviceId: string,
   templateId: string,
   params?: Record<string, string | number | boolean>,
+  oidMapping?: OidSetItem[],
 ): Promise<PushResult> {
   let actor = 'operator';
   try {
@@ -33,9 +41,40 @@ export async function pushConfig(
   } catch { /* ignore */ }
   const res = await apiClient.post<PushResult>(
     `/config/push/${deviceId}`,
-    { templateId, actor, ...(params ?? {}) },
+    { templateId, actor, ...(params ?? {}), ...(oidMapping?.length ? { oidMapping } : {}) },
   );
   return res.data;
+}
+
+/** Fetch parameter groups for a device from its activated product definition. */
+export async function fetchDefinitionParams(deviceId: string): Promise<{
+  deviceId: string;
+  productDefinitionId: string;
+  parameterCount: number;
+  groups: Array<{
+    groupId: string;
+    label: string;
+    subGroups: Array<{ subGroupId: string; label: string; parameters: DefinitionParam[] }>;
+    parameters: DefinitionParam[];
+  }>;
+}> {
+  const res = await apiClient.get(`/config/templates/from-definition/${encodeURIComponent(deviceId)}`);
+  return res.data as ReturnType<typeof fetchDefinitionParams> extends Promise<infer T> ? T : never;
+}
+
+export interface DefinitionParam {
+  parameterId:  string;
+  displayName:  string;
+  dataType:     string;
+  unit:         string;
+  defaultValue: string | null;
+  minValue:     number | null;
+  maxValue:     number | null;
+  enumValues:   string[];
+  snmpOid:      string | null;
+  readOnly:     boolean;
+  subGroup:     string | null;
+  currentValue: string | null;
 }
 
 export async function bulkPush(filter: Record<string, string>, templateId: string): Promise<ConfigJob> {
