@@ -559,6 +559,73 @@ function AllDiscoveredTab() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ICMP Diagnostic Banner — shown in results when ALL hosts timed out on ICMP
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetches the results of a discovery run and, when ALL hosts have
+ * icmpStatus='timeout', shows a prominent diagnostic banner explaining
+ * why discovery showed no SNMP data and how to use ICMP bypass instead.
+ */
+function IcmpDiagnosticBanner({ runId, onStartNew }: { runId: string; onStartNew: () => void }) {
+  const [allTimeout, setAllTimeout] = useState(false);
+  const [resultCount, setResultCount] = useState(0);
+
+  useEffect(() => {
+    if (!runId) return;
+    // Wait a tick so the results table also loads
+    const t = setTimeout(async () => {
+      try {
+        const res = await apiClient.get<DiscoveryResult[]>(`/discovery/runs/${runId}/results`);
+        const results = res.data ?? [];
+        if (results.length > 0 && results.every((r) => r.icmpStatus === 'timeout')) {
+          setResultCount(results.length);
+          setAllTimeout(true);
+        }
+      } catch { /* non-fatal */ }
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [runId]);
+
+  if (!allTimeout) return null;
+
+  return (
+    <div style={{
+      padding: '14px 18px', borderRadius: 10,
+      background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.4)',
+      display: 'flex', gap: 14, alignItems: 'flex-start',
+    }}>
+      <span style={{ fontSize: 22, flexShrink: 0 }}>⚠️</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', marginBottom: 6 }}>
+          All {resultCount} host{resultCount !== 1 ? 's' : ''} timed out on ICMP ping — SNMP was not attempted
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--vf-text-secondary)', marginBottom: 10, lineHeight: 1.5 }}>
+          The Java discovery service pings each host first. Docker containers, simulators
+          (<code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 4px', borderRadius: 3 }}>host.docker.internal</code>,
+          explicit <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 4px', borderRadius: 3 }}>host:port</code> targets)
+          and hosts behind ICMP-blocking firewalls will always time out here.
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            onClick={onStartNew}
+            style={{
+              padding: '6px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+              background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.5)', color: '#f59e0b',
+            }}
+          >
+            ⚡ Start New Discovery with ICMP Bypass →
+          </button>
+          <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', alignSelf: 'center' }}>
+            Check "Skip ICMP Ping" in the form, or use the Quick Probe bar above for instant SNMP-only discovery.
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tab 4 — SNMP Discovery (REQ-004)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -929,6 +996,8 @@ function SnmpDiscoveryTab({ initialScope }: SnmpDiscoveryTabProps) {
 
       {view === 'results' && activeRunId && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* ICMP-all-timeout diagnostic banner — shown when no hosts were ICMP-reachable */}
+          <IcmpDiagnosticBanner runId={activeRunId} onStartNew={handleStartNew} />
           {/* Action bar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <div style={{ display: 'flex', gap: 8 }}>

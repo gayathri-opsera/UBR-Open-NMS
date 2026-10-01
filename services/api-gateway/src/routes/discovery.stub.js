@@ -418,6 +418,218 @@ async function provisionHostsDirect(hosts, scansCol, scanId) {
 
 // ── Route handlers ─────────────────────────────────────────────────────────────
 
+// In-memory store for synthetic (ICMP-bypass) discovery runs so GET /runs/:runId
+// and GET /runs/:runId/results can return results without going to the Java service.
+const syntheticRuns = new Map();   // runId → { status, scope, createdAt, devices }
+
+/**
+ * POST /api/v1/discovery/runs
+ *
+ * Intercepts discovery run creation ONLY when the request includes icmpBypass:true
+ * (or when all scope entries are explicit hostnames/host:port that the Java ICMP sweep
+ * cannot reach).  All other requests fall through (next()) to the Java nms-discovery service.
+ *
+ * ICMP-bypass mode:
+ *   - Uses the same SNMP-GET logic as /snmp-probe (no ping required)
+ *   - Returns a synthetic run in the same shape as the Java service (status=COMPLETED)
+ *   - GET /runs/:runId and GET /runs/:runId/results are also intercepted for synthetic runs
+ *
+ * This allows "Start New Discovery" to work for Docker containers, simulators,
+ * and any host:port target where ICMP is blocked.
+ */
+router.post('/runs', async (req, res, next) => {
+  const body = req.body || {};
+  const {
+    scope             = [],
+    icmpBypass        = false,
+    community         = 'public',
+    protocol          = 'SNMP_V2C',
+    timeoutSeconds    = 5,
+    productDefinitionId: callerDefinitionId = null,
+  } = body;
+
+  // Detect hostname-style scope entries (host.docker.internal, explicit :port, or non-CIDR hostnames)
+  const hasHostname = Array.isArray(scope) && scope.some((e) =>
+    (e.type === 'HOSTNAME') ||
+    (e.type === 'SINGLE_IP' && (e.ip || '').includes(':')) ||
+    (typeof e === 'string' && e.includes(':'))
+  );
+
+  if (!icmpBypass && !hasHostname) {
+    // Let the Java nms-discovery service handle CIDR subnet scans normally
+    return next();
+  }
+
+  // ── ICMP-Bypass: run SNMP-only discovery ──────────────────────────────────
+  const runId   = `bypass-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const startAt = new Date().toISOString();
+  console.log(`[discovery-stub] ICMP-bypass run ${runId} — scope=${JSON.stringify(scope)}`);
+
+  // Flatten scope to host:port strings
+  const targets = [];
+  for (const entry of scope) {
+    if (entry.type === 'HOSTNAME' || entry.type === 'SINGLE_IP') {
+      targets.push(entry.hostname || entry.ip);
+    } else if (entry.type === 'CIDR') {
+      // For CIDR entries in bypass mode, push the network gateway as the target
+      targets.push((entry.cidr || '').split('/')[0]);
+    } else if (typeof entry === 'string') {
+      targets.push(entry);
+    }
+  }
+
+  const snmpProtoVersion = (protocol || '').includes('V1') ? 'v1' : 'v2c';
+
+  // Pre-load caller definition metadata
+  let callerDefMeta = null;
+  if (callerDefinitionId) {
+    callerDefMeta = { productDefinitionId: callerDefinitionId };
+    try {
+      for (const dbName of ['ubrnms_productdef', 'ubrnms']) {
+        const fpCol = mongoose.connection.client.db(dbName).collection('fingerprint_registry_entries');
+        const fp = await fpCol.findOne({ productDefinitionId: callerDefinitionId });
+        if (fp) { callerDefMeta = { productDefinitionId: callerDefinitionId, vendor: fp.vendor, model: fp.model }; break; }
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  // Load BANNER fingerprints
+  let banners = [];
+  try {
+    const fregCol = await getFingerprintCol();
+    banners = await fregCol.find({ fingerprintType: 'BANNER' }).toArray();
+  } catch { /* empty registry is OK */ }
+
+  const hosts = [];
+  const errors = [];
+
+  await Promise.all(targets.map(async (target) => {
+    const [host, rawPort] = target.includes(':') ? [target.split(':')[0], parseInt(target.split(':')[1], 10)] : [target, 161];
+    const port = isNaN(rawPort) ? 161 : rawPort;
+    try {
+      const mib = await snmpGet(host, port, community, (timeoutSeconds || 5) * 1000, snmpProtoVersion);
+      const oidClass = classifyByOid(mib.sysObjectID);
+      let vendor  = oidClass.vendor  || 'Unknown';
+      let model   = oidClass.model   || 'SNMP Device';
+      let generic = oidClass.genericDeviceType || 'SWITCH';
+      let defId   = oidClass.productDefinitionId || null;
+
+      for (const b of banners) {
+        try {
+          if (new RegExp(b.fingerprintValue, 'i').test(mib.sysDescr || '')) {
+            vendor  = b.vendor || vendor;
+            model   = b.model  || model;
+            defId   = b.productDefinitionId;
+            generic = b.genericDeviceType || 'RADIO';
+            break;
+          }
+        } catch { /* bad regex */ }
+      }
+
+      if (callerDefMeta) {
+        defId   = callerDefMeta.productDefinitionId;
+        if (callerDefMeta.vendor) vendor = callerDefMeta.vendor;
+        if (callerDefMeta.model)  model  = callerDefMeta.model;
+      }
+
+      const serial = mib.sysName
+        ? mib.sysName.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 64)
+        : `snmp-${host.replace(/\./g, '-')}-${port}`;
+
+      // Provision to inventory (same as snmp-probe)
+      await provisionOne({
+        ip: host, port, serialNumber: serial,
+        sysDescr: mib.sysDescr, sysObjectID: mib.sysObjectID,
+        sysName: mib.sysName, sysLocation: mib.sysLocation,
+        vendor, model, genericDeviceType: generic,
+        productDefinitionId: defId,
+      });
+
+      hosts.push({
+        ip:               host,
+        icmpStatus:       'bypassed',   // ICMP was skipped intentionally
+        snmpStatus:       'success',
+        sysName:          mib.sysName,
+        sysDescr:         mib.sysDescr,
+        sysObjectID:      mib.sysObjectID,
+        sysLocation:      mib.sysLocation,
+        sysContact:       mib.sysContact,
+        vendor, model,
+        genericDeviceType: generic,
+        productDefinitionId: defId,
+        macAddress:       null,
+        discoveryMethod:  'ICMP_BYPASS',
+      });
+      console.log(`[discovery-stub] bypass ✅ ${host}:${port} vendor=${vendor} defId=${defId}`);
+    } catch (err) {
+      console.warn(`[discovery-stub] bypass ❌ ${host}:${port} → ${err.message}`);
+      errors.push({ target, error: err.message });
+      hosts.push({
+        ip: host, icmpStatus: 'timeout', snmpStatus: 'failed',
+        sysName: null, sysDescr: null, sysObjectID: null,
+        sysLocation: null, sysContact: null, vendor: null, model: null,
+        genericDeviceType: null, productDefinitionId: null, macAddress: null,
+        discoveryMethod: 'ICMP_BYPASS',
+      });
+    }
+  }));
+
+  const run = {
+    runId,
+    status:          'COMPLETED',
+    scope:           scope,
+    normalizedScope: scope,
+    createdBy:       req.user?.sub || 'admin',
+    createdAt:       startAt,
+    completedAt:     new Date().toISOString(),
+    validationSummary: `ICMP-bypass scan of ${targets.length} target(s)`,
+    icmpBypass:      true,
+    hosts,
+    errors,
+  };
+  syntheticRuns.set(runId, run);
+
+  // Return in the same shape as Java createDiscoveryRun (status COMPLETED immediately)
+  res.status(201).json({
+    runId,
+    status:          'COMPLETED',
+    normalizedScope: scope,
+    createdBy:       run.createdBy,
+    createdAt:       startAt,
+    validationSummary: run.validationSummary,
+  });
+});
+
+/**
+ * GET /api/v1/discovery/runs/:runId
+ * Serves synthetic (ICMP-bypass) run status; falls through for Java-managed runs.
+ */
+router.get('/runs/:runId', (req, res, next) => {
+  const run = syntheticRuns.get(req.params.runId);
+  if (!run) return next();
+  res.json({
+    runId:           run.runId,
+    status:          run.status,
+    normalizedScope: run.normalizedScope,
+    createdBy:       run.createdBy,
+    createdAt:       run.createdAt,
+    completedAt:     run.completedAt,
+    validationSummary: run.validationSummary,
+    icmpBypass:      true,
+    hostCount:       run.hosts.length,
+  });
+});
+
+/**
+ * GET /api/v1/discovery/runs/:runId/results
+ * Returns host results for synthetic ICMP-bypass runs; falls through for Java runs.
+ */
+router.get('/runs/:runId/results', (req, res, next) => {
+  const run = syntheticRuns.get(req.params.runId);
+  if (!run) return next();
+  res.json(run.hosts);
+});
+
 /**
  * POST /api/v1/discovery/scans
  * Body: { subnets?: string[], definitionId?: string }

@@ -62,6 +62,12 @@ interface FormState {
   community: string;
   timeoutSeconds: string;
   retries: string;
+  /**
+   * Skip ICMP ping sweep — go directly to SNMP GET on every target.
+   * Needed for Docker / simulator targets where ICMP is blocked.
+   * Gateway intercepts these runs and uses SNMP-only discovery.
+   */
+  icmpBypass: boolean;
 }
 
 interface FormErrors {
@@ -196,6 +202,7 @@ function buildInitialState(initialScope?: string): FormState {
     community:      'public',
     timeoutSeconds: '5',
     retries:        '2',
+    icmpBypass:     false,
   };
 }
 
@@ -357,6 +364,8 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
             : { credentialId: form.credentialId }),
           // Vendor-independent: tag all discovered devices with the selected definition
           ...(selectedDefinitionId ? { productDefinitionId: selectedDefinitionId } : {}),
+          // ICMP bypass: skip ping, go straight to SNMP (for Docker/simulator targets)
+          ...(form.icmpBypass ? { icmpBypass: true } : {}),
         });
         addToast(`Discovery run ${response.runId} created`, 'success');
         onRunCreated(response);
@@ -532,6 +541,34 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
         />
       </div>
 
+      {/* ICMP Bypass ───────────────────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+        padding: '10px 14px', borderRadius: 8,
+        background: form.icmpBypass ? 'rgba(245,158,11,0.08)' : 'rgba(255,255,255,0.02)',
+        border: `1px solid ${form.icmpBypass ? 'rgba(245,158,11,0.35)' : 'var(--vf-border-subtle)'}`,
+        cursor: 'pointer',
+      }} onClick={() => setForm((prev) => ({ ...prev, icmpBypass: !prev.icmpBypass }))}>
+        <input
+          type="checkbox"
+          id="icmpBypass"
+          checked={form.icmpBypass}
+          onChange={(e) => setForm((prev) => ({ ...prev, icmpBypass: e.target.checked }))}
+          onClick={(e) => e.stopPropagation()}
+          style={{ marginTop: 2, cursor: 'pointer', accentColor: '#f59e0b' }}
+        />
+        <div>
+          <label htmlFor="icmpBypass" style={{ fontSize: 13, fontWeight: 600, color: form.icmpBypass ? '#f59e0b' : 'var(--vf-text-primary)', cursor: 'pointer' }}>
+            ⚡ Skip ICMP Ping (ICMP Bypass)
+          </label>
+          <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--vf-text-muted)', lineHeight: 1.4 }}>
+            {form.icmpBypass
+              ? '✅ Enabled — gateway will probe SNMP directly without pinging. Required for Docker containers, simulators, and hosts that block ICMP.'
+              : 'Enable when targeting Docker containers or simulators (host.docker.internal, explicit host:port) where ICMP ping is blocked.'}
+          </p>
+        </div>
+      </div>
+
       {/* Submit ─────────────────────────────────────────────────────────────── */}
       <div>
         <Button
@@ -541,7 +578,7 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
           loading={submitting}
           disabled={!formValid || submitting}
         >
-          {submitting ? 'Starting…' : 'Start Discovery'}
+          {submitting ? 'Starting…' : form.icmpBypass ? '⚡ Start Discovery (ICMP Bypass)' : 'Start Discovery'}
         </Button>
       </div>
     </form>

@@ -1283,6 +1283,14 @@ function DefinitionParamPusher({
   const [values, setValues]     = useState<Record<string, string>>({});
   const [pushing, setPushing]   = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [pushResult, setPushResult] = useState<PushResult | null>(null);
+
+  // Auto-load definition params whenever the selected device changes
+  useEffect(() => {
+    if (!deviceId) { setGroups([]); setPdId(''); setParamCount(0); setValues({}); setPushResult(null); return; }
+    loadDef();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceId]);
 
   const loadDef = async () => {
     setLoading(true);
@@ -1326,12 +1334,13 @@ function DefinitionParamPusher({
         }
       }
       const result = await pushConfig(deviceId, 'definition-push', undefined, oidMapping);
+      setPushResult(result);
       onPushComplete(result);
       addToast(
-        `Config pushed: ${oidMapping.length} OID(s) SET${result.snmpSets ? '' : ''}`,
+        `✅ ${oidMapping.length} OID(s) SET via SNMP — config applied to ${deviceId}`,
         result.status === 'PUSHED' ? 'success' : 'warning',
       );
-    } catch { addToast('Push failed', 'error'); }
+    } catch { addToast('Push failed — check device SNMP accessibility', 'error'); }
     finally { setPushing(false); }
   };
 
@@ -1477,9 +1486,56 @@ function DefinitionParamPusher({
       ))}
 
       {!groups.length && !loading && (
-        <p style={{ textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 13, padding: '20px 0' }}>
-          Click "Load Parameters" to fetch OID-mapped parameters from the activated product definition.
-        </p>
+        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+          <p style={{ color: 'var(--vf-text-muted)', fontSize: 13, margin: '0 0 12px' }}>
+            {deviceId
+              ? 'Loading OID-mapped parameters from the activated product definition…'
+              : 'Select a device above to load its product definition parameters.'}
+          </p>
+          {deviceId && (
+            <button
+              onClick={loadDef}
+              disabled={loading}
+              style={{
+                padding: '6px 16px', borderRadius: 6, cursor: 'pointer',
+                border: '1px solid rgba(139,92,246,0.5)', background: 'rgba(139,92,246,0.1)',
+                color: '#a78bfa', fontSize: 12, fontWeight: 600,
+              }}
+            >
+              {loading ? 'Loading…' : '📥 Load Parameters'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* SNMP SET Trace — shown after a successful push */}
+      {pushResult?.snmpSets && pushResult.snmpSets.length > 0 && (
+        <div style={{
+          marginTop: 16, padding: '12px 14px', borderRadius: 8,
+          background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.3)',
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#22c55e', marginBottom: 8 }}>
+            🔧 SNMP SET Trace — {pushResult.snmpSets.length} OID{pushResult.snmpSets.length !== 1 ? 's' : ''} applied
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {pushResult.snmpSets.map((s, i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 10, fontSize: 11,
+                fontFamily: 'var(--vf-font-mono)', padding: '3px 6px',
+                borderRadius: 4, background: 'rgba(255,255,255,0.03)',
+              }}>
+                <span style={{
+                  padding: '1px 6px', borderRadius: 3, fontSize: 10, fontWeight: 700,
+                  background: s.status === 'SET' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)',
+                  color: s.status === 'SET' ? '#22c55e' : '#f87171',
+                }}>{s.status}</span>
+                <span style={{ color: '#60a5fa', minWidth: 200 }}>{s.oid}</span>
+                <span style={{ color: 'var(--vf-text-muted)', minWidth: 160 }}>{s.displayName || s.parameterId}</span>
+                <span style={{ color: 'var(--vf-text-primary)', fontWeight: 600 }}>=&nbsp;{s.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1628,7 +1684,7 @@ function PushConfigTab() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {result.snmpSets.map((s: SnmpSetItem) => (
                       <div key={s.oid} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, background: 'var(--vf-elevated)', borderRadius: 5, padding: '4px 10px' }}>
-                        <Badge variant={s.status === 'SET' ? 'success' : 'danger'} size="sm">{s.status}</Badge>
+                        <Badge variant={s.status === 'SET' ? 'success' : 'danger'}>{s.status}</Badge>
                         <span style={{ fontFamily: 'var(--vf-font-mono)', color: '#8b5cf6', minWidth: 200 }}>{s.oid}</span>
                         <span style={{ color: 'var(--vf-text-secondary)' }}>{s.displayName}</span>
                         <span style={{ marginLeft: 'auto', fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-accent)' }}>= {String(s.value)}</span>

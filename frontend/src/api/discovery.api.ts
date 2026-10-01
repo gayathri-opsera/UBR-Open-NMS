@@ -103,6 +103,12 @@ export interface SnmpDiscoveryRunRequest {
    * gets classified under this definition regardless of its OID enterprise prefix.
    */
   productDefinitionId?: string;
+  /**
+   * Skip the ICMP ping sweep and go directly to SNMP.
+   * Required for Docker/simulator targets (host.docker.internal, explicit host:port)
+   * where ICMP is blocked. The gateway intercepts these runs and performs SNMP-only discovery.
+   */
+  icmpBypass?: boolean;
 }
 
 /** Backward-compatible alias for the basic scope-only request (WO-011). */

@@ -176,9 +176,14 @@ function snmpIcon(status: string): string {
   return '❌';
 }
 
+/** True when the device was either ICMP-reachable OR discovered via ICMP-bypass (SNMP-only). */
+function isEffectivelyReachable(r: DiscoveryResult): boolean {
+  return r.icmpStatus === 'reachable' || r.icmpStatus === 'bypassed';
+}
+
 function overallIcon(r: DiscoveryResult): string {
-  if (r.icmpStatus === 'reachable' && r.snmpStatus === 'success') return '✅';
-  if (r.icmpStatus !== 'reachable') return '❌';
+  if (isEffectivelyReachable(r) && r.snmpStatus === 'success') return '✅';
+  if (!isEffectivelyReachable(r)) return '❌';
   return '⚠️';
 }
 
@@ -233,7 +238,7 @@ function DeviceCard({
   // Inline deprovision confirmation state — avoids a separate modal for a simple action.
   const [confirmingDeprovision, setConfirmingDeprovision] = useState(false);
   const rows: Array<{ label: string; value: string; icon?: string }> = [
-    { label: 'ICMP',          value: r.icmpStatus === 'reachable' ? 'Reachable' : r.icmpStatus === 'unreachable' ? 'Unreachable' : 'Timeout', icon: icmpIcon(r.icmpStatus) },
+    { label: 'ICMP',          value: r.icmpStatus === 'reachable' ? 'Reachable' : r.icmpStatus === 'bypassed' ? 'Bypassed ⚡' : r.icmpStatus === 'unreachable' ? 'Unreachable' : 'Timeout', icon: icmpIcon(r.icmpStatus) },
     { label: 'SNMP',          value: r.snmpStatus === 'success' ? 'Successful' : r.snmpStatus === 'not_attempted' ? 'Not Attempted' : r.snmpStatus === 'auth_failed' ? 'Auth Failed' : r.snmpStatus === 'timeout' ? 'Timeout' : 'Partial', icon: snmpIcon(r.snmpStatus) },
     { label: 'Manufacturer',  value: val(r.vendor) },
     { label: 'Model',         value: val(r.model) },
@@ -452,8 +457,8 @@ function DeviceCard({
                 size="sm"
                 onClick={() => onProvision(r)}
                 style={{ width: '100%', fontWeight: 700 }}
-                disabled={r.icmpStatus !== 'reachable'}
-                title={r.icmpStatus !== 'reachable' ? 'Device must be ICMP-reachable to re-provision' : 'Add this device back to managed inventory'}
+                disabled={!isEffectivelyReachable(r)}
+                title={!isEffectivelyReachable(r) ? 'Device must be reachable (ICMP or SNMP-bypass) to re-provision' : 'Add this device back to managed inventory'}
               >
                 🔄 Re-provision Device
               </Button>
@@ -469,8 +474,8 @@ function DeviceCard({
                 size="sm"
                 onClick={() => onProvision(r)}
                 style={{ width: '100%', fontWeight: 700 }}
-                disabled={r.icmpStatus !== 'reachable'}
-                title={r.icmpStatus !== 'reachable' ? 'Device must be reachable (ICMP) to provision' : 'Provision this device into managed inventory'}
+                disabled={!isEffectivelyReachable(r)}
+                title={!isEffectivelyReachable(r) ? 'Device must be reachable (ICMP or SNMP-bypass) to provision' : 'Provision this device into managed inventory'}
               >
                 🔧 Provision Device
               </Button>
@@ -772,17 +777,17 @@ export function DiscoveryResultsTable({
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onProvision?.(row); }}
-              disabled={row.icmpStatus !== 'reachable'}
-              title={row.icmpStatus !== 'reachable'
-                ? 'Device must be ICMP-reachable to provision'
+              disabled={!isEffectivelyReachable(row)}
+              title={!isEffectivelyReachable(row)
+                ? 'Device must be reachable (ICMP or SNMP-bypass) to provision'
                 : 'Add this device to managed inventory'}
               style={{
                 fontSize: 11, padding: '3px 10px', borderRadius: 5,
-                background: row.icmpStatus === 'reachable'
+                background: isEffectivelyReachable(row)
                   ? 'var(--vf-accent)' : 'var(--vf-surface-raised)',
-                color: row.icmpStatus === 'reachable' ? '#fff' : 'var(--vf-text-muted)',
-                border: 'none', cursor: row.icmpStatus === 'reachable' ? 'pointer' : 'default',
-                fontWeight: 700, opacity: row.icmpStatus !== 'reachable' ? 0.5 : 1,
+                color: isEffectivelyReachable(row) ? '#fff' : 'var(--vf-text-muted)',
+                border: 'none', cursor: isEffectivelyReachable(row) ? 'pointer' : 'default',
+                fontWeight: 700, opacity: !isEffectivelyReachable(row) ? 0.5 : 1,
               }}
             >
               🔧 Provision
@@ -1116,8 +1121,8 @@ export function DiscoveryResultsTable({
                   variant="primary"
                   size="sm"
                   onClick={() => onProvision(sel)}
-                  disabled={sel.icmpStatus !== 'reachable'}
-                  title="Provision selected device into managed inventory"
+                  disabled={!isEffectivelyReachable(sel)}
+                  title={isEffectivelyReachable(sel) ? 'Provision selected device into managed inventory' : 'Device must be reachable (ICMP or SNMP-bypass) to provision'}
                 >
                   🔧 Provision
                 </Button>
