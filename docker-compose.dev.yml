@@ -269,6 +269,74 @@ services:
       retries: 5
       start_period: 5s
 
+  # ── EOC Configurations_GUI Simulator — BTS (A60) ───────────────────────────
+  # Simulates an EOC A60 BTS with enterprise OID .1.3.6.1.4.1.52619.1.1
+  # and all 56 OIDs from the Configurations_GUI product definition.
+  # UBR NMS classifies this as: vendor=EOC, model=Configurations_GUI,
+  # genericDeviceType=RADIO, productDefinitionId=Configurations_GUI
+  #
+  # SNMP probe test from host:
+  #   snmpget -v2c -c public -p 1162 localhost 1.3.6.1.2.1.1.2.0
+  #   → .1.3.6.1.4.1.52619.1.1
+  #
+  # NMS discovery:
+  #   POST /api/v1/discovery/snmp-probe
+  #   {"targets":["host.docker.internal:1162"],"community":"public","provision":true}
+  eoc-bts-sim:
+    build:
+      context: test/snmpsim-eoc
+      dockerfile: Dockerfile
+    container_name: nms-eoc-bts
+    restart: unless-stopped
+    environment:
+      SNMP_PORT: "1162"
+      SNMP_COMMUNITY: "public"
+      DEVICE_MODE: "BTS"
+      DEVICE_NAME: "EOC-BTS-01"
+      DEVICE_IP: "192.168.100.10"
+    ports:
+      - "1162:1162/udp"
+    networks:
+      nms-net: {}
+      snmp-test-net:
+        ipv4_address: 10.10.10.26
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.sendto(b'\\x30\\x26\\x02\\x01\\x01\\x04\\x06public\\xa0\\x19\\x02\\x04\\x00\\x00\\x00\\x02\\x02\\x01\\x00\\x02\\x01\\x00\\x30\\x0b\\x30\\x09\\x06\\x05\\x2b\\x06\\x01\\x02\\x01\\x05\\x00', ('127.0.0.1',1162)); s.recv(256); exit(0)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ── EOC Configurations_GUI Simulator — CPE (A61) ───────────────────────────
+  # Same image, CPE personality on port 1163.
+  # sysName: EOC-CPE-01  radioMode: CPE(sta)
+  eoc-cpe-sim:
+    build:
+      context: test/snmpsim-eoc
+      dockerfile: Dockerfile
+    container_name: nms-eoc-cpe
+    restart: unless-stopped
+    environment:
+      SNMP_PORT: "1163"
+      SNMP_COMMUNITY: "public"
+      DEVICE_MODE: "CPE"
+      DEVICE_NAME: "EOC-CPE-01"
+      DEVICE_IP: "192.168.100.11"
+    ports:
+      - "1163:1163/udp"
+    networks:
+      nms-net: {}
+      snmp-test-net:
+        ipv4_address: 10.10.10.27
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.sendto(b'\\x30\\x26\\x02\\x01\\x01\\x04\\x06public\\xa0\\x19\\x02\\x04\\x00\\x00\\x00\\x03\\x02\\x01\\x00\\x02\\x01\\x00\\x30\\x0b\\x30\\x09\\x06\\x05\\x2b\\x06\\x01\\x02\\x01\\x05\\x00', ('127.0.0.1',1163)); s.recv(256); exit(0)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
   discovery-service:
     build:
       context: .
