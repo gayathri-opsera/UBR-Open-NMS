@@ -84,6 +84,8 @@ public class InternalRegistryController {
             m.put("ProductDefinitionVersion",  e.getVersionId());
             m.put("RegistryVersion",           String.valueOf(e.getRegistryVersion()));
             m.put("DeviceType", e.getDeviceType() != null ? e.getDeviceType() : "");
+            m.put("Vendor",     e.getVendor() != null ? e.getVendor() : "");
+            m.put("Model",      e.getModel()  != null ? e.getModel()  : "");
             m.put("FirmwareMin",               e.getFirmwareFrom());
             m.put("FirmwareMax",               e.getFirmwareTo());
             m.put("SupportedProtocols",        e.getSupportedProtocols() != null ? e.getSupportedProtocols() : List.of());
@@ -94,8 +96,12 @@ public class InternalRegistryController {
             String value = e.getFingerprintValue();
             // Map to the Go RegistryEntry selector fields
             if ("SNMP_OID".equals(type)) {
-                m.put("SNMPOIDExact",       value);
-                m.put("SNMPOIDPrefix",      "");
+                // Treat SNMP_OID fingerprints as prefix matches so that vendor enterprise OID
+                // subtrees (e.g. 1.3.6.1.4.1.99999) match any device OID beneath them
+                // (e.g. 1.3.6.1.4.1.99999.1.3). The Go matcher's SNMPOIDPrefix field uses
+                // strings.HasPrefix(), which is exactly the right semantic here.
+                m.put("SNMPOIDExact",       "");
+                m.put("SNMPOIDPrefix",      value);
                 m.put("SSHBannerSubstring", "");
                 m.put("HTTPHeaderKey",      "");
                 m.put("HTTPHeaderContains", "");

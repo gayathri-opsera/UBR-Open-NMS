@@ -614,10 +614,10 @@ function IcmpDiagnosticBanner({ runId, onStartNew }: { runId: string; onStartNew
               background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.5)', color: '#f59e0b',
             }}
           >
-            ⚡ Start New Discovery with ICMP Bypass →
+            ⚡ Start New Discovery →
           </button>
           <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', alignSelf: 'center' }}>
-            Check "Skip ICMP Ping" in the form, or use the Quick Probe bar above for instant SNMP-only discovery.
+            Use the Quick Probe bar above for instant SNMP-only discovery without full sweep.
           </span>
         </div>
       </div>
@@ -1833,7 +1833,7 @@ function QuickDiscoveryBar() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
             {results.map((r) => {
-              const ok = r.icmpStatus === 'reachable' && r.snmpStatus === 'success';
+              const ok = r.snmpStatus === 'success';
               return (
                 <div key={r.ip} style={{
                   background: 'var(--vf-surface)',

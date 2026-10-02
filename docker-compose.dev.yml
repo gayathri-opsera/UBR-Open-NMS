@@ -369,6 +369,10 @@ services:
       ICMP_PING_RETRIES: "1"
       # Inventory-service endpoint for device provisioning (discovery → inventory bridge).
       INVENTORY_SERVICE_URL: "http://inventory-service:8082"
+      # Product-definition-service fingerprint registry — enables zero-code new-vendor onboarding.
+      # Discovery service queries GET /internal/fingerprint-registry on this URL to resolve OIDs
+      # from activated product definitions without any code changes to the classifier.
+      FINGERPRINT_REGISTRY_URL: "http://product-definition-service:8093"
     ports:
       - "8081:8081"
     networks:

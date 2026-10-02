@@ -18,6 +18,7 @@ import (
 	"github.com/airtel-ubrnms/discovery-service/internal/auth"
 	"github.com/airtel-ubrnms/discovery-service/internal/config"
 	"github.com/airtel-ubrnms/discovery-service/internal/crypto"
+	"github.com/airtel-ubrnms/discovery-service/internal/fingerprint"
 	"github.com/airtel-ubrnms/discovery-service/internal/handler"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
 	"github.com/airtel-ubrnms/discovery-service/internal/realtime"
@@ -124,6 +125,20 @@ func main() {
 	}
 	runExecutor.WithSNMP(credRepo, credEncryptor, snmpConcurrency, snmpDefaultCommunity).
 		WithSNMPPort(snmpPort)
+
+	// Wire the registry-driven fingerprint matcher so new vendor product definitions
+	// uploaded via the product-definition-service are automatically recognised during
+	// OID classification — zero code changes required per new vendor.
+	// FINGERPRINT_REGISTRY_URL defaults to the Docker service name used in docker-compose.
+	fingerprintRegistryURL := os.Getenv("FINGERPRINT_REGISTRY_URL")
+	if fingerprintRegistryURL == "" {
+		fingerprintRegistryURL = "http://product-definition-service:8093"
+	}
+	fpReader  := fingerprint.NewHTTPRegistryReader(fingerprintRegistryURL)
+	fpClient  := fingerprint.NewRegistryClient(fpReader, 60*time.Second)
+	fpMatcher := fingerprint.NewMatcher(fpClient)
+	runExecutor.WithFingerprintMatcher(fpMatcher)
+	slog.Info("fingerprint: registry-driven matcher wired", "registryURL", fingerprintRegistryURL)
 
 	h := handler.New(svc, store, runStore).
 		WithHMACValidator(hmacValidator).

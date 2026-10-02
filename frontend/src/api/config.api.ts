@@ -88,8 +88,28 @@ export async function getJobStatus(jobId: string): Promise<ConfigJob> {
 }
 
 export async function getVersionHistory(deviceId: string): Promise<ConfigVersion[]> {
-  const res = await apiClient.get<ConfigVersion[]>(`/devices/${deviceId}/config-history`);
-  return res.data;
+  const res = await apiClient.get(`/devices/${deviceId}/config-history`);
+  const data = res.data as ConfigVersion[] | { items?: ConfigVersionRecord[] };
+
+  // Java config-service returns a plain array; the local stub returns a paginated object.
+  // Normalise both so ConfigHistoryTab always sees ConfigVersion[].
+  if (Array.isArray(data)) return data as ConfigVersion[];
+
+  const paged = data as { items?: ConfigVersionRecord[] };
+  if (paged?.items && Array.isArray(paged.items)) {
+    return paged.items.map((r, i) => ({
+      id:            r.versionId,
+      deviceId,
+      versionNumber: r.versionNumber ?? (paged.items!.length - i),
+      actor:         r.actor ?? 'system',
+      appliedAt:     r.appliedAt ?? r.attemptedAt ?? new Date().toISOString(),
+      // Map the stored params blob → newValues for the history card grid
+      newValues:     (r as unknown as { params?: Record<string, string> }).params ?? {},
+      // Pass through extra fields ConfigHistoryTab casts to access (status, templateId)
+      ...(r as unknown as Record<string, unknown>),
+    } as unknown as ConfigVersion));
+  }
+  return [];
 }
 
 // ── Paginated configuration history (WO-050) ─────────────────────────────────

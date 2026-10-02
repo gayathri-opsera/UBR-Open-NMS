@@ -28,9 +28,118 @@
 
 const express    = require('express');
 const dgram      = require('dgram');
+const http       = require('http');
 const mongoose   = require('mongoose');
 const { createProvisionHandler } = require('./provision.stub');
 const router     = express.Router();
+
+// ── Product-definition service URL (for fingerprint registry lookups) ─────────
+// Inside Docker network: product-definition-service:8093
+// Local dev / test: localhost:8093
+const PD_SERVICE_URL = process.env.FINGERPRINT_REGISTRY_URL || 'http://product-definition-service:8093';
+
+/**
+ * Fetch ALL fingerprint registry entries from the Java product-definition service.
+ * Returns an array of normalised fingerprint objects:
+ *   { fingerprintType: 'SNMP_OID'|'BANNER', fingerprintValue: string, productDefinitionId: string }
+ * Falls back to empty array on any error.
+ */
+let _pdRegistryCache   = null;
+let _pdRegistryCachedAt = 0;
+const PD_REGISTRY_TTL_MS = 60_000;
+
+async function fetchAllFingerprintsFromPDService() {
+  if (_pdRegistryCache && Date.now() - _pdRegistryCachedAt < PD_REGISTRY_TTL_MS) {
+    return _pdRegistryCache;
+  }
+  return new Promise((resolve) => {
+    const url = `${PD_SERVICE_URL}/internal/fingerprint-registry`;
+    http.get(url, (res) => {
+      let raw = '';
+      res.on('data', (chunk) => { raw += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(raw);
+          const entries = Array.isArray(parsed) ? parsed : (parsed.entries || []);
+          // Normalise Java PascalCase wire format → gateway camelCase format
+          const normalised = [];
+          for (const e of entries) {
+            const defId = e.ProductDefinitionID || '';
+            if (!defId) continue;
+            const oidPrefix = (e.SNMPOIDPrefix || '').replace(/^\./, '');
+            const oidExact  = (e.SNMPOIDExact  || '').replace(/^\./, '');
+            const banner    = e.SSHBannerSubstring || '';
+            const vendor    = e.Vendor || '';
+            const model     = e.Model  || '';
+            // Prefer prefix match; fall back to exact match (prefix match of exact OID also works correctly)
+            if (oidPrefix) {
+              normalised.push({ productDefinitionId: defId, fingerprintType: 'SNMP_OID',
+                fingerprintValue: oidPrefix, sysObjectId: oidPrefix, vendor, model });
+            } else if (oidExact) {
+              normalised.push({ productDefinitionId: defId, fingerprintType: 'SNMP_OID',
+                fingerprintValue: oidExact,  sysObjectId: oidExact,  vendor, model });
+            }
+            if (banner) {
+              normalised.push({ productDefinitionId: defId, fingerprintType: 'BANNER',
+                fingerprintValue: banner, vendor, model });
+            }
+          }
+          _pdRegistryCache   = normalised;
+          _pdRegistryCachedAt = Date.now();
+          resolve(normalised);
+        } catch (parseErr) {
+          console.warn('[discovery-stub] Failed to parse PD registry response:', parseErr.message);
+          resolve([]);
+        }
+      });
+    }).on('error', (err) => {
+      console.warn('[discovery-stub] PD registry fetch failed:', err.message);
+      resolve([]);
+    });
+  });
+}
+
+/**
+ * Fetch fingerprints for a specific productDefinitionId — queries PD service first,
+ * falls back to MongoDB fingerprint_registry_entries.
+ */
+async function fetchCallerFingerprints(definitionId, mongoFallback) {
+  // Try PD service (authoritative source)
+  const all = await fetchAllFingerprintsFromPDService();
+  const matched = all.filter((e) => e.productDefinitionId === definitionId);
+  if (matched.length > 0) {
+    console.log(`[discovery-stub] PD-service fingerprints for '${definitionId}': ${matched.length} entry(s)`);
+    return matched;
+  }
+  // Fall back to MongoDB fingerprint_registry_entries (legacy seed data)
+  try {
+    const col = mongoFallback || await getFingerprintCol();
+    const mongoEntries = await col.find({ productDefinitionId: definitionId }).toArray();
+    console.log(`[discovery-stub] MongoDB fingerprints for '${definitionId}': ${mongoEntries.length} entry(s)`);
+    return mongoEntries;
+  } catch (mongoErr) {
+    console.error(`[discovery-stub] ❌ MongoDB fingerprint fallback failed for '${definitionId}':`, mongoErr.message);
+    return [];
+  }
+}
+
+// ── Test-network SNMP port overrides (module-level) ───────────────────────────
+// Simulators on snmp-test-net (10.10.10.0/24) listen on non-standard SNMP ports.
+// Java discovery hardcodes port 161 and can't reach these directly.
+// The gateway auto-bypasses Java for these IPs and uses these port mappings.
+const TEST_SNMP_PORT_MAP = {
+  '10.10.10.25': 1161,  // nms-snmpsim  — generic MIB-II / Cisco walk
+  '10.10.10.26': 1162,  // nms-eoc-bts  — EOC Configurations_GUI BTS
+  '10.10.10.27': 1163,  // nms-eoc-cpe  — EOC Configurations_GUI CPE
+};
+
+// ── Multi-port host expansion ─────────────────────────────────────────────────
+// When a hostname is entered without an explicit port (e.g. "host.docker.internal"),
+// expand it to all known simulator ports so SNMP Network Discovery behaves the
+// same as Quick SNMP Discovery which uses explicit host:port notation.
+const MULTI_PORT_HOST_MAP = {
+  'host.docker.internal': [1162, 1163, 1161], // BTS, CPE, snmpsim
+};
 
 // ── Minimal SNMP v2c BER encoder/decoder (pure Node.js, no libs) ──────────────
 
@@ -199,17 +308,94 @@ function snmpGet(host, port, community, timeoutMs = 4000, version = 'v2c') {
   });
 }
 
-/** Map sysObjectID enterprise OID prefix → vendor/model/deviceType */
-function classifyByOid(sysObjectID) {
+/**
+ * Returns true when the device MIB data matches at least one fingerprint entry
+ * for the caller-selected product definition template.
+ *
+ * Matching rules (any hit = included):
+ *   SNMP_OID  — device sysObjectID starts with the registered OID prefix
+ *   BANNER    — device sysDescr matches the registered regex pattern
+ *
+ * When entries is empty (template has no fingerprints or none are activated),
+ * returns true so all responding devices are included (safe fallback).
+ */
+function matchesTemplateFingerprints(mib, entries) {
+  if (!entries || entries.length === 0) return true; // no fingerprint constraint → accept all
+  const deviceOid = (mib.sysObjectID || '').replace(/^\./, '');
+  for (const entry of entries) {
+    if (entry.fingerprintType === 'SNMP_OID') {
+      const oidVal = (entry.sysObjectId || entry.fingerprintValue || '').replace(/^\./, '');
+      if (oidVal && deviceOid && deviceOid.startsWith(oidVal)) return true;
+    }
+    if (entry.fingerprintType === 'BANNER') {
+      try {
+        if (entry.fingerprintValue && new RegExp(entry.fingerprintValue, 'i').test(mib.sysDescr || '')) return true;
+      } catch { /* bad regex — ignore */ }
+    }
+  }
+  return false;
+}
+
+/**
+ * Registry-driven OID classification.
+ *
+ * Priority:
+ *   1. Fingerprint registry (SNMP_OID entries from activated product definitions)
+ *      — longest-prefix match on sysObjectId so uploading a new definition is
+ *        enough to make a new vendor discoverable. NO code change required.
+ *   2. Legacy hardcoded map (fallback for devices that have no product definition
+ *      uploaded yet — Cisco, Juniper, etc. work out-of-the-box).
+ *
+ * Cached for 30 s so the first discovery after a definition is activated picks
+ * up the new entries without a gateway restart.
+ */
+let _snmpOidEntries    = null;   // cached entries from fingerprint_registry_entries
+let _snmpOidCachedAt   = 0;
+const SNMP_OID_TTL_MS  = 30_000; // 30 s
+
+async function classifyByOid(sysObjectID) {
   if (!sysObjectID) return {};
-  const oid = sysObjectID;
-  if (oid.startsWith('1.3.6.1.4.1.9.'))    return { vendor: 'Cisco',    model: 'IOS Switch',  genericDeviceType: 'SWITCH' };
-  if (oid.startsWith('1.3.6.1.4.1.2636.')) return { vendor: 'Juniper',  model: 'JunOS Device', genericDeviceType: 'ROUTER' };
-  if (oid.startsWith('1.3.6.1.4.1.2272.')) return { vendor: 'Nortel',   model: 'ERS Switch',   genericDeviceType: 'SWITCH' };
-  if (oid.startsWith('1.3.6.1.4.1.4526.')) return { vendor: 'Netgear',  model: 'Smart Switch',  genericDeviceType: 'SWITCH' };
-  if (oid.startsWith('1.3.6.1.4.1.3764.')) return { vendor: 'EOC',      model: 'EOC640',                 genericDeviceType: 'RADIO', productDefinitionId: 'EOC640'              };
-  if (oid.startsWith('1.3.6.1.4.1.52619.'))return { vendor: 'EOC',      model: 'Configurations_GUI',     genericDeviceType: 'RADIO', productDefinitionId: 'Configurations_GUI'  };
-  if (oid.startsWith('1.3.6.1.4.1.41112.'))return { vendor: 'Ubiquiti', model: 'UniFi',                  genericDeviceType: 'RADIO'  };
+  const oid = sysObjectID.startsWith('.') ? sysObjectID.slice(1) : sysObjectID;
+
+  // ── Layer 1: fingerprint registry (product-definition driven, zero-code) ───
+  try {
+    if (!_snmpOidEntries || Date.now() - _snmpOidCachedAt > SNMP_OID_TTL_MS) {
+      const col = await getFingerprintCol();
+      _snmpOidEntries  = await col.find({ fingerprintType: 'SNMP_OID' }).toArray();
+      _snmpOidCachedAt = Date.now();
+      console.log(`[discovery-stub] OID registry refreshed — ${_snmpOidEntries.length} SNMP_OID entries`);
+    }
+
+    let bestLen  = 0;
+    let bestEntry = null;
+    for (const entry of _snmpOidEntries) {
+      // sysObjectId in the registry may have a leading dot; normalise before comparing
+      const entryOid = (entry.sysObjectId || entry.fingerprintValue || '').replace(/^\./, '');
+      if (entryOid && oid.startsWith(entryOid) && entryOid.length > bestLen) {
+        bestLen  = entryOid.length;
+        bestEntry = entry;
+      }
+    }
+    if (bestEntry) {
+      return {
+        vendor:              bestEntry.vendor  || 'Unknown',
+        model:               bestEntry.model   || 'SNMP Device',
+        genericDeviceType:   bestEntry.deviceType || bestEntry.genericDeviceType || 'SWITCH',
+        productDefinitionId: bestEntry.productDefinitionId || null,
+      };
+    }
+  } catch (regErr) {
+    console.warn('[discovery-stub] OID registry lookup failed, falling back to hardcoded map:', regErr.message);
+  }
+
+  // ── Layer 2: hardcoded legacy map (fallback for known vendors without a PD) ─
+  if (oid.startsWith('1.3.6.1.4.1.9.'))     return { vendor: 'Cisco',    model: 'IOS Switch',       genericDeviceType: 'SWITCH' };
+  if (oid.startsWith('1.3.6.1.4.1.2636.'))  return { vendor: 'Juniper',  model: 'JunOS Device',     genericDeviceType: 'ROUTER' };
+  if (oid.startsWith('1.3.6.1.4.1.2272.'))  return { vendor: 'Nortel',   model: 'ERS Switch',       genericDeviceType: 'SWITCH' };
+  if (oid.startsWith('1.3.6.1.4.1.4526.'))  return { vendor: 'Netgear',  model: 'Smart Switch',     genericDeviceType: 'SWITCH' };
+  if (oid.startsWith('1.3.6.1.4.1.3764.'))  return { vendor: 'EOC',      model: 'EOC640',           genericDeviceType: 'RADIO', productDefinitionId: 'EOC640'             };
+  if (oid.startsWith('1.3.6.1.4.1.52619.')) return { vendor: 'EOC',      model: 'Configurations_GUI', genericDeviceType: 'RADIO', productDefinitionId: 'Configurations_GUI' };
+  if (oid.startsWith('1.3.6.1.4.1.41112.')) return { vendor: 'Ubiquiti', model: 'UniFi',            genericDeviceType: 'RADIO' };
   return { vendor: 'Unknown', model: 'SNMP Device', genericDeviceType: 'SWITCH' };
 }
 
@@ -253,6 +439,81 @@ async function getFingerprintCol() {
   _fregCol = _fregConn.db.collection('fingerprint_registry_entries');
   return _fregCol;
 }
+
+// ── SNMP Credential storage ───────────────────────────────────────────────────
+// Credentials are stored in the main MongoDB (ubrnms DB) as `snmp_credentials`.
+// Sensitive fields (community, authKey, privKey) are stored encrypted in production;
+// in dev/stub mode they are stored as-is (plaintext) for simplicity.
+let _credCol = null;
+async function getCredentialCol() {
+  if (_credCol) return _credCol;
+  if (mongoose.connection.readyState === 1) {
+    _credCol = mongoose.connection.db.collection('snmp_credentials');
+    return _credCol;
+  }
+  const conn = await mongoose.createConnection(MONGO_URI, { serverSelectionTimeoutMS: 5000 }).asPromise();
+  _credCol = conn.db.collection('snmp_credentials');
+  return _credCol;
+}
+
+// ── GET /credentials — list all SNMP credentials (redacted) ──────────────────
+router.get('/credentials', async (req, res) => {
+  try {
+    const col  = await getCredentialCol();
+    const docs = await col.find({}).sort({ createdAt: -1 }).toArray();
+    return res.json(docs.map((d) => ({
+      id:             String(d._id),
+      name:           d.name || 'Unnamed',
+      version:        d.version || 'SNMP_V2C',
+      communityMasked: d.community ? d.community.slice(0, 2) + '****' : undefined,
+      createdAt:      d.createdAt,
+    })));
+  } catch (e) {
+    console.error('[discovery-stub] credential list failed:', e.message);
+    return res.status(500).json({ code: 'DB_ERROR', message: e.message });
+  }
+});
+
+// ── POST /credentials — create a new SNMP credential ─────────────────────────
+router.post('/credentials', async (req, res) => {
+  const { name, version = 'SNMP_V2C', community, authKey, privKey, authProtocol, privProtocol } = req.body || {};
+  if (!name) return res.status(400).json({ code: 'BAD_REQUEST', message: 'name is required' });
+  if ((version === 'SNMP_V1' || version === 'SNMP_V2C') && !community) {
+    return res.status(400).json({ code: 'BAD_REQUEST', message: 'community is required for SNMPv1/v2c' });
+  }
+  try {
+    const col = await getCredentialCol();
+    const doc = {
+      name, version, community: community || null,
+      authKey: authKey || null, privKey: privKey || null,
+      authProtocol: authProtocol || null, privProtocol: privProtocol || null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const result = await col.insertOne(doc);
+    console.log(`[discovery-stub] Credential created: ${name} (${version})`);
+    return res.status(201).json({
+      id: String(result.insertedId),
+      name, version,
+      communityMasked: community ? community.slice(0, 2) + '****' : undefined,
+      createdAt: doc.createdAt,
+    });
+  } catch (e) {
+    console.error('[discovery-stub] credential create failed:', e.message);
+    return res.status(500).json({ code: 'DB_ERROR', message: e.message });
+  }
+});
+
+// ── DELETE /credentials/:id — remove a credential ────────────────────────────
+router.delete('/credentials/:id', async (req, res) => {
+  try {
+    const { ObjectId } = mongoose.mongo;
+    const col = await getCredentialCol();
+    await col.deleteOne({ _id: new ObjectId(req.params.id) });
+    return res.status(204).end();
+  } catch (e) {
+    return res.status(500).json({ code: 'DB_ERROR', message: e.message });
+  }
+});
 
 // ── Demo device templates keyed by fingerprint pattern ────────────────────────
 
@@ -442,73 +703,166 @@ router.post('/runs', async (req, res, next) => {
   const {
     scope             = [],
     icmpBypass        = false,
-    community         = 'public',
+    community:        bodyCommunity = 'public',
+    credentialId,
     protocol          = 'SNMP_V2C',
     timeoutSeconds    = 5,
     productDefinitionId: callerDefinitionId = null,
   } = body;
 
+  // ── Resolve community string from credentialId if provided ────────────────
+  // credentialId takes priority; fall back to direct community string input.
+  let community = bodyCommunity;
+  if (credentialId) {
+    try {
+      const credCol = await getCredentialCol();
+      const { ObjectId } = require('mongoose').mongo;
+      const cred = await credCol.findOne({ _id: new ObjectId(credentialId) });
+      if (cred && cred.community) {
+        community = cred.community;
+        console.log(`[discovery-stub] Resolved credentialId ${credentialId} → community=[masked]`);
+      }
+    } catch (credErr) {
+      console.warn('[discovery-stub] credentialId lookup failed:', credErr.message, '— using body community');
+    }
+  }
+
+  // ── Scope field normaliser ────────────────────────────────────────────────
+  // The frontend sends { type:'IP'|'CIDR'|'SEED', value:'...' } (parseScopeInput).
+  // Older gateway/Java code uses { type:'SINGLE_IP'|'HOSTNAME'|'CIDR', ip/cidr/hostname:'...' }.
+  // Normalise both shapes into a consistent { type, ip, cidr, hostname } representation.
+  const normalisedScope = Array.isArray(scope) ? scope.map((e) => {
+    if (typeof e === 'string') return { type: 'SINGLE_IP', ip: e };
+    const val = e.value || e.ip || e.hostname || e.cidr || '';
+    const t = e.type || '';
+    if (t === 'IP'   || t === 'SINGLE_IP') return { ...e, type: 'SINGLE_IP', ip:  val };
+    if (t === 'SEED' || t === 'HOSTNAME')  return { ...e, type: 'HOSTNAME',  hostname: val };
+    if (t === 'CIDR')                      return { ...e, type: 'CIDR',      cidr: val };
+    // Unknown type — guess by format
+    if (val.includes('/')) return { ...e, type: 'CIDR', cidr: val };
+    return { ...e, type: 'SINGLE_IP', ip: val };
+  }) : [];
+
   // Detect hostname-style scope entries (host.docker.internal, explicit :port, or non-CIDR hostnames)
-  const hasHostname = Array.isArray(scope) && scope.some((e) =>
+  const hasHostname = normalisedScope.some((e) =>
     (e.type === 'HOSTNAME') ||
-    (e.type === 'SINGLE_IP' && (e.ip || '').includes(':')) ||
-    (typeof e === 'string' && e.includes(':'))
+    (e.type === 'SINGLE_IP' && (e.ip || '').includes(':'))
   );
 
-  if (!icmpBypass && !hasHostname) {
-    // Let the Java nms-discovery service handle CIDR subnet scans normally
+  // Auto-bypass for any scope entry that targets the snmp-test-net (10.10.10.x).
+  // Those containers run SNMP on non-standard ports and Java discovery can't reach
+  // them via ICMP anyway — route directly through the gateway SNMP-bypass path.
+  const isTestNetScope = normalisedScope.some((e) => {
+    const ip = e.ip || e.hostname || '';
+    return /^10\.10\.10\.\d+$/.test(ip) || (e.type === 'CIDR' && (e.cidr || '').startsWith('10.10.10.'));
+  });
+
+  // Single-IP targets (real devices) are also routed through the gateway bypass path.
+  // This ensures:
+  //   - Custom community strings (credentialId or direct) are honoured
+  //   - SNMP probe works even when ICMP is blocked by the device's firewall
+  //   - Java discovery service (which ignores the community param) is NOT used for single IPs
+  // Only pure CIDR subnet scans are forwarded to the Java service.
+  const isSingleIpOnly = normalisedScope.length > 0 &&
+    normalisedScope.every(e => e.type === 'SINGLE_IP' && !(e.ip || '').includes(':'));
+
+  // isRealIpTarget: single IP that is not a Docker simulator (real device with SNMP)
+  const isRealIpTarget = isSingleIpOnly && !isTestNetScope;
+
+  if (!icmpBypass && !hasHostname && !isTestNetScope && !isSingleIpOnly) {
+    // Only CIDR subnet scans go to the Java nms-discovery service
     return next();
   }
 
-  // ── ICMP-Bypass: run SNMP-only discovery ──────────────────────────────────
+  // ── Gateway SNMP probe: run SNMP-only discovery (with optional ICMP for real IPs) ──
   const runId   = `bypass-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const startAt = new Date().toISOString();
-  console.log(`[discovery-stub] ICMP-bypass run ${runId} — scope=${JSON.stringify(scope)}`);
+  console.log(`[discovery-stub] SNMP-probe run ${runId} — scope=${JSON.stringify(scope)} community=[${community === 'public' ? 'public' : 'custom'}] realIp=${isRealIpTarget}`);
 
-  // Flatten scope to host:port strings
+  // Flatten normalised scope to host:port strings
   const targets = [];
-  for (const entry of scope) {
-    if (entry.type === 'HOSTNAME' || entry.type === 'SINGLE_IP') {
-      targets.push(entry.hostname || entry.ip);
+
+  /** Expand a CIDR (e.g. "10.10.10.0/24") → array of usable host IPs */
+  function expandCidr(cidr) {
+    const [base, maskStr] = (cidr || '').split('/');
+    const mask = parseInt(maskStr, 10);
+    if (!base || isNaN(mask) || mask < 16 || mask > 30) return base ? [base] : [];
+    const parts = base.split('.').map(Number);
+    const baseInt = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3];
+    const size = 1 << (32 - mask);
+    const ips = [];
+    for (let i = 1; i < size - 1; i++) { // skip network (0) and broadcast (last)
+      const n = (baseInt & ~(size - 1)) + i;
+      ips.push(`${(n >>> 24) & 0xff}.${(n >>> 16) & 0xff}.${(n >>> 8) & 0xff}.${n & 0xff}`);
+    }
+    return ips;
+  }
+
+  for (const entry of normalisedScope) {
+    if (entry.type === 'HOSTNAME') {
+      const hostname = entry.hostname || '';
+      if (hostname.includes(':')) {
+        // Already has an explicit port — use as-is (e.g. host.docker.internal:1162)
+        targets.push(hostname);
+      } else if (MULTI_PORT_HOST_MAP[hostname]) {
+        // Known multi-port host (e.g. host.docker.internal) — expand to all simulator ports
+        // so "SNMP Network Discovery" finds all devices, same as Quick SNMP Discovery
+        MULTI_PORT_HOST_MAP[hostname].forEach(p => targets.push(`${hostname}:${p}`));
+      } else {
+        targets.push(hostname);
+      }
+    } else if (entry.type === 'SINGLE_IP') {
+      targets.push(entry.ip);
     } else if (entry.type === 'CIDR') {
-      // For CIDR entries in bypass mode, push the network gateway as the target
-      targets.push((entry.cidr || '').split('/')[0]);
-    } else if (typeof entry === 'string') {
-      targets.push(entry);
+      // Expand CIDR to individual IPs (guard: limit to /16–/30 to avoid huge ranges)
+      expandCidr(entry.cidr || '').forEach(ip => targets.push(ip));
     }
   }
 
   const snmpProtoVersion = (protocol || '').includes('V1') ? 'v1' : 'v2c';
 
-  // Pre-load caller definition metadata
+  // Pre-load caller definition metadata + ALL its fingerprint entries for device filtering
   let callerDefMeta = null;
+  let callerFingerprintEntries = []; // used to FILTER results to only matching devices
   if (callerDefinitionId) {
     callerDefMeta = { productDefinitionId: callerDefinitionId };
-    try {
-      for (const dbName of ['ubrnms_productdef', 'ubrnms']) {
-        const fpCol = mongoose.connection.client.db(dbName).collection('fingerprint_registry_entries');
-        const fp = await fpCol.findOne({ productDefinitionId: callerDefinitionId });
-        if (fp) { callerDefMeta = { productDefinitionId: callerDefinitionId, vendor: fp.vendor, model: fp.model }; break; }
-      }
-    } catch { /* non-fatal */ }
+    // Fetch from PD service (authoritative) with MongoDB fallback
+    callerFingerprintEntries = await fetchCallerFingerprints(callerDefinitionId);
+    const sample = callerFingerprintEntries[0];
+    if (sample) callerDefMeta = { productDefinitionId: callerDefinitionId, vendor: sample.vendor, model: sample.model };
+    if (callerFingerprintEntries.length === 0) {
+      console.warn(`[discovery-stub] ⚠️  No fingerprints found for template '${callerDefinitionId}' — filter will pass all devices`);
+    }
   }
 
-  // Load BANNER fingerprints
+  // Load BANNER fingerprints for auto-classification (used when no template is selected)
   let banners = [];
   try {
     const fregCol = await getFingerprintCol();
     banners = await fregCol.find({ fingerprintType: 'BANNER' }).toArray();
   } catch { /* empty registry is OK */ }
 
-  const hosts = [];
-  const errors = [];
+  const hosts   = [];
+  const errors  = [];
+  const skipped = []; // devices that responded but didn't match the selected template
 
   await Promise.all(targets.map(async (target) => {
-    const [host, rawPort] = target.includes(':') ? [target.split(':')[0], parseInt(target.split(':')[1], 10)] : [target, 161];
-    const port = isNaN(rawPort) ? 161 : rawPort;
+    const [host, rawPort] = target.includes(':') ? [target.split(':')[0], parseInt(target.split(':')[1], 10)] : [target, NaN];
+    const port = isNaN(rawPort) ? (TEST_SNMP_PORT_MAP[host] || 161) : rawPort;
     try {
       const mib = await snmpGet(host, port, community, (timeoutSeconds || 5) * 1000, snmpProtoVersion);
-      const oidClass = classifyByOid(mib.sysObjectID);
+      // ── Template filter ────────────────────────────────────────────────────
+      // When a product definition template is selected, only include devices whose
+      // OID or sysDescr matches the template's activated fingerprints.
+      // Devices that respond to SNMP but don't match are excluded from results
+      // (counted in `skipped`) so the operator sees only relevant devices.
+      if (callerFingerprintEntries.length > 0 && !matchesTemplateFingerprints(mib, callerFingerprintEntries)) {
+        console.log(`[discovery-stub] ⛔ ${host}:${port} (OID: ${mib.sysObjectID}) excluded — no fingerprint match for template '${callerDefinitionId}'`);
+        skipped.push({ target: `${host}:${port}`, oid: mib.sysObjectID, sysDescr: (mib.sysDescr || '').substring(0, 80) });
+        return; // don't provision, don't add to hosts
+      }
+
+      const oidClass = await classifyByOid(mib.sysObjectID);
       let vendor  = oidClass.vendor  || 'Unknown';
       let model   = oidClass.model   || 'SNMP Device';
       let generic = oidClass.genericDeviceType || 'SWITCH';
@@ -526,6 +880,7 @@ router.post('/runs', async (req, res, next) => {
         } catch { /* bad regex */ }
       }
 
+      // Apply caller-selected template for matching devices
       if (callerDefMeta) {
         defId   = callerDefMeta.productDefinitionId;
         if (callerDefMeta.vendor) vendor = callerDefMeta.vendor;
@@ -536,18 +891,56 @@ router.post('/runs', async (req, res, next) => {
         ? mib.sysName.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 64)
         : `snmp-${host.replace(/\./g, '-')}-${port}`;
 
-      // Provision to inventory (same as snmp-probe)
-      await provisionOne({
-        ip: host, port, serialNumber: serial,
-        sysDescr: mib.sysDescr, sysObjectID: mib.sysObjectID,
-        sysName: mib.sysName, sysLocation: mib.sysLocation,
-        vendor, model, genericDeviceType: generic,
-        productDefinitionId: defId,
-      });
+      // Provision to inventory — direct MongoDB upsert (same pattern as snmp-probe route)
+      // NOTE: ipAddress MUST use displayIp (host:port when port ≠ 161) so the inventory
+      // cross-reference in the results view (inventoryDeviceMap.get(result.ip)) succeeds.
+      // Using bare `host` here was the root cause of "Provision Device" reappearing on
+      // already-provisioned devices after a new discovery run.
+      const displayIp = port !== 161 ? `${host}:${port}` : host;
+      try {
+        const devicesCol = await getDevicesCol();
+        const now = new Date();
+        const doc = {
+          _id:              serial,
+          id:               serial,
+          deviceId:         serial,
+          serialNumber:     serial,
+          name:             mib.sysName || serial,
+          deviceName:       mib.sysName || serial,
+          deviceType:       generic === 'RADIO' ? 'RADIO' : null,
+          genericDeviceType: generic,
+          model,
+          manufacturer:     vendor,
+          productDefinitionId: defId,
+          status:           'ONLINE',
+          ipAddress:        displayIp,
+          snmpPort:         port,
+          snmpCommunity:    community,
+          sysDescr:         mib.sysDescr,
+          sysObjectID:      mib.sysObjectID,
+          sysName:          mib.sysName,
+          sysLocation:      mib.sysLocation,
+          sysContact:       mib.sysContact,
+          discoveryParadigm: defId ? 'BANNER' : 'SNMP',
+          tags:             isRealIpTarget ? ['snmp-discovered', 'real-device'] : ['snmp-discovered', 'icmp-bypass'],
+          createdAt:        now,
+          updatedAt:        now,
+        };
+        await devicesCol.replaceOne({ _id: doc._id }, doc, { upsert: true });
+        console.log(`[discovery-stub] bypass provisioned ${serial} (${generic}) @ ${host}:${port} defId=${defId}`);
+        try { require('./topology.stub').bustTopologyCache(); } catch { /* ignore */ }
+      } catch (provErr) {
+        console.warn(`[discovery-stub] bypass provision failed for ${serial}: ${provErr.message}`);
+      }
 
+      // displayIp is already computed above (before provisioning) — reuse it here.
+      // serialNumber MUST be included so inventoryDeviceMap.get(result.serialNumber)
+      // succeeds in the frontend cross-reference, even when the ipAddress lookup misses.
       hosts.push({
-        ip:               host,
-        icmpStatus:       'bypassed',   // ICMP was skipped intentionally
+        ip:               displayIp,
+        serialNumber:     serial,       // ← was missing; causes "Provision Device" to re-appear
+        port,
+        icmpStatus:       isRealIpTarget ? 'not_attempted' : 'bypassed',
         snmpStatus:       'success',
         sysName:          mib.sysName,
         sysDescr:         mib.sysDescr,
@@ -564,8 +957,9 @@ router.post('/runs', async (req, res, next) => {
     } catch (err) {
       console.warn(`[discovery-stub] bypass ❌ ${host}:${port} → ${err.message}`);
       errors.push({ target, error: err.message });
+      const displayIpFail = port !== 161 ? `${host}:${port}` : host;
       hosts.push({
-        ip: host, icmpStatus: 'timeout', snmpStatus: 'failed',
+        ip: displayIpFail, port, icmpStatus: isRealIpTarget ? 'not_attempted' : 'bypassed', snmpStatus: 'failed',
         sysName: null, sysDescr: null, sysObjectID: null,
         sysLocation: null, sysContact: null, vendor: null, model: null,
         genericDeviceType: null, productDefinitionId: null, macAddress: null,
@@ -574,6 +968,9 @@ router.post('/runs', async (req, res, next) => {
     }
   }));
 
+  const skipMsg = skipped.length > 0
+    ? ` — ${skipped.length} device(s) excluded (OID/banner did not match template '${callerDefinitionId}')`
+    : '';
   const run = {
     runId,
     status:          'COMPLETED',
@@ -582,11 +979,15 @@ router.post('/runs', async (req, res, next) => {
     createdBy:       req.user?.sub || 'admin',
     createdAt:       startAt,
     completedAt:     new Date().toISOString(),
-    validationSummary: `ICMP-bypass scan of ${targets.length} target(s)`,
+    validationSummary: `ICMP-bypass scan of ${targets.length} target(s)${skipMsg}`,
     icmpBypass:      true,
     hosts,
     errors,
+    skipped,          // devices that responded but didn't match the selected template
   };
+  if (skipped.length > 0) {
+    console.log(`[discovery-stub] Template filter '${callerDefinitionId}': ${hosts.length} matched, ${skipped.length} excluded`);
+  }
   syntheticRuns.set(runId, run);
 
   // Return in the same shape as Java createDiscoveryRun (status COMPLETED immediately)
@@ -628,6 +1029,28 @@ router.get('/runs/:runId/results', (req, res, next) => {
   const run = syntheticRuns.get(req.params.runId);
   if (!run) return next();
   res.json(run.hosts);
+});
+
+/**
+ * POST /api/v1/discovery/runs/:runId/provision
+ * For ICMP-bypass runs, devices are already provisioned to MongoDB during discovery.
+ * This handler returns a success response so the frontend Provision button works.
+ * Falls through to Java for real runs.
+ */
+router.post('/runs/:runId/provision', (req, res, next) => {
+  const run = syntheticRuns.get(req.params.runId);
+  if (!run) return next();
+  // Devices were auto-provisioned into MongoDB during the bypass discovery run.
+  const hosts = req.body?.hosts || run.hosts.map((h) => ({ ip: h.ip }));
+  console.log(`[discovery-stub] provision request for bypass run ${req.params.runId} — ${hosts.length} host(s) already in DB`);
+  res.json({
+    provisioned: hosts.length,
+    failed:      0,
+    results:     hosts.map((h) => ({
+      ip:     h.ip || h,
+      status: 'provisioned',
+    })),
+  });
 });
 
 /**
@@ -773,36 +1196,45 @@ router.post('/snmp-probe', async (req, res) => {
   if (!Array.isArray(targets) || targets.length === 0) {
     return res.status(400).json({ code: 'BAD_REQUEST', message: 'targets array required' });
   }
-  if (targets.length > 20) {
+
+  // Expand known multi-port hosts entered without a port (e.g. "host.docker.internal").
+  // This prevents a SNMP timeout when the user types the hostname without specifying
+  // which simulator port (1161/1162/1163) to hit — instead we probe all known ports.
+  const expandedTargets = [];
+  for (const t of targets) {
+    if (!t.includes(':') && MULTI_PORT_HOST_MAP[t]) {
+      MULTI_PORT_HOST_MAP[t].forEach((p) => expandedTargets.push(`${t}:${p}`));
+    } else {
+      expandedTargets.push(t);
+    }
+  }
+
+  if (expandedTargets.length > 20) {
     return res.status(400).json({ code: 'BAD_REQUEST', message: 'max 20 targets per probe' });
   }
 
-  console.log(`[snmp-probe] Probing ${targets.length} target(s): ${targets.join(', ')}`);
+  console.log(`[snmp-probe] Probing ${expandedTargets.length} target(s): ${expandedTargets.join(', ')}`);
 
-  // ── If caller supplied a definition, pre-load its metadata from the registry ──────────
-  // This enables vendor/device-independent discovery: any device responding to SNMP
-  // gets tagged with the selected definition, regardless of its OID enterprise prefix.
+  // ── Pre-load caller-specified definition: metadata + ALL fingerprints for device filtering ──
+  // When a template is selected, only devices whose OID/sysDescr matches its fingerprints
+  // are included in results. Non-matching devices are excluded (counted in `skipped`).
   let callerDefMeta = null;
+  let callerFingerprintEntries = []; // all fingerprints for the selected template
   if (callerDefinitionId) {
-    try {
-      for (const dbName of ['ubrnms_productdef', 'ubrnms']) {
-        const paramCol = mongoose.connection.client.db(dbName).collection('parameter_registry_entries');
-        const sample = await paramCol.findOne({ productDefinitionId: callerDefinitionId });
-        if (sample) { callerDefMeta = { productDefinitionId: callerDefinitionId }; break; }
-        // Also try fingerprint registry for vendor/model
-        const fpCol = mongoose.connection.client.db(dbName).collection('fingerprint_registry_entries');
-        const fp = await fpCol.findOne({ productDefinitionId: callerDefinitionId });
-        if (fp) { callerDefMeta = { productDefinitionId: callerDefinitionId, vendor: fp.vendor, model: fp.model }; break; }
-      }
-    } catch { /* non-fatal — definition metadata unavailable */ }
-    if (!callerDefMeta) {
-      // Definition not in registry yet (e.g. DRAFT not activated) — still use the ID
-      callerDefMeta = { productDefinitionId: callerDefinitionId };
+    // Fetch from PD service (authoritative) with MongoDB fallback
+    callerFingerprintEntries = await fetchCallerFingerprints(callerDefinitionId);
+    const sample = callerFingerprintEntries[0];
+    callerDefMeta = sample
+      ? { productDefinitionId: callerDefinitionId, vendor: sample.vendor, model: sample.model }
+      : { productDefinitionId: callerDefinitionId };
+    if (callerFingerprintEntries.length === 0) {
+      console.warn(`[snmp-probe] ⚠️  No fingerprints found for template '${callerDefinitionId}' — filter will pass all devices`);
+    } else {
+      console.log(`[snmp-probe] Template '${callerDefinitionId}': ${callerFingerprintEntries.length} fingerprint(s) loaded → ${JSON.stringify(callerDefMeta)}`);
     }
-    console.log(`[snmp-probe] Caller-specified definition: ${callerDefinitionId} → ${JSON.stringify(callerDefMeta)}`);
   }
 
-  // Load BANNER fingerprints once for classification
+  // Load ALL BANNER fingerprints for auto-classification (used when no template is selected)
   let banners = [];
   try {
     const fregCol = await getFingerprintCol();
@@ -811,20 +1243,33 @@ router.post('/snmp-probe', async (req, res) => {
 
   const discoveredHosts = [];
   const errors          = [];
+  const skipped         = []; // responded to SNMP but didn't match the selected template
 
-  // Probe all targets in parallel
-  await Promise.all(targets.map(async (target) => {
-    const [host, rawPort] = target.includes(':') ? [target.split(':')[0], parseInt(target.split(':')[1], 10)] : [target, 161];
-    const port = isNaN(rawPort) ? 161 : rawPort;
+  // Probe all targets in parallel (using expandedTargets so multi-port hosts like
+  // "host.docker.internal" are resolved to individual host:port pairs first)
+  await Promise.all(expandedTargets.map(async (target) => {
+    const [host, rawPort] = target.includes(':') ? [target.split(':')[0], parseInt(target.split(':')[1], 10)] : [target, NaN];
+    const port = isNaN(rawPort) ? (TEST_SNMP_PORT_MAP[host] || 161) : rawPort;
     try {
       const mib = await snmpGet(host, port, community, 5000, snmpProtoVersion);
       console.log(`[snmp-probe] ✅ ${host}:${port} → sysName=${mib.sysName} sysDescr=${(mib.sysDescr||'').substring(0,50)}`);
 
+      // ── Template filter ────────────────────────────────────────────────────
+      // When a product definition template is selected, only return devices whose
+      // OID or sysDescr actually matches the template's fingerprints.
+      // This ensures selecting "Acme Networks X9000" only returns Acme devices,
+      // not every device that happens to respond to SNMP on the given scope.
+      if (callerFingerprintEntries.length > 0 && !matchesTemplateFingerprints(mib, callerFingerprintEntries)) {
+        console.log(`[snmp-probe] ⛔ ${host}:${port} (OID: ${mib.sysObjectID}) excluded — no fingerprint match for template '${callerDefinitionId}'`);
+        skipped.push({ target: `${host}:${port}`, oid: mib.sysObjectID, sysDescr: (mib.sysDescr || '').substring(0, 80) });
+        return; // exclude from results
+      }
+
       // Classification priority (highest → lowest):
       //   1. Caller-supplied productDefinitionId (vendor-independent — user chose the definition)
       //   2. BANNER fingerprint match from the activated fingerprint registry
-      //   3. OID enterprise prefix (classifyByOid hardcoded map)
-      const oidClass = classifyByOid(mib.sysObjectID);
+      //   3. OID enterprise prefix — registry-driven first, then hardcoded fallback (classifyByOid)
+      const oidClass = await classifyByOid(mib.sysObjectID);
       let resolvedVendor  = oidClass.vendor  || 'Unknown';
       let resolvedModel   = oidClass.model   || 'SNMP Device';
       let resolvedGeneric = oidClass.genericDeviceType || 'SWITCH';
@@ -921,9 +1366,14 @@ router.post('/snmp-probe', async (req, res) => {
     try { require('./topology.stub').bustTopologyCache(); } catch { /* ignore */ }
   }
 
+  if (skipped.length > 0) {
+    console.log(`[snmp-probe] Template filter '${callerDefinitionId}': ${discoveredHosts.length} matched, ${skipped.length} excluded`);
+  }
+
   return res.status(discoveredHosts.length > 0 ? 200 : 207).json({
-    probed:     targets.length,
+    probed:     expandedTargets.length,
     discovered: discoveredHosts.length,
+    skipped:    skipped.length,    // devices that responded but didn't match the selected template
     errors:     errors.length,
     devices:    discoveredHosts.map((h) => ({
       ip:                 h.ip,
@@ -938,7 +1388,8 @@ router.post('/snmp-probe', async (req, res) => {
       productDefinitionId: h.productDefinitionId,
       provisioned:        provision,
     })),
-    errorDetails: errors,
+    errorDetails:  errors,
+    skippedDetails: skipped,  // diagnostic: which devices were excluded and why
   });
 });
 

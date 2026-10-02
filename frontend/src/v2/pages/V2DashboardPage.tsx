@@ -99,8 +99,8 @@ const DEFAULT_TAB_STATE: TabState = {
   widgetOrder: ALL_WIDGETS,
 };
 
-// v2 = bumped when grid columns changed (3-col vs old 2-col); forces fresh defaults
-const STORAGE_KEY = (tabId: TabId) => `vf_dash_tab_v2_${tabId}`;
+// v3 = bumped to reset stale mode filter (mode was saved as 'IDU' causing stat mismatch with inventory)
+const STORAGE_KEY = (tabId: TabId) => `vf_dash_tab_v3_${tabId}`;
 
 function loadTabState(tabId: TabId): TabState {
   try {
@@ -369,8 +369,10 @@ export default function V2DashboardPage() {
       Camera: '#f472b6', PDU: '#34d399', 'Switch Extender': '#60a5fa', Unknown: '#94a3b8',
     };
     const FALLBACK_COLORS = ['#60a5fa','#a78bfa','#22d3ee','#f59e0b','#22c55e','#fb923c'];
+    // Use all devices so Device Types always shows the full network picture
+    // (matches inventory page — not affected by advanced mode filter)
     const counts: Record<string, { total: number; online: number }> = {};
-    filtered.forEach((d) => {
+    devices.forEach((d) => {
       const t = d.genericDeviceType || d.deviceType || 'Unknown';
       if (!counts[t]) counts[t] = { total: 0, online: 0 };
       counts[t].total++;
@@ -412,18 +414,22 @@ export default function V2DashboardPage() {
     return Object.entries(buckets).map(([range, count]) => ({ range, count }));
   }, [cpeDevices]);
 
-  const onlineCount   = filtered.filter((d) => d.status === 'ONLINE').length;
-  const offlineCount  = filtered.filter((d) => d.status === 'OFFLINE').length;
-  const provCount     = filtered.filter((d) => d.status === 'PROVISIONING').length;
-  const unknownCount  = filtered.filter((d) => d.status === 'UNKNOWN').length;
+  // ── Global stats — ALWAYS from all devices, never from filtered ──────────────
+  // The top 4 KPI cards (ONLINE / OFFLINE / UNKNOWN / TOTAL) must match the
+  // inventory page, which shows unfiltered counts.  Only charts and the
+  // "Needs Attention" list respect the advanced mode/type filter.
+  const totalDevices  = devices.length;
+  const onlineCount   = devices.filter((d) => d.status === 'ONLINE').length;
+  const offlineCount  = devices.filter((d) => d.status === 'OFFLINE').length;
+  const provCount     = devices.filter((d) => d.status === 'PROVISIONING').length;
+  const unknownCount  = devices.filter((d) => d.status === 'UNKNOWN').length;
   const critCount     = activeAlarms.filter((a) => a.severity === 'CRITICAL').length;
   const majorCount    = activeAlarms.filter((a) => a.severity === 'MAJOR').length;
-  const onlinePct     = filtered.length > 0 ? Math.round((onlineCount / filtered.length) * 100) : 0;
+  const onlinePct     = totalDevices > 0 ? Math.round((onlineCount / totalDevices) * 100) : 0;
   const show          = (id: WidgetId) => visibleWidgets.includes(id);
 
-  // ── Network Dashboard donut chart ────────────────────────────────────────────
-  // CSS conic-gradient donut — same approach as the HTML reference design
-  const totalFiltered = filtered.length;
+  // ── Network Dashboard donut chart — uses global device counts ────────────────
+  const totalFiltered = totalDevices; // kept for backward compat with donut calculations below
   const donutSegments = [
     { color: '#22c55e', count: onlineCount,  label: 'Online' },
     { color: '#ef4444', count: offlineCount, label: 'Offline' },
@@ -595,13 +601,39 @@ export default function V2DashboardPage() {
           </div>
         </div>
 
+        {/* ── Active filter badge — shown whenever Advanced mode filter is not ALL ── */}
+        {mode !== 'ALL' && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.25)',
+            borderRadius: 8, padding: '8px 14px', fontSize: 12,
+          }}>
+            <span style={{ color: '#a78bfa', fontWeight: 700 }}>⚙ Advanced filter active:</span>
+            <span style={{
+              background: 'rgba(167,139,250,0.15)', color: '#c4b5fd',
+              padding: '2px 10px', borderRadius: 12, fontWeight: 700, fontSize: 11,
+            }}>{mode}</span>
+            <span style={{ color: '#64748b' }}>— Charts and Needs Attention are scoped to this type.</span>
+            <button
+              onClick={() => setMode('ALL')}
+              style={{
+                marginLeft: 'auto', background: 'none', border: '1px solid rgba(167,139,250,0.3)',
+                color: '#a78bfa', borderRadius: 6, padding: '2px 10px', cursor: 'pointer',
+                fontSize: 11, fontWeight: 600,
+              }}
+            >
+              Clear ×
+            </button>
+          </div>
+        )}
+
         {/* ── STATUS CARDS — 4 columns with colored top borders ──────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
           {[
-            { label: 'ONLINE',  value: onlineCount,  color: '#22c55e', href: '/v2/devices?status=ONLINE'  },
-            { label: 'OFFLINE', value: offlineCount, color: '#ef4444', href: '/v2/devices?status=OFFLINE' },
-            { label: 'UNKNOWN', value: unknownCount, color: '#64748b', href: '/v2/devices?status=UNKNOWN' },
-            { label: 'TOTAL',   value: totalFiltered, color: '#3b82f6', href: '/v2/devices'               },
+            { label: 'ONLINE',  value: onlineCount,   color: '#22c55e', href: '/v2/devices?status=ONLINE'  },
+            { label: 'OFFLINE', value: offlineCount,  color: '#ef4444', href: '/v2/devices?status=OFFLINE' },
+            { label: 'UNKNOWN', value: unknownCount,  color: '#64748b', href: '/v2/devices?status=UNKNOWN' },
+            { label: 'TOTAL',   value: totalDevices,  color: '#3b82f6', href: '/v2/devices'                },
           ].map((card) => (
             <button
               key={card.label}
@@ -632,7 +664,7 @@ export default function V2DashboardPage() {
           {/* Device Status donut chart */}
           <div style={{ background: '#111827', border: '1px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: 8, padding: 20 }}>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2, color: 'var(--vf-text-primary)' }}>Device Status</div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>All Devices · {totalFiltered} total</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>All Devices · {totalDevices} total</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
               {/* Donut ring using conic-gradient */}
               <div style={{ width: 160, height: 160, flexShrink: 0, borderRadius: '50%', background: donutGradient, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

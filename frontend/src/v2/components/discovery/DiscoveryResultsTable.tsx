@@ -167,6 +167,7 @@ export interface DiscoveryResultsTableProps {
 function icmpIcon(status: string): string {
   if (status === 'reachable') return '✅';
   if (status === 'unreachable') return '❌';
+  if (status === 'bypassed' || status === 'not_attempted') return '—';  // ICMP not applicable
   return '⚠️';
 }
 
@@ -176,15 +177,33 @@ function snmpIcon(status: string): string {
   return '❌';
 }
 
-/** True when the device was either ICMP-reachable OR discovered via ICMP-bypass (SNMP-only). */
+/**
+ * True when ICMP was responsive OR bypass mode was active.
+ * Used only for ICMP-level display logic.
+ */
 function isEffectivelyReachable(r: DiscoveryResult): boolean {
   return r.icmpStatus === 'reachable' || r.icmpStatus === 'bypassed';
 }
 
+/**
+ * True when the device can be provisioned — i.e. SNMP interrogation actually
+ * returned data.  This is the authoritative gate for the Provision button.
+ * ICMP status is irrelevant here: a device is provisionable iff we have SNMP data.
+ */
+function canProvision(r: DiscoveryResult): boolean {
+  return r.snmpStatus === 'success';
+}
+
+/**
+ * Overall discovery icon — driven by SNMP (the data-collection step), not ICMP.
+ *   ✅  SNMP succeeded  → device fully discovered
+ *   ⚠️  ICMP reached but SNMP failed  → partial
+ *   ❌  Neither ICMP nor SNMP succeeded
+ */
 function overallIcon(r: DiscoveryResult): string {
-  if (isEffectivelyReachable(r) && r.snmpStatus === 'success') return '✅';
-  if (!isEffectivelyReachable(r)) return '❌';
-  return '⚠️';
+  if (r.snmpStatus === 'success')    return '✅';
+  if (isEffectivelyReachable(r))     return '⚠️';  // ICMP/bypass OK but SNMP failed
+  return '❌';
 }
 
 /** Shared style for quick-nav link buttons inside cards */
@@ -238,7 +257,15 @@ function DeviceCard({
   // Inline deprovision confirmation state — avoids a separate modal for a simple action.
   const [confirmingDeprovision, setConfirmingDeprovision] = useState(false);
   const rows: Array<{ label: string; value: string; icon?: string }> = [
-    { label: 'ICMP',          value: r.icmpStatus === 'reachable' ? 'Reachable' : r.icmpStatus === 'bypassed' ? 'Bypassed ⚡' : r.icmpStatus === 'unreachable' ? 'Unreachable' : 'Timeout', icon: icmpIcon(r.icmpStatus) },
+    {
+      label: 'ICMP',
+      value: r.icmpStatus === 'reachable'      ? 'Reachable'
+           : r.icmpStatus === 'bypassed'       ? 'N/A (hostname target)'
+           : r.icmpStatus === 'not_attempted'  ? 'N/A (SNMP-only probe)'
+           : r.icmpStatus === 'unreachable'    ? 'Unreachable'
+           : 'Timeout',
+      icon: icmpIcon(r.icmpStatus),
+    },
     { label: 'SNMP',          value: r.snmpStatus === 'success' ? 'Successful' : r.snmpStatus === 'not_attempted' ? 'Not Attempted' : r.snmpStatus === 'auth_failed' ? 'Auth Failed' : r.snmpStatus === 'timeout' ? 'Timeout' : 'Partial', icon: snmpIcon(r.snmpStatus) },
     { label: 'Manufacturer',  value: val(r.vendor) },
     { label: 'Model',         value: val(r.model) },
@@ -457,8 +484,8 @@ function DeviceCard({
                 size="sm"
                 onClick={() => onProvision(r)}
                 style={{ width: '100%', fontWeight: 700 }}
-                disabled={!isEffectivelyReachable(r)}
-                title={!isEffectivelyReachable(r) ? 'Device must be reachable (ICMP or SNMP-bypass) to re-provision' : 'Add this device back to managed inventory'}
+                disabled={!canProvision(r)}
+                title={!canProvision(r) ? 'SNMP must succeed to re-provision (no device data available)' : 'Add this device back to managed inventory'}
               >
                 🔄 Re-provision Device
               </Button>
@@ -474,8 +501,8 @@ function DeviceCard({
                 size="sm"
                 onClick={() => onProvision(r)}
                 style={{ width: '100%', fontWeight: 700 }}
-                disabled={!isEffectivelyReachable(r)}
-                title={!isEffectivelyReachable(r) ? 'Device must be reachable (ICMP or SNMP-bypass) to provision' : 'Provision this device into managed inventory'}
+                disabled={!canProvision(r)}
+                title={!canProvision(r) ? 'SNMP must succeed to provision (no device data available)' : 'Provision this device into managed inventory'}
               >
                 🔧 Provision Device
               </Button>
@@ -777,17 +804,17 @@ export function DiscoveryResultsTable({
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onProvision?.(row); }}
-              disabled={!isEffectivelyReachable(row)}
-              title={!isEffectivelyReachable(row)
-                ? 'Device must be reachable (ICMP or SNMP-bypass) to provision'
+              disabled={!canProvision(row)}
+              title={!canProvision(row)
+                ? 'SNMP must succeed to provision (no device data available)'
                 : 'Add this device to managed inventory'}
               style={{
                 fontSize: 11, padding: '3px 10px', borderRadius: 5,
-                background: isEffectivelyReachable(row)
+                background: canProvision(row)
                   ? 'var(--vf-accent)' : 'var(--vf-surface-raised)',
-                color: isEffectivelyReachable(row) ? '#fff' : 'var(--vf-text-muted)',
-                border: 'none', cursor: isEffectivelyReachable(row) ? 'pointer' : 'default',
-                fontWeight: 700, opacity: !isEffectivelyReachable(row) ? 0.5 : 1,
+                color: canProvision(row) ? '#fff' : 'var(--vf-text-muted)',
+                border: 'none', cursor: canProvision(row) ? 'pointer' : 'default',
+                fontWeight: 700, opacity: !canProvision(row) ? 0.5 : 1,
               }}
             >
               🔧 Provision
@@ -1121,8 +1148,8 @@ export function DiscoveryResultsTable({
                   variant="primary"
                   size="sm"
                   onClick={() => onProvision(sel)}
-                  disabled={!isEffectivelyReachable(sel)}
-                  title={isEffectivelyReachable(sel) ? 'Provision selected device into managed inventory' : 'Device must be reachable (ICMP or SNMP-bypass) to provision'}
+                  disabled={!canProvision(sel)}
+                  title={canProvision(sel) ? 'Provision selected device into managed inventory' : 'SNMP must succeed to provision (no device data available)'}
                 >
                   🔧 Provision
                 </Button>

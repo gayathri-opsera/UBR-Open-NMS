@@ -98,6 +98,8 @@ func (m *Matcher) Match(ctx context.Context, evidence ProbeEvidence) *MatchResul
 			MatchConfidence:          m0.confidence,
 			MatchEvidence:            m0.evidence,
 			DeviceType:               m0.entry.DeviceType,
+			Vendor:                   m0.entry.Vendor,
+			Model:                    m0.entry.Model,
 		}
 
 	default:
@@ -146,6 +148,8 @@ func (m *Matcher) Match(ctx context.Context, evidence ProbeEvidence) *MatchResul
 			MatchConfidence:          best.confidence,
 			MatchEvidence:            best.evidence,
 			DeviceType:               best.entry.DeviceType,
+			Vendor:                   best.entry.Vendor,
+			Model:                    best.entry.Model,
 		}
 	}
 }

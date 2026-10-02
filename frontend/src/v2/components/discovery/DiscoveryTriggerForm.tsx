@@ -62,12 +62,6 @@ interface FormState {
   community: string;
   timeoutSeconds: string;
   retries: string;
-  /**
-   * Skip ICMP ping sweep — go directly to SNMP GET on every target.
-   * Needed for Docker / simulator targets where ICMP is blocked.
-   * Gateway intercepts these runs and uses SNMP-only discovery.
-   */
-  icmpBypass: boolean;
 }
 
 interface FormErrors {
@@ -202,7 +196,6 @@ function buildInitialState(initialScope?: string): FormState {
     community:      'public',
     timeoutSeconds: '5',
     retries:        '2',
-    icmpBypass:     false,
   };
 }
 
@@ -246,6 +239,8 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
   const [form, setForm] = useState<FormState>(buildInitialState(initialScope));
   const [touched, setTouched] = useState<Partial<Record<keyof FormState, boolean>>>({});
   const [submitting, setSubmitting] = useState(false);
+  /** Toggle for the community string visibility — lets operators verify what they typed. */
+  const [showCommunity, setShowCommunity] = useState(false);
 
   // Credential list state — loaded on mount.
   const [credentials, setCredentials]         = useState<CredentialSummary[]>([]);
@@ -364,8 +359,9 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
             : { credentialId: form.credentialId }),
           // Vendor-independent: tag all discovered devices with the selected definition
           ...(selectedDefinitionId ? { productDefinitionId: selectedDefinitionId } : {}),
-          // ICMP bypass: skip ping, go straight to SNMP (for Docker/simulator targets)
-          ...(form.icmpBypass ? { icmpBypass: true } : {}),
+          // ICMP bypass is auto-detected by the gateway based on scope type:
+          // hostname/host:port targets → SNMP-only (ICMP auto-bypassed)
+          // IP/CIDR targets → full ICMP sweep + SNMP fingerprint (ICMP mandatory)
         });
         addToast(`Discovery run ${response.runId} created`, 'success');
         onRunCreated(response);
@@ -385,7 +381,9 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
         setSubmitting(false);
       }
     },
-    [form, usingFallback, credentials.length, onRunCreated, addToast],
+    // selectedVersionKey MUST be in deps — without it handleSubmit closes over the initial
+    // empty string and productDefinitionId is never sent, breaking template-based filtering.
+    [form, usingFallback, credentials.length, onRunCreated, addToast, selectedVersionKey],
   );
 
   // ── Build credential select options ─────────────────────────────────────────
@@ -489,27 +487,97 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
 
       {/* Fallback community string — shown when no credentials or user chose direct entry */}
       {!credentialsLoading && usingFallback && (
-        <Input
-          label={
-            credentials.length === 0
-              ? 'Community String'
-              : 'Community String (direct entry)'
-          }
-          type="password"
-          autoComplete="off"
-          placeholder="e.g. public"
-          value={form.community}
-          onChange={handleField('community')}
-          onBlur={() => setTouched((prev) => ({ ...prev, community: true }))}
-          error={touched.community ? errors.community : undefined}
-          hint={
-            credentials.length === 0
-              ? 'No stored credentials found. Add credentials in the SNMP Credentials tab.'
-              : 'Security: community is sent HTTPS-only and is never logged.'
-          }
-          disabled={submitting}
-          fullWidth
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+          <label
+            htmlFor="vf-input-community-string"
+            style={{
+              fontSize: 'var(--vf-type-caption-size)',
+              fontWeight: 600,
+              color: 'var(--vf-text-secondary)',
+              letterSpacing: '0.03em',
+            }}
+          >
+            {credentials.length === 0 ? 'Community String' : 'Community String (direct entry)'}
+          </label>
+          <div style={{ position: 'relative' }}>
+            <input
+              id="vf-input-community-string"
+              type={showCommunity ? 'text' : 'password'}
+              autoComplete="off"
+              placeholder="e.g. public"
+              value={form.community}
+              onChange={handleField('community')}
+              onBlur={() => setTouched((prev) => ({ ...prev, community: true }))}
+              disabled={submitting}
+              aria-invalid={!!(touched.community && errors.community)}
+              style={{
+                width: '100%',
+                background: 'var(--vf-input-bg)',
+                border: `1px solid ${touched.community && errors.community ? 'var(--vf-danger)' : 'var(--vf-border-default)'}`,
+                borderRadius: 'var(--vf-radius-md)',
+                color: 'var(--vf-text-primary)',
+                fontSize: 'var(--vf-type-body-size)',
+                lineHeight: 'var(--vf-type-body-line)',
+                padding: '7px 38px 7px 10px',
+                fontFamily: 'var(--vf-font-sans)',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+            {/* Eye toggle — lets operators verify the value they typed */}
+            <button
+              type="button"
+              onClick={() => setShowCommunity((v) => !v)}
+              disabled={submitting}
+              aria-label={showCommunity ? 'Hide community string' : 'Show community string'}
+              title={showCommunity ? 'Hide' : 'Show'}
+              style={{
+                position: 'absolute',
+                right: 8,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                cursor: submitting ? 'not-allowed' : 'pointer',
+                color: showCommunity ? 'var(--vf-primary)' : 'var(--vf-text-muted)',
+                padding: '2px 4px',
+                display: 'flex',
+                alignItems: 'center',
+                lineHeight: 1,
+                fontSize: 16,
+                opacity: submitting ? 0.5 : 1,
+                transition: 'color 0.15s',
+              }}
+            >
+              {showCommunity ? (
+                /* Eye-off SVG */
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                /* Eye SVG */
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+          </div>
+          {touched.community && errors.community && (
+            <span role="alert" style={{ fontSize: 'var(--vf-type-caption-size)', color: 'var(--vf-danger)' }}>
+              {errors.community}
+            </span>
+          )}
+          {!(touched.community && errors.community) && (
+            <span style={{ fontSize: 'var(--vf-type-caption-size)', color: 'var(--vf-text-muted)' }}>
+              {credentials.length === 0
+                ? 'No stored credentials found. Add credentials in the SNMP Credentials tab.'
+                : 'Security: community is sent HTTPS-only and is never logged.'}
+            </span>
+          )}
+        </div>
       )}
 
       {/* Timeout and retries ────────────────────────────────────────────────── */}
@@ -541,34 +609,6 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
         />
       </div>
 
-      {/* ICMP Bypass ───────────────────────────────────────────────────────── */}
-      <div style={{
-        display: 'flex', alignItems: 'flex-start', gap: 10,
-        padding: '10px 14px', borderRadius: 8,
-        background: form.icmpBypass ? 'rgba(245,158,11,0.08)' : 'rgba(255,255,255,0.02)',
-        border: `1px solid ${form.icmpBypass ? 'rgba(245,158,11,0.35)' : 'var(--vf-border-subtle)'}`,
-        cursor: 'pointer',
-      }} onClick={() => setForm((prev) => ({ ...prev, icmpBypass: !prev.icmpBypass }))}>
-        <input
-          type="checkbox"
-          id="icmpBypass"
-          checked={form.icmpBypass}
-          onChange={(e) => setForm((prev) => ({ ...prev, icmpBypass: e.target.checked }))}
-          onClick={(e) => e.stopPropagation()}
-          style={{ marginTop: 2, cursor: 'pointer', accentColor: '#f59e0b' }}
-        />
-        <div>
-          <label htmlFor="icmpBypass" style={{ fontSize: 13, fontWeight: 600, color: form.icmpBypass ? '#f59e0b' : 'var(--vf-text-primary)', cursor: 'pointer' }}>
-            ⚡ Skip ICMP Ping (ICMP Bypass)
-          </label>
-          <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--vf-text-muted)', lineHeight: 1.4 }}>
-            {form.icmpBypass
-              ? '✅ Enabled — gateway will probe SNMP directly without pinging. Required for Docker containers, simulators, and hosts that block ICMP.'
-              : 'Enable when targeting Docker containers or simulators (host.docker.internal, explicit host:port) where ICMP ping is blocked.'}
-          </p>
-        </div>
-      </div>
-
       {/* Submit ─────────────────────────────────────────────────────────────── */}
       <div>
         <Button
@@ -578,7 +618,7 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
           loading={submitting}
           disabled={!formValid || submitting}
         >
-          {submitting ? 'Starting…' : form.icmpBypass ? '⚡ Start Discovery (ICMP Bypass)' : 'Start Discovery'}
+          {submitting ? 'Starting…' : 'Start Discovery'}
         </Button>
       </div>
     </form>

@@ -1167,6 +1167,12 @@ const PARAM_LABELS: Record<string, string> = {
   ssid: 'SSID', channel: 'Channel', txPower: 'TX Power (dBm)', encryption: 'Encryption',
   ddrsStatus: 'DDRS', spatialStream: 'Spatial Stream',
   templateId: 'Template',
+  // Cisco / switch-specific params
+  snmpCommunity: 'SNMP Community', snmpVersion: 'SNMP Version',
+  ntpServer: 'NTP Server', timezone: 'Timezone', logLevel: 'Log Level',
+  spanningTreeMode: 'Spanning Tree', spanningTreePriority: 'STP Priority',
+  ethernetSpeed: 'Ethernet Speed', ethernetPort0: 'Port 0',
+  diffSummary: 'Summary',
 };
 
 function ConfigHistoryTab({ device }: { device: Device }) {

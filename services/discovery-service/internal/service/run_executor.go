@@ -10,6 +10,7 @@ import (
 	"github.com/airtel-ubrnms/discovery-service/internal/audit"
 	"github.com/airtel-ubrnms/discovery-service/internal/classifier"
 	"github.com/airtel-ubrnms/discovery-service/internal/crypto"
+	"github.com/airtel-ubrnms/discovery-service/internal/fingerprint"
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
 	"github.com/airtel-ubrnms/discovery-service/internal/repository"
 	"github.com/airtel-ubrnms/discovery-service/internal/scanner"
@@ -36,6 +37,10 @@ type RunExecutor struct {
 	// Intended for dev/testing only (e.g. community "public" against snmpsim).
 	// Empty means SNMP stage is skipped when no credential is provided.
 	defaultCommunity string
+	// fpMatcher is the registry-driven fingerprint matcher (product-definition-service).
+	// When set, it is consulted FIRST during OID classification; the hardcoded
+	// classifier.Classify() is used only as a fallback for unknown OIDs.
+	fpMatcher *fingerprint.Matcher
 }
 
 // NewRunExecutor constructs a RunExecutor with a no-op audit publisher.
@@ -57,6 +62,15 @@ func (e *RunExecutor) WithSNMPPort(port uint16) *RunExecutor {
 	if port > 0 {
 		e.snmpPort = port
 	}
+	return e
+}
+
+// WithFingerprintMatcher wires in the registry-driven fingerprint.Matcher so that
+// newly uploaded product definitions are recognised during OID classification
+// without any code changes to the discovery service. When the matcher is absent
+// (nil) the service falls back to the hardcoded classifier.Classify() map.
+func (e *RunExecutor) WithFingerprintMatcher(m *fingerprint.Matcher) *RunExecutor {
+	e.fpMatcher = m
 	return e
 }
 
@@ -253,9 +267,12 @@ func (e *RunExecutor) runSNMPStage(
 	fpResults := fingerprinter.FingerprintBatch(ctx, reachableHosts, runID, concurrency)
 
 	// Classify each fingerprint result and index by IP for merging.
+	// Priority:
+	//   1. fingerprint.Matcher (registry-driven — zero-code for new vendors)
+	//   2. classifier.Classify() (hardcoded release-1 map — fallback)
 	enrichedByIP := make(map[string]model.DiscoveryHostResult, len(fpResults))
 	for _, fp := range fpResults {
-		cl := classifier.Classify(fp, fp.CorrelationID)
+		cl := e.classifyFingerprint(ctx, fp)
 		icmp := icmpStatusByIP[fp.IP]
 		if icmp == "" {
 			icmp = "reachable"
@@ -289,6 +306,60 @@ func (e *RunExecutor) runSNMPStage(
 	slog.Info("snmp: fingerprint batch complete",
 		"runId", runID, "attempted", len(fpResults), "success", success)
 	return results
+}
+
+// classifyFingerprint resolves a ClassificationResult for one SNMP fingerprint.
+//
+// Strategy (highest precedence first):
+//  1. fingerprint.Matcher — queries the product-definition-service registry so any
+//     uploaded product definition is automatically recognised (zero-code onboarding).
+//  2. classifier.Classify() — hardcoded release-1 OID map (Cisco, Juniper, HP …).
+//     Used only when the registry matcher returns UNKNOWN or is unavailable.
+func (e *RunExecutor) classifyFingerprint(ctx context.Context, fp model.SNMPFingerprintResult) classifier.ClassificationResult {
+	if e.fpMatcher != nil && fp.SysObjectID != "" {
+		evidence := fingerprint.ProbeEvidence{
+			IP:                 fp.IP,
+			RunID:              fp.RunID,
+			CorrelationID:      fp.CorrelationID,
+			SNMPOIDSysObjectID: fp.SysObjectID,
+			SNMPSysDescr:       fp.SysDescr,
+			// FirmwareVersion is not available from SNMPFingerprintResult directly;
+			// it is parsed upstream if present in sysDescr by the snmp_fingerprinter.
+		}
+		mr := e.fpMatcher.Match(ctx, evidence)
+		if mr != nil && mr.Status == fingerprint.FingerprintStatusMatched {
+			slog.Info("classify: registry match",
+				"ip", fp.IP, "pd", mr.ProductDefinitionID, "vendor", mr.Vendor, "model", mr.Model,
+				"confidence", mr.MatchConfidence, "evidence", mr.MatchEvidence)
+			vendor := mr.Vendor
+			if vendor == "" {
+				vendor = mr.ProductDefinitionID // safe fallback: PD ID is always set
+			}
+			model := mr.Model
+			if model == "" {
+				model = mr.ProductDefinitionID
+			}
+			deviceType := mr.DeviceType
+			if deviceType == "" {
+				deviceType = "SWITCH"
+			}
+			return classifier.ClassificationResult{
+				Status:              classifier.ClassificationRecognised,
+				Vendor:              vendor,
+				Model:               model,
+				GenericDeviceType:   deviceType,
+				CapabilityProfileID: "cap-registry-" + mr.ProductDefinitionID,
+				DriverID:            "drv-registry-" + mr.ProductDefinitionID,
+				CorrelationID:       fp.CorrelationID,
+			}
+		}
+		if mr != nil && mr.Status != fingerprint.FingerprintStatusUnknown &&
+			mr.Status != fingerprint.FingerprintStatusRegistryUnavailable {
+			slog.Debug("classify: registry non-match", "ip", fp.IP, "status", mr.Status)
+		}
+	}
+	// Fallback: hardcoded release-1 classifier.
+	return classifier.Classify(fp, fp.CorrelationID)
 }
 
 // fetchMACAddresses walks ifPhysAddress on all hosts that returned a successful

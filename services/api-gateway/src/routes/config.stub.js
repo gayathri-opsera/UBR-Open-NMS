@@ -113,13 +113,39 @@ const SEED_TEMPLATES = [
     customFields: [], hiddenFields: [],
     createdAt: new Date(),
   },
+  {
+    // Cisco access/core switch template — network config for devices like SN-cisco-sw-core-01
+    _id: 'tpl-cisco-switch-core', name: 'Cisco-Switch-Core', deviceType: 'CPE', isDefault: false,
+    description: 'Standard config for Cisco Catalyst core/access switches',
+    // Network — keep existing management IP; only push L2/L3 parameters
+    ipMode: 'Static',
+    // VLAN
+    vlanMode: 'Single', vlanId: 200, vlanPriority: 6,
+    // QoS
+    qosProfile: 'EF', ulBandwidthLimit: 1000, dlBandwidthLimit: 1000,
+    // SNMP / management
+    snmpCommunity: 'public', snmpVersion: 'v2c',
+    // NTP / logging
+    ntpServer: 'pool.ntp.org', timezone: 'Asia/Kolkata', logLevel: 'INFO',
+    // Spanning tree
+    spanningTreeMode: 'RSTP', spanningTreePriority: 4096,
+    // Port defaults
+    ethernetSpeed: '1000Mbps Full', ethernetPort0: true,
+    customFields: [], hiddenFields: ['wpaKey5', 'wpaKey24', 'ssid5', 'ssid24'],
+    createdAt: new Date(),
+  },
 ];
 
-/** Seed default templates if the collection is empty */
+/**
+ * Upsert all seed templates so that newly-added templates are picked up
+ * on gateway restart even when the collection already has data.
+ */
 async function seedIfEmpty(col) {
-  const count = await col.countDocuments();
-  if (count === 0) {
-    await col.insertMany(SEED_TEMPLATES);
+  for (const tpl of SEED_TEMPLATES) {
+    const exists = await col.countDocuments({ _id: tpl._id });
+    if (!exists) {
+      await col.insertOne({ ...tpl });
+    }
   }
 }
 
@@ -666,7 +692,9 @@ router.get('/history/:deviceId', async (req, res) => {
       deliveryChannel: doc.deliveryChannel || null,
       appliedAt:       doc.pushedAt instanceof Date ? doc.pushedAt.toISOString() : doc.pushedAt,
       attemptedAt:     null,
-      diffSummary:     doc.diffSummary || null,
+      diffSummary:     doc.diffSummary || doc.params?.diffSummary || null,
+      // Include the raw params blob so the frontend can render the parameter grid
+      params:          doc.params || {},
       sanitizedDiff:   [],
       rollbackEligible: true,
       failureReason:   null,

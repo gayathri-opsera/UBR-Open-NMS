@@ -103,12 +103,8 @@ export interface SnmpDiscoveryRunRequest {
    * gets classified under this definition regardless of its OID enterprise prefix.
    */
   productDefinitionId?: string;
-  /**
-   * Skip the ICMP ping sweep and go directly to SNMP.
-   * Required for Docker/simulator targets (host.docker.internal, explicit host:port)
-   * where ICMP is blocked. The gateway intercepts these runs and performs SNMP-only discovery.
-   */
-  icmpBypass?: boolean;
+  // icmpBypass removed — ICMP is auto-detected by the gateway based on target type.
+  // Hostname/host:port targets → SNMP-only; IP/CIDR targets → full ICMP sweep.
 }
 
 /** Backward-compatible alias for the basic scope-only request (WO-011). */
@@ -146,8 +142,12 @@ export interface ScopeValidationError {
 
 // ── WO-001: Discovery result types ───────────────────────────────────────────
 
-/** ICMP reachability outcome for a single host. */
-export type IcmpStatus = 'reachable' | 'unreachable' | 'timeout';
+/**
+ * ICMP reachability outcome for a single host.
+ * 'bypassed' is set by the gateway when ICMP was intentionally skipped
+ * (bypass mode for Docker/simulator targets where ICMP is blocked).
+ */
+export type IcmpStatus = 'reachable' | 'unreachable' | 'timeout' | 'bypassed' | 'not_attempted';
 
 /** SNMP fingerprint outcome for a single host. */
 export type SnmpStatus = 'success' | 'auth_failed' | 'timeout' | 'not_attempted' | 'partial';

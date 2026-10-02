@@ -65,8 +65,15 @@ type RegistryEntry struct {
 	SupportedProtocols []string
 
 	// DeviceType is the semantic device category from the product definition
-	// (e.g. switch, router, access_point). Used to populate genericDeviceType in inventory.
+	// (e.g. SWITCH, ROUTER, RADIO). Used to populate genericDeviceType in inventory.
 	DeviceType string
+
+	// Vendor is the manufacturer name from the product definition (e.g. "Acme Networks").
+	// Populated from the FingerprintRegistryEntry via the internal registry wire format.
+	Vendor string
+
+	// Model is the device model name from the product definition (e.g. "AcmeRouter-X9000").
+	Model string
 
 	// Metadata
 	CreatedAt time.Time
@@ -145,8 +152,12 @@ type MatchResult struct {
 	MatchConfidence float64
 	// MatchEvidence is a human-readable, credential-free summary of the matched selector.
 	MatchEvidence string
-	// DeviceType is the semantic category resolved from the matched registry entry.
+	// DeviceType is the semantic category resolved from the matched registry entry (e.g. SWITCH).
 	DeviceType string
+	// Vendor is the manufacturer name from the matched registry entry (e.g. "Acme Networks").
+	Vendor string
+	// Model is the device model name from the matched registry entry (e.g. "AcmeRouter-X9000").
+	Model string
 
 	// ── Set when Status == CONFLICT ───────────────────────────────────────────
 

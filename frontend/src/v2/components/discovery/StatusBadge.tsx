@@ -10,19 +10,27 @@ import type { IcmpStatus, SnmpStatus, ClassificationStatus } from '../../../api/
 
 // ── ICMP ──────────────────────────────────────────────────────────────────────
 
-const ICMP_VARIANT: Record<IcmpStatus, BadgeVariant> = {
-  reachable:   'success',
-  unreachable: 'danger',
-  timeout:     'warning',
+const ICMP_VARIANT: Record<string, BadgeVariant> = {
+  reachable:     'success',
+  unreachable:   'danger',
+  timeout:       'warning',
+  bypassed:      'default',
+  not_attempted: 'default',
 };
 
-const ICMP_LABEL: Record<IcmpStatus, string> = {
-  reachable:   'Reachable',
-  unreachable: 'Unreachable',
-  timeout:     'Timeout',
+const ICMP_LABEL: Record<string, string> = {
+  reachable:     'Reachable',
+  unreachable:   'Unreachable',
+  timeout:       'Timeout',
+  bypassed:      '—',
+  not_attempted: '—',
 };
 
 export function IcmpStatusBadge({ status }: { status: IcmpStatus }) {
+  // Render a neutral dash for hostname targets and real-IP SNMP-only probes
+  if (status === 'bypassed' || (status as string) === 'not_attempted') {
+    return <span style={{ color: 'var(--vf-text-muted)', fontSize: 12 }}>—</span>;
+  }
   return (
     <Badge variant={ICMP_VARIANT[status] ?? 'default'} dot>
       {ICMP_LABEL[status] ?? status}

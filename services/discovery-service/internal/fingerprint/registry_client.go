@@ -197,6 +197,8 @@ type registryWireEntry struct {
 	PreferredProtocol        string   `json:"PreferredProtocol"`
 	SupportedProtocols       []string `json:"SupportedProtocols"`
 	DeviceType               string   `json:"DeviceType"`
+	Vendor                   string   `json:"Vendor"`
+	Model                    string   `json:"Model"`
 }
 
 func (r *HTTPRegistryReader) ListActive(ctx context.Context) ([]RegistryEntry, string, error) {
@@ -246,6 +248,8 @@ func (r *HTTPRegistryReader) ListActive(ctx context.Context) ([]RegistryEntry, s
 			PreferredProtocol:        we.PreferredProtocol,
 			SupportedProtocols:       we.SupportedProtocols,
 			DeviceType:               we.DeviceType,
+			Vendor:                   we.Vendor,
+			Model:                    we.Model,
 		})
 	}
 
