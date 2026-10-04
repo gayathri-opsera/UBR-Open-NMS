@@ -1311,6 +1311,10 @@ router.post('/snmp-probe', async (req, res) => {
       // Start with OID-based productDefinitionId
       let productDefinitionId = oidClass.productDefinitionId || null;
 
+      // GPS from Product Definition (OID classification — may be updated by banner match below)
+      let pdLat = oidClass.defaultLatitude  != null ? oidClass.defaultLatitude  : null;
+      let pdLon = oidClass.defaultLongitude != null ? oidClass.defaultLongitude : null;
+
       // Level 2: BANNER fingerprint match
       for (const entry of banners) {
         try {
@@ -1319,6 +1323,9 @@ router.post('/snmp-probe', async (req, res) => {
             resolvedModel        = entry.model  || resolvedModel;
             productDefinitionId  = entry.productDefinitionId;
             resolvedGeneric      = entry.genericDeviceType || 'RADIO';
+            // Banner match may also carry GPS from its Product Definition
+            if (entry.defaultLatitude  != null) pdLat = parseFloat(entry.defaultLatitude);
+            if (entry.defaultLongitude != null) pdLon = parseFloat(entry.defaultLongitude);
             break;
           }
         } catch { /* bad regex */ }
@@ -1329,6 +1336,8 @@ router.post('/snmp-probe', async (req, res) => {
         productDefinitionId = callerDefMeta.productDefinitionId;
         if (callerDefMeta.vendor) resolvedVendor = callerDefMeta.vendor;
         if (callerDefMeta.model)  resolvedModel  = callerDefMeta.model;
+        if (callerDefMeta.defaultLatitude  != null) pdLat = callerDefMeta.defaultLatitude;
+        if (callerDefMeta.defaultLongitude != null) pdLon = callerDefMeta.defaultLongitude;
       }
 
       const serialNumber = mib.sysName
@@ -1349,6 +1358,8 @@ router.post('/snmp-probe', async (req, res) => {
         genericDeviceType:  resolvedGeneric,
         deviceType:         resolvedGeneric === 'RADIO' ? 'RADIO' : null,
         productDefinitionId,
+        defaultLatitude:    pdLat,
+        defaultLongitude:   pdLon,
         discoveryMethod:    callerDefinitionId ? 'DEFINITION_PROBE' : 'SNMP_V2C',
       });
     } catch (err) {
