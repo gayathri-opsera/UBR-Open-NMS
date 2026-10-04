@@ -91,6 +91,12 @@ public class InternalRegistryController {
             m.put("SupportedProtocols",        e.getSupportedProtocols() != null ? e.getSupportedProtocols() : List.of());
             m.put("PreferredProtocol",         e.getSupportedProtocols() != null && !e.getSupportedProtocols().isEmpty()
                 ? e.getSupportedProtocols().get(0) : "SNMP");
+            // GPS from the uploaded Product Definition — included in both PascalCase (Go service compat)
+            // and camelCase (gateway Node.js normalisation) so both consumers can read them.
+            m.put("DefaultLatitude",  e.getDefaultLatitude());
+            m.put("DefaultLongitude", e.getDefaultLongitude());
+            m.put("defaultLatitude",  e.getDefaultLatitude());
+            m.put("defaultLongitude", e.getDefaultLongitude());
 
             String type  = e.getFingerprintType();
             String value = e.getFingerprintValue();
