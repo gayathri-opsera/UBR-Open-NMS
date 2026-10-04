@@ -1126,20 +1126,72 @@ router.get('/runs/:runId/results', (req, res, next) => {
  * This handler returns a success response so the frontend Provision button works.
  * Falls through to Java for real runs.
  */
-router.post('/runs/:runId/provision', (req, res, next) => {
+router.post('/runs/:runId/provision', async (req, res, next) => {
   const run = syntheticRuns.get(req.params.runId);
   if (!run) return next();
-  // Devices were auto-provisioned into MongoDB during the bypass discovery run.
-  const hosts = req.body?.hosts || run.hosts.map((h) => ({ ip: h.ip }));
-  console.log(`[discovery-stub] provision request for bypass run ${req.params.runId} — ${hosts.length} host(s) already in DB`);
-  res.json({
-    provisioned: hosts.length,
-    failed:      0,
-    results:     hosts.map((h) => ({
-      ip:     h.ip || h,
-      status: 'provisioned',
-    })),
-  });
+
+  // The caller passes the specific hosts it wants to provision (from the UI card).
+  // Fall back to all run hosts if none specified.
+  const requestedHosts = req.body?.hosts || run.hosts;
+
+  // For each requested host, find the matching run host to get full metadata,
+  // then upsert into MongoDB — clearing any isDeprovisioned flag so the device
+  // becomes active again. This makes "Provision Device" on a deprovisioned card
+  // actually persist the re-provision rather than just returning a fake success.
+  const devicesCol = await getDevicesCol();
+  const now        = new Date();
+  const results    = [];
+
+  for (const reqHost of requestedHosts) {
+    const ip     = reqHost.ip || reqHost;
+    // Find matching full metadata from run hosts
+    const runHost = run.hosts.find((h) => h.ip === ip || h.serialNumber === reqHost.serialNumber) || reqHost;
+    const serial  = runHost.serialNumber || reqHost.serialNumber || ip.replace(/[.:]/g, '-');
+
+    try {
+      const doc = {
+        _id:               serial,
+        id:                serial,
+        deviceId:          serial,
+        serialNumber:      serial,
+        name:              runHost.sysName || serial,
+        deviceName:        runHost.sysName || serial,
+        deviceType:        runHost.genericDeviceType || 'UNKNOWN',
+        genericDeviceType: runHost.genericDeviceType || 'UNKNOWN',
+        model:             runHost.model  || null,
+        manufacturer:      runHost.vendor || null,
+        productDefinitionId: runHost.productDefinitionId || null,
+        status:            'ONLINE',
+        isDeprovisioned:   false,   // ← explicitly clear soft-delete flag
+        ipAddress:         runHost.ip || ip,
+        latitude:          runHost.defaultLatitude  != null ? parseFloat(runHost.defaultLatitude)  : null,
+        longitude:         runHost.defaultLongitude != null ? parseFloat(runHost.defaultLongitude) : null,
+        sysName:           runHost.sysName     || null,
+        sysLocation:       runHost.sysLocation || null,
+        sysDescr:          runHost.sysDescr    || null,
+        sysObjectID:       runHost.sysObjectID || null,
+        discoveryParadigm: 'BYPASS',
+        tags:              ['bypass-discovered', 'provisioned'],
+        updatedAt:         now,
+        createdAt:         now,
+      };
+
+      await devicesCol.replaceOne({ _id: doc._id }, doc, { upsert: true });
+      console.log(`[discovery-stub] bypass-provision ✅ ${serial} (${doc.genericDeviceType}) @ ${ip}`);
+      results.push({ ip, serialNumber: serial, status: 'provisioned' });
+    } catch (err) {
+      console.error(`[discovery-stub] bypass-provision ❌ ${serial}:`, err.message);
+      results.push({ ip, serialNumber: serial, status: 'failed', error: err.message });
+    }
+  }
+
+  // Bust topology cache after provisioning
+  try { require('./topology.stub').bustTopologyCache(); } catch { /* ignore */ }
+
+  const provisioned = results.filter((r) => r.status === 'provisioned').length;
+  const failed      = results.filter((r) => r.status === 'failed').length;
+  const status      = failed > 0 && provisioned === 0 ? 422 : failed > 0 ? 207 : 201;
+  return res.status(status).json({ provisioned, failed, results });
 });
 
 /**
@@ -1447,6 +1499,22 @@ router.post('/snmp-probe', async (req, res) => {
     const devicesCol = await getDevicesCol();
     const now = new Date();
     for (const h of discoveredHosts) {
+      // ── Deprovision guard ──────────────────────────────────────────────────
+      // Never auto-re-provision a device the operator explicitly deprovisioned.
+      // Mark it in the response so the UI shows the "Provision Device" button
+      // instead of treating it as already provisioned.
+      const existingRecord = await devicesCol.findOne(
+        { $or: [{ _id: h.serialNumber }, { serialNumber: h.serialNumber }, { ipAddress: h.ip }] },
+        { projection: { isDeprovisioned: 1 } }
+      );
+      if (existingRecord && existingRecord.isDeprovisioned === true) {
+        console.log(`[snmp-probe] ⏭ ${h.serialNumber} @ ${h.ip}:${h.port} — deprovisioned, skipping auto-provision`);
+        h.provisioned      = false;
+        h.deprovisionedFlag = true;
+        provisionResults.push({ serialNumber: h.serialNumber, status: 'skipped_deprovisioned' });
+        continue;
+      }
+
       const doc = {
         _id:              h.serialNumber,
         id:               h.serialNumber,
@@ -1460,6 +1528,7 @@ router.post('/snmp-probe', async (req, res) => {
         manufacturer:     h.vendor,
         productDefinitionId: h.productDefinitionId,
         status:           'ONLINE',
+        isDeprovisioned:  false,
         ipAddress:        h.ip,
         snmpPort:         h.port,
         snmpCommunity:    community,
@@ -1519,7 +1588,10 @@ router.post('/snmp-probe', async (req, res) => {
       defaultLatitude:      h.defaultLatitude,
       defaultLongitude:     h.defaultLongitude,
       serialNumber:         h.serialNumber,
-      provisioned:          provision,
+      // Use per-device provisioned flag if explicitly set (e.g. false for deprovisioned
+      // devices that were skipped), otherwise fall back to the batch provision flag.
+      provisioned:          h.provisioned !== undefined ? h.provisioned : provision,
+      deprovisionedFlag:    h.deprovisionedFlag || false,
     })),
     errorDetails:  errors,
     skippedDetails: skipped,  // diagnostic: which devices were excluded and why
