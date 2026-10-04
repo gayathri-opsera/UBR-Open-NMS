@@ -102,6 +102,7 @@ public class XmlProductDefinitionParser {
                 NormalizedProductDefinition.builder();
 
         parseIdentity(root, builder, errors);
+        parseLocation(root, builder);
         parseFingerprints(root, builder, errors);
         parseProtocols(root, builder, errors);
         parseParameters(root, builder, errors);
@@ -124,6 +125,39 @@ public class XmlProductDefinitionParser {
         DocumentBuilder builder = factory.newDocumentBuilder();
         builder.setErrorHandler(null);
         return builder.parse(new ByteArrayInputStream(bytes));
+    }
+
+    // ── Location ──────────────────────────────────────────────────────────────
+
+    /**
+     * Reads optional GPS coordinates from a {@code <location>} element anywhere in the document.
+     * Accepted child element names: latitude/lat, longitude/lon/lng.
+     * Silently ignored if absent or unparseable — GPS is optional in a Product Definition.
+     */
+    private void parseLocation(Element root,
+                                NormalizedProductDefinition.NormalizedProductDefinitionBuilder builder) {
+        Element loc = coalesceEl(
+                firstChild(root, "location"),
+                firstChild(root, "gps"),
+                firstChild(root, "coordinates"),
+                firstChild(root, "position")
+        );
+        if (loc == null) return;
+
+        Double lat = parseDoubleEl(loc, "latitude", "lat");
+        Double lon = parseDoubleEl(loc, "longitude", "longitude", "lon", "lng");
+        if (lat != null) builder.defaultLatitude(lat);
+        if (lon != null) builder.defaultLongitude(lon);
+    }
+
+    private Double parseDoubleEl(Element parent, String... aliases) {
+        for (String alias : aliases) {
+            String val = text(parent, alias);
+            if (val != null) {
+                try { return Double.parseDouble(val.trim()); } catch (NumberFormatException ignored) { /* try next */ }
+            }
+        }
+        return null;
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────

@@ -81,6 +81,8 @@ public class FingerprintRegistryBuilder {
                         .firmwareFrom(fwFrom)
                         .firmwareTo(fwTo)
                         .supportedProtocols(protocols)
+                        .defaultLatitude(normalized.getDefaultLatitude())
+                        .defaultLongitude(normalized.getDefaultLongitude())
                         .registryVersion(registryVersion)
                         .build();
                 entries.add(oidEntry);
@@ -105,6 +107,8 @@ public class FingerprintRegistryBuilder {
                         .firmwareFrom(fwFrom)
                         .firmwareTo(fwTo)
                         .supportedProtocols(protocols)
+                        .defaultLatitude(normalized.getDefaultLatitude())
+                        .defaultLongitude(normalized.getDefaultLongitude())
                         .registryVersion(registryVersion)
                         .build();
                 entries.add(bannerEntry);

@@ -64,24 +64,31 @@ async function fetchAllFingerprintsFromPDService() {
           // Normalise Java PascalCase wire format → gateway camelCase format
           const normalised = [];
           for (const e of entries) {
-            const defId = e.ProductDefinitionID || '';
+            // Support both Java PascalCase wire format (legacy InternalRegistryController)
+            // and Spring Boot default camelCase JSON (FingerprintRegistryEntry @Document).
+            const defId = e.productDefinitionId || e.ProductDefinitionID || '';
             if (!defId) continue;
             const oidPrefix = (e.SNMPOIDPrefix || '').replace(/^\./, '');
             const oidExact  = (e.SNMPOIDExact  || '').replace(/^\./, '');
-            const banner    = e.SSHBannerSubstring || '';
-            const vendor    = e.Vendor || '';
-            const model     = e.Model  || '';
-            // Prefer prefix match; fall back to exact match (prefix match of exact OID also works correctly)
+            const sysOid    = (e.fingerprintValue || e.sysObjectId || oidPrefix || oidExact || '').replace(/^\./, '');
+            const banner    = e.SSHBannerSubstring || (e.fingerprintType === 'BANNER' ? e.fingerprintValue : '') || '';
+            const vendor    = e.vendor    || e.Vendor || '';
+            const model     = e.model     || e.Model  || '';
+            // deviceType and GPS come from the uploaded Product Definition (new fields)
+            const deviceType  = e.deviceType  || null;
+            const defaultLat  = e.defaultLatitude  != null ? parseFloat(e.defaultLatitude)  : null;
+            const defaultLon  = e.defaultLongitude != null ? parseFloat(e.defaultLongitude) : null;
+            const base = { productDefinitionId: defId, vendor, model, deviceType, defaultLatitude: defaultLat, defaultLongitude: defaultLon };
+            // Prefer prefix match; fall back to exact match / sysOid from camelCase format
             if (oidPrefix) {
-              normalised.push({ productDefinitionId: defId, fingerprintType: 'SNMP_OID',
-                fingerprintValue: oidPrefix, sysObjectId: oidPrefix, vendor, model });
+              normalised.push({ ...base, fingerprintType: 'SNMP_OID', fingerprintValue: oidPrefix, sysObjectId: oidPrefix });
             } else if (oidExact) {
-              normalised.push({ productDefinitionId: defId, fingerprintType: 'SNMP_OID',
-                fingerprintValue: oidExact,  sysObjectId: oidExact,  vendor, model });
+              normalised.push({ ...base, fingerprintType: 'SNMP_OID', fingerprintValue: oidExact,  sysObjectId: oidExact  });
+            } else if (sysOid && e.fingerprintType === 'SNMP_OID') {
+              normalised.push({ ...base, fingerprintType: 'SNMP_OID', fingerprintValue: sysOid,    sysObjectId: sysOid    });
             }
             if (banner) {
-              normalised.push({ productDefinitionId: defId, fingerprintType: 'BANNER',
-                fingerprintValue: banner, vendor, model });
+              normalised.push({ ...base, fingerprintType: 'BANNER', fingerprintValue: banner });
             }
           }
           _pdRegistryCache   = normalised;
@@ -382,6 +389,9 @@ async function classifyByOid(sysObjectID) {
         model:               bestEntry.model   || 'SNMP Device',
         genericDeviceType:   bestEntry.deviceType || bestEntry.genericDeviceType || 'SWITCH',
         productDefinitionId: bestEntry.productDefinitionId || null,
+        // GPS from the uploaded Product Definition (set during registry build if definition had <location>)
+        defaultLatitude:     bestEntry.defaultLatitude  != null ? parseFloat(bestEntry.defaultLatitude)  : null,
+        defaultLongitude:    bestEntry.defaultLongitude != null ? parseFloat(bestEntry.defaultLongitude) : null,
       };
     }
   } catch (regErr) {
@@ -829,7 +839,15 @@ router.post('/runs', async (req, res, next) => {
     // Fetch from PD service (authoritative) with MongoDB fallback
     callerFingerprintEntries = await fetchCallerFingerprints(callerDefinitionId);
     const sample = callerFingerprintEntries[0];
-    if (sample) callerDefMeta = { productDefinitionId: callerDefinitionId, vendor: sample.vendor, model: sample.model };
+    if (sample) callerDefMeta = {
+      productDefinitionId: callerDefinitionId,
+      vendor:           sample.vendor || null,
+      model:            sample.model  || null,
+      // deviceType and GPS come from the uploaded definition — flow through from registry
+      deviceType:       sample.deviceType       || null,
+      defaultLatitude:  sample.defaultLatitude  != null ? parseFloat(sample.defaultLatitude)  : null,
+      defaultLongitude: sample.defaultLongitude != null ? parseFloat(sample.defaultLongitude) : null,
+    };
     if (callerFingerprintEntries.length === 0) {
       console.warn(`[discovery-stub] ⚠️  No fingerprints found for template '${callerDefinitionId}' — filter will pass all devices`);
     }
@@ -867,6 +885,9 @@ router.post('/runs', async (req, res, next) => {
       let model   = oidClass.model   || 'SNMP Device';
       let generic = oidClass.genericDeviceType || 'SWITCH';
       let defId   = oidClass.productDefinitionId || null;
+      // GPS from the Product Definition uploaded by the operator
+      let pdLat   = oidClass.defaultLatitude  ?? null;
+      let pdLon   = oidClass.defaultLongitude ?? null;
 
       for (const b of banners) {
         try {
@@ -874,7 +895,9 @@ router.post('/runs', async (req, res, next) => {
             vendor  = b.vendor || vendor;
             model   = b.model  || model;
             defId   = b.productDefinitionId;
-            generic = b.genericDeviceType || 'RADIO';
+            generic = b.genericDeviceType || b.deviceType || 'RADIO';
+            if (b.defaultLatitude  != null) pdLat = parseFloat(b.defaultLatitude);
+            if (b.defaultLongitude != null) pdLon = parseFloat(b.defaultLongitude);
             break;
           }
         } catch { /* bad regex */ }
@@ -883,8 +906,11 @@ router.post('/runs', async (req, res, next) => {
       // Apply caller-selected template for matching devices
       if (callerDefMeta) {
         defId   = callerDefMeta.productDefinitionId;
-        if (callerDefMeta.vendor) vendor = callerDefMeta.vendor;
-        if (callerDefMeta.model)  model  = callerDefMeta.model;
+        if (callerDefMeta.vendor)           vendor = callerDefMeta.vendor;
+        if (callerDefMeta.model)            model  = callerDefMeta.model;
+        if (callerDefMeta.deviceType)       generic = callerDefMeta.deviceType;
+        if (callerDefMeta.defaultLatitude  != null) pdLat = callerDefMeta.defaultLatitude;
+        if (callerDefMeta.defaultLongitude != null) pdLon = callerDefMeta.defaultLongitude;
       }
 
       const serial = mib.sysName
@@ -916,6 +942,10 @@ router.post('/runs', async (req, res, next) => {
           ipAddress:        displayIp,
           snmpPort:         port,
           snmpCommunity:    community,
+          // GPS — sourced from the Product Definition uploaded by the operator.
+          // Falls back to null if no definition was selected or it had no location block.
+          latitude:         pdLat,
+          longitude:        pdLon,
           sysDescr:         mib.sysDescr,
           sysObjectID:      mib.sysObjectID,
           sysName:          mib.sysName,

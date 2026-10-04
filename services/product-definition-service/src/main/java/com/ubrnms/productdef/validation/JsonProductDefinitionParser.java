@@ -130,6 +130,7 @@ public class JsonProductDefinitionParser {
             parseIdentityFlat(defNode, builder, errors);
         }
 
+        parseLocation(defNode, builder);
         parseFingerprints(defNode.get("fingerprints"), builder, errors);
         parseProtocols(defNode, builder, errors);
 
@@ -139,6 +140,40 @@ public class JsonProductDefinitionParser {
         parseParameters(paramsNode, builder, errors);
 
         return builder.build();
+    }
+
+    // ── Location ──────────────────────────────────────────────────────────────
+
+    /**
+     * Parses optional GPS coordinates from a "location" block in the JSON.
+     * Accepted layouts:
+     * <pre>
+     *   { "location": { "latitude": 17.385, "longitude": 78.486 } }
+     *   { "location": { "lat": 17.385, "lon": 78.486 } }
+     *   { "latitude": 17.385, "longitude": 78.486 }   // flat root
+     * </pre>
+     * Silently ignored if missing or unparseable — GPS is optional.
+     */
+    private void parseLocation(JsonNode defNode,
+                                NormalizedProductDefinition.NormalizedProductDefinitionBuilder builder) {
+        // Try nested "location" block first, then flat root
+        JsonNode loc = defNode.get("location");
+        JsonNode src = (loc != null && loc.isObject()) ? loc : defNode;
+
+        Double lat = nodeDouble(src, "latitude", "lat");
+        Double lon = nodeDouble(src, "longitude", "lng", "lon");
+
+        if (lat != null) builder.defaultLatitude(lat);
+        if (lon != null) builder.defaultLongitude(lon);
+    }
+
+    /** Returns the first non-null numeric value for any of the given field aliases, or null. */
+    private Double nodeDouble(JsonNode node, String... aliases) {
+        for (String alias : aliases) {
+            JsonNode n = node.get(alias);
+            if (n != null && n.isNumber()) return n.doubleValue();
+        }
+        return null;
     }
 
     // ── Identity (canonical: nested "identity" object) ────────────────────────

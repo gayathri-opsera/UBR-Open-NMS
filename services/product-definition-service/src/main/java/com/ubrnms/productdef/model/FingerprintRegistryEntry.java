@@ -91,6 +91,13 @@ public class FingerprintRegistryEntry {
     /** Upper bound of the firmware version range this fingerprint covers (inclusive). */
     private String firmwareTo;
 
+    // ── Default location (from uploaded definition) ───────────────────────────
+    // Propagated from the network planning document uploaded as the Product Definition.
+    // The discovery service writes these values into provisioned device records so
+    // GPS is available immediately after discovery without manual operator entry.
+    private Double defaultLatitude;
+    private Double defaultLongitude;
+
     // ── Discovery hints ──────────────────────────────────────────────────────
 
     /** Ordered list of protocols supported by this product (e.g. SNMP, REST, CLI). */

@@ -39,6 +39,15 @@ public class NormalizedProductDefinition {
     private String productFamily;
     private String deviceType;
 
+    // ── Default location (from uploaded definition) ───────────────────────────
+    // When the uploaded JSON/XML contains a <location> / "location" block with
+    // latitude and longitude, these values are stored here and propagated into
+    // the fingerprint registry.  The discovery service applies them to every
+    // device provisioned from this definition so GPS is pre-populated from the
+    // network planning document rather than requiring manual entry after discovery.
+    private Double defaultLatitude;
+    private Double defaultLongitude;
+
     // ── Fingerprints ─────────────────────────────────────────────────────────
 
     private List<FingerprintEntry> fingerprints;
