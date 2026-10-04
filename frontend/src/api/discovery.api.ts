@@ -200,6 +200,17 @@ export interface DiscoveryResult {
    */
   macAddress?: string;
 
+  /**
+   * GPS latitude sourced from the Product Definition's <location> block (uploaded config).
+   * Populated when the discovery engine matched this device against an activated definition
+   * that contained a location block. Null when no definition was selected or it had no GPS.
+   */
+  defaultLatitude?: number | null;
+  /**
+   * GPS longitude sourced from the Product Definition's <location> block (uploaded config).
+   */
+  defaultLongitude?: number | null;
+
   // ── WO-010: Framework identity fields (additive, nullable) ─────────────────
   //
   // Populated by the FingerprintMatcher after probe evidence is matched against
@@ -562,14 +573,35 @@ export async function listDiscoveryRuns(
 // ── Provisioning: convert discovered hosts into managed inventory devices ─────
 
 /**
- * Maps a `genericDeviceType` string from SNMP discovery to the nearest UBR
- * device type (BTS | CPE | IDU). Falls back to CPE when no mapping exists.
+ * Maps a `genericDeviceType` string from SNMP discovery (or a Product Definition's
+ * deviceType field) to the nearest UBR device type (BTS | CPE | IDU).
+ *
+ * Priority order:
+ *  1. Exact match against UBR legacy types (BTS / CPE / IDU)
+ *  2. Semantic match — BTS-like (backhaul radios, gateways, routers, APs)
+ *  3. IDU-like (indoor units, bridges, switches in access role)
+ *  4. Fallback → CPE
+ *
+ * The mapping intentionally treats RADIO/AP/GATEWAY as BTS (access-point / backhaul
+ * role) and SWITCH/IDU as IDU (wired bridging role) to align with UBR's topology model.
  */
 export function mapGenericTypeToDeviceType(generic?: string): 'BTS' | 'CPE' | 'IDU' {
   if (!generic) return 'CPE';
-  const g = generic.toUpperCase();
-  if (g === 'BTS' || g.includes('BASE') || g.includes('ROUTER')) return 'BTS';
-  if (g === 'IDU' || g.includes('IDU')) return 'IDU';
+  const g = generic.toUpperCase().replace(/[_\s-]/g, '');
+  // ── Exact UBR legacy types ─────────────────────────────────────────────────
+  if (g === 'BTS')                               return 'BTS';
+  if (g === 'CPE')                               return 'CPE';
+  if (g === 'IDU')                               return 'IDU';
+  // ── BTS-like (backhaul / access-point / router role) ──────────────────────
+  if (g.includes('BTS')   || g.includes('BASE')) return 'BTS';
+  if (g.includes('RADIO') || g.includes('AP')  ) return 'BTS';
+  if (g.includes('GATEWAY') || g.includes('GW')) return 'BTS';
+  if (g.includes('ROUTER'))                      return 'BTS';
+  if (g.includes('ACCESS'))                      return 'BTS';
+  // ── IDU-like (indoor unit / wired bridge / switch) ────────────────────────
+  if (g.includes('IDU')    || g.includes('INDOOR')) return 'IDU';
+  if (g.includes('SWITCH') || g.includes('BRIDGE')) return 'IDU';
+  // ── CPE fallback ──────────────────────────────────────────────────────────
   return 'CPE';
 }
 

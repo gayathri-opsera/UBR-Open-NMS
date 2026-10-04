@@ -982,6 +982,11 @@ router.post('/runs', async (req, res, next) => {
         productDefinitionId: defId,
         macAddress:       null,
         discoveryMethod:  'ICMP_BYPASS',
+        // GPS sourced from the Product Definition's location block (uploaded config file).
+        // Passed to the provisioning modal so operators see pre-filled coordinates
+        // from their network planning document rather than having to enter manually.
+        defaultLatitude:  pdLat,
+        defaultLongitude: pdLon,
       });
       console.log(`[discovery-stub] bypass ✅ ${host}:${port} vendor=${vendor} defId=${defId}`);
     } catch (err) {

@@ -281,11 +281,19 @@ export function ProvisionDeviceModal({
   const [latStr,       setLatStr]       = useState('');
   const [lngStr,       setLngStr]       = useState('');
   const [gpsAutoFilled, setGpsAutoFilled] = useState(false);
+  /** Where the pre-filled GPS came from — drives the badge label shown to the operator. */
+  const [gpsSource, setGpsSource] = useState<'sysLocation' | 'productDefinition' | null>(null);
 
   // Reset form whenever a new result is opened.
   useEffect(() => {
     if (result) {
+      // ── Device Type ─────────────────────────────────────────────────────────
+      // Use the genericDeviceType from the discovery result (which comes from the
+      // Product Definition's deviceType field when a template was selected, or from
+      // the OID classification table when not). mapGenericTypeToDeviceType handles
+      // all PD types (RADIO, GATEWAY, SWITCH, etc.) not just BTS/CPE/IDU.
       setDeviceType(mapGenericTypeToDeviceType(result.genericDeviceType));
+
       setSerialNumber(deriveSerialFromResult(result));
 
       // Auto-fill MAC if the scanner walked IF-MIB ifPhysAddress; otherwise leave blank.
@@ -294,16 +302,26 @@ export function ProvisionDeviceModal({
       // Auto-derive network ID from IP subnet (e.g. 192.168.65.x → net-192-168-65)
       setNetworkId(deriveNetworkId(result.ip));
 
-      // Attempt to parse GPS from sysLocation free-text
+      // ── GPS priority chain ──────────────────────────────────────────────────
+      // 1. Parse from SNMP sysLocation (device reports its own GPS as free-text)
+      // 2. Fall back to Product Definition location block (operator's planning doc)
+      // 3. Leave blank — operator enters manually
       const gps = parseGpsFromLocation(result.sysLocation);
       if (gps) {
         setLatStr(String(gps.lat));
         setLngStr(String(gps.lng));
         setGpsAutoFilled(true);
+        setGpsSource('sysLocation');
+      } else if (result.defaultLatitude != null && result.defaultLongitude != null) {
+        setLatStr(String(result.defaultLatitude));
+        setLngStr(String(result.defaultLongitude));
+        setGpsAutoFilled(true);
+        setGpsSource('productDefinition');
       } else {
         setLatStr('');
         setLngStr('');
         setGpsAutoFilled(false);
+        setGpsSource(null);
       }
     }
   }, [result]);
@@ -430,11 +448,21 @@ export function ProvisionDeviceModal({
         <div>
           <div style={{
             fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-            letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 8,
+            letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 4,
+            display: 'flex', alignItems: 'center', gap: 6,
           }}>
             UBR Device Type <span style={{ color: 'var(--vf-danger)' }}>*</span>
+            {result.genericDeviceType && (
+              <span style={{
+                fontSize: 9, fontWeight: 600, textTransform: 'none',
+                background: 'rgba(96,165,250,0.12)', color: '#93c5fd',
+                borderRadius: 4, padding: '1px 6px', letterSpacing: 0,
+              }}>
+                detected: {result.genericDeviceType}
+              </span>
+            )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
             {(['BTS', 'CPE', 'IDU'] as DeviceType[]).map((t) => (
               <button
                 key={t}
@@ -452,11 +480,21 @@ export function ProvisionDeviceModal({
               </button>
             ))}
           </div>
-          <div style={{ marginTop: 6, fontSize: 11, color: 'var(--vf-text-muted)' }}>
+          <div style={{ fontSize: 11, color: 'var(--vf-text-muted)' }}>
             {deviceType === 'BTS' && '📡 Base Transceiver Station — provides wireless coverage to CPEs.'}
             {deviceType === 'CPE' && '🏠 Customer Premises Equipment — receives signal from a BTS.'}
             {deviceType === 'IDU' && '🔌 Indoor Unit — wired Ethernet/PoE bridge attached to a CPE.'}
           </div>
+          {result.genericDeviceType && !['BTS','CPE','IDU'].includes(result.genericDeviceType.toUpperCase()) && (
+            <div style={{
+              marginTop: 6, fontSize: 11, padding: '5px 10px', borderRadius: 6,
+              background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.2)',
+              color: 'var(--vf-text-muted)',
+            }}>
+              ℹ Discovery detected <strong style={{ color: '#93c5fd' }}>{result.genericDeviceType}</strong> from the Product Definition.
+              It has been mapped to the nearest UBR type above — adjust if needed.
+            </div>
+          )}
         </div>
 
         {/* ── Identity Fields ─────────────────────────────────────────────── */}
@@ -503,12 +541,20 @@ export function ProvisionDeviceModal({
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
             📍 GPS Location (optional — shows device on topology map)
-            {gpsAutoFilled && (
+            {gpsSource === 'sysLocation' && (
               <span style={{
                 fontSize: 9, fontWeight: 600, background: 'rgba(34,197,94,0.15)',
                 color: '#22c55e', borderRadius: 4, padding: '1px 5px',
               }}>
                 parsed from sysLocation
+              </span>
+            )}
+            {gpsSource === 'productDefinition' && (
+              <span style={{
+                fontSize: 9, fontWeight: 600, background: 'rgba(96,165,250,0.15)',
+                color: '#60a5fa', borderRadius: 4, padding: '1px 5px',
+              }}>
+                📂 from Product Definition
               </span>
             )}
           </div>
