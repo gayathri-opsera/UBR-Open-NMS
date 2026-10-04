@@ -137,11 +137,13 @@ router.get('/', async (req, res, next) => {
     try {
       const col   = await getCol();
       // Build query: prefer explicit deviceType, then genericDeviceType (for RADIO etc.)
+      // Always exclude soft-deleted (deprovisioned) devices — these must not reappear in inventory.
+      const baseQuery = { isDeprovisioned: { $ne: true } };
       const query = typeUpper
-        ? { deviceType: { $regex: typeUpper, $options: 'i' } }
+        ? { ...baseQuery, deviceType: { $regex: typeUpper, $options: 'i' } }
         : genericDeviceType
-          ? { deviceType: { $regex: genericDeviceType, $options: 'i' } }
-          : {};
+          ? { ...baseQuery, deviceType: { $regex: genericDeviceType, $options: 'i' } }
+          : baseQuery;
       const docs  = await col.find(query).limit(parseInt(limit, 10) || 500).toArray();
 
       // Deduplicate within the local collection by ipAddress — keep the most recently
@@ -277,14 +279,25 @@ router.put('/:id', async (req, res) => {
 });
 
 // ── DELETE /api/v1/devices/:id ────────────────────────────────────────────────
+// Soft-delete: marks the device as DEPROVISIONED rather than physically removing it.
+// This prevents re-discovery from silently resurrecting a device the operator intentionally removed.
+// The device disappears from inventory (filtered in GET /devices) but its MongoDB doc is preserved
+// for audit trail and to block future auto-provisioning during discovery runs.
 router.delete('/:id', async (req, res) => {
   try {
     const col = await getCol();
     const id  = req.params.id;
-    const result = await col.deleteOne(
-      { $or: [{ _id: id }, { id }, { serialNumber: id }, { deviceId: id }] }
+    const result = await col.updateOne(
+      { $or: [{ _id: id }, { id }, { serialNumber: id }, { deviceId: id }] },
+      { $set: {
+          status:           'DEPROVISIONED',
+          isDeprovisioned:  true,
+          deprovisionedAt:  new Date(),
+          updatedAt:        new Date(),
+        }
+      }
     );
-    if (result.deletedCount === 0) {
+    if (result.matchedCount === 0) {
       return res.status(404).json({ code: 'NOT_FOUND', message: `Device '${id}' not found` });
     }
     // Bust the topology cache so deprovisioned devices disappear immediately from the map.

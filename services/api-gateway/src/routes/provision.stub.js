@@ -99,7 +99,7 @@ const BUILTIN_TYPES = new Set(['BTS', 'CPE', 'IDU']);
  */
 async function provisionOne(host, col) {
   const {
-    ip, deviceType, serialNumber, macAddress,
+    ip, deviceType, genericDeviceType, serialNumber, macAddress,
     networkId, vendor, model, sysName, sysLocation,
     sysObjectID, sysDescr, latitude, longitude,
   } = host;
@@ -145,6 +145,7 @@ async function provisionOne(host, col) {
       name:             deviceName,
       deviceName,
       deviceType,
+      genericDeviceType: genericDeviceType || deviceType,
       model:            resolvedModel,
       productDefinitionId: fingerprintMeta?.productDefinitionId || null,
       // Provisioned via discovery → ONLINE immediately for admin-initiated provision.
@@ -168,31 +169,41 @@ async function provisionOne(host, col) {
     };
 
     // ── IP + hostname uniqueness (spec requirement) ────────────────────────
-    // Only one active provisioned record may exist for a given IP+hostname pair.
-    // If a record already exists for this IP with the same hostname AND a different
-    // serial number, reject the request with a 409 — the admin must deprovision
-    // the existing device before re-provisioning it with a new serial.
+    // Only one ACTIVE (non-deprovisioned) provisioned record may exist for a
+    // given IP+hostname pair.
     //
-    // If the hostname differs (device was replaced), clean up the old record and
-    // allow the new one through (the old serial is considered stale).
+    // Deprovisioned records are treated as soft-deleted — they must NEVER block
+    // a fresh provision of the same or a replacement device at the same IP.
+    // This prevents the "previously deprovisioned" 422 loop in the UI.
+    //
+    // Decision matrix for existing record at same IP (different serial):
+    //   • isDeprovisioned=true            → clean it up, allow new provision
+    //   • active + same hostname          → reject (duplicate), user must deprovision
+    //   • active + different hostname     → clean up stale record (device replaced)
     const existingForIp = await col.findOne({ ipAddress: ip, _id: { $ne: serialNumber } });
     if (existingForIp) {
-      const existingHostname = existingForIp.sysName || existingForIp.name || '';
-      const incomingHostname = deviceName;
-      if (existingHostname === incomingHostname) {
-        // Same IP + same hostname → duplicate; reject.
-        return {
-          ip,
-          deviceId: '',
-          serialNumber,
-          status: 'failed',
-          error: `A provisioned record already exists for IP ${ip} with hostname '${existingHostname}' (serial: ${existingForIp._id}). Deprovision it first.`,
-        };
-      }
-      // Different hostname → stale record for the same IP (device was replaced).
-      const removed = await col.deleteMany({ ipAddress: ip, _id: { $ne: serialNumber } });
-      if (removed.deletedCount > 0) {
-        console.log(`[provision-stub] Cleaned up ${removed.deletedCount} stale entries for IP ${ip} (hostname changed)`);
+      if (existingForIp.isDeprovisioned === true) {
+        // Deprovisioned record — always safe to overwrite; clean it up first.
+        await col.deleteMany({ ipAddress: ip, isDeprovisioned: true, _id: { $ne: serialNumber } });
+        console.log(`[provision-stub] Cleared deprovisioned record for IP ${ip} — allowing re-provision`);
+      } else {
+        const existingHostname = existingForIp.sysName || existingForIp.name || '';
+        const incomingHostname = deviceName;
+        if (existingHostname === incomingHostname) {
+          // Same IP + same hostname + active → genuine duplicate; reject.
+          return {
+            ip,
+            deviceId: '',
+            serialNumber,
+            status: 'failed',
+            error: `A provisioned record already exists for IP ${ip} with hostname '${existingHostname}' (serial: ${existingForIp._id}). Deprovision it first.`,
+          };
+        }
+        // Different hostname → stale active record (device was replaced); clean up.
+        const removed = await col.deleteMany({ ipAddress: ip, _id: { $ne: serialNumber } });
+        if (removed.deletedCount > 0) {
+          console.log(`[provision-stub] Cleaned up ${removed.deletedCount} stale entries for IP ${ip} (hostname changed)`);
+        }
       }
     }
 

@@ -20,7 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Input } from '../common/Input';
-import type { DiscoveryResult, ProvisionHostRequest } from '../../../api/discovery.api';
+import type { DiscoveryResult, ProvisionHostRequest, NmsDeviceType } from '../../../api/discovery.api';
 import { mapGenericTypeToDeviceType, buildProvisionRequest } from '../../../api/discovery.api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -49,7 +49,42 @@ export interface ProvisionDeviceModalProps {
   provisionedSerialNumber?: string;
 }
 
-type DeviceType = 'BTS' | 'CPE' | 'IDU';
+// Re-export for internal use
+type DeviceType = NmsDeviceType;
+
+/** Emoji and color for every supported device type. Unknown types get a fallback. */
+const TYPE_META: Record<string, { emoji: string; color: string; label: string; desc: string }> = {
+  BTS:      { emoji: '📡', color: '#3b82f6', label: 'BTS',      desc: 'Base Transceiver Station — provides wireless coverage to CPEs.' },
+  CPE:      { emoji: '🏠', color: '#22c55e', label: 'CPE',      desc: 'Customer Premises Equipment — receives signal from a BTS.' },
+  IDU:      { emoji: '🔌', color: '#f59e0b', label: 'IDU',      desc: 'Indoor Unit — wired Ethernet/PoE bridge attached to a CPE.' },
+  RADIO:    { emoji: '📻', color: '#8b5cf6', label: 'RADIO',    desc: 'Wireless Radio / Backhaul — point-to-point or sector radio.' },
+  SWITCH:   { emoji: '🔄', color: '#06b6d4', label: 'SWITCH',   desc: 'Network Switch — L2/L3 switching device.' },
+  ROUTER:   { emoji: '🌐', color: '#0ea5e9', label: 'ROUTER',   desc: 'Router — routes traffic between network segments.' },
+  GATEWAY:  { emoji: '🚪', color: '#64748b', label: 'GATEWAY',  desc: 'Gateway — edge device bridging two network domains.' },
+  FIREWALL: { emoji: '🔥', color: '#ef4444', label: 'FIREWALL', desc: 'Firewall — security appliance controlling traffic flow.' },
+  AP:       { emoji: '📶', color: '#10b981', label: 'AP',       desc: 'Access Point — wireless LAN access point (Wi-Fi).' },
+  OLT:      { emoji: '💡', color: '#f97316', label: 'OLT',      desc: 'Optical Line Terminal — PON headend device.' },
+  ONU:      { emoji: '📦', color: '#a855f7', label: 'ONU',      desc: 'Optical Network Unit — subscriber-side PON device.' },
+  SERVER:   { emoji: '🖥️', color: '#6366f1', label: 'SERVER',   desc: 'Server — network management host or application server.' },
+  UNKNOWN:  { emoji: '❓', color: '#94a3b8', label: 'UNKNOWN',  desc: 'Unclassified device — update after discovery.' },
+};
+
+/** Returns meta for any type, generating a sensible fallback for custom types. */
+function getTypeMeta(type: string) {
+  return TYPE_META[type.toUpperCase()] ?? {
+    emoji: '🔧', color: '#64748b',
+    label: type.toUpperCase(),
+    desc: `Custom device type: ${type}`,
+  };
+}
+
+/**
+ * Ordered list of "common" types shown as quick-select buttons.
+ * The detected type is always prepended so it appears first.
+ */
+const COMMON_TYPES: DeviceType[] = [
+  'BTS','CPE','IDU','RADIO','SWITCH','ROUTER','GATEWAY','FIREWALL','AP','OLT','ONU',
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -178,7 +213,7 @@ function SuccessView({
     navigate(`/v2/topology?highlight=${encodeURIComponent(ip)}`);
   }
 
-  const TYPE_EMOJI: Record<DeviceType, string> = { BTS: '📡', CPE: '🏠', IDU: '🔌' };
+  const meta = getTypeMeta(deviceType);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center', padding: '8px 0' }}>
@@ -198,7 +233,7 @@ function SuccessView({
           Device Provisioned Successfully
         </div>
         <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', lineHeight: 1.6 }}>
-          {TYPE_EMOJI[deviceType]} <strong>{serialNumber}</strong> ({ip}) has been added to inventory
+          {meta.emoji} <strong>{serialNumber}</strong> ({ip}) has been added to inventory
           with status <span style={{ color: '#22c55e', fontWeight: 600 }}>ONLINE</span>.
         </div>
         {deviceId && (
@@ -274,7 +309,7 @@ export function ProvisionDeviceModal({
   provisionedSerialNumber = '',
 }: ProvisionDeviceModalProps) {
   // ── Form state ──────────────────────────────────────────────────────────────
-  const [deviceType,   setDeviceType]   = useState<DeviceType>('CPE');
+  const [deviceType,   setDeviceType]   = useState<DeviceType>('UNKNOWN');
   const [serialNumber, setSerialNumber] = useState('');
   const [macAddress,   setMacAddress]   = useState('');
   const [networkId,    setNetworkId]    = useState('');
@@ -354,11 +389,7 @@ export function ProvisionDeviceModal({
     onConfirm(req);
   }
 
-  const TYPE_COLORS: Record<DeviceType, string> = {
-    BTS: '#3b82f6',
-    CPE: '#22c55e',
-    IDU: '#f59e0b',
-  };
+  // TYPE_COLORS is now driven by TYPE_META — use getTypeMeta(t).color per type
 
   // ── SNMP summary rows ───────────────────────────────────────────────────────
   const snmpRows: [string, string | undefined][] = [
@@ -448,51 +479,65 @@ export function ProvisionDeviceModal({
         <div>
           <div style={{
             fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-            letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 4,
+            letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 8,
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            UBR Device Type <span style={{ color: 'var(--vf-danger)' }}>*</span>
+            Device Type <span style={{ color: 'var(--vf-danger)' }}>*</span>
             {result.genericDeviceType && (
               <span style={{
                 fontSize: 9, fontWeight: 600, textTransform: 'none',
                 background: 'rgba(96,165,250,0.12)', color: '#93c5fd',
                 borderRadius: 4, padding: '1px 6px', letterSpacing: 0,
               }}>
-                detected: {result.genericDeviceType}
+                auto-detected: {result.genericDeviceType}
               </span>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-            {(['BTS', 'CPE', 'IDU'] as DeviceType[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setDeviceType(t)}
-                style={{
-                  flex: 1, padding: '10px 0', borderRadius: 8, cursor: 'pointer',
-                  fontSize: 13, fontWeight: 700,
-                  background: deviceType === t ? TYPE_COLORS[t] : 'var(--vf-surface-raised)',
-                  color: deviceType === t ? '#fff' : 'var(--vf-text-secondary)',
-                  border: `2px solid ${deviceType === t ? TYPE_COLORS[t] : 'var(--vf-border-subtle)'}`,
-                  transition: 'all 0.15s',
-                }}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--vf-text-muted)' }}>
-            {deviceType === 'BTS' && '📡 Base Transceiver Station — provides wireless coverage to CPEs.'}
-            {deviceType === 'CPE' && '🏠 Customer Premises Equipment — receives signal from a BTS.'}
-            {deviceType === 'IDU' && '🔌 Indoor Unit — wired Ethernet/PoE bridge attached to a CPE.'}
-          </div>
-          {result.genericDeviceType && !['BTS','CPE','IDU'].includes(result.genericDeviceType.toUpperCase()) && (
-            <div style={{
-              marginTop: 6, fontSize: 11, padding: '5px 10px', borderRadius: 6,
-              background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.2)',
-              color: 'var(--vf-text-muted)',
-            }}>
-              ℹ Discovery detected <strong style={{ color: '#93c5fd' }}>{result.genericDeviceType}</strong> from the Product Definition.
-              It has been mapped to the nearest UBR type above — adjust if needed.
+
+          {/* Dynamic type grid — all common types + detected type always visible */}
+          {(() => {
+            const detectedType = result.genericDeviceType?.toUpperCase() as DeviceType | undefined;
+            // Build list: detected type first (if not already in COMMON_TYPES), then the rest
+            const typeList: DeviceType[] = detectedType && !COMMON_TYPES.includes(detectedType)
+              ? [detectedType, ...COMMON_TYPES]
+              : COMMON_TYPES;
+            return (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))',
+                gap: 6, marginBottom: 8,
+              }}>
+                {typeList.map((t) => {
+                  const m = getTypeMeta(t);
+                  const selected = deviceType === t;
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => setDeviceType(t)}
+                      title={m.desc}
+                      style={{
+                        padding: '8px 4px', borderRadius: 8, cursor: 'pointer',
+                        fontSize: 11, fontWeight: 700, textAlign: 'center',
+                        background: selected ? m.color : 'var(--vf-surface-raised)',
+                        color: selected ? '#fff' : 'var(--vf-text-secondary)',
+                        border: `2px solid ${selected ? m.color : 'var(--vf-border-subtle)'}`,
+                        transition: 'all 0.15s',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                      }}
+                    >
+                      <span style={{ fontSize: 16 }}>{m.emoji}</span>
+                      <span>{m.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Description of selected type */}
+          {deviceType && deviceType !== 'UNKNOWN' && (
+            <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginBottom: 4 }}>
+              {getTypeMeta(deviceType).emoji} {getTypeMeta(deviceType).desc}
             </div>
           )}
         </div>

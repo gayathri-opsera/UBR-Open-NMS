@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Product Definition: Ubiquiti AirMax AC Radio
+  Device Type  : RADIO (point-to-point / PTMP backhaul radio)
+  Vendor       : Ubiquiti
+  OID Prefix   : .1.3.6.1.4.1.41112.1.6  (Ubiquiti Networks — AirMax)
+  Default GPS  : Hyderabad, Telangana, India (17.3850° N, 78.4867° E)
+
+  Upload via:  NMS UI → Product Definitions → Upload XML
+  After upload: Activate the version, then use it as a Discovery Template
+-->
+<productDefinition xmlns="urn:nms:productdef:1.0">
+
+  <!-- ══════════════ IDENTITY ══════════════════════════════════════════════ -->
+  <identity>
+    <name>AirMax AC</name>
+    <vendor>Ubiquiti</vendor>
+    <model>LBE-5AC-XR</model>
+    <firmwareFrom>8.5</firmwareFrom>
+    <firmwareTo>8.9</firmwareTo>
+    <productFamily>AirMax AC Series</productFamily>
+  </identity>
+
+  <!-- ══════════════ FINGERPRINTS ═════════════════════════════════════════ -->
+  <!--
+    The NMS fingerprint registry reads these entries on activation and seeds
+    the fingerprint_registry_entries collection in ubrnms_productdef with:
+      - genericDeviceType = RADIO
+      - defaultLatitude   = 17.3850
+      - defaultLongitude  = 78.4867
+
+    During SNMP probe the gateway matches sysObjectID / sysDescr against these
+    entries and pre-fills the Provision modal with RADIO type + GPS coordinates.
+  -->
+  <fingerprints>
+    <!-- OID match: Ubiquiti AirMax AC device class -->
+    <fingerprint>
+      <sysObjectId>.1.3.6.1.4.1.41112.1.6</sysObjectId>
+    </fingerprint>
+    <!-- Banner match: AirOS sysDescr patterns -->
+    <fingerprint>
+      <sysDescrPattern>AirMax.*AC.*</sysDescrPattern>
+    </fingerprint>
+    <fingerprint>
+      <sysDescrPattern>Ubiquiti.*AirMax.*</sysDescrPattern>
+    </fingerprint>
+    <fingerprint>
+      <sysDescrPattern>.*UBNT.*airOS.*</sysDescrPattern>
+    </fingerprint>
+  </fingerprints>
+
+  <!-- ══════════════ PROTOCOLS ════════════════════════════════════════════ -->
+  <protocols>
+    <protocol><type>SNMP</type></protocol>
+    <protocol><type>CLI</type></protocol>
+  </protocols>
+
+  <!-- ══════════════ PARAMETERS ═══════════════════════════════════════════ -->
+  <parameters>
+
+    <!-- ── System / Identity ── -->
+    <group name="system">
+      <parameter>
+        <id>firmware_version</id>
+        <displayName>Firmware Version</displayName>
+        <dataType>STRING</dataType>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.1.1.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>device_model</id>
+        <displayName>Device Model</displayName>
+        <dataType>STRING</dataType>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.1.2.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+
+    <!-- ── RF Parameters ── -->
+    <group name="radio_rf">
+      <parameter>
+        <id>tx_power</id>
+        <displayName>TX Power (dBm)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>dBm</unit>
+        <minValue>0</minValue>
+        <maxValue>30</maxValue>
+        <thresholdLow>10</thresholdLow>
+        <stalenessSeconds>30</stalenessSeconds>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.1.18.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>frequency</id>
+        <displayName>Frequency (MHz)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>MHz</unit>
+        <stalenessSeconds>60</stalenessSeconds>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.1.17.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>channel_width</id>
+        <displayName>Channel Width (MHz)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>MHz</unit>
+        <stalenessSeconds>60</stalenessSeconds>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.1.19.0</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+
+    <!-- ── Link Quality ── -->
+    <group name="link_quality">
+      <parameter>
+        <id>signal_strength</id>
+        <displayName>Signal Strength (RSSI)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>dBm</unit>
+        <minValue>-100</minValue>
+        <maxValue>0</maxValue>
+        <thresholdLow>-75</thresholdLow>
+        <stalenessSeconds>15</stalenessSeconds>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.5.1.5.1</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>noise_floor</id>
+        <displayName>Noise Floor (dBm)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>dBm</unit>
+        <stalenessSeconds>30</stalenessSeconds>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.5.1.6.1</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>link_distance</id>
+        <displayName>Link Distance (m)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>m</unit>
+        <stalenessSeconds>60</stalenessSeconds>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.5.1.15.1</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+
+    <!-- ── Throughput ── -->
+    <group name="throughput">
+      <parameter>
+        <id>rx_throughput</id>
+        <displayName>RX Throughput (Mbps)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>Mbps</unit>
+        <thresholdLow>1</thresholdLow>
+        <stalenessSeconds>15</stalenessSeconds>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.5.1.9.1</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+      <parameter>
+        <id>tx_throughput</id>
+        <displayName>TX Throughput (Mbps)</displayName>
+        <dataType>GAUGE</dataType>
+        <unit>Mbps</unit>
+        <thresholdLow>1</thresholdLow>
+        <stalenessSeconds>15</stalenessSeconds>
+        <snmpMapping>
+          <oid>.1.3.6.1.4.1.41112.1.4.5.1.10.1</oid>
+        </snmpMapping>
+        <uiVisibleTo>NMS_OPERATOR,FRAMEWORK_ADMIN</uiVisibleTo>
+      </parameter>
+    </group>
+
+  </parameters>
+
+</productDefinition>

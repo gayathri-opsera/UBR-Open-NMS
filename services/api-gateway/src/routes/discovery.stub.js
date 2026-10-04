@@ -405,7 +405,7 @@ async function classifyByOid(sysObjectID) {
   if (oid.startsWith('1.3.6.1.4.1.4526.'))  return { vendor: 'Netgear',  model: 'Smart Switch',     genericDeviceType: 'SWITCH' };
   if (oid.startsWith('1.3.6.1.4.1.3764.'))  return { vendor: 'EOC',      model: 'EOC640',           genericDeviceType: 'RADIO', productDefinitionId: 'EOC640'             };
   if (oid.startsWith('1.3.6.1.4.1.52619.')) return { vendor: 'EOC',      model: 'Configurations_GUI', genericDeviceType: 'RADIO', productDefinitionId: 'Configurations_GUI' };
-  if (oid.startsWith('1.3.6.1.4.1.41112.')) return { vendor: 'Ubiquiti', model: 'UniFi',            genericDeviceType: 'RADIO' };
+  if (oid.startsWith('1.3.6.1.4.1.41112.')) return { vendor: 'Ubiquiti', model: 'AirMax AC',        genericDeviceType: 'RADIO', productDefinitionId: 'ubiquiti-airmax-radio' };
   return { vendor: 'Unknown', model: 'SNMP Device', genericDeviceType: 'SWITCH' };
 }
 
@@ -625,13 +625,14 @@ async function provisionHostsDirect(hosts, scansCol, scanId) {
   const now     = new Date();
 
   for (const host of hosts) {
-    const { ip, serialNumber, deviceType, sysDescr, sysName, sysLocation, vendor, model,
-            latitude, longitude, firmwareVersion, manufacturer } = host;
+    const { ip, serialNumber, deviceType, genericDeviceType, sysDescr, sysName, sysLocation,
+            vendor, model, latitude, longitude, firmwareVersion, manufacturer,
+            productDefinitionId: incomingProdDefId } = host;
 
     // Banner fingerprint resolution
-    let resolvedVendor = vendor || 'EOC';
+    let resolvedVendor = vendor || manufacturer || 'EOC';
     let resolvedModel  = model  || 'EOC640';
-    let productDefinitionId = null;
+    let productDefinitionId = incomingProdDefId || null;
 
     for (const entry of banners) {
       try {
@@ -645,6 +646,7 @@ async function provisionHostsDirect(hosts, scansCol, scanId) {
     }
 
     const deviceName = sysName || `${resolvedModel}-${ip.replace(/\./g, '-')}`;
+    const resolvedType = genericDeviceType || deviceType || 'UNKNOWN';
     const doc = {
       _id:              serialNumber,
       id:               serialNumber,
@@ -652,20 +654,23 @@ async function provisionHostsDirect(hosts, scansCol, scanId) {
       serialNumber,
       name:             deviceName,
       deviceName,
-      deviceType:       deviceType || 'RADIO',
+      deviceType:       resolvedType,
+      genericDeviceType: resolvedType,
       model:            resolvedModel,
       productDefinitionId,
       status:           'ONLINE',
       ipAddress:        ip,
       latitude:         latitude  != null ? parseFloat(latitude)  : null,
       longitude:        longitude != null ? parseFloat(longitude) : null,
+      lat:              latitude  != null ? parseFloat(latitude)  : null,
+      lon:              longitude != null ? parseFloat(longitude) : null,
       manufacturer:     resolvedVendor,
       sysName:          sysName      || null,
       sysLocation:      sysLocation  || null,
       sysDescr:         sysDescr     || null,
-      firmwareVersion:  firmwareVersion || '2.1.3',
+      firmwareVersion:  firmwareVersion || null,
       discoveryParadigm: productDefinitionId ? 'BANNER' : 'MANUAL',
-      tags:             ['banner-discovered', 'auto-scan', 'eoc640'],
+      tags:             ['provisioned'],
       uptimeSeconds:    Math.floor(Math.random() * 86400),
       createdAt:        now,
       updatedAt:        now,
@@ -903,6 +908,26 @@ router.post('/runs', async (req, res, next) => {
         } catch { /* bad regex */ }
       }
 
+      // ── sysDescr keyword override — refine generic type from device description ──
+      // Many vendors embed the device role directly in sysDescr (EOC, Cisco, Juniper, etc.).
+      // This override fires AFTER banner/OID classification and takes highest priority.
+      // Example: "Configurations_GUI v2.1.3 (EOC A60 BTS)" → generic = 'BTS'
+      //          "Configurations_GUI v2.1.3 (EOC A61 CPE)" → generic = 'CPE'
+      const descUpper = (mib.sysDescr || '').toUpperCase();
+      // EOC proprietary roles
+      if      (descUpper.includes(' BTS')      || descUpper.includes('-BTS')      || descUpper.includes('(BTS'))      generic = 'BTS';
+      else if (descUpper.includes(' CPE')      || descUpper.includes('-CPE')      || descUpper.includes('(CPE'))      generic = 'CPE';
+      else if (descUpper.includes(' IDU')      || descUpper.includes('-IDU')      || descUpper.includes('(IDU'))      generic = 'IDU';
+      // Generic network device keywords
+      else if (descUpper.includes('FIREWALL')  || descUpper.includes(' FW ')      || descUpper.includes('ASA ')       || descUpper.includes('FORTIGATE'))  generic = 'FIREWALL';
+      else if (descUpper.includes(' OLT')      || descUpper.includes('-OLT')      || descUpper.includes('OPTICAL LINE TERMINAL'))  generic = 'OLT';
+      else if (descUpper.includes(' ONU')      || descUpper.includes(' ONT')      || descUpper.includes('OPTICAL NETWORK UNIT'))   generic = 'ONU';
+      else if (descUpper.includes('ACCESS POINT') || descUpper.includes('WIFI ')  || descUpper.includes('WLAN ')      || descUpper.includes(' WAP'))         generic = 'AP';
+      else if (descUpper.includes('ROUTER')    || descUpper.includes(' RTR')      || descUpper.includes('EDGE ROUTER') || descUpper.includes('ASBR'))         generic = 'ROUTER';
+      else if (descUpper.includes('SWITCH')    || descUpper.includes('CATALYST ')  || descUpper.includes('NEXUS ')     || descUpper.includes('JUNIPER EX'))    generic = 'SWITCH';
+      else if (descUpper.includes('GATEWAY')   || descUpper.includes(' GW '))                                           generic = 'GATEWAY';
+      else if (descUpper.includes(' RADIO')    || descUpper.includes('BACKHAUL')  || descUpper.includes('AIRMAX')      || descUpper.includes('PTMP'))          generic = 'RADIO';
+
       // Apply caller-selected template for matching devices
       if (callerDefMeta) {
         defId   = callerDefMeta.productDefinitionId;
@@ -926,6 +951,33 @@ router.post('/runs', async (req, res, next) => {
       try {
         const devicesCol = await getDevicesCol();
         const now = new Date();
+
+        // ── Deprovision guard: skip re-provisioning soft-deleted devices ──────
+        // When an operator clicks "Deprovision", the device is marked with
+        // isDeprovisioned: true (soft delete) rather than physically removed.
+        // Re-discovery must honour that intent and NOT resurrect the device.
+        const existingDoc = await devicesCol.findOne(
+          { $or: [{ _id: serial }, { serialNumber: serial }, { ipAddress: displayIp }] },
+          { projection: { isDeprovisioned: 1 } }
+        );
+        if (existingDoc && existingDoc.isDeprovisioned === true) {
+          console.log(`[discovery-stub] bypass ⏭ ${serial} @ ${host}:${port} — previously deprovisioned, skipping re-provision`);
+          hosts.push({
+            ip: displayIp, serialNumber: serial, port,
+            icmpStatus: 'bypassed', snmpStatus: 'success',
+            sysName: mib.sysName, sysDescr: mib.sysDescr, sysObjectID: mib.sysObjectID,
+            sysLocation: mib.sysLocation, sysContact: mib.sysContact,
+            vendor, model, genericDeviceType: generic,
+            classificationStatus: 'RECOGNISED',
+            productDefinitionId: defId, macAddress: null,
+            defaultLatitude: pdLat, defaultLongitude: pdLon,
+            discoveryMethod: 'ICMP_BYPASS',
+            provisioned: false,
+            deprovisionedFlag: true,
+          });
+          return;
+        }
+
         const doc = {
           _id:              serial,
           id:               serial,
@@ -968,10 +1020,12 @@ router.post('/runs', async (req, res, next) => {
       // succeeds in the frontend cross-reference, even when the ipAddress lookup misses.
       hosts.push({
         ip:               displayIp,
-        serialNumber:     serial,       // ← was missing; causes "Provision Device" to re-appear
+        serialNumber:     serial,
         port,
         icmpStatus:       isRealIpTarget ? 'not_attempted' : 'bypassed',
         snmpStatus:       'success',
+        // classificationStatus required by DiscoveryResult interface — drives frontend type badge
+        classificationStatus: 'RECOGNISED',
         sysName:          mib.sysName,
         sysDescr:         mib.sysDescr,
         sysObjectID:      mib.sysObjectID,
@@ -1331,6 +1385,22 @@ router.post('/snmp-probe', async (req, res) => {
         } catch { /* bad regex */ }
       }
 
+      // ── sysDescr keyword override — refine generic type from device description ──
+      const probeDescUpper = (mib.sysDescr || '').toUpperCase();
+      // EOC proprietary roles
+      if      (probeDescUpper.includes(' BTS')      || probeDescUpper.includes('-BTS')      || probeDescUpper.includes('(BTS'))      resolvedGeneric = 'BTS';
+      else if (probeDescUpper.includes(' CPE')      || probeDescUpper.includes('-CPE')      || probeDescUpper.includes('(CPE'))      resolvedGeneric = 'CPE';
+      else if (probeDescUpper.includes(' IDU')      || probeDescUpper.includes('-IDU')      || probeDescUpper.includes('(IDU'))      resolvedGeneric = 'IDU';
+      // Generic network device keywords
+      else if (probeDescUpper.includes('FIREWALL')  || probeDescUpper.includes(' FW ')      || probeDescUpper.includes('ASA ')       || probeDescUpper.includes('FORTIGATE'))  resolvedGeneric = 'FIREWALL';
+      else if (probeDescUpper.includes(' OLT')      || probeDescUpper.includes('-OLT')      || probeDescUpper.includes('OPTICAL LINE TERMINAL'))  resolvedGeneric = 'OLT';
+      else if (probeDescUpper.includes(' ONU')      || probeDescUpper.includes(' ONT')      || probeDescUpper.includes('OPTICAL NETWORK UNIT'))   resolvedGeneric = 'ONU';
+      else if (probeDescUpper.includes('ACCESS POINT') || probeDescUpper.includes('WIFI ')  || probeDescUpper.includes('WLAN ')      || probeDescUpper.includes(' WAP'))         resolvedGeneric = 'AP';
+      else if (probeDescUpper.includes('ROUTER')    || probeDescUpper.includes(' RTR')      || probeDescUpper.includes('EDGE ROUTER') || probeDescUpper.includes('ASBR'))         resolvedGeneric = 'ROUTER';
+      else if (probeDescUpper.includes('SWITCH')    || probeDescUpper.includes('CATALYST ')  || probeDescUpper.includes('NEXUS ')     || probeDescUpper.includes('JUNIPER EX'))    resolvedGeneric = 'SWITCH';
+      else if (probeDescUpper.includes('GATEWAY')   || probeDescUpper.includes(' GW '))                                                resolvedGeneric = 'GATEWAY';
+      else if (probeDescUpper.includes(' RADIO')    || probeDescUpper.includes('BACKHAUL')  || probeDescUpper.includes('AIRMAX')      || probeDescUpper.includes('PTMP'))          resolvedGeneric = 'RADIO';
+
       // Level 1 (highest priority): caller-specified definition overrides everything
       if (callerDefMeta) {
         productDefinitionId = callerDefMeta.productDefinitionId;
@@ -1345,22 +1415,25 @@ router.post('/snmp-probe', async (req, res) => {
         : `snmp-${host.replace(/\./g, '-')}-${port}`;
 
       discoveredHosts.push({
-        ip:                 host,
+        ip:                  host,
         port,
         serialNumber,
-        sysDescr:           mib.sysDescr,
-        sysObjectID:        mib.sysObjectID,
-        sysName:            mib.sysName,
-        sysLocation:        mib.sysLocation,
-        sysContact:         mib.sysContact,
-        vendor:             resolvedVendor,
-        model:              resolvedModel,
-        genericDeviceType:  resolvedGeneric,
-        deviceType:         resolvedGeneric === 'RADIO' ? 'RADIO' : null,
+        icmpStatus:          'bypassed',
+        snmpStatus:          'success',
+        classificationStatus: 'RECOGNISED',
+        sysDescr:            mib.sysDescr,
+        sysObjectID:         mib.sysObjectID,
+        sysName:             mib.sysName,
+        sysLocation:         mib.sysLocation,
+        sysContact:          mib.sysContact,
+        vendor:              resolvedVendor,
+        model:               resolvedModel,
+        genericDeviceType:   resolvedGeneric,
+        deviceType:          resolvedGeneric === 'RADIO' ? 'RADIO' : null,
         productDefinitionId,
-        defaultLatitude:    pdLat,
-        defaultLongitude:   pdLon,
-        discoveryMethod:    callerDefinitionId ? 'DEFINITION_PROBE' : 'SNMP_V2C',
+        defaultLatitude:     pdLat,
+        defaultLongitude:    pdLon,
+        discoveryMethod:     callerDefinitionId ? 'DEFINITION_PROBE' : 'SNMP_V2C',
       });
     } catch (err) {
       console.warn(`[snmp-probe] ❌ ${host}:${port} → ${err.message}`);
@@ -1395,6 +1468,16 @@ router.post('/snmp-probe', async (req, res) => {
         sysName:          h.sysName,
         sysLocation:      h.sysLocation,
         sysContact:       h.sysContact,
+        // GPS from Product Definition — stored as both lat/lon and latitude/longitude
+        // so topology, inventory, and map services all find the coordinates
+        latitude:         h.defaultLatitude  != null ? parseFloat(h.defaultLatitude)  : null,
+        longitude:        h.defaultLongitude != null ? parseFloat(h.defaultLongitude) : null,
+        lat:              h.defaultLatitude  != null ? parseFloat(h.defaultLatitude)  : null,
+        lon:              h.defaultLongitude != null ? parseFloat(h.defaultLongitude) : null,
+        location: h.defaultLatitude != null ? {
+          latitude:  parseFloat(h.defaultLatitude),
+          longitude: parseFloat(h.defaultLongitude),
+        } : null,
         discoveryParadigm: h.productDefinitionId ? 'BANNER' : 'SNMP',
         tags:             ['snmp-discovered', 'real-snmp-probe'],
         createdAt:        now,
@@ -1422,17 +1505,21 @@ router.post('/snmp-probe', async (req, res) => {
     skipped:    skipped.length,    // devices that responded but didn't match the selected template
     errors:     errors.length,
     devices:    discoveredHosts.map((h) => ({
-      ip:                 h.ip,
-      port:               h.port,
-      sysName:            h.sysName,
-      sysDescr:           (h.sysDescr || '').substring(0, 120),
-      sysObjectID:        h.sysObjectID,
-      sysLocation:        h.sysLocation,
-      vendor:             h.vendor,
-      model:              h.model,
-      genericDeviceType:  h.genericDeviceType,
-      productDefinitionId: h.productDefinitionId,
-      provisioned:        provision,
+      ip:                   h.ip,
+      port:                 h.port,
+      sysName:              h.sysName,
+      sysDescr:             (h.sysDescr || '').substring(0, 120),
+      sysObjectID:          h.sysObjectID,
+      sysLocation:          h.sysLocation,
+      vendor:               h.vendor,
+      model:                h.model,
+      genericDeviceType:    h.genericDeviceType,
+      productDefinitionId:  h.productDefinitionId,
+      classificationStatus: h.classificationStatus,
+      defaultLatitude:      h.defaultLatitude,
+      defaultLongitude:     h.defaultLongitude,
+      serialNumber:         h.serialNumber,
+      provisioned:          provision,
     })),
     errorDetails:  errors,
     skippedDetails: skipped,  // diagnostic: which devices were excluded and why

@@ -573,36 +573,54 @@ export async function listDiscoveryRuns(
 // ── Provisioning: convert discovered hosts into managed inventory devices ─────
 
 /**
- * Maps a `genericDeviceType` string from SNMP discovery (or a Product Definition's
- * deviceType field) to the nearest UBR device type (BTS | CPE | IDU).
- *
- * Priority order:
- *  1. Exact match against UBR legacy types (BTS / CPE / IDU)
- *  2. Semantic match — BTS-like (backhaul radios, gateways, routers, APs)
- *  3. IDU-like (indoor units, bridges, switches in access role)
- *  4. Fallback → CPE
- *
- * The mapping intentionally treats RADIO/AP/GATEWAY as BTS (access-point / backhaul
- * role) and SWITCH/IDU as IDU (wired bridging role) to align with UBR's topology model.
+ * All supported device types in UBR NMS.
+ * Extensible — any new type from a Product Definition is accepted as-is.
  */
-export function mapGenericTypeToDeviceType(generic?: string): 'BTS' | 'CPE' | 'IDU' {
-  if (!generic) return 'CPE';
+export type NmsDeviceType =
+  | 'BTS'       // Base Transceiver Station
+  | 'CPE'       // Customer Premises Equipment
+  | 'IDU'       // Indoor Unit
+  | 'RADIO'     // Wireless Radio / Backhaul
+  | 'SWITCH'    // Network Switch (L2/L3)
+  | 'ROUTER'    // Router / L3 device
+  | 'GATEWAY'   // Gateway / Edge device
+  | 'FIREWALL'  // Firewall / Security appliance
+  | 'AP'        // Wireless Access Point
+  | 'OLT'       // Optical Line Terminal
+  | 'ONU'       // Optical Network Unit
+  | 'SERVER'    // Server / NMS host
+  | 'UNKNOWN'   // Unclassified device
+  | string;     // Future/custom types from Product Definitions pass through
+
+/**
+ * Maps a `genericDeviceType` string from SNMP discovery or a Product Definition
+ * to the canonical NmsDeviceType.  Unknown types pass through as-is so new
+ * Product Definitions automatically show up without a code change.
+ */
+export function mapGenericTypeToDeviceType(generic?: string): NmsDeviceType {
+  if (!generic) return 'UNKNOWN';
   const g = generic.toUpperCase().replace(/[_\s-]/g, '');
-  // ── Exact UBR legacy types ─────────────────────────────────────────────────
-  if (g === 'BTS')                               return 'BTS';
-  if (g === 'CPE')                               return 'CPE';
-  if (g === 'IDU')                               return 'IDU';
-  // ── BTS-like (backhaul / access-point / router role) ──────────────────────
-  if (g.includes('BTS')   || g.includes('BASE')) return 'BTS';
-  if (g.includes('RADIO') || g.includes('AP')  ) return 'BTS';
-  if (g.includes('GATEWAY') || g.includes('GW')) return 'BTS';
-  if (g.includes('ROUTER'))                      return 'BTS';
-  if (g.includes('ACCESS'))                      return 'BTS';
-  // ── IDU-like (indoor unit / wired bridge / switch) ────────────────────────
-  if (g.includes('IDU')    || g.includes('INDOOR')) return 'IDU';
-  if (g.includes('SWITCH') || g.includes('BRIDGE')) return 'IDU';
-  // ── CPE fallback ──────────────────────────────────────────────────────────
-  return 'CPE';
+  // ── Exact canonical types — return verbatim ─────────────────────────────
+  const KNOWN: NmsDeviceType[] = [
+    'BTS','CPE','IDU','RADIO','SWITCH','ROUTER','GATEWAY',
+    'FIREWALL','AP','OLT','ONU','SERVER','UNKNOWN',
+  ];
+  if (KNOWN.includes(g as NmsDeviceType)) return g as NmsDeviceType;
+  // ── Aliases / partial matches ───────────────────────────────────────────
+  if (g.includes('BTS')    || g.includes('BASE'))    return 'BTS';
+  if (g.includes('CPE'))                              return 'CPE';
+  if (g.includes('IDU')    || g.includes('INDOOR'))  return 'IDU';
+  if (g.includes('RADIO')  || g.includes('BACKHAUL')) return 'RADIO';
+  if (g.includes('AP')     || g.includes('ACCESS'))  return 'AP';
+  if (g.includes('GATEWAY')|| g.includes('GW'))      return 'GATEWAY';
+  if (g.includes('ROUTER') || g.includes('RTR'))     return 'ROUTER';
+  if (g.includes('SWITCH') || g.includes('SW'))      return 'SWITCH';
+  if (g.includes('FIREWALL')|| g.includes('FW'))     return 'FIREWALL';
+  if (g.includes('OLT'))                             return 'OLT';
+  if (g.includes('ONU')    || g.includes('ONT'))     return 'ONU';
+  if (g.includes('SERVER') || g.includes('HOST'))    return 'SERVER';
+  // ── Unknown types pass through — Product Definitions drive the label ─────
+  return generic.toUpperCase() as NmsDeviceType;
 }
 
 /**
@@ -624,8 +642,8 @@ function deriveSerial(ip: string, sysName?: string): string {
  */
 export interface ProvisionHostRequest {
   ip: string;
-  /** UBR device type chosen by the admin (BTS | CPE | IDU). */
-  deviceType: 'BTS' | 'CPE' | 'IDU';
+  /** Device type chosen by the admin — any NmsDeviceType or custom string from a Product Definition. */
+  deviceType: NmsDeviceType;
   serialNumber: string;
   macAddress: string;
   networkId?: string;
@@ -684,7 +702,7 @@ export async function provisionDiscoveredHosts(
 export function buildProvisionRequest(
   result: DiscoveryResult,
   overrides: {
-    deviceType: 'BTS' | 'CPE' | 'IDU';
+    deviceType: NmsDeviceType;
     serialNumber: string;
     macAddress: string;
     networkId?: string;

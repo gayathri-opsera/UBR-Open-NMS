@@ -337,6 +337,36 @@ services:
       retries: 5
       start_period: 5s
 
+  # ── Ubiquiti AirMax RADIO SNMP Simulator ────────────────────────────────────
+  # Simulates a Ubiquiti AirMax AC backhaul RADIO on port 1164.
+  # OID: 1.3.6.1.4.1.41112.1.6  →  genericDeviceType=RADIO  GPS=17.385,78.487
+  radio-sim:
+    build:
+      context: test/snmpsim-radio
+      dockerfile: Dockerfile
+    container_name: nms-radio
+    restart: unless-stopped
+    environment:
+      SNMP_PORT: "1164"
+      SNMP_COMMUNITY: "public"
+      DEVICE_NAME: "UBR-RADIO-01"
+      DEVICE_IP: "192.168.100.20"
+      DEFAULT_LAT: "17.3850"
+      DEFAULT_LON: "78.4867"
+    ports:
+      - "1164:1164/udp"
+    networks:
+      nms-net: {}
+      snmp-test-net:
+        ipv4_address: 10.10.10.28
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.sendto(b'\\x30\\x26\\x02\\x01\\x01\\x04\\x06public\\xa0\\x19\\x02\\x04\\x00\\x00\\x00\\x04\\x02\\x01\\x00\\x02\\x01\\x00\\x30\\x0b\\x30\\x09\\x06\\x05\\x2b\\x06\\x01\\x02\\x01\\x05\\x00', ('127.0.0.1',1164)); s.recv(256); exit(0)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
   discovery-service:
     build:
       context: .
