@@ -6,10 +6,10 @@
  *       navigate to Inventory or Topology.
  *
  * Auto-population logic:
- *   • deviceType  — derived from SNMP genericDeviceType heuristic
+ *   • deviceType  — device-reported role (vendor role OID); admin picks only when not reported
  *   • serialNumber — derived from sysName or IP (overridable)
  *   • networkId   — derived from IP /24 subnet (e.g. 192.168.65.x → net-192-168-65)
- *   • lat/lng     — attempted from sysLocation if it contains a coordinate pair
+ *   • lat/lng     — device-reported GPS (vendor GPS OIDs or a coordinate pair in sysLocation)
  *
  * Fields that SNMP MIB-II cannot discover and must be entered by the admin:
  *   • macAddress  — requires ARP table walk or physical label
@@ -315,19 +315,20 @@ export function ProvisionDeviceModal({
   const [networkId,    setNetworkId]    = useState('');
   const [latStr,       setLatStr]       = useState('');
   const [lngStr,       setLngStr]       = useState('');
-  const [gpsAutoFilled, setGpsAutoFilled] = useState(false);
-  /** Where the pre-filled GPS came from — drives the badge label shown to the operator. */
-  const [gpsSource, setGpsSource] = useState<'sysLocation' | 'productDefinition' | null>(null);
+  /** Where the pre-filled GPS came from ('' = admin must enter it): a device OID source,
+   *  'sysLocation', or 'productDefinition'. Drives the badge shown to the operator. */
+  const [gpsSource, setGpsSource] = useState('');
 
   // Reset form whenever a new result is opened.
   useEffect(() => {
     if (result) {
       // ── Device Type ─────────────────────────────────────────────────────────
-      // Use the genericDeviceType from the discovery result (which comes from the
+      // The role the device reports over SNMP (vendor role OID) wins. Otherwise
+      // use the genericDeviceType from the discovery result (which comes from the
       // Product Definition's deviceType field when a template was selected, or from
       // the OID classification table when not). mapGenericTypeToDeviceType handles
       // all PD types (RADIO, GATEWAY, SWITCH, etc.) not just BTS/CPE/IDU.
-      setDeviceType(mapGenericTypeToDeviceType(result.genericDeviceType));
+      setDeviceType(result.deviceRole ?? mapGenericTypeToDeviceType(result.genericDeviceType));
 
       setSerialNumber(deriveSerialFromResult(result));
 
@@ -338,25 +339,27 @@ export function ProvisionDeviceModal({
       setNetworkId(deriveNetworkId(result.ip));
 
       // ── GPS priority chain ──────────────────────────────────────────────────
-      // 1. Parse from SNMP sysLocation (device reports its own GPS as free-text)
-      // 2. Fall back to Product Definition location block (operator's planning doc)
-      // 3. Leave blank — operator enters manually
-      const gps = parseGpsFromLocation(result.sysLocation);
-      if (gps) {
-        setLatStr(String(gps.lat));
-        setLngStr(String(gps.lng));
-        setGpsAutoFilled(true);
+      // 1. Device-reported GPS (vendor GPS OIDs, read by the scanner)
+      // 2. Parse from SNMP sysLocation (device reports its own GPS as free-text)
+      // 3. Fall back to Product Definition location block (operator's planning doc)
+      // 4. Leave blank — operator enters manually
+      const sysLocGps = parseGpsFromLocation(result.sysLocation);
+      if (result.latitude != null && result.longitude != null) {
+        setLatStr(String(result.latitude));
+        setLngStr(String(result.longitude));
+        setGpsSource(result.locationSource || 'device');
+      } else if (sysLocGps) {
+        setLatStr(String(sysLocGps.lat));
+        setLngStr(String(sysLocGps.lng));
         setGpsSource('sysLocation');
       } else if (result.defaultLatitude != null && result.defaultLongitude != null) {
         setLatStr(String(result.defaultLatitude));
         setLngStr(String(result.defaultLongitude));
-        setGpsAutoFilled(true);
         setGpsSource('productDefinition');
       } else {
         setLatStr('');
         setLngStr('');
-        setGpsAutoFilled(false);
-        setGpsSource(null);
+        setGpsSource('');
       }
     }
   }, [result]);
@@ -391,10 +394,16 @@ export function ProvisionDeviceModal({
 
   // TYPE_COLORS is now driven by TYPE_META — use getTypeMeta(t).color per type
 
+  const roleReported = !!result.deviceRole;
+  const gpsAutoFilled = gpsSource !== '';
+
   // ── SNMP summary rows ───────────────────────────────────────────────────────
   const snmpRows: [string, string | undefined][] = [
     ['Manufacturer', result.vendor],
     ['Model',        result.model],
+    ['Device Role',  result.deviceRole],
+    ['Coordinates',  result.latitude != null && result.longitude != null
+      ? `${result.latitude}, ${result.longitude}` : undefined],
     ['Hostname',     result.sysName],
     ['Location',     result.sysLocation],
     ['sysObjectID',  result.sysObjectID],
@@ -492,6 +501,15 @@ export function ProvisionDeviceModal({
                 auto-detected: {result.genericDeviceType}
               </span>
             )}
+            {roleReported && (
+              <span style={{
+                fontSize: 9, fontWeight: 600, textTransform: 'none',
+                background: 'rgba(34,197,94,0.15)', color: '#22c55e',
+                borderRadius: 4, padding: '1px 6px', letterSpacing: 0,
+              }}>
+                reported by device
+              </span>
+            )}
           </div>
 
           {/* Dynamic type grid — all common types + detected type always visible */}
@@ -540,6 +558,11 @@ export function ProvisionDeviceModal({
               {getTypeMeta(deviceType).emoji} {getTypeMeta(deviceType).desc}
             </div>
           )}
+          <div style={{ marginTop: 4, fontSize: 11, color: roleReported ? 'var(--vf-text-muted)' : '#f59e0b' }}>
+            {roleReported
+              ? `Role detected via ${result.deviceRoleSource || 'SNMP'}.`
+              : '⚠ The device did not report its role over SNMP — confirm the type before provisioning.'}
+          </div>
         </div>
 
         {/* ── Identity Fields ─────────────────────────────────────────────── */}
@@ -586,12 +609,12 @@ export function ProvisionDeviceModal({
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
             📍 GPS Location (optional — shows device on topology map)
-            {gpsSource === 'sysLocation' && (
+            {gpsSource !== '' && gpsSource !== 'productDefinition' && (
               <span style={{
                 fontSize: 9, fontWeight: 600, background: 'rgba(34,197,94,0.15)',
                 color: '#22c55e', borderRadius: 4, padding: '1px 5px',
               }}>
-                parsed from sysLocation
+                {gpsSource === 'sysLocation' ? 'parsed from sysLocation' : 'reported by device'}
               </span>
             )}
             {gpsSource === 'productDefinition' && (
@@ -665,7 +688,7 @@ export function ProvisionDeviceModal({
             <li>Device is created in the inventory with status <strong>ONLINE</strong>.</li>
             <li>Appears in <strong>Inventory</strong> immediately — you can navigate there from the next screen.</li>
             <li>If GPS coordinates are supplied, the device is placed on the <strong>Topology Map</strong>.</li>
-            <li>Without GPS, the map uses an approximate city fallback for India-region devices.</li>
+            <li>Without GPS, the map shows the device at an approximate position, marked as approximate.</li>
           </ul>
         </div>
 

@@ -116,9 +116,11 @@ function toNode(d, idx, parentNode) {
   const rssi   = d.rssi ?? (type !== 'IDU' ? -60 - (idx % 20) : null);
   const snr    = d.snr  ?? (type !== 'IDU' ? 25  - (idx % 10) : null);
 
-  // Fix any GPS coordinate that is outside India (0,0 or wrong continent)
+  // Device-reported GPS is used as-is; only devices without coordinates get an
+  // approximate placement (flagged so the UI can say so).
   let lat = d.latitude, lng = d.longitude;
-  if (!isInsideIndia(lat, lng)) {
+  const approximateLocation = !hasRealCoords(lat, lng);
+  if (approximateLocation) {
     const fb = fallbackCoord(d, parentNode, idx);
     lat = fb.lat;
     lng = fb.lng;
@@ -138,6 +140,7 @@ function toNode(d, idx, parentNode) {
     macAddress:      d.macAddress || '00:00:00:00:00:00',
     latitude:        lat,
     longitude:       lng,
+    approximateLocation,
     operatingChannel: d.channel ? `${d.channel} (${d.channelBandwidth || 80} MHz)` : null,
     rssi,
     a1Rssi:          d.a1Rssi ?? (rssi != null ? rssi - 3 : null),
@@ -202,9 +205,9 @@ function buildEdges(nodes) {
          if (bts.length) n.parentDeviceId = bts[i % bts.length].id;
        });
 
-  // 4. GPS fix: if CPE/IDU coordinate is missing or outside India, place near parent
+  // 4. GPS fix: CPE/IDU without device-reported coordinates are placed near their parent
   nodes.forEach((n, i) => {
-    if ((n.type === 'CPE' || n.type === 'IDU') && !isInsideIndia(n.latitude, n.longitude)) {
+    if ((n.type === 'CPE' || n.type === 'IDU') && n.approximateLocation) {
       const parent = n.parentDeviceId ? nodesById[n.parentDeviceId] : null;
       const fb = fallbackCoord(n, parent, i);
       n.latitude  = fb.lat;
@@ -214,9 +217,9 @@ function buildEdges(nodes) {
 
   // 5. 1 km enforcement: CPE must be within 1 km of its parent BTS
   nodes.forEach((n, i) => {
-    if (n.type !== 'CPE' || !n.parentDeviceId) return;
+    if (n.type !== 'CPE' || !n.parentDeviceId || !n.approximateLocation) return;
     const parent = nodesById[n.parentDeviceId];
-    if (!parent || !isInsideIndia(parent.latitude, parent.longitude)) return;
+    if (!parent || !hasRealCoords(parent.latitude, parent.longitude)) return;
     if (haversine(n.latitude, n.longitude, parent.latitude, parent.longitude) > 1.0) {
       const jitter = () => (((i * 7919 + 1) % 80) - 40) / 10000; // ±0.004° ≈ ±0.44 km
       n.latitude  = parent.latitude  + jitter();
@@ -226,7 +229,7 @@ function buildEdges(nodes) {
 
   // 6. IDU must share coordinates with its linked CPE
   nodes.forEach((n) => {
-    if (n.type !== 'IDU' || !n.parentDeviceId) return;
+    if (n.type !== 'IDU' || !n.parentDeviceId || !n.approximateLocation) return;
     const parent = nodesById[n.parentDeviceId];
     if (!parent || parent.type !== 'CPE') return;
     // snap IDU to exact CPE position
@@ -292,8 +295,10 @@ const INDIA_ANCHORS = [
   { lat: 22.7196, lng: 75.8577, name: 'Indore' },
 ];
 
-function isInsideIndia(lat, lng) {
-  return lat != null && lng != null && lat > 6 && lat < 38 && lng > 67 && lng < 98
+/** True when lat/lng are a usable device-reported position (not null, not 0,0). */
+function hasRealCoords(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng)
+      && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
       && !(lat === 0 && lng === 0);
 }
 
@@ -301,7 +306,7 @@ function isInsideIndia(lat, lng) {
  *  BTS get a city anchor.  CPE/IDU get a small jitter around their parent anchor
  *  that is guaranteed to stay within the 1 km BTS-CPE rule (±0.004° ≈ ±0.44 km). */
 function fallbackCoord(device, parentNode, idx) {
-  if (parentNode && isInsideIndia(parentNode.latitude, parentNode.longitude)) {
+  if (parentNode && hasRealCoords(parentNode.latitude, parentNode.longitude)) {
     // Deterministic sub-km jitter so CPE always lands within 1 km of BTS
     const jitter = () => (((idx * 7919 + 1) % 80) - 40) / 10000; // ±0.004° ≈ ±0.44 km
     return { lat: parentNode.latitude + jitter(), lng: parentNode.longitude + jitter() };
@@ -324,7 +329,7 @@ function haversine(la1, ln1, la2, ln2) {
 // ── Shared: load + build ──────────────────────────────────────────────────────
 async function loadGraph(bustCache = false) {
   const raw   = await getInventoryDevices(bustCache);
-  const nodes = raw.map(toNode);
+  const nodes = raw.map((d, i) => toNode(d, i));
   const edges = buildEdges(nodes);
   return { nodes, edges };
 }

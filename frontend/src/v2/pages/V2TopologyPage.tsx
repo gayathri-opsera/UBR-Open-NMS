@@ -352,7 +352,9 @@ function DevicePanel({ node, onClose, onNavigate, onDeprovision, height }: {
             {row('Firmware',        node.firmwareVersion)}
             {row('Uptime',          node.uptime)}
             {row('Cascade Hop',     node.cascadeHop)}
-            {row('GPS', node.location ? `${node.location.lat.toFixed(4)}, ${node.location.lng.toFixed(4)}` : 'No GPS')}
+            {row('GPS', node.location
+              ? `${node.location.lat.toFixed(4)}, ${node.location.lng.toFixed(4)}${node.approximateLocation ? ' (approximate — device reported no GPS)' : ''}`
+              : 'No GPS')}
           </>
         )}
 
@@ -573,6 +575,10 @@ function GpsSearchBar({ onResult, onClear, active, resultCount }: {
 }
 
 // ── Map view ──────────────────────────────────────────────────────────────────
+// Default viewport: mainland India. Devices elsewhere (e.g. real GPS abroad)
+// remain reachable by panning/zooming out.
+const INDIA_BOUNDS: L.LatLngBoundsExpression = [[6.5, 68.0], [35.7, 97.4]];
+
 function IndiaMapView({ nodes, edges, onNodeClick, gpsResult, mapHeight }: {
   nodes: TopologyNode[];
   edges: TopologyEdge[];
@@ -600,15 +606,15 @@ function IndiaMapView({ nodes, edges, onNodeClick, gpsResult, mapHeight }: {
         </div>
       )}
       <MapContainer
-        center={[22.5937, 78.9629]}
-        zoom={5}
+        bounds={INDIA_BOUNDS}
+        zoomSnap={0.25}
         scrollWheelZoom
         style={{ width: '100%', height: '100%' }}
       >
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          attribution='&copy; OSM &copy; CARTO'
-          subdomains="abcd"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          subdomains="abc"
           maxZoom={19}
           eventHandlers={{ tileerror: () => setTileError(true) }}
         />
@@ -1174,7 +1180,7 @@ function TopologyListView({ nodes, onNodeClick, mapHeight }: {
               <td style={{ padding: '8px 12px', color: 'var(--vf-text-muted)', fontSize: 11 }}>{n.uptime ?? '—'}</td>
               <td style={{ padding: '8px 12px' }}>
                 {n.location
-                  ? <Badge variant="success" dot>{n.location.lat.toFixed(3)}, {n.location.lng.toFixed(3)}</Badge>
+                  ? <Badge variant={n.approximateLocation ? 'warning' : 'success'} dot>{n.location.lat.toFixed(3)}, {n.location.lng.toFixed(3)}{n.approximateLocation ? ' ≈' : ''}</Badge>
                   : <Badge variant="default">No GPS</Badge>}
               </td>
             </tr>
@@ -1271,7 +1277,7 @@ export default function V2TopologyPage() {
   const unplacedNodes = useMemo(() =>
     nodes.filter((n) => {
       const extended = n as TopologyNode & { latitude?: number; longitude?: number; _usedFallback?: boolean };
-      return !extended.latitude || !extended.longitude || extended._usedFallback;
+      return !extended.latitude || !extended.longitude || extended._usedFallback || n.approximateLocation;
     }),
   [nodes]);
 
@@ -1303,7 +1309,7 @@ export default function V2TopologyPage() {
   const healthy  = nodes.filter((n) => n.health === 'HEALTHY').length;
   const degraded = nodes.filter((n) => n.health === 'DEGRADED').length;
   const faulty   = nodes.filter((n) => n.health === 'FAULTY').length;
-  const withGps  = nodes.filter((n) => !!n.location).length;
+  const withGps  = nodes.filter((n) => !!n.location && !n.approximateLocation).length;
 
   // Mode-specific breakdowns (mirrors Dashboard KPIs)
   const btsNodes = nodes.filter((n) => n.deviceType === 'BTS');
@@ -1405,7 +1411,7 @@ export default function V2TopologyPage() {
           <TopoKpiTile icon="⚠"  label="BTS Faulty"  value={btsFaulty}        color={btsFaulty > 0 ? '#ef4444' : '#22c55e'} onClick={() => setHealthFilter('FAULTY')} />
           <TopoKpiTile icon="📡" label="Avg CPEs/BTS" value={avgCpesPerBts}   color="#a78bfa" />
           <TopoKpiTile icon="🔗" label="Links"        value={edges.length}    color="#60a5fa" />
-          <TopoKpiTile icon="📍" label="GPS Located"  value={btsNodes.filter((n) => !!n.location).length} color="#22c55e" total={btsNodes.length} />
+          <TopoKpiTile icon="📍" label="GPS Located"  value={btsNodes.filter((n) => !!n.location && !n.approximateLocation).length} color="#22c55e" total={btsNodes.length} />
         </>)}
         {typeMode === 'CPE' && (<>
           <TopoKpiTile icon="📡" label="CPE Total"   value={cpeNodes.length}  color="#a78bfa" onClick={() => setHealthFilter('')} />

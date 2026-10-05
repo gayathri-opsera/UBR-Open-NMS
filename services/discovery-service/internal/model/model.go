@@ -235,6 +235,16 @@ type DiscoveryHostResult struct {
 	// were attempted (e.g. community string restricted to MIB-II scalars only).
 	MACAddress           string `json:"macAddress,omitempty"`
 
+	// DeviceRole is the device-reported role (BTS, CPE, IDU) read from the
+	// vendor's role OID. Empty when the device does not report one.
+	DeviceRole       string `json:"deviceRole,omitempty"`
+	DeviceRoleSource string `json:"deviceRoleSource,omitempty"`
+	// Latitude/Longitude are device-reported GPS coordinates in decimal degrees,
+	// from vendor GPS OIDs or a coordinate pair in sysLocation. Nil when not reported.
+	Latitude       *float64 `json:"latitude,omitempty"`
+	Longitude      *float64 `json:"longitude,omitempty"`
+	LocationSource string   `json:"locationSource,omitempty"`
+
 	// ── WO-011: Guided failure detail (nil when result is not failed/degraded) ─
 	// GuidedFailure is populated for any failed, auth-failed, timeout, partial,
 	// or degraded host result. It provides machine-readable category, operator

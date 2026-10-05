@@ -41,6 +41,7 @@ import {
   listIgnoredHosts,
   ignoreDiscoveredHosts,
   unignoreDiscoveredHost,
+  mapGenericTypeToDeviceType,
 } from '../../api/discovery.api';
 import type {
   DiscoveryRunResponse,
@@ -1449,20 +1450,19 @@ function QuickDiscoveryBar() {
         ip:           r.ip,
         serialNumber: serial,
         macAddress:   '',
-        // Map SNMP generic device type to the NMS device type enum.
-        // SWITCHes and ROUTERs are modelled as BTS (managed network equipment);
-        // servers and unknown devices default to CPE.
-        deviceType:   (r.genericDeviceType === 'SERVER' ? 'CPE' : 'BTS') as 'BTS' | 'CPE' | 'IDU',
+        // Device-reported role first; generic-type mapping only when the device doesn't report one.
+        deviceType:   r.deviceRole ?? mapGenericTypeToDeviceType(r.genericDeviceType),
+        deviceRoleSource: r.deviceRoleSource,
         vendor:       r.vendor     || undefined,
         model:        r.model      || undefined,
         sysObjectID:  r.sysObjectID || undefined,
         sysDescr:     r.sysDescr   || undefined,
         sysName:      r.sysName    || undefined,
         sysLocation:  r.sysLocation || undefined,
-        // Place in Bengaluru data-centre as default GPS anchor when no location is known.
-        // The admin can update the GPS coordinates later from the inventory page.
-        latitude:  12.9716,
-        longitude: 77.5946,
+        // Device-reported GPS only; without it topology shows an approximate position.
+        latitude:  r.latitude,
+        longitude: r.longitude,
+        locationSource: r.locationSource,
       };
       const resp = await provisionDiscoveredHosts(activeRunId, [req]);
       const result = resp.results[0];

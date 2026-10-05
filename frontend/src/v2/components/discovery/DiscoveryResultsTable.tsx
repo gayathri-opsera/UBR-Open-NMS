@@ -272,6 +272,8 @@ function DeviceCard({
     { label: 'Hostname',      value: val(r.sysName) },
     { label: 'MAC Address',   value: val(r.macAddress) },
     { label: 'Device Type',   value: val(r.genericDeviceType) },
+    { label: 'Device Role',   value: r.deviceRole ? r.deviceRole : 'Not reported' },
+    { label: 'GPS',           value: r.latitude != null && r.longitude != null ? `${r.latitude}, ${r.longitude}` : 'Not reported' },
     { label: 'sysObjectID',   value: val(r.sysObjectID) },
     { label: 'sysDescr',      value: r.sysDescr ? (r.sysDescr.length > 80 ? r.sysDescr.slice(0, 80) + '…' : r.sysDescr) : 'N/A' },
     { label: 'Location',      value: val(r.sysLocation) },

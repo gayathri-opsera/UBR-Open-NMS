@@ -370,3 +370,33 @@ func TestClassify_LongestPrefixWins(t *testing.T) {
 		t.Errorf("expected FIREWALL for ASA OID, got %s", result.GenericDeviceType)
 	}
 }
+
+func TestClassify_EOCRadio_ModelFromSysDescr(t *testing.T) {
+	fp := model.SNMPFingerprintResult{
+		Status:      model.SNMPFingerprintSuccess,
+		SysObjectID: ".1.3.6.1.4.1.52619",
+		SysDescr:    "Linux UBR655 4.4.60 #1 SMP PREEMPT armv7l",
+	}
+	cl := classifier.Classify(fp, "c1")
+	if cl.Status != classifier.ClassificationRecognised || cl.Vendor != "EOC" || cl.Model != "UBR655" || cl.GenericDeviceType != "RADIO" {
+		t.Fatalf("got %+v", cl)
+	}
+}
+
+func TestClassify_PrefixRespectsOIDBoundary(t *testing.T) {
+	fp := model.SNMPFingerprintResult{Status: model.SNMPFingerprintSuccess, SysObjectID: ".1.3.6.1.4.1.526190.1"}
+	if cl := classifier.Classify(fp, "c2"); cl.Status != classifier.ClassificationDeferred {
+		t.Fatalf("enterprise 526190 must not match 52619, got %+v", cl)
+	}
+}
+
+func TestClassify_EOCModelFromSimulatorSysDescr(t *testing.T) {
+	fp := model.SNMPFingerprintResult{
+		Status:      model.SNMPFingerprintSuccess,
+		SysObjectID: ".1.3.6.1.4.1.52619.1.1",
+		SysDescr:    "Configurations_GUI v2.1.3 (EOC A60 BTS)",
+	}
+	if cl := classifier.Classify(fp, "c3"); cl.Model != "A60" {
+		t.Fatalf("model = %q, want A60", cl.Model)
+	}
+}

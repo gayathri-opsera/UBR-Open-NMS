@@ -40,6 +40,8 @@ type MACWalker interface {
 type WalkEntry struct {
 	OID   string
 	Bytes []byte
+	// Value is the PDU rendered as a string (integers as decimal, OctetString as text).
+	Value string
 }
 
 // FormatMAC converts 6 raw bytes to a colon-separated MAC string (e.g. "00:1A:2B:3C:4D:5E").
@@ -283,7 +285,7 @@ func (c *GoSNMPClient) WalkOID(ctx context.Context, host string, rootOID string)
 				raw = bs
 			}
 		}
-		entries = append(entries, WalkEntry{OID: oid, Bytes: raw})
+		entries = append(entries, WalkEntry{OID: oid, Bytes: raw, Value: pduValueToString(pdu)})
 	}
 	return entries, nil
 }

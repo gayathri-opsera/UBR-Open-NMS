@@ -30,6 +30,8 @@ export interface TopologyNode {
   health: NodeHealth;
   pendingCommandCount?: number;
   location?: { lat: number; lng: number };
+  /** True when the device reported no GPS and the position is an approximate placement. */
+  approximateLocation?: boolean;
   parentDeviceId?: string;
   cascadeHop?: number;
   // ── WO-036: Health overlay fields ─────────────────────────────────────────

@@ -210,6 +210,16 @@ export interface DiscoveryResult {
    * GPS longitude sourced from the Product Definition's <location> block (uploaded config).
    */
   defaultLongitude?: number | null;
+  /** Device-reported role (BTS | CPE | IDU) read from the vendor role OID. Absent when not reported. */
+  deviceRole?: UbrDeviceType;
+  /** Where deviceRole came from, e.g. "snmp .1.3.6.1.4.1.52619.1.1.1.1.1.2=1". */
+  deviceRoleSource?: string;
+  /** Device-reported GPS latitude in decimal degrees. Absent when not reported. */
+  latitude?: number;
+  /** Device-reported GPS longitude in decimal degrees. Absent when not reported. */
+  longitude?: number;
+  /** Where the coordinates came from ("sysLocation" or the GPS OIDs). */
+  locationSource?: string;
 
   // ── WO-010: Framework identity fields (additive, nullable) ─────────────────
   //
@@ -640,6 +650,9 @@ function deriveSerial(ip: string, sysName?: string): string {
  * Request body for POST /api/v1/discovery/runs/{runId}/provision.
  * Each host entry corresponds to one DiscoveryResult selected by the admin.
  */
+/** UBR device types accepted by the provision endpoint. */
+export type UbrDeviceType = 'BTS' | 'CPE' | 'IDU';
+
 export interface ProvisionHostRequest {
   ip: string;
   /** Device type chosen by the admin — any NmsDeviceType or custom string from a Product Definition. */
@@ -657,6 +670,10 @@ export interface ProvisionHostRequest {
   latitude?: number;
   /** Optional GPS longitude for map placement. */
   longitude?: number;
+  /** Provenance of deviceType when it was read from the device. */
+  deviceRoleSource?: string;
+  /** Provenance of latitude/longitude when they were read from the device. */
+  locationSource?: string;
 }
 
 /** Per-host result returned by the provision endpoint. */
@@ -724,6 +741,10 @@ export function buildProvisionRequest(
     sysDescr:     result.sysDescr,
     latitude:     overrides.latitude,
     longitude:    overrides.longitude,
+    // Keep provenance only when the submitted value is still the device-reported one.
+    deviceRoleSource: overrides.deviceType === result.deviceRole ? result.deviceRoleSource : undefined,
+    locationSource:   overrides.latitude === result.latitude && overrides.longitude === result.longitude
+      ? result.locationSource : undefined,
   };
 }
 

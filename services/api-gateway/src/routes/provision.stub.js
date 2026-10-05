@@ -78,6 +78,52 @@ async function resolveBannerFingerprint(sysDescr) {
   return null;
 }
 
+/**
+ * Resolves a device against the same sources discovery classifies with, so a
+ * type discovery reported (e.g. RADIO for an EOC device) is also accepted here:
+ *   1. BANNER entries in the gateway's MongoDB registry (sysDescr regex)
+ *   2. The product-definition service registry — SNMP OID prefix on sysObjectID,
+ *      or sysDescr pattern (this is where uploaded definitions actually live)
+ *   3. The gateway's built-in vendor OID map (classifyByOid's legacy layer)
+ * Returns { vendor, model, productDefinitionId, paradigm } or null.
+ */
+async function resolveFingerprint(sysDescr, sysObjectID) {
+  const banner = await resolveBannerFingerprint(sysDescr);
+  if (banner) return { ...banner, paradigm: 'BANNER' };
+
+  const oid  = (sysObjectID || '').replace(/^\./, '');
+  const pick = (e, paradigm) => ({
+    vendor: e.vendor, model: e.model, productDefinitionId: e.productDefinitionId, paradigm,
+  });
+  try {
+    // Lazy require: discovery.stub requires this module at load time.
+    const { fetchAllFingerprintsFromPDService, classifyByOid } = require('./discovery.stub');
+    const entries = await fetchAllFingerprintsFromPDService();
+    for (const e of entries) {
+      const entryOid = (e.sysObjectId || '').replace(/^\./, '');
+      if (e.fingerprintType === 'SNMP_OID' && oid && entryOid &&
+          (oid === entryOid || oid.startsWith(entryOid + '.'))) {
+        return pick(e, 'SNMP');
+      }
+    }
+    if (sysDescr) {
+      for (const e of entries) {
+        if (e.fingerprintType !== 'BANNER' || !e.fingerprintValue) continue;
+        try {
+          if (new RegExp(e.fingerprintValue, 'i').test(sysDescr)) return pick(e, 'BANNER');
+        } catch { /* invalid regex in registry — skip */ }
+      }
+    }
+    if (oid) {
+      const c = await classifyByOid(oid);
+      if (c && c.productDefinitionId) return pick(c, 'SNMP');
+    }
+  } catch (err) {
+    console.warn('[provision-stub] Registry lookup failed:', err.message);
+  }
+  return null;
+}
+
 // Eagerly connect so the first provision request isn't slow.
 getDevicesCol().catch((err) =>
   console.error('[provision-stub] MongoDB connect failed:', err.message),
@@ -102,6 +148,7 @@ async function provisionOne(host, col) {
     ip, deviceType, genericDeviceType, serialNumber, macAddress,
     networkId, vendor, model, sysName, sysLocation,
     sysObjectID, sysDescr, latitude, longitude,
+    deviceRoleSource, locationSource,
   } = host;
 
   if (!ip || !serialNumber || !deviceType) {
@@ -115,27 +162,30 @@ async function provisionOne(host, col) {
   // Built-in types (BTS/CPE/IDU) bypass the registry check.
   let fingerprintMeta = null;
   if (!BUILTIN_TYPES.has(deviceType)) {
-    fingerprintMeta = await resolveBannerFingerprint(sysDescr);
+    fingerprintMeta = await resolveFingerprint(sysDescr, sysObjectID);
     if (!fingerprintMeta) {
       // Unknown type AND no fingerprint match — reject gracefully
       return {
         ip, deviceId: serialNumber, serialNumber, status: 'failed',
         error: `Unknown deviceType '${deviceType}' with no matching fingerprint registry entry. ` +
-               `Upload and activate a product definition that has a sysDescrPattern matching '${sysDescr || '(none)'}'.`,
+               `Upload and activate a product definition with a sysObjectId matching '${sysObjectID || '(none)'}' ` +
+               `or a sysDescrPattern matching '${sysDescr || '(none)'}'.`,
       };
     }
-    console.log(`[provision-stub] Resolved ${serialNumber} sysDescr '${sysDescr}' → productDef '${fingerprintMeta.productDefinitionId}' model '${fingerprintMeta.model}'`);
+    console.log(`[provision-stub] Resolved ${serialNumber} (${fingerprintMeta.paradigm}: oid '${sysObjectID}', sysDescr '${sysDescr}') → productDef '${fingerprintMeta.productDefinitionId}' model '${fingerprintMeta.model}'`);
   }
 
   try {
     const now = new Date();
 
     // Prefer fingerprint registry model over caller-supplied model for banner-matched devices
-    const resolvedVendor = fingerprintMeta?.vendor || vendor || 'Unknown';
-    const resolvedModel  = fingerprintMeta?.model  || TYPE_MODEL[deviceType] || model || deviceType;
+    // Discovery reports "Not Available" when it could not identify vendor/model.
+    const known = (v) => (v && v !== 'Not Available' ? v : null);
+    const resolvedVendor = fingerprintMeta?.vendor || known(vendor) || 'Unknown';
+    const resolvedModel  = fingerprintMeta?.model  || known(model) || TYPE_MODEL[deviceType] || deviceType;
     const deviceName     = sysName || `${resolvedModel}-${ip.replace(/\./g, '-')}`;
     // Discovery paradigm: SNMP for OID-matched, BANNER for pattern-matched
-    const paradigm       = fingerprintMeta ? 'BANNER' : 'SNMP';
+    const paradigm       = fingerprintMeta ? fingerprintMeta.paradigm : 'SNMP';
 
     const doc = {
       _id:              serialNumber,
@@ -160,6 +210,8 @@ async function provisionOne(host, col) {
       sysLocation:      sysLocation || null,
       sysObjectID:      sysObjectID || null,
       sysDescr:         sysDescr  || null,
+      deviceRoleSource: deviceRoleSource || null,
+      locationSource:   locationSource   || null,
       // Discovery metadata so inventory UI can surface how it was found.
       discoveryParadigm: paradigm,
       tags:             [paradigm.toLowerCase() + '-discovered'],

@@ -325,9 +325,20 @@ function snmpGet(host, port, community, timeoutMs = 4000, version = 'v2c') {
  *
  * When entries is empty (template has no fingerprints or none are activated),
  * returns true so all responding devices are included (safe fallback).
+ *
+ * The filter only applies when the template has at least one SNMP_OID entry.
+ * Banner-only templates (SSH banner / HTTP header patterns, e.g. EOC
+ * Configurations_GUI) carry nothing that can identify a device from an SNMP
+ * response, so filtering on them would exclude every SNMP device; the template
+ * then only tags results, as it did before the filter was introduced.
  */
+function hasSnmpOidFingerprint(entries) {
+  return !!entries && entries.some((e) => e.fingerprintType === 'SNMP_OID');
+}
+
 function matchesTemplateFingerprints(mib, entries) {
   if (!entries || entries.length === 0) return true; // no fingerprint constraint → accept all
+  if (!hasSnmpOidFingerprint(entries)) return true;  // banner-only template → can't identify SNMP devices
   const deviceOid = (mib.sysObjectID || '').replace(/^\./, '');
   for (const entry of entries) {
     if (entry.fingerprintType === 'SNMP_OID') {
@@ -399,13 +410,16 @@ async function classifyByOid(sysObjectID) {
   }
 
   // ── Layer 2: hardcoded legacy map (fallback for known vendors without a PD) ─
-  if (oid.startsWith('1.3.6.1.4.1.9.'))     return { vendor: 'Cisco',    model: 'IOS Switch',       genericDeviceType: 'SWITCH' };
-  if (oid.startsWith('1.3.6.1.4.1.2636.'))  return { vendor: 'Juniper',  model: 'JunOS Device',     genericDeviceType: 'ROUTER' };
-  if (oid.startsWith('1.3.6.1.4.1.2272.'))  return { vendor: 'Nortel',   model: 'ERS Switch',       genericDeviceType: 'SWITCH' };
-  if (oid.startsWith('1.3.6.1.4.1.4526.'))  return { vendor: 'Netgear',  model: 'Smart Switch',     genericDeviceType: 'SWITCH' };
-  if (oid.startsWith('1.3.6.1.4.1.3764.'))  return { vendor: 'EOC',      model: 'EOC640',           genericDeviceType: 'RADIO', productDefinitionId: 'EOC640'             };
-  if (oid.startsWith('1.3.6.1.4.1.52619.')) return { vendor: 'EOC',      model: 'Configurations_GUI', genericDeviceType: 'RADIO', productDefinitionId: 'Configurations_GUI' };
-  if (oid.startsWith('1.3.6.1.4.1.41112.')) return { vendor: 'Ubiquiti', model: 'AirMax AC',        genericDeviceType: 'RADIO', productDefinitionId: 'ubiquiti-airmax-radio' };
+  // Match the enterprise OID itself as well as anything beneath it — some devices
+  // (e.g. EOC 10.0.150.88) report the bare enterprise OID 1.3.6.1.4.1.52619.
+  const under = (prefix) => oid === prefix || oid.startsWith(prefix + '.');
+  if (under('1.3.6.1.4.1.9'))     return { vendor: 'Cisco',    model: 'IOS Switch',       genericDeviceType: 'SWITCH' };
+  if (under('1.3.6.1.4.1.2636'))  return { vendor: 'Juniper',  model: 'JunOS Device',     genericDeviceType: 'ROUTER' };
+  if (under('1.3.6.1.4.1.2272'))  return { vendor: 'Nortel',   model: 'ERS Switch',       genericDeviceType: 'SWITCH' };
+  if (under('1.3.6.1.4.1.4526'))  return { vendor: 'Netgear',  model: 'Smart Switch',     genericDeviceType: 'SWITCH' };
+  if (under('1.3.6.1.4.1.3764'))  return { vendor: 'EOC',      model: 'EOC640',           genericDeviceType: 'RADIO', productDefinitionId: 'EOC640'             };
+  if (under('1.3.6.1.4.1.52619')) return { vendor: 'EOC',      model: 'Configurations_GUI', genericDeviceType: 'RADIO', productDefinitionId: 'Configurations_GUI' };
+  if (under('1.3.6.1.4.1.41112')) return { vendor: 'Ubiquiti', model: 'AirMax AC',        genericDeviceType: 'RADIO', productDefinitionId: 'ubiquiti-airmax-radio' };
   return { vendor: 'Unknown', model: 'SNMP Device', genericDeviceType: 'SWITCH' };
 }
 
@@ -855,6 +869,8 @@ router.post('/runs', async (req, res, next) => {
     };
     if (callerFingerprintEntries.length === 0) {
       console.warn(`[discovery-stub] ⚠️  No fingerprints found for template '${callerDefinitionId}' — filter will pass all devices`);
+    } else if (!hasSnmpOidFingerprint(callerFingerprintEntries)) {
+      console.warn(`[discovery-stub] ⚠️  Template '${callerDefinitionId}' has no SNMP OID fingerprint — filter will pass all devices`);
     }
   }
 
@@ -1370,6 +1386,8 @@ router.post('/snmp-probe', async (req, res) => {
       : { productDefinitionId: callerDefinitionId };
     if (callerFingerprintEntries.length === 0) {
       console.warn(`[snmp-probe] ⚠️  No fingerprints found for template '${callerDefinitionId}' — filter will pass all devices`);
+    } else if (!hasSnmpOidFingerprint(callerFingerprintEntries)) {
+      console.warn(`[snmp-probe] ⚠️  Template '${callerDefinitionId}' has no SNMP OID fingerprint — filter will pass all devices`);
     } else {
       console.log(`[snmp-probe] Template '${callerDefinitionId}': ${callerFingerprintEntries.length} fingerprint(s) loaded → ${JSON.stringify(callerDefMeta)}`);
     }
@@ -1599,3 +1617,6 @@ router.post('/snmp-probe', async (req, res) => {
 });
 
 module.exports = router;
+// Shared with provision.stub so provisioning accepts what discovery classified.
+module.exports.fetchAllFingerprintsFromPDService = fetchAllFingerprintsFromPDService;
+module.exports.classifyByOid = classifyByOid;

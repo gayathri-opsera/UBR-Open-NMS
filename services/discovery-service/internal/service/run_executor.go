@@ -302,6 +302,25 @@ func (e *RunExecutor) runSNMPStage(
 		}
 	}
 
+	// ── Best-effort device role + GPS read ────────────────────────────────────
+	attrCtx, attrCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer attrCancel()
+	attrsByIP := fetchDeviceAttributes(attrCtx, snmpClient, results, concurrency)
+	for i, r := range results {
+		a, ok := attrsByIP[r.IP]
+		if !ok {
+			continue
+		}
+		results[i].DeviceRole = a.Role
+		results[i].DeviceRoleSource = a.RoleSource
+		results[i].Latitude = a.Latitude
+		results[i].Longitude = a.Longitude
+		results[i].LocationSource = a.LocationSource
+		slog.Info("snmp: device attributes",
+			"host", r.IP, "runId", runID, "role", a.Role, "roleSource", a.RoleSource,
+			"hasCoordinates", a.Latitude != nil, "locationSource", a.LocationSource)
+	}
+
 	success, _ := countSNMPStats(results)
 	slog.Info("snmp: fingerprint batch complete",
 		"runId", runID, "attempted", len(fpResults), "success", success)
@@ -393,6 +412,40 @@ func fetchMACAddresses(
 				out[ip] = mac
 				mu.Unlock()
 			}
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+// fetchDeviceAttributes reads role and GPS attributes from every host with a
+// successful SNMP fingerprint, concurrently up to maxWorkers goroutines.
+func fetchDeviceAttributes(
+	ctx context.Context,
+	client scanner.SNMPClient,
+	results []model.DiscoveryHostResult,
+	maxWorkers int,
+) map[string]scanner.DeviceAttributes {
+	out := make(map[string]scanner.DeviceAttributes, len(results))
+	var mu sync.Mutex
+
+	sem := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+
+	for _, r := range results {
+		if r.SnmpStatus != "success" {
+			continue
+		}
+		r := r
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			a := scanner.FetchDeviceAttributes(ctx, client, r.IP, r.SysObjectID, r.SysLocation)
+			mu.Lock()
+			out[r.IP] = a
+			mu.Unlock()
 		}()
 	}
 	wg.Wait()

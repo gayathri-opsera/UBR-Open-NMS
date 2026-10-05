@@ -30,9 +30,9 @@ export function TopologyMapView({ nodes, highlightedId, onNodeClick, onError }: 
       style={{ width: '100%', height: '100%', borderRadius: 8 }}
     >
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
-        subdomains="abcd"
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        subdomains="abc"
         maxZoom={19}
         eventHandlers={{ tileerror: () => onError?.() }}
       />

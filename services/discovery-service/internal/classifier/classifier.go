@@ -14,6 +14,7 @@
 package classifier
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
@@ -102,6 +103,22 @@ var releaseOneOIDPrefixes = []struct {
 
 	// Arista Networks — data-center switches
 	{".1.3.6.1.4.1.30065.1", OIDMapping{Vendor: "Arista", Model: "EOS Switch", GenericDeviceType: "SWITCH", CapabilityProfile: "cap-arista-switch-v1", DriverID: "drv-arista-snmp-v1"}},
+
+	// EOC Networks — UBR wireless radios (BTS/CPE). Model is taken from sysDescr
+	// (e.g. "Linux UBR655 …" → UBR655); see modelFromSysDescr.
+	{".1.3.6.1.4.1.52619", OIDMapping{Vendor: "EOC", GenericDeviceType: "RADIO", CapabilityProfile: "cap-eoc-radio-v1", DriverID: "drv-eoc-snmp-v1"}},
+}
+
+// sysDescrModelPattern extracts a product model token: letters followed by at
+// least two digits, e.g. "UBR655" ("Linux UBR655 …"), "EOC640", or "A60" ("(EOC A60 BTS)").
+var sysDescrModelPattern = regexp.MustCompile(`\b([A-Z]{1,4}[0-9]{2,}[A-Za-z0-9-]*)\b`)
+
+// modelFromSysDescr returns the model token from sysDescr, or "" when none is found.
+func modelFromSysDescr(sysDescr string) string {
+	if m := sysDescrModelPattern.FindStringSubmatch(sysDescr); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 // Classify maps an SNMP fingerprint result to a ClassificationResult.
@@ -123,10 +140,14 @@ func Classify(fp model.SNMPFingerprintResult, correlationID string) Classificati
 	// Try OID-based classification (most authoritative).
 	if fp.SysObjectID != "" {
 		if mapping, ok := matchOIDPrefix(fp.SysObjectID); ok {
+			deviceModel := mapping.Model
+			if deviceModel == "" {
+				deviceModel = modelFromSysDescr(fp.SysDescr)
+			}
 			return ClassificationResult{
 				Status:              ClassificationRecognised,
 				Vendor:              mapping.Vendor,
-				Model:               mapping.Model,
+				Model:               deviceModel,
 				GenericDeviceType:   mapping.GenericDeviceType,
 				CapabilityProfileID: mapping.CapabilityProfile,
 				DriverID:            mapping.DriverID,
@@ -160,7 +181,7 @@ func matchOIDPrefix(oid string) (OIDMapping, bool) {
 	found := false
 
 	for _, entry := range releaseOneOIDPrefixes {
-		if strings.HasPrefix(oid, entry.prefix) && len(entry.prefix) > bestLen {
+		if (oid == entry.prefix || strings.HasPrefix(oid, entry.prefix+".")) && len(entry.prefix) > bestLen {
 			bestLen = len(entry.prefix)
 			bestMapping = entry.mapping
 			found = true
