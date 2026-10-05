@@ -394,13 +394,13 @@ public class XmlProductDefinitionParser {
         }
 
         // Group element — broad alias chain
-        NodeList groupNodes = firstTagList(params,
-                "group", "parameterGroup", "section", "category",
+        List<Element> groupNodes = directChildrenAny(params,
+                "parameterGroup", "group", "section", "category",
                 "module", "tab", "page", "set", "cluster");
 
         List<NormalizedProductDefinition.ParameterGroup> groups = new ArrayList<>();
-        for (int g = 0; g < groupNodes.getLength(); g++) {
-            Element groupEl = (Element) groupNodes.item(g);
+        for (int g = 0; g < groupNodes.size(); g++) {
+            Element groupEl = groupNodes.get(g);
             // Group name: broad alias — attributes first, then child elements
             String groupName = coalesce(
                     attrAny(groupEl, "name", "id", "key", "label", "title", "code"),
@@ -409,15 +409,16 @@ public class XmlProductDefinitionParser {
             if (groupName == null || groupName.isBlank()) groupName = "default";
 
             // Parameter entry element — broad alias chain
-            NodeList paramNodes = firstTagList(groupEl,
+            List<Element> paramNodes = directChildrenAny(groupEl,
                     "parameter", "param", "attribute", "property",
                     "field", "mibObject", "object", "item");
             List<NormalizedProductDefinition.ParameterEntry> entries = new ArrayList<>();
 
             // Track seen IDs within this group to resolve duplicates (same logic as JSON parser)
             Set<String> seenIds = new HashSet<>();
-            for (int p = 0; p < paramNodes.getLength(); p++) {
-                Element pe = (Element) paramNodes.item(p);
+            int order = 0;
+            for (int p = 0; p < paramNodes.size(); p++) {
+                Element pe = paramNodes.get(p);
 
                 // Parameter ID: attribute aliases first, then child elements
                 String rawId = coalesce(
@@ -439,7 +440,9 @@ public class XmlProductDefinitionParser {
                             rawId, groupName, resolvedId);
                     seenIds.add(resolvedId);
                 }
-                entries.add(parseParameterElement(pe, resolvedId));
+                var entry = parseParameterElement(pe, resolvedId);
+                entry.setDisplayOrder(++order);
+                entries.add(entry);
             }
             groups.add(NormalizedProductDefinition.ParameterGroup.builder()
                     .groupName(groupName)
@@ -481,6 +484,10 @@ public class XmlProductDefinitionParser {
                         .dataType(dataType)
                         .unit(unit)
                         .defaultValue(defaultValue)
+                        .subGroup(coalesce(textAny(pe, "subGroup", "subSection", "subCategory", "sub"),
+                                           attrAny(pe, "subGroup", "subSection", "sub")))
+                        .uiWidget(coalesce(textAny(pe, "uiWidget", "widget"), attrAny(pe, "uiWidget", "widget")))
+                        .readOnly(parseBool(coalesce(textAny(pe, "readOnly", "readonly"), attrAny(pe, "readOnly", "readonly"))))
                         .thresholdHigh(coalesce(textAny(pe, "thresholdHigh", "maxThreshold", "highThreshold", "upper"),
                                                 attrAny(pe, "thresholdHigh", "maxThreshold")))
                         .thresholdLow(coalesce(textAny(pe, "thresholdLow", "minThreshold", "lowThreshold", "lower"),
@@ -609,6 +616,28 @@ public class XmlProductDefinitionParser {
     private Element firstChildOf(Element parent, String localName) {
         NodeList nodes = parent.getElementsByTagName(localName);
         return nodes.getLength() > 0 ? (Element) nodes.item(0) : null;
+    }
+
+    private static Boolean parseBool(String v) {
+        return v == null ? null : Boolean.valueOf(v.trim());
+    }
+
+    /**
+     * Direct (non-descendant) child elements of {@code parent}, using the first alias
+     * that has at least one direct child. Matches on local name (namespace-agnostic).
+     */
+    private List<Element> directChildrenAny(Element parent, String... tagNames) {
+        for (String tag : tagNames) {
+            List<Element> out = new ArrayList<>();
+            for (org.w3c.dom.Node n = parent.getFirstChild(); n != null; n = n.getNextSibling()) {
+                if (n instanceof Element e) {
+                    String ln = e.getLocalName() != null ? e.getLocalName() : e.getTagName();
+                    if (ln.equals(tag)) out.add(e);
+                }
+            }
+            if (!out.isEmpty()) return out;
+        }
+        return List.of();
     }
 
     /** Return the first non-null Element from candidates. */

@@ -114,6 +114,12 @@ public class ParameterRegistryEntry {
     /** Low-threshold string used by the alarm service. */
     private String thresholdLow;
 
+    /** Sub-section within the group (e.g. {@code properties}). */
+    private String subGroup;
+
+    /** UI widget hint (dropdown, textfield, slider). */
+    private String uiWidget;
+
     /**
      * Whether this parameter is read-only (display-only, never polled for writes).
      * Informational — the poller does not attempt to set read-only parameters.

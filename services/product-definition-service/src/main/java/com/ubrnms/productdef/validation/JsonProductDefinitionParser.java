@@ -332,7 +332,9 @@ public class JsonProductDefinitionParser {
                 // (e.g. "ipAddress" in "ip_configuration" and again in "dhcp2.4").
                 // We qualify duplicate IDs with their subGroup to keep them unique.
                 Set<String> seenIds = new HashSet<>();
+                int order = 0;
                 for (JsonNode p : params) {
+                    order++;
                     String rawId    = str(p, "id");
                     String subGroup = str(p, "subGroup");
                     String resolvedId = rawId;
@@ -346,7 +348,9 @@ public class JsonProductDefinitionParser {
                                 rawId, groupName, resolvedId);
                         seenIds.add(resolvedId);
                     }
-                    entries.add(parseParameterNode(p, resolvedId));
+                    var entry = parseParameterNode(p, resolvedId);
+                    entry.setDisplayOrder(order);
+                    entries.add(entry);
                 }
             }
             groups.add(NormalizedProductDefinition.ParameterGroup.builder()
@@ -372,14 +376,20 @@ public class JsonProductDefinitionParser {
                         .unit(str(p, "unit"))
                         .defaultValue(str(p, "defaultValue"))
                         .thresholdHigh(str(p, "thresholdHigh"))
-                        .thresholdLow(str(p, "thresholdLow"));
+                        .thresholdLow(str(p, "thresholdLow"))
+                        .subGroup(str(p, "subGroup"))
+                        .uiWidget(str(p, "uiWidget"))
+                        .readOnly(p.hasNonNull("readOnly") ? Boolean.valueOf(p.get("readOnly").asText().trim()) : null);
 
         if (p.hasNonNull("minValue")) b.minValue(p.get("minValue").asDouble());
         if (p.hasNonNull("maxValue")) b.maxValue(p.get("maxValue").asDouble());
 
         // Protocol mappings (canonical format)
         JsonNode snmp = p.get("snmpMapping");
-        if (snmp != null) b.snmpOid(str(snmp, "oid"));
+        String topOid = str(p, "oid");
+        if (topOid == null) topOid = str(p, "snmpOid");
+        String nestedOid = snmp != null ? str(snmp, "oid") : null;
+        b.snmpOid(nestedOid != null ? nestedOid : topOid);
 
         JsonNode cli = p.get("cliMapping");
         if (cli != null) {

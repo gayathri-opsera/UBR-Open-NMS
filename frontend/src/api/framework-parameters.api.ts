@@ -28,6 +28,7 @@ export type {
   ParameterCurrentValueGroup,
   FreshnessState,
 };
+export type { ParameterInstance, DevicePollStatus } from './framework-parameters.types';
 export type { ParameterReadStatus, PollFailureCategory } from './framework-parameters.types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -132,6 +133,7 @@ export async function getDeviceCurrentParameterValues(
   // Default to the framework-specific axios instance that injects Bearer tokens.
   // Tests can inject a mock instance via the third parameter.
   instance: AxiosInstance = frameworkAxios,
+  options?: { refresh?: boolean },
 ): Promise<ParameterCurrentValueResponse> {
   try {
     const headers: Record<string, string> = {};
@@ -141,7 +143,7 @@ export async function getDeviceCurrentParameterValues(
 
     const response = await instance.get<ParameterCurrentValueResponse>(
       `${BASE}/devices/${encodeURIComponent(deviceId)}/parameters/current`,
-      { headers },
+      { headers, params: options?.refresh ? { refresh: 1 } : undefined },
     );
 
     return normaliseCurrentValueResponse(response.data);

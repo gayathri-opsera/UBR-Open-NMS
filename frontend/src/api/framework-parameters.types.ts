@@ -38,6 +38,7 @@ export type ParameterReadStatus =
   | 'AUTH_FAILURE'
   | 'TIMEOUT'
   | 'UNMAPPED'
+  | 'NO_SUCH_OBJECT'
   | 'ADAPTER_ERROR'
   | 'REGISTRY_STALE'
   | 'UNKNOWN';
@@ -57,13 +58,24 @@ export type PollFailureCategory =
 
 // ── Current-value record ──────────────────────────────────────────────────────
 
+/** One row of a table parameter (or the single instance of a scalar). */
+export interface ParameterInstance {
+  /** SNMP row index ('' for scalars). */
+  index: string;
+  value: string;
+  display: string;
+}
+
+/** Outcome of the whole poll for a device. */
+export type DevicePollStatus = 'OK' | 'UNREACHABLE' | 'NO_CREDENTIALS' | 'NOT_POLLED';
+
 /**
  * ParameterCurrentValue is a single polled value for one parameter.
  * It is the atomic unit returned in the current-value API response.
  */
 export interface ParameterCurrentValue {
   /** Inventory device identifier. */
-  deviceId: string;
+  deviceId?: string;
   /** Parameter group identifier from the Product Definition. */
   groupId: string;
   /** Stable parameter identifier. */
@@ -78,7 +90,13 @@ export interface ParameterCurrentValue {
    * Raw string representation of the current value.
    * Empty string when the last poll failed with no prior successful value.
    */
-  value?: string;
+  value?: string | null;
+  /** Value with enum label resolved; null when no value. */
+  display?: string | null;
+  /** True when the parameter has several instances (SNMP table). */
+  isTable?: boolean;
+  /** Per-row instances (tables) or a single instance with index ''. */
+  instances?: ParameterInstance[];
   /**
    * Parsed numeric representation of value.
    * Undefined when the value is a string or the poll failed.
@@ -90,9 +108,9 @@ export interface ParameterCurrentValue {
    */
   source?: string;
   /** ISO-8601 UTC timestamp of the most recent poll attempt (success or failure). */
-  collectedAt: string;
+  collectedAt?: string | null;
   /** Configured poll interval in seconds for this parameter group. */
-  pollIntervalSeconds: number;
+  pollIntervalSeconds?: number;
   /** Staleness classification of this value. */
   freshnessState: FreshnessState;
   /** Outcome of the most recent poll attempt. */
@@ -110,9 +128,9 @@ export interface ParameterCurrentValue {
    */
   failureReason?: string;
   /** Active registry version used to resolve this parameter. */
-  registryVersion: string;
+  registryVersion?: string;
   /** Product Definition identifier that owns this parameter. */
-  productDefinitionId: string;
+  productDefinitionId?: string;
 }
 
 // ── Group and response shapes ─────────────────────────────────────────────────
@@ -135,6 +153,12 @@ export interface ParameterCurrentValueData {
   productDefinitionId: string;
   /** Active registry version. */
   registryVersion: string;
+  /** ISO time of the latest poll, null when never polled. */
+  collectedAt?: string | null;
+  /** Overall poll outcome. */
+  pollStatus?: DevicePollStatus;
+  /** Operator-visible poll error when pollStatus is not OK. */
+  pollError?: string;
   /** Parameter groups with current values. */
   groups: ParameterCurrentValueGroup[];
 }

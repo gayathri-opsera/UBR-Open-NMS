@@ -156,4 +156,27 @@ class XmlProductDefinitionParserTest {
             return is.readAllBytes();
         }
     }
+
+    @Test
+    void parse_parameterGroupElements_notConfusedWithGroupTextChild() {
+        String xml = "<productDefinition xmlns=\"urn:nms:productdef:1.0\"><identity><id>x</id><vendor>V</vendor><model>M</model></identity>"
+                + "<parameterGroups><parameterGroup id=\"radio\">"
+                + "<parameter id=\"a\"><name>A</name><group>radio</group><subGroup>s1</subGroup><dataType>uint</dataType>"
+                + "<uiWidget>slider</uiWidget><readOnly>true</readOnly><oid>.1.2.3</oid><minValue>1</minValue><maxValue>9</maxValue></parameter>"
+                + "<parameter id=\"a\"><name>A2</name><group>radio</group><subGroup>s2</subGroup><dataType>string</dataType></parameter>"
+                + "</parameterGroup></parameterGroups></productDefinition>";
+        NormalizedProductDefinition r = parser.parse(xml.getBytes(StandardCharsets.UTF_8), new ArrayList<>());
+        assertThat(r.getParameterGroups()).hasSize(1);
+        var g = r.getParameterGroups().get(0);
+        assertThat(g.getGroupName()).isEqualTo("radio");
+        assertThat(g.getParameters()).extracting("id").containsExactly("a", "s2_a");
+        var p = g.getParameters().get(0);
+        assertThat(p.getSubGroup()).isEqualTo("s1");
+        assertThat(p.getUiWidget()).isEqualTo("slider");
+        assertThat(p.getReadOnly()).isTrue();
+        assertThat(p.getSnmpOid()).isEqualTo(".1.2.3");
+        assertThat(p.getMinValue()).isEqualTo(1.0);
+        assertThat(p.getDisplayOrder()).isEqualTo(1);
+        assertThat(g.getParameters().get(1).getDisplayOrder()).isEqualTo(2);
+    }
 }

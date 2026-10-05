@@ -73,6 +73,16 @@ export interface AdaptiveParameter {
   effectiveWidget: UiWidget;
   /** Threshold metadata for alarm badge rendering. */
   thresholds?: ParameterThresholds;
+  /** SNMP OID from the Product Definition ('' when none). */
+  snmpOid?: string;
+  /** True when the definition marks the parameter hidden. */
+  hidden?: boolean;
+  /** Order of the parameter within the document. */
+  displayOrder?: number;
+  /** Sub-group (section) within the group; null/undefined when none. */
+  subGroup?: string | null;
+  /** Default value from the definition. */
+  defaultValue?: string | null;
 }
 
 /** A parameter group in an adaptive UI template. */
@@ -88,6 +98,10 @@ export interface AdaptiveParameterGroup {
    * Empty groups (after server-side filtering) are absent from the response.
    */
   parameters: AdaptiveParameter[];
+  /** Poll interval for the group, in seconds. */
+  pollIntervalSeconds?: number;
+  /** Ordered, distinct sub-group names (may be empty). */
+  subGroups?: string[];
 }
 
 /** Adapter context attached to the template for failure guidance. */
@@ -106,11 +120,12 @@ export interface AdapterContext {
 export interface AdaptiveUiTemplateData {
   /** Device type / model identifier (e.g. 'CISCO_CATALYST_9300', 'GENERIC'). */
   deviceType?: string;
-  deviceId: string;
+  deviceId?: string;
   productDefinitionId: string;
+  versionId?: string;
   registryVersion: string;
   /** ISO-8601 UTC timestamp when this template was generated. */
-  renderedAt: string;
+  renderedAt?: string;
   /** Authorized parameter groups. */
   groups: AdaptiveParameterGroup[];
   /** Southbound adapter context for failure guidance. */

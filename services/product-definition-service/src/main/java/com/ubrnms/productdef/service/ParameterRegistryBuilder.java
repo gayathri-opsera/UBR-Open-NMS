@@ -49,6 +49,7 @@ public class ParameterRegistryBuilder {
             return entries;
         }
 
+        java.util.Map<String, Set<String>> seenByGroup = new java.util.HashMap<>();
         for (NormalizedProductDefinition.ParameterGroup group : normalized.getParameterGroups()) {
             if (group.getGroupName() == null || group.getGroupName().isBlank()) {
                 log.warn("Skipping parameter group with null/blank groupName in definition {}",
@@ -62,7 +63,9 @@ public class ParameterRegistryBuilder {
             }
 
             // Track IDs within this group to detect duplicates
-            Set<String> seenIds = new HashSet<>();
+            // Keyed by group name so repeated group names cannot violate the unique index
+            Set<String> seenIds = seenByGroup.computeIfAbsent(group.getGroupName(), k -> new HashSet<>());
+            int fallbackOrder = 0;
 
             for (NormalizedProductDefinition.ParameterEntry param : group.getParameters()) {
                 if (param.getId() == null || param.getId().isBlank()) {
@@ -79,6 +82,7 @@ public class ParameterRegistryBuilder {
                     continue;
                 }
 
+                int position = ++fallbackOrder;
                 ParameterRegistryEntry entry = ParameterRegistryEntry.builder()
                         .productDefinitionId(productDefinitionId)
                         .versionId(versionId)
@@ -101,7 +105,10 @@ public class ParameterRegistryBuilder {
                         .uiVisibleTo(param.getUiVisibleTo())
                         .thresholdHigh(param.getThresholdHigh())
                         .thresholdLow(param.getThresholdLow())
-                        .readOnly(false) // parameters are polling-eligible by default
+                        .subGroup(param.getSubGroup())
+                        .uiWidget(param.getUiWidget())
+                        .readOnly(Boolean.TRUE.equals(param.getReadOnly()))
+                        .displayOrder(param.getDisplayOrder() > 0 ? param.getDisplayOrder() : position)
                         .registryVersion(registryVersion)
                         .build();
 

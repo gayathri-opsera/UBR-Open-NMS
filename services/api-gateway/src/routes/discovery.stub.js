@@ -26,6 +26,7 @@
  *   - Provisions matched devices into MongoDB as real discovered inventory
  */
 
+const liveParameters = require('../live/liveParameters');
 const express    = require('express');
 const dgram      = require('dgram');
 const http       = require('http');
@@ -994,6 +995,9 @@ router.post('/runs', async (req, res, next) => {
           return;
         }
 
+        // Link to the ACTIVE product definition (the id from the built-in OID map can be stale).
+        defId = (await liveParameters.resolveDefinitionId([defId], vendor).catch(() => null)) || defId;
+
         const doc = {
           _id:              serial,
           id:               serial,
@@ -1026,6 +1030,8 @@ router.post('/runs', async (req, res, next) => {
         };
         await devicesCol.replaceOne({ _id: doc._id }, doc, { upsert: true });
         console.log(`[discovery-stub] bypass provisioned ${serial} (${generic}) @ ${host}:${port} defId=${defId}`);
+        // First live read of the definition's parameters (fire-and-forget) so the Node View has data.
+        if (defId) liveParameters.refreshDevice(doc).catch(() => {});
         try { require('./topology.stub').bustTopologyCache(); } catch { /* ignore */ }
       } catch (provErr) {
         console.warn(`[discovery-stub] bypass provision failed for ${serial}: ${provErr.message}`);

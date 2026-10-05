@@ -170,4 +170,20 @@ class ParameterRegistryBuilderTest {
 
         assertThat(entries).isEmpty();
     }
+
+    @Test
+    void build_carriesSubGroupUiWidgetReadOnlyDisplayOrder() {
+        var p = NormalizedProductDefinition.ParameterEntry.builder().id("a").dataType("INTEGER")
+                .subGroup("vlan").uiWidget("slider").readOnly(true).displayOrder(7).build();
+        var q = NormalizedProductDefinition.ParameterEntry.builder().id("b").dataType("INTEGER").build();
+        NormalizedProductDefinition n = NormalizedProductDefinition.builder().parameterGroups(List.of(
+                NormalizedProductDefinition.ParameterGroup.builder().groupName("g").parameters(List.of(p, q)).build())).build();
+        List<ParameterRegistryEntry> es = builder.build(n, DEF_ID, VERSION, REG_VER);
+        assertThat(es.get(0).getSubGroup()).isEqualTo("vlan");
+        assertThat(es.get(0).getUiWidget()).isEqualTo("slider");
+        assertThat(es.get(0).isReadOnly()).isTrue();
+        assertThat(es.get(0).getDisplayOrder()).isEqualTo(7);
+        assertThat(es.get(1).isReadOnly()).isFalse();
+        assertThat(es.get(1).getDisplayOrder()).isEqualTo(2);
+    }
 }

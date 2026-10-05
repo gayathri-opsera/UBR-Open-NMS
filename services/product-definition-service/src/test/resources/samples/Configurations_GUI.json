@@ -1,0 +1,795 @@
+{
+  "id": "Configurations_GUI",
+  "vendor": "EOC",
+  "model": "Configurations_GUI Wireless Unit",
+  "description": "Auto-generated product definition for Configurations_GUI Wireless Unit",
+  "firmwareVer": "1.0",
+  "schemaVersion": "1.0",
+  "fingerprints": [
+    {
+      "type": "sshBanner",
+      "match": "Configurations_GUI.*"
+    },
+    {
+      "type": "httpHeader",
+      "header": "Server",
+      "match": "EOC-.*"
+    }
+  ],
+  "protocols": {
+    "primary": {
+      "type": "rest",
+      "baseUrl": "http://{deviceIp}/api/v1",
+      "authType": "basic",
+      "contentType": "application/json"
+    },
+    "fallback": {
+      "type": "cli",
+      "transport": "ssh",
+      "port": 22,
+      "loginPrompt": "login:",
+      "passPrompt": "Password:"
+    }
+  },
+  "parameterGroups": [
+    {
+      "group": "radio",
+      "parameters": [
+        {
+          "id": "radioStatus",
+          "name": "Radio status",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Enable(0)",
+          "readOnly": false,
+          "enumValues": [
+            "Enable(0)",
+            "Disable(1)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.33"
+        },
+        {
+          "id": "linktype",
+          "name": "LinkType",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "PTMP(3)",
+          "readOnly": false,
+          "enumValues": [
+            "PTP(1)",
+            "PTMP(3)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.35"
+        },
+        {
+          "id": "radioMode",
+          "name": "Radio Mode",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "A60(BTS), A61(CPE)",
+          "readOnly": false,
+          "enumValues": [
+            "BTS(ap)",
+            "CPE(sta)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.2"
+        },
+        {
+          "id": "ssid",
+          "name": "SSID",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "string",
+          "uiWidget": "textfield",
+          "defaultValue": "UBR650",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.3"
+        },
+        {
+          "id": "bandwidth",
+          "name": "Bandwidth",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "HT80(HT80)",
+          "readOnly": false,
+          "enumValues": [
+            "HT20(HT20)",
+            "HT40+(HT40+)",
+            "HT80(HT80)",
+            "HT160(HT160) based on countries"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.7"
+        },
+        {
+          "id": "country",
+          "name": "Country",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "5GHz(5019)",
+          "readOnly": false,
+          "enumValues": [
+            "US-Non DFS(5011)",
+            "US-5GHz ALL(5012)",
+            "Europe(276)",
+            "Canada(124)",
+            "5 Ghz(5019)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.4"
+        },
+        {
+          "id": "configuredChannel",
+          "name": "Configured channel",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "36(5180 Mhz)",
+          "readOnly": false,
+          "enumValues": [
+            "channel list based on country(36",
+            "37",
+            "...)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.9"
+        },
+        {
+          "id": "encryption",
+          "name": "Encryption",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "AES-256",
+          "readOnly": false,
+          "enumValues": [
+            "AES-256(psk2+ccmp-256)/None(none)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.16"
+        },
+        {
+          "id": "key",
+          "name": "Key",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "string",
+          "uiWidget": "textfield",
+          "defaultValue": "ubr@1234",
+          "readOnly": false,
+          "minValue": 8,
+          "maxValue": 63,
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.17"
+        },
+        {
+          "id": "maximumSus",
+          "name": "Maximum Sus",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "uint",
+          "uiWidget": "slider",
+          "defaultValue": "16",
+          "readOnly": false,
+          "minValue": 1,
+          "maxValue": 32,
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.37"
+        },
+        {
+          "id": "ofdma",
+          "name": "OFDMA",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Disable(0)",
+          "readOnly": false,
+          "enumValues": [
+            "Enable(1)/Disable(0)"
+          ]
+        },
+        {
+          "id": "dlUlRatio",
+          "name": "DL/UL Ratio",
+          "group": "radio",
+          "subGroup": "properties",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "75/25(75)",
+          "readOnly": false,
+          "enumValues": [
+            "Auto(0)",
+            "50/50(50)",
+            "60/40(60)",
+            "70/30(70)",
+            "75/25(75)",
+            "80/20(80)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.57"
+        },
+        {
+          "id": "ddrsStatus",
+          "name": "DDRS Status",
+          "group": "radio",
+          "subGroup": "ddrs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Enable(1)",
+          "readOnly": false,
+          "enumValues": [
+            "Enable(1)/Disable(0)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.3"
+        },
+        {
+          "id": "spatialStreamDdrsStatusIsEnabled",
+          "name": "Spatial Stream ( DDRS Status is enabled )",
+          "group": "radio",
+          "subGroup": "ddrs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Auto(3)",
+          "readOnly": false,
+          "enumValues": [
+            "Single(1)",
+            "Dual(2)",
+            "Auto(3)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.4"
+        },
+        {
+          "id": "maxDataRateSingleStream",
+          "name": "Max. Data Rate - Single Stream",
+          "group": "radio",
+          "subGroup": "ddrs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "MCS11(143 Mbps)(11)",
+          "readOnly": false,
+          "enumValues": [
+            "MCS0 \u2013 MCS 11(0-11)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.17"
+        },
+        {
+          "id": "maxDataRateDualStream",
+          "name": "Max. Data Rate - Dual Stream",
+          "group": "radio",
+          "subGroup": "ddrs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "MCS23(286 Mbps)",
+          "readOnly": false,
+          "enumValues": [
+            "MCS 12 \u2013 MCS 23(12-23)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.18"
+        },
+        {
+          "id": "minModulationIndexSpatialStreamIsSingleDual",
+          "name": "Min. Modulation Index ( Spatial stream is single/Dual)",
+          "group": "radio",
+          "subGroup": "ddrs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "MCS0(8Mbps)/MCS(12Mbps)",
+          "readOnly": false,
+          "enumValues": [
+            "MCS 0 \u2013 MCS 11(0-11)",
+            "MCS 12 \u2013 MCS 23(12-23)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.5"
+        },
+        {
+          "id": "maxModulationIndexSpatialStreamIsSingleDual",
+          "name": "Max. Modulation Index ( spatial stream is single/Dual)",
+          "group": "radio",
+          "subGroup": "ddrs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "MCS11(143 Mbps)/MCS(23Mbps)",
+          "readOnly": false,
+          "enumValues": [
+            "MCS 0 \u2013 MCS 11(0-11)",
+            "MCS 12 \u2013 MCS 23(12-23)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.6"
+        },
+        {
+          "id": "spatialStreamDdrsStatusIsDisabled",
+          "name": "Spatial Stream ( DDRS Status is Disabled )",
+          "group": "radio",
+          "subGroup": "ddrs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Single(1)",
+          "readOnly": false,
+          "enumValues": [
+            "Single(1)",
+            "Dual(2)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.4"
+        },
+        {
+          "id": "modulationIndex",
+          "name": "Modulation Index",
+          "group": "radio",
+          "subGroup": "ddrs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "MCS 3 ( 34 Mbps)",
+          "readOnly": false,
+          "enumValues": [
+            "MCS0 \u2013 MCS 11(0-11)",
+            "MCS 12- MCS 23(12-23)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.9"
+        },
+        {
+          "id": "atpcStatus",
+          "name": "ATPC Status",
+          "group": "radio",
+          "subGroup": "atpc",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Disable(0)",
+          "readOnly": false,
+          "enumValues": [
+            "Disable(0)",
+            "Enable(1)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.11"
+        },
+        {
+          "id": "transmitPower",
+          "name": "Transmit Power",
+          "group": "radio",
+          "subGroup": "atpc",
+          "dataType": "uint",
+          "uiWidget": "slider",
+          "defaultValue": "26",
+          "readOnly": false,
+          "minValue": 0,
+          "maxValue": 26,
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.2.1.12"
+        },
+        {
+          "id": "connectorizedAntennaGain",
+          "name": "Connectorized Antenna Gain",
+          "group": "radio",
+          "subGroup": "atpc",
+          "dataType": "uint",
+          "uiWidget": "slider",
+          "defaultValue": "23",
+          "readOnly": false,
+          "minValue": 0,
+          "maxValue": 30
+        },
+        {
+          "id": "maximumEirp",
+          "name": "Maximum EIRP",
+          "group": "radio",
+          "subGroup": "aptc",
+          "dataType": "uint",
+          "uiWidget": "slider",
+          "defaultValue": "0",
+          "readOnly": false,
+          "minValue": 0,
+          "maxValue": 100,
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.1.1.30"
+        },
+        {
+          "id": "dcsStatus",
+          "name": "DCS Status",
+          "group": "radio",
+          "subGroup": "dcs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Disable(0)",
+          "readOnly": false,
+          "enumValues": [
+            "Enable(1)",
+            "Disable(0)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.3.1.2"
+        },
+        {
+          "id": "rtxThreshold",
+          "name": "RTX Threshold",
+          "group": "radio",
+          "subGroup": "dcs",
+          "dataType": "uint",
+          "uiWidget": "slider",
+          "defaultValue": "25",
+          "readOnly": false,
+          "minValue": 0,
+          "maxValue": 100,
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.3.1.3"
+        },
+        {
+          "id": "backgroundScan",
+          "name": "Background Scan",
+          "group": "radio",
+          "subGroup": "dcs",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Disable(0)",
+          "readOnly": false,
+          "enumValues": [
+            "Enable(1)",
+            "Disable(0)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.1.3.1.11"
+        }
+      ]
+    },
+    {
+      "group": "network",
+      "parameters": [
+        {
+          "id": "addressType",
+          "name": "Address Type",
+          "group": "network",
+          "subGroup": "ip_configuration",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Static",
+          "readOnly": false,
+          "enumValues": [
+            "Static(static)",
+            "Dynamic- IPv4(dhcp)",
+            "Dynamic \u2013 Ipv6(dhcpv6)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.2.1.0"
+        },
+        {
+          "id": "ipAddress",
+          "name": "IP Address",
+          "group": "network",
+          "subGroup": "ip_configuration",
+          "dataType": "ipv4",
+          "uiWidget": "textfield",
+          "defaultValue": "192.168.1.1",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.2.2.0"
+        },
+        {
+          "id": "subnetMask",
+          "name": "Subnet Mask",
+          "group": "network",
+          "subGroup": "ip_configuration",
+          "dataType": "ipv4",
+          "uiWidget": "textfield",
+          "defaultValue": "255.255.255.0",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.2.3.0"
+        },
+        {
+          "id": "gateway",
+          "name": "Gateway",
+          "group": "network",
+          "subGroup": "ip_configuration",
+          "dataType": "ipv4",
+          "uiWidget": "textfield",
+          "defaultValue": "192.168.1.1",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.2.4.0"
+        },
+        {
+          "id": "ipv6Address",
+          "name": "IPv6 Address",
+          "group": "network",
+          "subGroup": "ip_configuration",
+          "dataType": "ipv6",
+          "uiWidget": "textfield",
+          "defaultValue": "",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.2.15.0"
+        },
+        {
+          "id": "ipv6Gateway",
+          "name": "IPv6 Gateway",
+          "group": "network",
+          "subGroup": "ip_configuration",
+          "dataType": "ipv6",
+          "uiWidget": "textfield",
+          "defaultValue": "",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.2.17.0"
+        },
+        {
+          "id": "mgmtVlanId",
+          "name": "Mgmt VLAN ID",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "uint",
+          "uiWidget": "textfield",
+          "defaultValue": "1",
+          "readOnly": false,
+          "minValue": 1,
+          "maxValue": 4094,
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.11"
+        },
+        {
+          "id": "mode",
+          "name": "Mode",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Transparent(0)",
+          "readOnly": false,
+          "enumValues": [
+            "Transparent(0)",
+            "Access(1)Trunk(2)",
+            "Q-in-Q(3)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.3"
+        },
+        {
+          "id": "trunkOption",
+          "name": "Trunk Option",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "string",
+          "uiWidget": "textfield",
+          "defaultValue": "List(1)",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.5"
+        },
+        {
+          "id": "trunkVlanId",
+          "name": "Trunk VLAN ID",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "uint",
+          "uiWidget": "textfield",
+          "defaultValue": "Empty",
+          "readOnly": false,
+          "minValue": 1,
+          "maxValue": 4094,
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.6"
+        },
+        {
+          "id": "cvlanPriority",
+          "name": "CVLAN Priority",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "uint",
+          "uiWidget": "slider",
+          "defaultValue": "0",
+          "readOnly": false,
+          "minValue": 0,
+          "maxValue": 7,
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.16"
+        },
+        {
+          "id": "cvlanId",
+          "name": "CVLAN ID",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "uint",
+          "uiWidget": "textfield",
+          "defaultValue": "101",
+          "readOnly": false,
+          "minValue": 1,
+          "maxValue": 4094,
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.17"
+        },
+        {
+          "id": "cvlanEthertype",
+          "name": "CVLAN EtherType",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "0x8100(0x0081)",
+          "readOnly": false,
+          "enumValues": [
+            "0x8100(0x0081)",
+            "0x88a8(0xa888)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.15"
+        },
+        {
+          "id": "svlanPriority",
+          "name": "SVLAN Priority",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "uint",
+          "uiWidget": "slider",
+          "defaultValue": "0",
+          "readOnly": false,
+          "minValue": 0,
+          "maxValue": 7,
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.14"
+        },
+        {
+          "id": "svlanId",
+          "name": "SVLAN ID",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "uint",
+          "uiWidget": "textfield",
+          "defaultValue": "100",
+          "readOnly": false,
+          "minValue": 1,
+          "maxValue": 4094,
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.8"
+        },
+        {
+          "id": "svlanEthertype",
+          "name": "SVLAN EtherType",
+          "group": "network",
+          "subGroup": "vlan",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "0x8100(0x0081)",
+          "readOnly": false,
+          "enumValues": [
+            "0x8100(0x0081)",
+            "0x88a8(0xa888)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.4.18.1.9"
+        },
+        {
+          "id": "speedDuplex",
+          "name": "Speed / Duplex",
+          "group": "network",
+          "subGroup": "ethernet",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Auto(0)",
+          "readOnly": false,
+          "enumValues": [
+            "Auto",
+            "100-Full(4)",
+            "1000-Full(5)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.5.6.1.2"
+        },
+        {
+          "id": "mtu",
+          "name": "MTU",
+          "group": "network",
+          "subGroup": "ethernet",
+          "dataType": "uint",
+          "uiWidget": "textfield",
+          "defaultValue": "1500",
+          "readOnly": false,
+          "minValue": 1500,
+          "maxValue": 9000,
+          "oid": ".1.3.6.1.4.1.52619.1.1.5.6.1.4"
+        },
+        {
+          "id": "dhcpServer",
+          "name": "DHCP Server",
+          "group": "network",
+          "subGroup": "dhcp",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Disable(1)",
+          "readOnly": false,
+          "enumValues": [
+            "Enable(0)",
+            "Disable(1)"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.1.0"
+        },
+        {
+          "id": "startIpAddress",
+          "name": "Start IP Address",
+          "group": "network",
+          "subGroup": "dhcp",
+          "dataType": "ipv4",
+          "uiWidget": "textfield",
+          "defaultValue": "192.168.1.100",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.2.0"
+        },
+        {
+          "id": "endIpAddress",
+          "name": "End IP Address",
+          "group": "network",
+          "subGroup": "dhcp",
+          "dataType": "ipv4",
+          "uiWidget": "textfield",
+          "defaultValue": "192.168.1.150",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.3.0"
+        },
+        {
+          "id": "leaseTime",
+          "name": "Lease Time",
+          "group": "network",
+          "subGroup": "dhcp",
+          "dataType": "uint",
+          "uiWidget": "textfield",
+          "defaultValue": "43200",
+          "readOnly": false,
+          "minValue": 120,
+          "maxValue": 86400,
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.4.0"
+        },
+        {
+          "id": "ipAddress",
+          "name": "IP Address",
+          "group": "network",
+          "subGroup": "dhcp_2_4",
+          "dataType": "ipv4",
+          "uiWidget": "textfield",
+          "defaultValue": "169.254.254.1",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.5.1.0"
+        },
+        {
+          "id": "subnetMask",
+          "name": "Subnet Mask",
+          "group": "network",
+          "subGroup": "dhcp_2_4",
+          "dataType": "ipv4",
+          "uiWidget": "textfield",
+          "defaultValue": "255.255.255.0",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.5.2.0"
+        },
+        {
+          "id": "dhcpServerPoolConfiguration",
+          "name": "DHCP Server(Pool Configuration)",
+          "group": "network",
+          "subGroup": "dhcp_2_4",
+          "dataType": "enum",
+          "uiWidget": "dropdown",
+          "defaultValue": "Enable",
+          "readOnly": false,
+          "enumValues": [
+            "Enable/Disable"
+          ],
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.5.3.0"
+        },
+        {
+          "id": "startIpAddress",
+          "name": "Start IP Address",
+          "group": "network",
+          "subGroup": "dhcp_2_4",
+          "dataType": "ipv4",
+          "uiWidget": "textfield",
+          "defaultValue": "169.254.254.100",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.5.4.0"
+        },
+        {
+          "id": "endIpAddress",
+          "name": "End IP Address",
+          "group": "network",
+          "subGroup": "dhcp_2_4",
+          "dataType": "ipv4",
+          "uiWidget": "textfield",
+          "defaultValue": "169.254.254.102",
+          "readOnly": false,
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.5.5.0"
+        },
+        {
+          "id": "leaseTime",
+          "name": "Lease Time",
+          "group": "network",
+          "subGroup": "dhcp_2_4",
+          "dataType": "uint",
+          "uiWidget": "textfield",
+          "defaultValue": "300",
+          "readOnly": false,
+          "minValue": 120,
+          "maxValue": 86400,
+          "oid": ".1.3.6.1.4.1.52619.1.1.6.5.6.0"
+        }
+      ]
+    }
+  ]
+}

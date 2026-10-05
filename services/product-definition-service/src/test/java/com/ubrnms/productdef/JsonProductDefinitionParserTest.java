@@ -145,4 +145,21 @@ class JsonProductDefinitionParserTest {
             return is.readAllBytes();
         }
     }
+
+    @Test
+    void parse_topLevelOidSubGroupUiWidgetReadOnly() {
+        String json = "{\"id\":\"x\",\"vendor\":\"V\",\"model\":\"M\",\"parameterGroups\":[{\"group\":\"radio\",\"parameters\":["
+                + "{\"id\":\"a\",\"dataType\":\"uint\",\"subGroup\":\"s1\",\"uiWidget\":\"slider\",\"readOnly\":true,\"oid\":\".1.2.3\"},"
+                + "{\"id\":\"b\",\"dataType\":\"enum\",\"enumValues\":[\"Enable(0)\"],\"snmpMapping\":{\"oid\":\".1.2.4\"}}]}]}";
+        NormalizedProductDefinition r = parser.parse(json.getBytes(java.nio.charset.StandardCharsets.UTF_8), new java.util.ArrayList<>());
+        var ps = r.getParameterGroups().get(0).getParameters();
+        assertThat(ps.get(0).getSnmpOid()).isEqualTo(".1.2.3");
+        assertThat(ps.get(0).getSubGroup()).isEqualTo("s1");
+        assertThat(ps.get(0).getUiWidget()).isEqualTo("slider");
+        assertThat(ps.get(0).getReadOnly()).isTrue();
+        assertThat(ps.get(0).getDisplayOrder()).isEqualTo(1);
+        assertThat(ps.get(1).getSnmpOid()).isEqualTo(".1.2.4");
+        assertThat(ps.get(1).getReadOnly()).isNull();
+        assertThat(ps.get(1).getEnumValues()).containsExactly("Enable(0)");
+    }
 }

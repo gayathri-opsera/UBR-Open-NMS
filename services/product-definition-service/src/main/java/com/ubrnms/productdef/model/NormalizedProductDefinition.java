@@ -179,5 +179,14 @@ public class NormalizedProductDefinition {
         private String thresholdHigh;
         /** Optional low-threshold string. */
         private String thresholdLow;
+
+        /** Optional sub-section within the group (e.g. {@code properties}, {@code vlan}). */
+        private String subGroup;
+        /** UI widget hint: dropdown, textfield, slider, ... */
+        private String uiWidget;
+        /** Whether the parameter is read-only (null = unspecified, treated as false). */
+        private Boolean readOnly;
+        /** 1-based document order of the parameter within its group (0 = unset). */
+        private int displayOrder;
     }
 }

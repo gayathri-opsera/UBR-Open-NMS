@@ -4,6 +4,7 @@ const Redis = require('ioredis');
 const config = require('./config');
 const logger = require('./utils/logger');
 const { createApp } = require('./app');
+const liveParameters = require('./live/liveParameters');
 
 async function start() {
   const redis = new Redis({
@@ -26,6 +27,8 @@ async function start() {
   const server = app.listen(config.port, () => {
     logger.info({ msg: 'API Gateway started', port: config.port });
   });
+
+  liveParameters.startScheduler();
 
   const shutdown = async (signal) => {
     logger.info({ msg: 'Shutting down', signal });

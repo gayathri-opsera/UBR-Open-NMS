@@ -17,6 +17,7 @@
 
 const mongoose      = require('mongoose');
 const topologyStub  = require('./topology.stub');
+const live          = require('../live/liveParameters');
 
 const MONGO_URI      = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms';
 const PRODUCTDEF_URI = (process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms')
@@ -129,6 +130,28 @@ getDevicesCol().catch((err) =>
   console.error('[provision-stub] MongoDB connect failed:', err.message),
 );
 
+/**
+ * SNMP credential for live parameter reads. Discovery stores the community it used on the
+ * device record at the same IP; a credentialId on the host (saved credential) is honoured too.
+ * A community supplied directly in the request body is intentionally not accepted.
+ */
+async function resolveSnmpCredential(col, host, ip) {
+  const port = parseInt(host.snmpPort || host.port, 10) || 161;
+  const prior = await col.findOne(
+    { ipAddress: ip, snmpCommunity: { $nin: [null, ''] } },
+    { projection: { snmpCommunity: 1, snmpPort: 1 } },
+  );
+  if (prior) return { community: prior.snmpCommunity, port: prior.snmpPort || port };
+  if (host.credentialId) {
+    try {
+      const cred = await mongoose.connection.db.collection('snmp_credentials')
+        .findOne({ _id: new mongoose.Types.ObjectId(host.credentialId) });
+      if (cred && cred.community) return { community: cred.community, port };
+    } catch { /* invalid id / missing collection */ }
+  }
+  return { community: null, port };
+}
+
 /** Map discovery device type → hardware model string (mirrors devices.stub.js). */
 const TYPE_MODEL = { BTS: 'A60', CPE: 'A61', IDU: 'IDU' };
 
@@ -149,6 +172,7 @@ async function provisionOne(host, col) {
     networkId, vendor, model, sysName, sysLocation,
     sysObjectID, sysDescr, latitude, longitude,
     deviceRoleSource, locationSource,
+    productDefinitionId: hostDefinitionId,
   } = host;
 
   if (!ip || !serialNumber || !deviceType) {
@@ -187,6 +211,13 @@ async function provisionOne(host, col) {
     // Discovery paradigm: SNMP for OID-matched, BANNER for pattern-matched
     const paradigm       = fingerprintMeta ? fingerprintMeta.paradigm : 'SNMP';
 
+    // Link the device to the ACTIVE product definition (drives the Node View) and keep the SNMP
+    // credential discovery used, so live values can be read from the device afterwards.
+    const productDefinitionId = await live.resolveDefinitionId(
+      [fingerprintMeta?.productDefinitionId, hostDefinitionId], resolvedVendor,
+    );
+    const snmp = await resolveSnmpCredential(col, host, ip);
+
     const doc = {
       _id:              serialNumber,
       id:               serialNumber,
@@ -197,7 +228,8 @@ async function provisionOne(host, col) {
       deviceType,
       genericDeviceType: genericDeviceType || deviceType,
       model:            resolvedModel,
-      productDefinitionId: fingerprintMeta?.productDefinitionId || null,
+      productDefinitionId: productDefinitionId || null,
+      ...(snmp.community ? { snmpPort: snmp.port, snmpCommunity: snmp.community } : {}),
       // Provisioned via discovery → ONLINE immediately for admin-initiated provision.
       status:           'ONLINE',
       ipAddress:        ip,
@@ -261,7 +293,10 @@ async function provisionOne(host, col) {
 
     // Upsert by serialNumber (_id) — idempotent for re-provisioning the same serial.
     await col.replaceOne({ _id: doc._id }, doc, { upsert: true });
-    console.log(`[provision-stub] Provisioned ${serialNumber} (${deviceType}) @ ${ip}`);
+    console.log(`[provision-stub] Provisioned ${serialNumber} (${deviceType}) @ ${ip} productDef=${productDefinitionId || 'none'}`);
+
+    // First live read straight away (fire-and-forget) so the Node View has data when opened.
+    if (productDefinitionId) live.refreshDevice(doc).catch(() => {});
 
     return { ip, deviceId: serialNumber, serialNumber, status: 'provisioned' };
   } catch (err) {

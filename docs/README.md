@@ -5,6 +5,7 @@
 - [Developer Onboarding Guide](onboarding.md)
 - [API Documentation](api/index.html) (OpenAPI / Swagger UI)
 - [Architecture Decision Records](adr/decisions.md)
+- [Definition-Driven Live Node View](definition-driven-live-node-view.md) — product definition upload → discovery → provisioning → live Node View → topology (XML-only fields)
 
 ### Operational Runbooks
 

@@ -211,7 +211,12 @@ export function ParameterValueCard({ parameter, currentValue, onWrite, className
     currentValue?.valueNumeric,
   );
 
-  const isSlider  = parameter.effectiveWidget === 'slider';
+  // Several instances (SNMP table): list them all instead of only the first.
+  const instances = currentValue?.instances ?? [];
+  const multi = instances.length > 1;
+  const shownValue = currentValue?.display ?? currentValue?.value ?? undefined;
+
+  const isSlider  = parameter.effectiveWidget === 'slider' && !multi;
   const isWritable = !parameter.readOnly && typeof onWrite === 'function';
 
   const [editing, setEditing]   = useState(false);
@@ -289,7 +294,21 @@ export function ParameterValueCard({ parameter, currentValue, onWrite, className
         {!isSlider && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
             <div aria-labelledby={`${cardId}-label`}>
-              {renderWidgetDisplay(parameter, currentValue?.value, valueColor)}
+              {multi ? (
+                <ul
+                  aria-label={`${parameter.label} instances`}
+                  style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}
+                >
+                  {instances.map((inst) => (
+                    <li key={inst.index} style={{ fontSize: 14, fontWeight: 700, color: valueColor, fontFamily: 'var(--vf-font-mono)' }}>
+                      <span style={{ color: 'var(--vf-text-muted)', fontWeight: 500, marginRight: 6 }}>#{inst.index}</span>
+                      {formatValue(inst.display || inst.value, parameter.unit)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                renderWidgetDisplay(parameter, shownValue, valueColor)
+              )}
             </div>
             {/* Badges: freshness and threshold alarm */}
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -318,7 +337,7 @@ export function ParameterValueCard({ parameter, currentValue, onWrite, className
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <div aria-labelledby={`${cardId}-label`}>
               <span style={{ fontSize: 20, fontWeight: 700, color: valueColor, fontFamily: 'var(--vf-font-mono)' }}>
-                {formatValue(currentValue?.value, parameter.unit)}
+                {formatValue(shownValue, parameter.unit)}
               </span>
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
@@ -331,7 +350,7 @@ export function ParameterValueCard({ parameter, currentValue, onWrite, className
             </div>
           </div>
           {/* The slider bar */}
-          {renderWidgetDisplay(parameter, currentValue?.value, valueColor)}
+          {renderWidgetDisplay(parameter, shownValue, valueColor)}
         </div>
       )}
 
