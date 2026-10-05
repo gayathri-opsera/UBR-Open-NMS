@@ -1,0 +1,769 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Product Definition: EOC Configurations_GUI Wireless Unit  (SNMP-discoverable)
+  Definition ID : eoc-configurations-gui  (same as the existing template, so
+                  this uploads as a NEW VERSION of it rather than a new template)
+  Vendor        : EOC
+  OID Prefix    : .1.3.6.1.4.1.52619  (EOC enterprise; matches device 10.0.150.88)
+
+  Changes vs Configurations_GUI.xml:
+    - SNMP sysObjectID fingerprint added, so SNMP discovery with this template
+      selected matches devices whose sysObjectID starts with the OID prefix above
+    - SNMP protocol declared alongside REST / CLI
+    - explicit <name> (otherwise the <description> text is used as the name)
+
+  Upload via:  NMS UI -> Product Definitions -> Upload, then Activate the new version
+-->
+<productDefinition xmlns="urn:nms:productdef:1.0" schemaVersion="1.0">
+
+  <!-- ══════════════ IDENTITY ══════════════ -->
+  <identity>
+    <id>Configurations_GUI</id>
+    <name>Configurations_GUI Wireless Unit</name>
+    <vendor>EOC</vendor>
+    <model>Configurations_GUI Wireless Unit</model>
+    <description>Auto-generated product definition for Configurations_GUI Wireless Unit</description>
+    <firmwareVer>1.0</firmwareVer>
+  </identity>
+
+  <!-- ══════════════ FINGERPRINTS ══════════════ -->
+  <fingerprints>
+    <!-- SNMP sysObjectID match: EOC enterprise OID (prefix match) -->
+    <fingerprint>
+      <sysObjectId>.1.3.6.1.4.1.52619</sysObjectId>
+    </fingerprint>
+    <fingerprint type="sshBanner" match="Configurations_GUI.*"/>
+    <fingerprint type="httpHeader" header="Server" match="EOC-.*"/>
+  </fingerprints>
+
+  <!-- ══════════════ PROTOCOLS ══════════════ -->
+  <protocols>
+    <protocol name="discovery" type="snmp" version="v2c" port="161"/>
+    <protocol name="primary" type="rest">
+      <baseUrl>http://{deviceIp}/api/v1</baseUrl>
+      <authType>basic</authType>
+      <contentType>application/json</contentType>
+    </protocol>
+    <protocol name="fallback" type="cli" transport="ssh" port="22">
+      <loginPrompt>login:</loginPrompt>
+      <passPrompt>Password:</passPrompt>
+    </protocol>
+  </protocols>
+
+  <!-- ══════════════ PARAMETER GROUPS ══════════════ -->
+  <parameterGroups>
+
+    <!-- ── Group: RADIO (27 parameters) ── -->
+    <parameterGroup id="radio">
+      <!-- Section: Properties -->
+      <parameter id="radioStatus">
+        <name>Radio status</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Enable(0)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.33</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Enable(0)</value>
+          <value>Disable(1)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="linktype">
+        <name>LinkType</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>PTMP(3)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.35</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>PTP(1)</value>
+          <value>PTMP(3)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="radioMode">
+        <name>Radio Mode</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>A60(BTS), A61(CPE)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.2</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>BTS(ap)</value>
+          <value>CPE(sta)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="ssid">
+        <name>SSID</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>string</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>UBR650</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.3</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="bandwidth">
+        <name>Bandwidth</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>HT80(HT80)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.7</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>HT20(HT20)</value>
+          <value>HT40+(HT40+)</value>
+          <value>HT80(HT80)</value>
+          <value>HT160(HT160) based on countries</value>
+        </enumValues>
+      </parameter>
+      <parameter id="country">
+        <name>Country</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>5GHz(5019)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.4</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>US-Non DFS(5011)</value>
+          <value>US-5GHz ALL(5012)</value>
+          <value>Europe(276)</value>
+          <value>Canada(124)</value>
+          <value>5 Ghz(5019)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="configuredChannel">
+        <name>Configured channel</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>36(5180 Mhz)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.9</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>channel list based on country(36</value>
+          <value>37</value>
+          <value>...)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="encryption">
+        <name>Encryption</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>AES-256</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.16</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>AES-256(psk2+ccmp-256)/None(none)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="key">
+        <name>Key</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>string</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>ubr@1234</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.17</oid>
+        <readOnly>false</readOnly>
+        <minValue>8</minValue>
+        <maxValue>63</maxValue>
+      </parameter>
+      <parameter id="maximumSus">
+        <name>Maximum Sus</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>slider</uiWidget>
+        <defaultValue>16</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.37</oid>
+        <readOnly>false</readOnly>
+        <minValue>1</minValue>
+        <maxValue>32</maxValue>
+      </parameter>
+      <parameter id="ofdma">
+        <name>OFDMA</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Disable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Enable(1)/Disable(0)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="dlUlRatio">
+        <name>DL/UL Ratio</name>
+        <group>radio</group>
+        <subGroup>properties</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>75/25(75)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.57</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Auto(0)</value>
+          <value>50/50(50)</value>
+          <value>60/40(60)</value>
+          <value>70/30(70)</value>
+          <value>75/25(75)</value>
+          <value>80/20(80)</value>
+        </enumValues>
+      </parameter>
+      <!-- Section: DDRS -->
+      <parameter id="ddrsStatus">
+        <name>DDRS Status</name>
+        <group>radio</group>
+        <subGroup>ddrs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Enable(1)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.3</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Enable(1)/Disable(0)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="spatialStreamDdrsStatusIsEnabled">
+        <name>Spatial Stream ( DDRS Status is enabled )</name>
+        <group>radio</group>
+        <subGroup>ddrs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Auto(3)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.4</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Single(1)</value>
+          <value>Dual(2)</value>
+          <value>Auto(3)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="maxDataRateSingleStream">
+        <name>Max. Data Rate - Single Stream</name>
+        <group>radio</group>
+        <subGroup>ddrs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>MCS11(143 Mbps)(11)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.17</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>MCS0 – MCS 11(0-11)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="maxDataRateDualStream">
+        <name>Max. Data Rate - Dual Stream</name>
+        <group>radio</group>
+        <subGroup>ddrs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>MCS23(286 Mbps)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.18</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>MCS 12 – MCS 23(12-23)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="minModulationIndexSpatialStreamIsSingleDual">
+        <name>Min. Modulation Index ( Spatial stream is single/Dual)</name>
+        <group>radio</group>
+        <subGroup>ddrs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>MCS0(8Mbps)/MCS(12Mbps)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.5</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>MCS 0 – MCS 11(0-11)</value>
+          <value>MCS 12 – MCS 23(12-23)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="maxModulationIndexSpatialStreamIsSingleDual">
+        <name>Max. Modulation Index ( spatial stream is single/Dual)</name>
+        <group>radio</group>
+        <subGroup>ddrs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>MCS11(143 Mbps)/MCS(23Mbps)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.6</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>MCS 0 – MCS 11(0-11)</value>
+          <value>MCS 12 – MCS 23(12-23)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="spatialStreamDdrsStatusIsDisabled">
+        <name>Spatial Stream ( DDRS Status is Disabled )</name>
+        <group>radio</group>
+        <subGroup>ddrs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Single(1)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.4</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Single(1)</value>
+          <value>Dual(2)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="modulationIndex">
+        <name>Modulation Index</name>
+        <group>radio</group>
+        <subGroup>ddrs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>MCS 3 ( 34 Mbps)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.9</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>MCS0 – MCS 11(0-11)</value>
+          <value>MCS 12- MCS 23(12-23)</value>
+        </enumValues>
+      </parameter>
+      <!-- Section: ATPC -->
+      <parameter id="atpcStatus">
+        <name>ATPC Status</name>
+        <group>radio</group>
+        <subGroup>atpc</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Disable(0)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.11</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Disable(0)</value>
+          <value>Enable(1)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="transmitPower">
+        <name>Transmit Power</name>
+        <group>radio</group>
+        <subGroup>atpc</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>slider</uiWidget>
+        <defaultValue>26</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.12</oid>
+        <readOnly>false</readOnly>
+        <minValue>0</minValue>
+        <maxValue>26</maxValue>
+      </parameter>
+      <parameter id="connectorizedAntennaGain">
+        <name>Connectorized Antenna Gain</name>
+        <group>radio</group>
+        <subGroup>atpc</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>slider</uiWidget>
+        <defaultValue>23</defaultValue>
+        <readOnly>false</readOnly>
+        <minValue>0</minValue>
+        <maxValue>30</maxValue>
+      </parameter>
+      <!-- Section: APTC -->
+      <parameter id="maximumEirp">
+        <name>Maximum EIRP</name>
+        <group>radio</group>
+        <subGroup>aptc</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>slider</uiWidget>
+        <defaultValue>0</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.30</oid>
+        <readOnly>false</readOnly>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+      </parameter>
+      <!-- Section: DCS -->
+      <parameter id="dcsStatus">
+        <name>DCS Status</name>
+        <group>radio</group>
+        <subGroup>dcs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Disable(0)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.3.1.2</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Enable(1)</value>
+          <value>Disable(0)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="rtxThreshold">
+        <name>RTX Threshold</name>
+        <group>radio</group>
+        <subGroup>dcs</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>slider</uiWidget>
+        <defaultValue>25</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.3.1.3</oid>
+        <readOnly>false</readOnly>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+      </parameter>
+      <parameter id="backgroundScan">
+        <name>Background Scan</name>
+        <group>radio</group>
+        <subGroup>dcs</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Disable(0)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.3.1.11</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Enable(1)</value>
+          <value>Disable(0)</value>
+        </enumValues>
+      </parameter>
+    </parameterGroup>
+
+    <!-- ── Group: NETWORK (28 parameters) ── -->
+    <parameterGroup id="network">
+      <!-- Section: IP Configuration -->
+      <parameter id="addressType">
+        <name>Address Type</name>
+        <group>network</group>
+        <subGroup>ip_configuration</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Static</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.1.0</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Static(static)</value>
+          <value>Dynamic- IPv4(dhcp)</value>
+          <value>Dynamic – Ipv6(dhcpv6)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="ipAddress">
+        <name>IP Address</name>
+        <group>network</group>
+        <subGroup>ip_configuration</subGroup>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>192.168.1.1</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.2.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="subnetMask">
+        <name>Subnet Mask</name>
+        <group>network</group>
+        <subGroup>ip_configuration</subGroup>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>255.255.255.0</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.3.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="gateway">
+        <name>Gateway</name>
+        <group>network</group>
+        <subGroup>ip_configuration</subGroup>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>192.168.1.1</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.4.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="ipv6Address">
+        <name>IPv6 Address</name>
+        <group>network</group>
+        <subGroup>ip_configuration</subGroup>
+        <dataType>ipv6</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue></defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.15.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="ipv6Gateway">
+        <name>IPv6 Gateway</name>
+        <group>network</group>
+        <subGroup>ip_configuration</subGroup>
+        <dataType>ipv6</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue></defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.17.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <!-- Section: VLAN -->
+      <parameter id="mgmtVlanId">
+        <name>Mgmt VLAN ID</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>1</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.11</oid>
+        <readOnly>false</readOnly>
+        <minValue>1</minValue>
+        <maxValue>4094</maxValue>
+      </parameter>
+      <parameter id="mode">
+        <name>Mode</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Transparent(0)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.3</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Transparent(0)</value>
+          <value>Access(1)Trunk(2)</value>
+          <value>Q-in-Q(3)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="trunkOption">
+        <name>Trunk Option</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>string</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>List(1)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.5</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="trunkVlanId">
+        <name>Trunk VLAN ID</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>Empty</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.6</oid>
+        <readOnly>false</readOnly>
+        <minValue>1</minValue>
+        <maxValue>4094</maxValue>
+      </parameter>
+      <parameter id="cvlanPriority">
+        <name>CVLAN Priority</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>slider</uiWidget>
+        <defaultValue>0</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.16</oid>
+        <readOnly>false</readOnly>
+        <minValue>0</minValue>
+        <maxValue>7</maxValue>
+      </parameter>
+      <parameter id="cvlanId">
+        <name>CVLAN ID</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>101</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.17</oid>
+        <readOnly>false</readOnly>
+        <minValue>1</minValue>
+        <maxValue>4094</maxValue>
+      </parameter>
+      <parameter id="cvlanEthertype">
+        <name>CVLAN EtherType</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>0x8100(0x0081)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.15</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>0x8100(0x0081)</value>
+          <value>0x88a8(0xa888)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="svlanPriority">
+        <name>SVLAN Priority</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>slider</uiWidget>
+        <defaultValue>0</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.14</oid>
+        <readOnly>false</readOnly>
+        <minValue>0</minValue>
+        <maxValue>7</maxValue>
+      </parameter>
+      <parameter id="svlanId">
+        <name>SVLAN ID</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>100</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.8</oid>
+        <readOnly>false</readOnly>
+        <minValue>1</minValue>
+        <maxValue>4094</maxValue>
+      </parameter>
+      <parameter id="svlanEthertype">
+        <name>SVLAN EtherType</name>
+        <group>network</group>
+        <subGroup>vlan</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>0x8100(0x0081)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.9</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>0x8100(0x0081)</value>
+          <value>0x88a8(0xa888)</value>
+        </enumValues>
+      </parameter>
+      <!-- Section: Ethernet -->
+      <parameter id="speedDuplex">
+        <name>Speed / Duplex</name>
+        <group>network</group>
+        <subGroup>ethernet</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Auto(0)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.5.6.1.2</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Auto</value>
+          <value>100-Full(4)</value>
+          <value>1000-Full(5)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="mtu">
+        <name>MTU</name>
+        <group>network</group>
+        <subGroup>ethernet</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>1500</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.5.6.1.4</oid>
+        <readOnly>false</readOnly>
+        <minValue>1500</minValue>
+        <maxValue>9000</maxValue>
+      </parameter>
+      <!-- Section: DHCP -->
+      <parameter id="dhcpServer">
+        <name>DHCP Server</name>
+        <group>network</group>
+        <subGroup>dhcp</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Disable(1)</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.1.0</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Enable(0)</value>
+          <value>Disable(1)</value>
+        </enumValues>
+      </parameter>
+      <parameter id="startIpAddress">
+        <name>Start IP Address</name>
+        <group>network</group>
+        <subGroup>dhcp</subGroup>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>192.168.1.100</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.2.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="endIpAddress">
+        <name>End IP Address</name>
+        <group>network</group>
+        <subGroup>dhcp</subGroup>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>192.168.1.150</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.3.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="leaseTime">
+        <name>Lease Time</name>
+        <group>network</group>
+        <subGroup>dhcp</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>43200</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.4.0</oid>
+        <readOnly>false</readOnly>
+        <minValue>120</minValue>
+        <maxValue>86400</maxValue>
+      </parameter>
+      <!-- Section: DHCP(2.4) -->
+      <parameter id="ipAddress">
+        <name>IP Address</name>
+        <group>network</group>
+        <subGroup>dhcp_2_4</subGroup>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>169.254.254.1</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.1.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="subnetMask">
+        <name>Subnet Mask</name>
+        <group>network</group>
+        <subGroup>dhcp_2_4</subGroup>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>255.255.255.0</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.2.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="dhcpServerPoolConfiguration">
+        <name>DHCP Server(Pool Configuration)</name>
+        <group>network</group>
+        <subGroup>dhcp_2_4</subGroup>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <defaultValue>Enable</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.3.0</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <value>Enable/Disable</value>
+        </enumValues>
+      </parameter>
+      <parameter id="startIpAddress">
+        <name>Start IP Address</name>
+        <group>network</group>
+        <subGroup>dhcp_2_4</subGroup>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>169.254.254.100</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.4.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="endIpAddress">
+        <name>End IP Address</name>
+        <group>network</group>
+        <subGroup>dhcp_2_4</subGroup>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>169.254.254.102</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.5.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter id="leaseTime">
+        <name>Lease Time</name>
+        <group>network</group>
+        <subGroup>dhcp_2_4</subGroup>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>300</defaultValue>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.6.0</oid>
+        <readOnly>false</readOnly>
+        <minValue>120</minValue>
+        <maxValue>86400</maxValue>
+      </parameter>
+    </parameterGroup>
+  </parameterGroups>
+
+</productDefinition>
