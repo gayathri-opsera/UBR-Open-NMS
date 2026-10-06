@@ -995,6 +995,42 @@ router.post('/:definitionId/rollback',
 router.delete('/:definitionId/versions/:versionId',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'product-definitions.versions.delete'),
   productDefinitionProxy(),
+  // ── Post-delete cleanup ────────────────────────────────────────────────────
+  // Run after the proxy responds 204. Cleans up gateway-owned data for this
+  // version so stale wireframes / parameter entries never get served.
+  async function cleanupAfterDelete(req, res) {
+    const { definitionId, versionId } = req.params;
+    const redis = req.app.get('redis');
+    setImmediate(async () => {
+      try {
+        const mongoose = require('mongoose');
+        if (mongoose.connection.readyState === 1) {
+          // Remove parameter registry entries for this specific version
+          const PRODUCTDEF_DB = process.env.PRODUCTDEF_DB_NAME || 'ubrnms_productdef';
+          const db = mongoose.connection.client.db(PRODUCTDEF_DB);
+          await db.collection('parameter_registry_entries').deleteMany({ productDefinitionId: definitionId, versionId });
+          await db.collection('product_definition_versions').deleteOne({ definitionId, versionId });
+
+          // Check if any other versions remain for this definition
+          const remaining = await db.collection('parameter_registry_entries').countDocuments({ productDefinitionId: definitionId });
+          if (remaining === 0) {
+            // Last version deleted — remove wireframe + active version pointer + full cache
+            await NodeViewWireframe.deleteMany({ productDefinitionId: definitionId });
+            await db.collection('product_definition_active_versions').deleteOne({ productDefinitionId: definitionId });
+            logger.info({ msg: 'cleanup-delete: removed wireframe + active pointer (last version)', definitionId });
+          } else {
+            // Other versions exist — just remove wireframe for this specific version
+            await NodeViewWireframe.deleteOne({ productDefinitionId: definitionId, versionId });
+          }
+        }
+        // Always invalidate Redis cache
+        await invalidateCache(redis, definitionId);
+        logger.info({ msg: 'cleanup-delete: done', definitionId, versionId });
+      } catch (e) {
+        logger.warn({ msg: 'cleanup-delete: error', definitionId, versionId, err: e.message });
+      }
+    });
+  },
 );
 
 module.exports = router;
