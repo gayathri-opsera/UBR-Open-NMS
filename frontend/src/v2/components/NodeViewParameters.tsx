@@ -1,43 +1,39 @@
 /**
- * NodeViewParameters — Pure Renderer
- * ===================================
+ * NodeViewParameters — Card-Style Wireframe Renderer
+ * ====================================================
  *
  * NEW ARCHITECTURE (pre-built wireframe):
- *   Props shape:
- *     wireframe  — static layout from node_view_wireframes (built at upload time)
- *     values     — flat map of parameterId → live value (from /parameters/current)
- *
- *   The component is a PURE RENDERER. It:
- *     ✅ Binds values to wireframe parameters (O(1) map lookup)
- *     ✅ Renders groups / sub-groups / parameter table rows
- *     ✅ Shows UNMAPPED / STALE / FAILED / FRESH states
- *     ❌ Does NOT calculate groups
- *     ❌ Does NOT sort parameters
- *     ❌ Does NOT parse any definition format
+ *   Renders groups as top-level accent-underline tabs.
+ *   Sub-groups within each group are shown as stacked section CARDS
+ *   (matching the Wireless / Network tab visual language).
+ *   Parameters inside each card use a 2-column grid with label + value box.
  *
  * BACKWARD-COMPATIBLE overload:
- *   To avoid breaking the existing V2DeviceDetailPage while it migrates,
- *   the component also accepts the legacy `groups` + `current` props shape.
- *   When `wireframe` is provided, it takes precedence.
+ *   Also accepts the legacy `groups` + `current` props shape.
  */
 
 import { useState } from 'react';
-import type { CSSProperties } from 'react';
 
-// ── New architecture types (from persisted wireframe) ─────────────────────────
-import type { WireframeGroup, WireframeParameter, NodeViewValues, ParameterValueRecord } from '../../api/nodeView.types';
+// ── New architecture types ────────────────────────────────────────────────────
+import type {
+  WireframeGroup, WireframeParameter, NodeViewValues, ParameterValueRecord,
+} from '../../api/nodeView.types';
 
-// ── Legacy types (kept for backward compat) ───────────────────────────────────
+// ── Legacy types ──────────────────────────────────────────────────────────────
 import type { AdaptiveParameter, AdaptiveParameterGroup } from '../../api/framework-panels.types';
 import type { ParameterCurrentValue, ParameterCurrentValueData } from '../../api/framework-parameters.types';
 
-import { Badge } from './common/Badge';
-import { Button } from './common/Button';
-import { Spinner } from './common/Spinner';
+import { Badge }    from './common/Badge';
+import { Button }   from './common/Button';
+import { Spinner }  from './common/Spinner';
 
-// ── Props ─────────────────────────────────────────────────────────────────────
+// ── Sentinel for parameters that have no explicit sub-group ───────────────────
+const NO_SUB = '\u0000none';
 
-/** New architecture props — use when consuming the node-view API. */
+// ─────────────────────────────────────────────────────────────────────────────
+// Props
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface NewArchProps {
   wireframe:           WireframeGroup[];
   values:              NodeViewValues;
@@ -49,12 +45,10 @@ interface NewArchProps {
   registryVersion:     string;
   collectedAt?:        string | null;
   pollStatus?:         string;
-  // Legacy props not used in new arch — marked optional for compat
-  groups?:   never;
-  current?:  never;
+  groups?:  never;
+  current?: never;
 }
 
-/** Legacy props — kept for backward compat during migration. */
 interface LegacyProps {
   groups:              AdaptiveParameterGroup[];
   current:             ParameterCurrentValueData | null;
@@ -64,7 +58,6 @@ interface LegacyProps {
   deviceStatus:        string;
   productDefinitionId: string;
   registryVersion:     string;
-  // New arch props not used in legacy mode
   wireframe?: never;
   values?:    never;
   collectedAt?: string | null;
@@ -73,183 +66,9 @@ interface LegacyProps {
 
 type Props = NewArchProps | LegacyProps;
 
-// ── Shared styles ─────────────────────────────────────────────────────────────
-
-const th: CSSProperties = {
-  textAlign: 'left', padding: '6px 12px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-  letterSpacing: '0.06em', color: 'var(--vf-text-muted)', borderBottom: '1px solid var(--vf-border-subtle)',
-};
-const td: CSSProperties = {
-  padding: '6px 12px', fontSize: 13, borderBottom: '1px solid var(--vf-border-subtle)', verticalAlign: 'top',
-};
-
-const NO_SUB = '\u0000none';
-
-// ── Value cell — handles UNMAPPED / STALE / FAILED / FRESH ────────────────────
-
-function ValueCell({ record, text }: {
-  record: ParameterValueRecord | ParameterCurrentValue | undefined;
-  text:   string | null;
-}) {
-  if (!record) {
-    return <span style={{ color: 'var(--vf-text-muted)' }}>—</span>;
-  }
-  if ((record as ParameterCurrentValue).readStatus === 'UNMAPPED' ||
-      (record as ParameterValueRecord).readStatus === 'UNMAPPED') {
-    return <span title="no OID in product definition" style={{ color: 'var(--vf-text-muted)' }}>—</span>;
-  }
-  const fs = (record as ParameterValueRecord).freshnessState ?? (record as ParameterCurrentValue).freshnessState;
-  const bad = fs === 'STALE' || fs === 'FAILED';
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-      <span style={{
-        fontFamily: 'var(--vf-font-mono)', fontWeight: 600, wordBreak: 'break-all',
-        color: bad || text === null ? 'var(--vf-text-muted)' : 'var(--vf-text-primary)',
-        opacity: bad ? 0.7 : 1,
-      }}>
-        {text ?? '—'}
-      </span>
-      {bad && (
-        <Badge
-          variant={fs === 'FAILED' ? 'danger' : 'warning'}
-          title={(record as ParameterCurrentValue).failureReason ?? undefined}
-        >
-          {fs === 'FAILED' ? 'Failed' : 'Stale'}
-        </Badge>
-      )}
-    </span>
-  );
-}
-
-// ── NEW ARCH: Section table using flat values map ─────────────────────────────
-
-function NewSectionTable({
-  params, values,
-}: { params: WireframeParameter[]; values: NodeViewValues }) {
-  // Collect table indexes across all table parameters in this section
-  const indexes: string[] = [];
-  for (const p of params) {
-    const v = values[p.parameterId];
-    if (!v?.isTable) continue;
-    for (const inst of v.instances ?? []) {
-      if (!indexes.includes(inst.index)) indexes.push(inst.index);
-    }
-  }
-  const isTable = indexes.length > 0;
-  indexes.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th style={th}>Parameter</th>
-            {isTable
-              ? indexes.map((i) => <th key={i} style={th}>#{i}</th>)
-              : <th style={th}>Value</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {params.map((p) => {
-            const v = values[p.parameterId] as ParameterValueRecord | undefined;
-            const getText = (idx: string | null) => {
-              if (!v) return null;
-              if (idx !== null && v.isTable && v.instances?.length) {
-                const inst = v.instances.find((i) => i.index === idx);
-                return inst ? (inst.display || inst.value || null) : null;
-              }
-              return v.display || v.value || null;
-            };
-            return (
-              <tr key={p.parameterId}>
-                <td style={{ ...td, color: 'var(--vf-text-secondary)' }}>
-                  {p.displayName || p.parameterId}
-                  {p.unit && (
-                    <span style={{ color: 'var(--vf-text-muted)', marginLeft: 4, fontSize: 11 }}>({p.unit})</span>
-                  )}
-                  {p.readOnly && (
-                    <span title="Read-only" aria-label="Read-only" style={{ marginLeft: 6, fontSize: 11 }}>🔒</span>
-                  )}
-                </td>
-                {isTable ? (
-                  v?.isTable ? (
-                    indexes.map((i) => (
-                      <td key={i} style={td}><ValueCell record={v} text={getText(i)} /></td>
-                    ))
-                  ) : (
-                    <td style={td} colSpan={indexes.length}><ValueCell record={v} text={getText(null)} /></td>
-                  )
-                ) : (
-                  <td style={td}><ValueCell record={v} text={getText(null)} /></td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ── LEGACY ARCH: Section table using nested current value structure ────────────
-
-function LegacySectionTable({
-  groupId, params, values,
-}: { groupId: string; params: AdaptiveParameter[]; values: Map<string, ParameterCurrentValue> }) {
-  const legacyKey = (pid: string) => `${groupId}\u0000${pid}`;
-  const indexes: string[] = [];
-  for (const p of params) {
-    const v = values.get(legacyKey(p.parameterId));
-    if (!v?.isTable) continue;
-    for (const inst of v.instances ?? []) if (!indexes.includes(inst.index)) indexes.push(inst.index);
-  }
-  const isTable = indexes.length > 0;
-  indexes.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th style={th}>Parameter</th>
-            {isTable ? indexes.map((i) => <th key={i} style={th}>#{i}</th>) : <th style={th}>Value</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {params.map((p) => {
-            const v = values.get(legacyKey(p.parameterId));
-            const getText = (idx: string | null) => {
-              if (!v) return null;
-              if (idx !== null && v.instances?.length) {
-                const inst = v.instances.find((i) => i.index === idx);
-                return inst ? (inst.display || inst.value || null) : null;
-              }
-              return v.display || v.value || null;
-            };
-            return (
-              <tr key={p.parameterId}>
-                <td style={{ ...td, color: 'var(--vf-text-secondary)' }}>
-                  {p.label || p.parameterId}
-                  {p.unit && <span style={{ color: 'var(--vf-text-muted)', marginLeft: 4, fontSize: 11 }}>({p.unit})</span>}
-                  {p.readOnly && <span title="Read-only" style={{ marginLeft: 6, fontSize: 11 }}>🔒</span>}
-                </td>
-                {isTable ? (
-                  v?.isTable
-                    ? indexes.map((i) => <td key={i} style={td}><ValueCell record={v} text={getText(i)} /></td>)
-                    : <td style={td} colSpan={indexes.length}><ValueCell record={v} text={getText(null)} /></td>
-                ) : (
-                  <td style={td}><ValueCell record={v} text={getText(null)} /></td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ── Status bar ────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Status bar
+// ─────────────────────────────────────────────────────────────────────────────
 
 function StatusBar({
   deviceStatus, productDefinitionId, registryVersion,
@@ -265,23 +84,33 @@ function StatusBar({
   refreshing:          boolean;
   onRefresh:           () => void;
 }) {
-  const pollOk = pollStatus === 'OK';
-  const strip: CSSProperties = { fontSize: 11, color: 'var(--vf-text-muted)' };
+  const pollOk  = pollStatus === 'OK';
+  const strip = { fontSize: 11, color: 'var(--vf-text-muted)' } as const;
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', padding: '10px 16px',
-      background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10,
+      display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+      padding: '8px 14px',
+      background: 'var(--vf-surface)',
+      border: '1px solid var(--vf-border-subtle)',
+      borderRadius: 8,
+      marginBottom: 16,
     }}>
-      <span style={strip}>Status: <strong style={{ color: 'var(--vf-text-primary)' }}>{deviceStatus || '—'}</strong></span>
-      <span style={{ ...strip, fontFamily: 'var(--vf-font-mono)' }}>def: {productDefinitionId} · rv{registryVersion}</span>
       <span style={strip}>
-        Last polled: <strong style={{ color: 'var(--vf-text-primary)' }}>
+        Status: <strong style={{ color: 'var(--vf-text-primary)' }}>{deviceStatus || '—'}</strong>
+      </span>
+      <span style={{ ...strip, fontFamily: 'var(--vf-font-mono)' }}>
+        def: {productDefinitionId} · rv{registryVersion}
+      </span>
+      <span style={strip}>
+        Last polled:{' '}
+        <strong style={{ color: 'var(--vf-text-primary)' }}>
           {collectedAt ? new Date(collectedAt).toLocaleString() : '—'}
         </strong>
       </span>
       {pollStatus && (
         <span style={strip}>
-          Poll: <Badge variant={pollOk ? 'success' : pollStatus === 'NOT_POLLED' ? 'default' : 'danger'}>
+          Poll:{' '}
+          <Badge variant={pollOk ? 'success' : pollStatus === 'NOT_POLLED' ? 'default' : 'danger'}>
             {pollStatus}
           </Badge>
           {!pollOk && pollError && (
@@ -297,100 +126,48 @@ function StatusBar({
   );
 }
 
-// ── Tab bar ────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Group tab bar  (accent-underline style, matches Wireless / Network tabs)
+// ─────────────────────────────────────────────────────────────────────────────
 
-function TabBar({
-  tabs, active, onChange,
-}: { tabs: { id: string; label: string }[]; active: string; onChange: (id: string) => void }) {
+function GroupTabBar({
+  groups, activeId, onChange,
+}: { groups: { id: string; label: string }[]; activeId: string; onChange: (id: string) => void }) {
+  if (groups.length <= 1) return null;
   return (
     <div style={{
-      display: 'flex', gap: 0, borderBottom: '1px solid var(--vf-border-subtle)',
-      overflowX: 'auto', flexShrink: 0,
-    }}>
-      {tabs.map((t) => {
-        const isActive = t.id === active;
-        return (
-          <button
-            key={t.id}
-            onClick={() => onChange(t.id)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              borderBottom: isActive ? '2px solid var(--vf-accent, #4F8EF7)' : '2px solid transparent',
-              padding: '10px 18px',
-              fontSize: 13,
-              fontWeight: isActive ? 700 : 500,
-              color: isActive ? 'var(--vf-text-primary)' : 'var(--vf-text-muted)',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              marginBottom: -1,
-              transition: 'color 0.15s, border-color 0.15s',
-              letterSpacing: '0.01em',
-              outline: 'none',
-            }}
-          >
-            {t.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Tab content panel ──────────────────────────────────────────────────────────
-
-function TabPanel({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{
-      background: 'var(--vf-surface)',
-      border: '1px solid var(--vf-border-subtle)',
-      borderTop: 'none',
-      borderRadius: '0 0 12px 12px',
-      overflow: 'hidden',
-    }}>
-      {children}
-    </div>
-  );
-}
-
-// ── Second-level sub-group tab bar ────────────────────────────────────────────
-// Renders inside a top-level tab to show sub-groups as a second tab tier.
-// Styled more compact than the top bar to express hierarchy.
-
-function SubGroupTabBar({
-  tabs, active, onChange,
-}: { tabs: { id: string; label: string }[]; active: string; onChange: (id: string) => void }) {
-  // Single sub-group — no tab bar needed, just render directly
-  if (tabs.length <= 1) return null;
-  return (
-    <div style={{
-      display: 'flex', gap: 0,
+      display: 'flex',
+      gap: 0,
+      marginBottom: 20,
       borderBottom: '1px solid var(--vf-border-subtle)',
-      background: 'rgba(255,255,255,0.02)',
-      overflowX: 'auto', flexShrink: 0,
+      paddingBottom: 0,
+      overflowX: 'auto',
+      flexShrink: 0,
     }}>
-      {tabs.map((t) => {
-        const isActive = t.id === active;
+      {groups.map((g) => {
+        const active = g.id === activeId;
         return (
           <button
-            key={t.id}
-            onClick={() => onChange(t.id)}
+            key={g.id}
+            aria-selected={active}
+            onClick={() => onChange(g.id)}
             style={{
-              background: 'transparent', border: 'none',
-              borderBottom: isActive
-                ? '2px solid rgba(79,142,247,0.7)'
-                : '2px solid transparent',
-              padding: '7px 16px',
-              fontSize: 12,
-              fontWeight: isActive ? 600 : 400,
-              color: isActive ? 'var(--vf-text-secondary)' : 'var(--vf-text-muted)',
-              cursor: 'pointer', whiteSpace: 'nowrap',
+              padding: '8px 16px',
+              background: 'none',
+              border: 'none',
+              borderBottom: active ? '2px solid var(--vf-accent)' : '2px solid transparent',
+              color: active ? 'var(--vf-accent)' : 'var(--vf-text-secondary)',
+              fontFamily: 'var(--vf-font-sans)',
+              fontSize: 13,
+              fontWeight: active ? 600 : 400,
+              cursor: 'pointer',
               marginBottom: -1,
+              whiteSpace: 'nowrap',
               transition: 'color 0.15s, border-color 0.15s',
               outline: 'none',
             }}
           >
-            {t.label}
+            {g.label}
           </button>
         );
       })}
@@ -398,85 +175,326 @@ function SubGroupTabBar({
   );
 }
 
-// ── Sub-group tabs wrapper (stateful) ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Parameter value display (read-only field box)
+// ─────────────────────────────────────────────────────────────────────────────
 
-function SubGroupTabs({
-  subGroupOrder,
-  renderSubGroup,
-}: {
-  subGroupOrder: string[];
-  renderSubGroup: (key: string) => React.ReactNode;
+function ParamValueBox({ record, text }: {
+  record: ParameterValueRecord | ParameterCurrentValue | undefined;
+  text:   string | null;
 }) {
-  const [activeKey, setActiveKey] = useState<string>(subGroupOrder[0] ?? '');
-  const tabs = subGroupOrder.map((k) => ({
-    id: k,
-    label: k === '\u0000none'
-      ? 'General'
-      : k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '),
-  }));
-  const current = subGroupOrder.includes(activeKey) ? activeKey : subGroupOrder[0];
+  const fs  = (record as ParameterValueRecord)?.freshnessState ?? (record as ParameterCurrentValue)?.freshnessState;
+  const bad = fs === 'STALE' || fs === 'FAILED';
+  const empty = text === null || text === undefined;
+
   return (
-    <div>
-      <SubGroupTabBar tabs={tabs} active={current} onChange={setActiveKey} />
-      {renderSubGroup(current)}
+    <div style={{
+      padding: '7px 10px',
+      background: 'var(--vf-input-bg, rgba(255,255,255,0.04))',
+      border: '1px solid var(--vf-border-default, rgba(255,255,255,0.08))',
+      borderRadius: 'var(--vf-radius-md, 6px)',
+      minHeight: 34,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+    }}>
+      <span style={{
+        fontFamily: (record && !empty) ? 'var(--vf-font-mono)' : 'var(--vf-font-sans)',
+        fontSize: 13,
+        fontWeight: 500,
+        color: empty || bad ? 'var(--vf-text-muted)' : 'var(--vf-text-primary)',
+        wordBreak: 'break-all',
+        opacity: bad ? 0.75 : 1,
+      }}>
+        {text ?? '—'}
+      </span>
+      {bad && (
+        <Badge
+          variant={fs === 'FAILED' ? 'danger' : 'warning'}
+          title={(record as ParameterCurrentValue)?.failureReason ?? undefined}
+        >
+          {fs === 'FAILED' ? 'Failed' : 'Stale'}
+        </Badge>
+      )}
     </div>
   );
 }
 
-// ── Tabbed wrapper ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Single parameter field (label + value box)
+// ─────────────────────────────────────────────────────────────────────────────
 
-function TabbedGroups<G extends { groupId: string; label?: string; subGroups?: string[] }>({
-  groups,
-  renderContent,
-}: {
-  groups: G[];
-  renderContent: (g: G) => React.ReactNode;
+function ParameterField({ param, record }: {
+  param:  WireframeParameter;
+  record: ParameterValueRecord | undefined;
 }) {
-  const visible = groups.filter((g) => g !== null);
-  const [activeId, setActiveId] = useState<string>(visible[0]?.groupId ?? '');
-  const activeGroup = visible.find((g) => g.groupId === activeId) ?? visible[0];
+  const displayText = record?.display || record?.value || null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{
+        fontSize: 'var(--vf-type-caption-size, 11px)',
+        fontWeight: 600,
+        color: 'var(--vf-text-secondary)',
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        lineHeight: 1.4,
+      }}>
+        {param.displayName || param.parameterId}
+        {param.unit && (
+          <span style={{ fontWeight: 400, marginLeft: 4, opacity: 0.65 }}>({param.unit})</span>
+        )}
+        {param.readOnly && (
+          <span title="Read-only" style={{ marginLeft: 5, opacity: 0.45 }}>🔒</span>
+        )}
+      </span>
+      <ParamValueBox record={record} text={displayText} />
+    </div>
+  );
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Table parameter (SNMP table with instances) — spans full width
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TableParamSection({ param, record }: {
+  param:  WireframeParameter;
+  record: ParameterValueRecord | undefined;
+}) {
+  if (!record?.isTable || !record.instances?.length) {
+    return <ParameterField param={param} record={record} />;
+  }
+
+  const instances = [...record.instances].sort((a, b) =>
+    a.index.localeCompare(b.index, undefined, { numeric: true }),
+  );
+  const th = {
+    padding: '5px 10px',
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.06em',
+    color: 'var(--vf-text-muted)',
+    borderBottom: '1px solid var(--vf-border-subtle)',
+    textAlign: 'left' as const,
+  };
+  const td = {
+    padding: '5px 10px',
+    fontSize: 12,
+    borderBottom: '1px solid var(--vf-border-subtle)',
+  };
+
+  return (
+    <div style={{ gridColumn: '1 / -1', marginTop: 8 }}>
+      <span style={{
+        fontSize: 11, fontWeight: 600, color: 'var(--vf-text-secondary)',
+        letterSpacing: '0.04em', textTransform: 'uppercase', display: 'block', marginBottom: 6,
+      }}>
+        {param.displayName || param.parameterId}
+      </span>
+      <div style={{ overflowX: 'auto', border: '1px solid var(--vf-border-subtle)', borderRadius: 6 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={th}>#</th>
+              <th style={th}>Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {instances.map((inst) => (
+              <tr key={inst.index}>
+                <td style={{ ...td, color: 'var(--vf-text-muted)' }}>{inst.index}</td>
+                <td style={{ ...td, fontFamily: 'var(--vf-font-mono)' }}>
+                  {inst.display || inst.value || '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Section card  (one sub-group → one rounded card with section header)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SectionCard({ title, params, values }: {
+  title:  string;
+  params: WireframeParameter[];
+  values: NodeViewValues;
+}) {
+  const visible = params.filter((p) => !p.hidden);
   if (visible.length === 0) return null;
 
-  const tabs = visible.map((g) => ({
-    id: g.groupId,
-    label: g.label || g.groupId.charAt(0).toUpperCase() + g.groupId.slice(1).replace(/_/g, ' '),
-  }));
+  // Split table vs scalar params
+  const isTableParam = (p: WireframeParameter) => {
+    const v = values[p.parameterId] as ParameterValueRecord | undefined;
+    return v?.isTable && (v.instances?.length ?? 0) > 0;
+  };
 
   return (
     <div style={{
       background: 'var(--vf-surface)',
       border: '1px solid var(--vf-border-subtle)',
-      borderRadius: 12,
+      borderRadius: 'var(--vf-radius-lg, 12px)',
+      boxShadow: 'var(--vf-shadow-low)',
       overflow: 'hidden',
+      marginBottom: 16,
     }}>
-      <TabBar tabs={tabs} active={activeGroup?.groupId ?? ''} onChange={setActiveId} />
-      <TabPanel>
-        {activeGroup ? renderContent(activeGroup) : null}
-      </TabPanel>
+      {title && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          padding: '10px 16px',
+          borderBottom: '1px solid var(--vf-border-subtle)',
+        }}>
+          <span style={{
+            fontSize: 'var(--vf-type-h4-size, 14px)',
+            fontWeight: 'var(--vf-type-h4-weight, 600)' as unknown as number,
+            color: 'var(--vf-text-primary)',
+            letterSpacing: 'var(--vf-type-h4-tracking, 0)',
+          }}>
+            {title}
+          </span>
+        </div>
+      )}
+
+      <div style={{ padding: 16 }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: 16,
+          alignItems: 'start',
+        }}>
+          {visible.map((p) => {
+            const record = values[p.parameterId] as ParameterValueRecord | undefined;
+            return isTableParam(p)
+              ? <TableParamSection key={p.parameterId} param={p} record={record} />
+              : <ParameterField    key={p.parameterId} param={p} record={record} />;
+          })}
+        </div>
+      </div>
     </div>
   );
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy section table (unchanged, for backward compat)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function LegacyParamValueBox({ groupId, param, values }: {
+  groupId: string;
+  param:   AdaptiveParameter;
+  values:  Map<string, ParameterCurrentValue>;
+}) {
+  const key = `${groupId}\u0000${param.parameterId}`;
+  const v   = values.get(key);
+  const getText = () => {
+    if (!v) return null;
+    return v.display || v.value || null;
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{
+        fontSize: 11, fontWeight: 600, color: 'var(--vf-text-secondary)',
+        letterSpacing: '0.04em', textTransform: 'uppercase',
+      }}>
+        {param.label || param.parameterId}
+        {param.unit && <span style={{ fontWeight: 400, marginLeft: 4, opacity: 0.65 }}>({param.unit})</span>}
+        {param.readOnly && <span title="Read-only" style={{ marginLeft: 5, opacity: 0.45 }}>🔒</span>}
+      </span>
+      <ParamValueBox record={v} text={getText()} />
+    </div>
+  );
+}
+
+function LegacySectionCard({ group, values }: {
+  group:  AdaptiveParameterGroup;
+  values: Map<string, ParameterCurrentValue>;
+}) {
+  const visible = group.parameters.filter((p) => !p.hidden);
+  if (visible.length === 0) return null;
+
+  return (
+    <div style={{
+      background: 'var(--vf-surface)',
+      border: '1px solid var(--vf-border-subtle)',
+      borderRadius: 'var(--vf-radius-lg, 12px)',
+      boxShadow: 'var(--vf-shadow-low)',
+      overflow: 'hidden',
+      marginBottom: 16,
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center',
+        padding: '10px 16px',
+        borderBottom: '1px solid var(--vf-border-subtle)',
+      }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--vf-text-primary)' }}>
+          {group.label || group.groupId}
+        </span>
+      </div>
+      <div style={{ padding: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+          {visible.map((p) => (
+            <LegacyParamValueBox key={p.parameterId} groupId={group.groupId} param={p} values={values} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main export
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function NodeViewParameters(props: Props) {
   const {
-    loading, refreshing, onRefresh, deviceStatus, productDefinitionId, registryVersion,
+    loading, refreshing, onRefresh,
+    deviceStatus, productDefinitionId, registryVersion,
   } = props;
 
-  // ── New architecture: wireframe + flat values map ─────────────────────────
+  // ── NEW ARCHITECTURE ───────────────────────────────────────────────────────
   if ('wireframe' in props && props.wireframe !== undefined) {
     const { wireframe, values = {}, collectedAt, pollStatus } = props as NewArchProps;
 
-    const visibleGroups = wireframe.filter((g) => g.parameters.some((p) => !p.hidden));
+    const visibleGroups = wireframe.filter((g) =>
+      g.parameters.some((p) => !p.hidden),
+    );
+
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const [activeGroupId, setActiveGroupId] = useState<string>(
+      visibleGroups[0]?.groupId ?? '',
+    );
+    const activeGroup = visibleGroups.find((g) => g.groupId === activeGroupId) ?? visibleGroups[0];
+
+    // Organise active group's parameters into sub-groups (cards)
+    const activeParams = activeGroup?.parameters.filter((p) => !p.hidden) ?? [];
+    const bySub        = new Map<string, WireframeParameter[]>();
+    for (const p of activeParams) {
+      const key = p.subGroup ?? NO_SUB;
+      bySub.set(key, [...(bySub.get(key) ?? []), p]);
+    }
+    // Sub-group order: NO_SUB first, then declaration order, then any extras
+    const subOrder = [NO_SUB, ...(activeGroup?.subGroups ?? [])];
+    for (const k of bySub.keys()) if (!subOrder.includes(k)) subOrder.push(k);
+    const filteredSubs = subOrder.filter((k) => bySub.has(k));
+
+    const groupTabs = visibleGroups.map((g) => ({
+      id:    g.groupId,
+      label: g.label || g.groupId.charAt(0).toUpperCase() + g.groupId.slice(1).replace(/_/g, ' '),
+    }));
+
+    const singleGroup = visibleGroups.length === 1;
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
+        {/* Status bar */}
         <StatusBar
           deviceStatus={deviceStatus}
           productDefinitionId={productDefinitionId}
-          registryVersion={registryVersion}
+          registryVersion={String(registryVersion)}
           collectedAt={collectedAt}
           pollStatus={pollStatus}
           loading={loading}
@@ -484,59 +502,85 @@ export function NodeViewParameters(props: Props) {
           onRefresh={onRefresh}
         />
 
+        {/* Loading state */}
         {loading && Object.keys(values).length === 0 && (
-          <div style={{ padding: 24, textAlign: 'center' }}><Spinner /></div>
+          <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>
         )}
 
-        <TabbedGroups
-          groups={visibleGroups}
-          renderContent={(g) => {
-            const visible = g.parameters.filter((p) => !p.hidden);
-            const bySub = new Map<string, WireframeParameter[]>();
-            for (const p of visible) {
-              const k = p.subGroup ?? NO_SUB;
-              bySub.set(k, [...(bySub.get(k) ?? []), p]);
-            }
-            const order = [NO_SUB, ...(g.subGroups ?? [])];
-            for (const k of bySub.keys()) if (!order.includes(k)) order.push(k);
-            const filtered = order.filter((k) => bySub.has(k));
-
-            // Single sub-group → no second tab bar needed
-            if (filtered.length === 1) {
-              return <NewSectionTable params={bySub.get(filtered[0]) ?? []} values={values} />;
-            }
-
-            // Multiple sub-groups → render as second-level tabs
-            return (
-              <SubGroupTabs
-                subGroupOrder={filtered}
-                renderSubGroup={(k) => (
-                  <NewSectionTable params={bySub.get(k) ?? []} values={values} />
-                )}
-              />
-            );
-          }}
+        {/* Group tabs (only shown when >1 group) */}
+        <GroupTabBar
+          groups={groupTabs}
+          activeId={activeGroup?.groupId ?? ''}
+          onChange={setActiveGroupId}
         />
+
+        {/* Section cards — one per sub-group */}
+        {filteredSubs.map((subKey) => {
+          const subParams = bySub.get(subKey) ?? [];
+
+          // Card title logic:
+          //   • single group, no sub-group → use group label (or empty for clarity)
+          //   • single group, named sub-group → use sub-group name
+          //   • multiple groups, no sub-group → use group label
+          //   • multiple groups, named sub-group → use sub-group name
+          const cardTitle = subKey === NO_SUB
+            ? (singleGroup ? '' : (activeGroup?.label || ''))
+            : subKey.charAt(0).toUpperCase() + subKey.slice(1).replace(/_/g, ' ');
+
+          return (
+            <SectionCard
+              key={subKey}
+              title={cardTitle}
+              params={subParams}
+              values={values}
+            />
+          );
+        })}
+
+        {visibleGroups.length === 0 && !loading && (
+          <div style={{
+            padding: 24, textAlign: 'center',
+            color: 'var(--vf-text-muted)', fontSize: 13,
+          }}>
+            No parameters defined in this definition.
+          </div>
+        )}
       </div>
     );
   }
 
-  // ── Legacy architecture: groups[] + ParameterCurrentValueData ────────────
+  // ── LEGACY ARCHITECTURE ────────────────────────────────────────────────────
   const { groups = [], current } = props as LegacyProps;
 
   const legacyValues = new Map<string, ParameterCurrentValue>();
   for (const g of current?.groups ?? []) {
-    for (const p of g.parameters) legacyValues.set(`${g.groupId}\u0000${p.parameterId}`, p);
+    for (const p of g.parameters) {
+      legacyValues.set(`${g.groupId}\u0000${p.parameterId}`, p);
+    }
   }
 
-  const visibleLegacyGroups = groups.filter((g) => g.parameters.some((p) => !p.hidden));
+  const visibleLegacyGroups = groups.filter((g) =>
+    g.parameters.some((p) => !p.hidden),
+  );
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [activeLegacyId, setActiveLegacyId] = useState<string>(
+    visibleLegacyGroups[0]?.groupId ?? '',
+  );
+  const activeLegacyGroup =
+    visibleLegacyGroups.find((g) => g.groupId === activeLegacyId) ?? visibleLegacyGroups[0];
+
+  const legacyTabs = visibleLegacyGroups.map((g) => ({
+    id:    g.groupId,
+    label: g.label || g.groupId.charAt(0).toUpperCase() + g.groupId.slice(1).replace(/_/g, ' '),
+  }));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
       <StatusBar
         deviceStatus={deviceStatus}
         productDefinitionId={productDefinitionId}
-        registryVersion={registryVersion}
+        registryVersion={String(registryVersion)}
         collectedAt={current?.collectedAt}
         pollStatus={current?.pollStatus}
         pollError={current?.pollError}
@@ -545,35 +589,19 @@ export function NodeViewParameters(props: Props) {
         onRefresh={onRefresh}
       />
 
-      {loading && !current && <div style={{ padding: 24, textAlign: 'center' }}><Spinner /></div>}
+      {loading && !current && (
+        <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>
+      )}
 
-      <TabbedGroups
-        groups={visibleLegacyGroups}
-        renderContent={(g) => {
-          const visible = g.parameters.filter((p) => !p.hidden);
-          const bySub = new Map<string, AdaptiveParameter[]>();
-          for (const p of visible) {
-            const k = p.subGroup ?? NO_SUB;
-            bySub.set(k, [...(bySub.get(k) ?? []), p]);
-          }
-          const order = [NO_SUB, ...(g.subGroups ?? [])];
-          for (const k of bySub.keys()) if (!order.includes(k)) order.push(k);
-          const filtered = order.filter((k) => bySub.has(k));
-
-          if (filtered.length === 1) {
-            return <LegacySectionTable groupId={g.groupId} params={bySub.get(filtered[0]) ?? []} values={legacyValues} />;
-          }
-
-          return (
-            <SubGroupTabs
-              subGroupOrder={filtered}
-              renderSubGroup={(k) => (
-                <LegacySectionTable groupId={g.groupId} params={bySub.get(k) ?? []} values={legacyValues} />
-              )}
-            />
-          );
-        }}
+      <GroupTabBar
+        groups={legacyTabs}
+        activeId={activeLegacyGroup?.groupId ?? ''}
+        onChange={setActiveLegacyId}
       />
+
+      {activeLegacyGroup && (
+        <LegacySectionCard group={activeLegacyGroup} values={legacyValues} />
+      )}
     </div>
   );
 }
