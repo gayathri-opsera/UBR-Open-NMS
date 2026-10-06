@@ -131,6 +131,12 @@ router.get('/', async (req, res, next) => {
 
     // Track serials already covered by Java to avoid duplicates.
     const javaSerials = new Set(javaDevices.map((d) => d.serialNumber).filter(Boolean));
+    // Build a lookup of Java serial → device type (for type-aware dedup below).
+    const javaTypeBySerial = new Map(
+      javaDevices
+        .filter((d) => d.serialNumber)
+        .map((d) => [d.serialNumber, (d.deviceType || '').toUpperCase()])
+    );
 
     // ── 2. Locally-provisioned (and admin-created) devices from ubrnms.devices ─
     let localDevices = [];
@@ -166,6 +172,30 @@ router.get('/', async (req, res, next) => {
         }
       }
       const deduped = [...ipMap.values()];
+
+      // Prefer local when it exists and has a DIFFERENT (more-specific) deviceType than
+      // the Java entry with the same serial.  Java is authoritative only for its native
+      // types (BTS / CPE / IDU).  For all other types (SWITCH, RADIO, WIRELESS_BACKHAUL,
+      // etc.) the locally-provisioned record wins and the Java entry is suppressed.
+      const JAVA_NATIVE_TYPES = new Set(['BTS', 'CPE', 'IDU']);
+      const localWinsSerials = new Set();
+      for (const d of deduped) {
+        const sn = d.serialNumber;
+        if (!sn || !javaSerials.has(sn)) continue;
+        const localType = (d.deviceType || '').toUpperCase();
+        const javaType  = javaTypeBySerial.get(sn) || '';
+        // Local wins when the local type is non-native (e.g. SWITCH) or differs from Java.
+        if (!JAVA_NATIVE_TYPES.has(localType) || localType !== javaType) {
+          localWinsSerials.add(sn);
+        }
+      }
+      // Remove from Java response the serials where local wins.
+      if (localWinsSerials.size > 0) {
+        javaDevices = javaDevices.filter((d) => !localWinsSerials.has(d.serialNumber));
+        // Rebuild javaSerials to reflect removed entries.
+        javaSerials.clear();
+        javaDevices.forEach((d) => { if (d.serialNumber) javaSerials.add(d.serialNumber); });
+      }
 
       // Only include devices NOT already present in Java response.
       localDevices = deduped.filter((d) => !javaSerials.has(d.serialNumber));

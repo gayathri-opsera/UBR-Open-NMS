@@ -411,6 +411,25 @@ async function doRefresh(device) {
 }
 
 /**
+ * Returns ONLY cached/stored parameter values — never triggers an SNMP walk.
+ * Use this for Node View page loads to keep latency < 100 ms.
+ * If no stored data exists yet, returns empty values (first background poll will populate).
+ * @returns {Promise<{ http: number, body: object }>}
+ */
+async function getCachedOnly(device) {
+  await ensureDefinitionLink(device);
+  const definition = await loadDefinition(device.productDefinitionId).catch(() => null);
+  if (!definition) {
+    return { http: 200, body: { status: 'NO_ACTIVE_FRAMEWORK', error: {
+      code: 'NO_ACTIVE_FRAMEWORK', message: 'This device has no active Product Definition framework association.' } } };
+  }
+  const col = valuesCol();
+  const doc = col ? await col.findOne({ _id: String(device._id) }) : null;
+  // Return whatever is cached — no SNMP triggered
+  return { http: 200, body: buildCurrentResponse({ device, definition, doc }) };
+}
+
+/**
  * Current values for a device (parameters/current). Re-polls when the stored data is
  * older than ON_DEMAND_MAX_AGE_SECONDS or `force` is set.
  * @returns {Promise<{ http: number, body: object }>}
@@ -461,6 +480,6 @@ module.exports = {
   // pure
   normOid, walkRoots, mapVarbinds, resolveDisplay, groupEntries, buildCurrentResponse,
   // io
-  loadDefinition, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, refreshDevice, getCurrent, startScheduler, pollAll,
+  loadDefinition, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, refreshDevice, getCurrent, getCachedOnly, startScheduler, pollAll,
   POLL_INTERVAL_SECONDS,
 };

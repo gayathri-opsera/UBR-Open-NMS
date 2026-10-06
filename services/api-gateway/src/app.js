@@ -27,6 +27,7 @@ const frameworkProductDefinitions = require('./routes/frameworkProductDefinition
 const frameworkSecurity           = require('./routes/frameworkSecurity.routes');
 const frameworkParameters         = require('./routes/frameworkParameters.routes');
 const framework                   = require('./routes/framework.routes');
+const nodeView                    = require('./routes/nodeView.routes');
 // Alarms router — proxies to local alarm-service when ALARM_SERVICE_URL is local,
 // otherwise serves stub data to avoid CORS/auth issues with the external Opsera dev env.
 const alarmsRoutes    = require('./routes/alarms.routes');
@@ -82,6 +83,11 @@ function createApp(redisClient) {
   // Mounted under the same protected path group — JWT + framework RBAC is enforced per-route.
   app.use('/api/framework/v1', framework);
   app.use('/api/v1/framework', framework); // legacy alias
+
+  // Node View — persisted wireframe + live values.
+  // New architecture: wireframe built once at activation, loaded by index at runtime.
+  app.use('/api/node-view', nodeView);
+  app.use('/api/v1/node-view', nodeView); // legacy alias
 
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);

@@ -787,26 +787,47 @@ export default function V2ProductDefinitionPage() {
         selectedFile,
         `Uploaded via UI — ${new Date().toISOString()}`,
       );
-      setDraftVersion(version);
-      setRightTab('validation');
-      addToast(`${selectedFile.name} uploaded. Validation complete.`, 'success');
-      void loadVersions();
+
+      // The gateway may return alreadyUploaded:true when the same file was previously
+      // uploaded and then "deleted" from the UI (the Java service keeps the hash).
+      // In that case we recover the existing version object so the operator can
+      // proceed directly to Stage & Activate without re-uploading a different file.
+      const v = version as typeof version & { alreadyUploaded?: boolean };
+      if (v.alreadyUploaded) {
+        // Populate draftVersion so Stage & Activate button is enabled.
+        setDraftVersion(version);
+        // Inject the recovered STAGED version directly into allVersions so it
+        // appears in the Versions tab even though the Java service won't list it
+        // (it only returns definitions with an ACTIVE version).
+        setAllVersions((prev) => {
+          const exists = prev.some((x) => x.versionId === version.versionId);
+          return exists ? prev : [version as ProductDefinitionVersion, ...prev];
+        });
+        // Switch to validation tab — that's where Stage & Activate button lives.
+        setRightTab('validation');
+        addToast(
+          `"${version.name || selectedFile?.name}" was previously uploaded and is ${version.lifecycleStatus || 'STAGED'}. Click Stage & Activate to make it active.`,
+          'warning',
+        );
+        void loadVersions();
+      } else {
+        setDraftVersion(version);
+        setRightTab('validation');
+        addToast(`${selectedFile.name} uploaded. Validation complete.`, 'success');
+        void loadVersions();
+      }
     } catch (err) {
       // uploadProductDefinition already normalises to FrameworkApiError via extractApiError.
-      // extractApiError fast-paths FrameworkApiError objects, so calling it here is safe
-      // even though the error was already normalised by the API layer.
       const apiErr = extractApiError(err);
 
-      // UPLOAD_REJECTED = duplicate content-hash — surface the server message directly.
-      // Also match on the message text as a safety net for any future code-rename.
+      // Fallback: if the gateway idempotency decorator isn't deployed yet,
+      // still surface a useful message (old behaviour kept as safety net).
       const isDuplicate =
         apiErr.error.code === 'UPLOAD_REJECTED' ||
         apiErr.error.message?.toLowerCase().includes('already been uploaded') ||
         apiErr.error.message?.toLowerCase().includes('already uploaded');
 
       if (isDuplicate) {
-        // Show a persistent dialog instead of a fleeting toast so the operator
-        // can read the existing versionId and decide what to do next.
         const msg = (apiErr.error.message || '').includes('already')
           ? apiErr.error.message
           : 'This file has already been uploaded. Check the Versions tab to find the existing version.';
@@ -825,36 +846,43 @@ export default function V2ProductDefinitionPage() {
     if (!draftVersion) return;
     setStaging(true);
     try {
-      await stageProductDefinitionVersion(draftVersion.definitionId, draftVersion.versionId);
-      addToast(`${draftVersion.name} staged.`, 'success');
+      // Stage — gateway decorator makes this idempotent:
+      // if already STAGED or ACTIVE the gateway returns 200 with alreadyStaged:true.
+      const stageResult = await stageProductDefinitionVersion(
+        draftVersion.definitionId, draftVersion.versionId,
+      );
+      if (stageResult?.alreadyStaged) {
+        addToast(`${draftVersion.name} was already staged — proceeding to activate.`, 'info');
+      } else {
+        addToast(`${draftVersion.name} staged.`, 'success');
+      }
+
       setActivating(true);
       const idempotencyKey = generateIdempotencyKey();
-      await activateProductDefinitionVersion(
+      // Activate — gateway decorator makes this idempotent:
+      // if already ACTIVE the gateway returns 200 with alreadyActive:true.
+      const activateResult = await activateProductDefinitionVersion(
         draftVersion.definitionId,
         draftVersion.versionId,
         idempotencyKey,
       );
-      addToast(`${draftVersion.name} activated — registries rebuilding.`, 'success');
+
+      if (activateResult?.alreadyActive) {
+        addToast(`${draftVersion.name} is already active — no changes needed.`, 'info');
+      } else {
+        addToast(`${draftVersion.name} activated — registries rebuilding.`, 'success');
+      }
       void loadVersions();
       setDraftVersion(null);
       setSelectedFile(null);
       setRightTab('versions');
     } catch (err) {
       const apiErr = extractApiError(err);
-      // "socket hang up" / ECONNRESET means the proxy timed out but the backend
-      // may have completed — refresh versions and switch to the tab so the operator
-      // can see the actual outcome rather than an opaque error.
       const isTimeout = apiErr.error.code === 'INTERNAL_ERROR' &&
         (apiErr.error.message.includes('hang up') || apiErr.error.message.includes('timeout') ||
          apiErr.error.message.includes('ECONNRESET') || apiErr.error.message.includes('Network'));
       if (isTimeout) {
         addToast('Activation request timed out — refreshing to check backend status…', 'warning');
-      } else if (apiErr.error.code === 'INVALID_LIFECYCLE_TRANSITION') {
-        // e.g. trying to stage a version that's already ACTIVE
-        addToast(
-          `Lifecycle error: ${apiErr.error.message} — upload a new file to create a new version.`,
-          'error',
-        );
       } else {
         addToast(`Action failed: ${apiErr.error.message}`, 'error');
       }
@@ -862,7 +890,6 @@ export default function V2ProductDefinitionPage() {
     } finally {
       setStaging(false);
       setActivating(false);
-      // Always reload versions — activation may have succeeded even if the proxy timed out.
       void loadVersions();
       setRightTab('versions');
     }
@@ -911,8 +938,15 @@ export default function V2ProductDefinitionPage() {
     setRowActivating(version.versionId);
     try {
       const idempotencyKey = generateIdempotencyKey();
-      await activateProductDefinitionVersion(version.definitionId, version.versionId, idempotencyKey);
-      addToast(`Version ${version.versionId.slice(0, 8)}… is now ACTIVE. Registries rebuilding…`, 'success');
+      const result = await activateProductDefinitionVersion(
+        version.definitionId, version.versionId, idempotencyKey,
+      );
+
+      if (result?.alreadyActive) {
+        addToast(`Version ${version.versionId.slice(0, 8)}… is already ACTIVE — no changes needed.`, 'info');
+      } else {
+        addToast(`Version ${version.versionId.slice(0, 8)}… is now ACTIVE. Registries rebuilding…`, 'success');
+      }
       void loadVersions();
     } catch (err) {
       const apiErr = extractApiError(err);

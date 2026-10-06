@@ -337,6 +337,63 @@ services:
       retries: 5
       start_period: 5s
 
+  # ── EOC640 Wireless Backhaul Unit SNMP Simulators ───────────────────────────
+  # sysObjectID: .1.3.6.1.4.1.26928.1.640  sysDescr: EOC640.*
+  # productDefinitionId: eoc-eoc640-wireless-backhaul-unit
+  eoc640-bts-sim:
+    build:
+      context: test/snmpsim-eoc640
+      dockerfile: Dockerfile
+    container_name: nms-eoc640-bts
+    restart: unless-stopped
+    environment:
+      SNMP_PORT: "1166"
+      SNMP_COMMUNITY: "public"
+      DEVICE_MODE: "BTS"
+      DEVICE_NAME: "EOC640-BTS-01"
+      DEVICE_IP: "192.168.100.20"
+      DEVICE_SERIAL: "EOC640-BTS-SN-001"
+    ports:
+      - "1166:1166/udp"
+    networks:
+      nms-net: {}
+      snmp-test-net:
+        ipv4_address: 10.10.10.28
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.sendto(b'\\x30\\x26\\x02\\x01\\x01\\x04\\x06public\\xa0\\x19\\x02\\x04\\x00\\x00\\x00\\x04\\x02\\x01\\x00\\x02\\x01\\x00\\x30\\x0b\\x30\\x09\\x06\\x05\\x2b\\x06\\x01\\x02\\x01\\x05\\x00', ('127.0.0.1',1166)); s.recv(256); exit(0)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 8s
+
+  eoc640-cpe-sim:
+    build:
+      context: test/snmpsim-eoc640
+      dockerfile: Dockerfile
+    container_name: nms-eoc640-cpe
+    restart: unless-stopped
+    environment:
+      SNMP_PORT: "1167"
+      SNMP_COMMUNITY: "public"
+      DEVICE_MODE: "CPE"
+      DEVICE_NAME: "EOC640-CPE-01"
+      DEVICE_IP: "192.168.100.21"
+      DEVICE_SERIAL: "EOC640-CPE-SN-001"
+    ports:
+      - "1167:1167/udp"
+    networks:
+      nms-net: {}
+      snmp-test-net:
+        ipv4_address: 10.10.10.29
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.sendto(b'\\x30\\x26\\x02\\x01\\x01\\x04\\x06public\\xa0\\x19\\x02\\x04\\x00\\x00\\x00\\x04\\x02\\x01\\x00\\x02\\x01\\x00\\x30\\x0b\\x30\\x09\\x06\\x05\\x2b\\x06\\x01\\x02\\x01\\x05\\x00', ('127.0.0.1',1167)); s.recv(256); exit(0)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 8s
+
   # ── Ubiquiti AirMax RADIO SNMP Simulator ────────────────────────────────────
   # Simulates a Ubiquiti AirMax AC backhaul RADIO on port 1164.
   # OID: 1.3.6.1.4.1.41112.1.6  →  genericDeviceType=RADIO  GPS=17.385,78.487

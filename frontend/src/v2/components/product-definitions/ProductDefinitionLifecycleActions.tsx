@@ -219,7 +219,7 @@ export function ProductDefinitionLifecycleActions({ version, allVersions, canWri
       setToast({
         kind: 'success',
         title: 'Rollback complete',
-        message: `Definition rolled back to ${result.version.versionId}.`,
+        message: `Definition rolled back to ${result.version?.versionId ?? targetVersionId}.`,
         correlationId: result.correlationId,
       });
       onActionComplete(version.definitionId);

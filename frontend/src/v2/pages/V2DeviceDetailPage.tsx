@@ -23,6 +23,9 @@ import { getDeviceCurrentParameterValues, flattenParameterValues, updateDevicePa
 import type { AdaptiveUiTemplateData } from '../../api/framework-panels.types';
 import { NodeViewParameters } from '../components/NodeViewParameters';
 import type { ParameterCurrentValue, ParameterCurrentValueData } from '../../api/framework-parameters.types';
+// ── New wireframe architecture ─────────────────────────────────────────────────
+import { fetchNodeView } from '../../api/nodeView.api';
+import type { NodeViewData } from '../../api/nodeView.types';
 
 const TABS = [
   { id: 'summary',   label: 'Node View' },
@@ -72,7 +75,13 @@ export default function V2DeviceDetailPage() {
   const [confirmDeprovision, setConfirmDeprovision] = useState(false);
   const [deprovisioning, setDeprovisioning] = useState(false);
 
-  // ── Framework tab state ───────────────────────────────────────────────────
+  // ── Node View tab state (new wireframe architecture) ─────────────────────
+  const [nvData, setNvData]                 = useState<NodeViewData | null>(null);
+  const [nvLoading, setNvLoading]           = useState(false);
+  const [nvRefreshing, setNvRefreshing]     = useState(false);
+  const [nvError, setNvError]               = useState<string | null>(null);
+
+  // ── Framework (Parameters) tab state — legacy, kept for the Parameters tab ─
   const [fwTemplate, setFwTemplate]         = useState<AdaptiveUiTemplateData | null>(null);
   const [fwValues, setFwValues]             = useState<Map<string, ParameterCurrentValue>>(new Map());
   const [fwCurrent, setFwCurrent]           = useState<ParameterCurrentValueData | null>(null);
@@ -99,7 +108,34 @@ export default function V2DeviceDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  // ── Framework data: load on both summary (Node View) and framework tabs ─────
+  // ── Node View loader — uses persisted wireframe architecture ─────────────
+  const loadNodeView = useCallback(async (refresh = false, silent = false) => {
+    if (!devId) return;
+    if (refresh) setNvRefreshing(true);
+    else if (!silent) setNvLoading(true);
+    if (!silent) setNvError(null);
+    try {
+      const resp = await fetchNodeView(devId, { refresh });
+      if (resp.status === 'ok' && resp.data) {
+        setNvData(resp.data);
+        setNvError(null);
+      } else if (resp.status === 'NO_ACTIVE_FRAMEWORK') {
+        setNvData(null);
+        setNvError(null); // expected — no definition linked
+      } else {
+        setNvError(resp.error?.message ?? 'Failed to load Node View.');
+        setNvData(null);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String((e as { message?: string })?.message ?? e);
+      if (!silent) setNvError(`Failed to load Node View: ${msg}`);
+    } finally {
+      setNvLoading(false);
+      setNvRefreshing(false);
+    }
+  }, [devId]);
+
+  // ── Framework tab loader — still uses legacy ui-template approach ─────────
   const loadFramework = useCallback(async (refresh = false, silent = false) => {
     if (!devId) return;
     if (refresh) setFwRefreshing(true);
@@ -136,17 +172,24 @@ export default function V2DeviceDetailPage() {
     }
   }, [devId]);
 
+  // Load Node View when summary tab is shown
   useEffect(() => {
-    if (tab !== 'framework' && tab !== 'summary') return;
+    if (tab !== 'summary') return;
+    void loadNodeView();
+  }, [loadNodeView, tab]);
+
+  // Load framework data when Parameters tab is shown
+  useEffect(() => {
+    if (tab !== 'framework') return;
     void loadFramework();
   }, [loadFramework, tab]);
 
   // Auto-refresh every 30 s while the Node View tab is visible.
   useEffect(() => {
     if (tab !== 'summary' || !devId) return;
-    const timer = setInterval(() => { void loadFramework(false, true); }, 30000);
+    const timer = setInterval(() => { void loadNodeView(false, true); }, 30000);
     return () => clearInterval(timer);
-  }, [tab, devId, loadFramework]);
+  }, [tab, devId, loadNodeView]);
 
   const handleFrameworkWrite = useCallback(async (parameterId: string, value: string) => {
     try {
@@ -370,25 +413,33 @@ export default function V2DeviceDetailPage() {
               </div>
             </div>
 
-            {fwLoading && !fwTemplate && !fwError && (
+            {nvLoading && !nvData && !nvError && (
               <div style={{ padding: 24, textAlign: 'center' }}><Spinner /></div>
             )}
 
-            {fwTemplate && (
+            {nvError && (
+              <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '16px', fontSize: 13, color: 'var(--vf-warning)' }}>
+                ⚠ {nvError}
+              </div>
+            )}
+
+            {nvData && (
               <NodeViewParameters
-                groups={fwTemplate.groups ?? []}
-                current={fwCurrent}
-                loading={fwLoading}
-                refreshing={fwRefreshing}
-                onRefresh={() => void loadFramework(true)}
+                wireframe={nvData.wireframe.groups}
+                values={nvData.values}
+                loading={nvLoading}
+                refreshing={nvRefreshing}
+                onRefresh={() => void loadNodeView(true)}
                 deviceStatus={device.status}
-                productDefinitionId={fwTemplate.productDefinitionId}
-                registryVersion={fwTemplate.registryVersion}
+                productDefinitionId={nvData.wireframe.productDefinitionId}
+                registryVersion={nvData.wireframe.registryVersion}
+                collectedAt={nvData.collectedAt}
+                pollStatus={nvData.pollStatus}
               />
             )}
 
             {/* No product definition placeholder */}
-            {!fwLoading && !fwTemplate && (
+            {!nvLoading && !nvData && !nvError && (
               <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '20px 16px', fontSize: 13, color: 'var(--vf-text-muted)' }}>
                 📋 No Product Definition linked to this device. Upload and activate a definition in
                 <button onClick={() => navigate('/v2/product-definitions')} style={{ background: 'none', border: 'none', color: 'var(--vf-accent)', cursor: 'pointer', fontSize: 13, marginLeft: 4 }}>

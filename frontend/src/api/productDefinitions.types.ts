@@ -124,17 +124,23 @@ export interface ValidationReport {
  * Includes the updated version record plus the correlation ID for support escalation.
  */
 export interface LifecycleActionResult {
-  version: ProductDefinitionVersion;
-  correlationId: string;
+  version?: ProductDefinitionVersion;
+  correlationId?: string;
   /** Machine-readable outcome code (e.g. STAGED, ACTIVATED, ROLLED_BACK). */
   outcome?: string;
+  /** Set by the gateway idempotency decorator when the version was already STAGED or ACTIVE. */
+  alreadyStaged?: boolean;
+  alreadyActive?: boolean;
+  /** Gateway-level success status/message when returning idempotent 200 */
+  status?: string;
+  message?: string;
 }
 
 /**
  * Response returned by the activate endpoint; may include conflict details.
  */
 export interface ActivationResult extends LifecycleActionResult {
-  registryVersion: number;
+  registryVersion?: number;
   /** Conflict details if the activation was rejected (HTTP 409). */
   conflict?: ConflictDetails;
 }

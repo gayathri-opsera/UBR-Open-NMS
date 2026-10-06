@@ -333,7 +333,12 @@ router.get(
           error: { code: 'DEVICE_NOT_FOUND', message: `Device ${deviceId} not found`, correlationId },
         });
       }
-      const { http, body } = await live.getCurrent(device, { force: req.query.refresh === '1' });
+      // Use cached values by default — avoids blocking on SNMP walk (may time out 30s for unreachable devices).
+      // ?refresh=1 explicitly triggers a fresh SNMP poll.
+      const isRefresh = req.query.refresh === '1';
+      const { http, body } = isRefresh
+        ? await live.getCurrent(device, { force: true })
+        : await live.getCachedOnly(device);
       if (body.data && Array.isArray(body.data.groups)) {
         body.data.groups = filterParameterGroups(body.data.groups, callerRole,
           { productDefinitionId: device.productDefinitionId })

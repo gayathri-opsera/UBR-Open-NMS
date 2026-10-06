@@ -146,7 +146,7 @@ const TEST_SNMP_PORT_MAP = {
 // expand it to all known simulator ports so SNMP Network Discovery behaves the
 // same as Quick SNMP Discovery which uses explicit host:port notation.
 const MULTI_PORT_HOST_MAP = {
-  'host.docker.internal': [1162, 1163, 1161], // BTS, CPE, snmpsim
+  'host.docker.internal': [1162, 1163, 1161, 1166, 1167, 1168], // BTS, CPE, snmpsim, eoc640-bts, eoc640-cpe, srx300
 };
 
 // ── Minimal SNMP v2c BER encoder/decoder (pure Node.js, no libs) ──────────────
@@ -415,10 +415,15 @@ async function classifyByOid(sysObjectID) {
   // (e.g. EOC 10.0.150.88) report the bare enterprise OID 1.3.6.1.4.1.52619.
   const under = (prefix) => oid === prefix || oid.startsWith(prefix + '.');
   if (under('1.3.6.1.4.1.9'))     return { vendor: 'Cisco',    model: 'IOS Switch',       genericDeviceType: 'SWITCH' };
+  if (under('1.3.6.1.4.1.2636.1.1.1.2.151')) return { vendor: 'Juniper', model: 'SRX300',    genericDeviceType: 'FIREWALL', productDefinitionId: 'juniper-srx300' };
+  if (under('1.3.6.1.4.1.2636.1.1.1.2.43'))  return { vendor: 'Juniper', model: 'SRX100',    genericDeviceType: 'FIREWALL', productDefinitionId: 'juniper-srx300' };
+  if (under('1.3.6.1.4.1.2636.1.1.1.2'))     return { vendor: 'Juniper', model: 'SRX Series', genericDeviceType: 'FIREWALL', productDefinitionId: 'juniper-srx300' };
   if (under('1.3.6.1.4.1.2636'))  return { vendor: 'Juniper',  model: 'JunOS Device',     genericDeviceType: 'ROUTER' };
   if (under('1.3.6.1.4.1.2272'))  return { vendor: 'Nortel',   model: 'ERS Switch',       genericDeviceType: 'SWITCH' };
   if (under('1.3.6.1.4.1.4526'))  return { vendor: 'Netgear',  model: 'Smart Switch',     genericDeviceType: 'SWITCH' };
-  if (under('1.3.6.1.4.1.3764'))  return { vendor: 'EOC',      model: 'EOC640',           genericDeviceType: 'RADIO', productDefinitionId: 'EOC640'             };
+  if (under('1.3.6.1.4.1.26928.1.640')) return { vendor: 'EOC', model: 'EOC640 Wireless Backhaul Unit', genericDeviceType: 'WIRELESS_BACKHAUL', productDefinitionId: 'eoc-eoc640-wireless-backhaul-unit' };
+  if (under('1.3.6.1.4.1.26928'))      return { vendor: 'EOC', model: 'EOC640',                        genericDeviceType: 'WIRELESS_BACKHAUL', productDefinitionId: 'eoc-eoc640-wireless-backhaul-unit' };
+  if (under('1.3.6.1.4.1.3764'))       return { vendor: 'EOC', model: 'EOC640',                        genericDeviceType: 'WIRELESS_BACKHAUL', productDefinitionId: 'eoc-eoc640-wireless-backhaul-unit' };
   if (under('1.3.6.1.4.1.52619')) return { vendor: 'EOC',      model: 'Configurations_GUI', genericDeviceType: 'RADIO', productDefinitionId: 'Configurations_GUI' };
   if (under('1.3.6.1.4.1.41112')) return { vendor: 'Ubiquiti', model: 'AirMax AC',        genericDeviceType: 'RADIO', productDefinitionId: 'ubiquiti-airmax-radio' };
   return { vendor: 'Unknown', model: 'SNMP Device', genericDeviceType: 'SWITCH' };

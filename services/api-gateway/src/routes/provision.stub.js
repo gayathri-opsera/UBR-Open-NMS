@@ -156,7 +156,23 @@ async function resolveSnmpCredential(col, host, ip) {
 const TYPE_MODEL = { BTS: 'A60', CPE: 'A61', IDU: 'IDU' };
 
 /** Device types that are always valid without a fingerprint registry match. */
-const BUILTIN_TYPES = new Set(['BTS', 'CPE', 'IDU']);
+// All device types that the Provision Device modal lets an operator select.
+// These are provisionable without a product-definition fingerprint match.
+// BTS/CPE/IDU are UBR call-home paradigm; the rest are SNMP-discovered generic types.
+// WIRELESS_BACKHAUL is the genericDeviceType for EOC640 and similar P2MP backhaul radios.
+const BUILTIN_TYPES = new Set([
+  'BTS', 'CPE', 'IDU',           // UBR call-home
+  'RADIO',                        // Generic SNMP radio (Ubiquiti AirMax, etc.)
+  'WIRELESS_BACKHAUL',            // EOC640, P2MP backhaul units
+  'SWITCH',                       // L2/L3 network switch
+  'ROUTER',                       // IP router
+  'GATEWAY',                      // Edge gateway
+  'FIREWALL',                     // Firewall / UTM
+  'AP',                           // Wi-Fi access point
+  'OLT',                          // Optical line terminal
+  'ONU',                          // Optical network unit
+  'UNKNOWN',                      // Fallback — never block explicit admin provision
+]);
 
 /**
  * Writes a single ProvisionHost to MongoDB and returns the result object.
@@ -274,21 +290,28 @@ async function provisionOne(host, col) {
         const existingHostname = existingForIp.sysName || existingForIp.name || '';
         const incomingHostname = deviceName;
         if (existingHostname === incomingHostname) {
-          // Same IP + same hostname + active → genuine duplicate; reject.
+          // Same IP + same hostname + active → idempotent: return the existing device as success.
+          // The admin already has this device provisioned — no need to re-provision.
+          console.log(`[provision-stub] ${ip} already provisioned as '${existingForIp._id}' — returning existing device (idempotent)`);
           return {
             ip,
-            deviceId: '',
-            serialNumber,
-            status: 'failed',
-            error: `A provisioned record already exists for IP ${ip} with hostname '${existingHostname}' (serial: ${existingForIp._id}). Deprovision it first.`,
+            deviceId: String(existingForIp._id),
+            serialNumber: String(existingForIp._id),
+            status: 'provisioned',
           };
-        }
-        // Different hostname → stale active record (device was replaced); clean up.
-        const removed = await col.deleteMany({ ipAddress: ip, _id: { $ne: serialNumber } });
-        if (removed.deletedCount > 0) {
-          console.log(`[provision-stub] Cleaned up ${removed.deletedCount} stale entries for IP ${ip} (hostname changed)`);
+        } else {
+          // Different hostname → stale active record (device was replaced); clean up.
+          const removed = await col.deleteMany({ ipAddress: ip, _id: { $ne: serialNumber } });
+          if (removed.deletedCount > 0) {
+            console.log(`[provision-stub] Cleaned up ${removed.deletedCount} stale entries for IP ${ip} (hostname changed)`);
+          }
         }
       }
+    }
+    // Also clear isDeprovisioned on the target serial itself if it exists.
+    const existingForSerial = await col.findOne({ _id: serialNumber });
+    if (existingForSerial?.isDeprovisioned === true) {
+      console.log(`[provision-stub] Serial ${serialNumber} was deprovisioned — clearing flag`);
     }
 
     // Upsert by serialNumber (_id) — idempotent for re-provisioning the same serial.

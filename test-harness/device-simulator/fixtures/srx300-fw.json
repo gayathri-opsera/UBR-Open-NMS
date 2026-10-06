@@ -1,0 +1,14 @@
+{
+  "description": "Juniper SRX300 Firewall Simulator",
+  "ip": "host.docker.internal",
+  "port": 1168,
+  "snmpCommunity": "public",
+  "snmpVersion": "2c",
+  "sysObjectID": ".1.3.6.1.4.1.2636.1.1.1.2.151",
+  "sysDescr": "Juniper Networks, Inc. srx300 internet router, kernel JUNOS 21.4R3-S4.8",
+  "sysName": "srx300-fw-01",
+  "vendor": "Juniper",
+  "model": "SRX300",
+  "genericDeviceType": "FIREWALL",
+  "productDefinitionId": "juniper-srx300-firewall"
+}
