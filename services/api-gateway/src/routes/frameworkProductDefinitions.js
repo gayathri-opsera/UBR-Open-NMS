@@ -511,12 +511,9 @@ async function nativeFormatUpload(req, res, next) {
       { upsert: true },
     );
 
-    // Supersede any previous ACTIVE version
-    await db.collection('product_definition_active_versions').updateOne(
-      { productDefinitionId: defId },
-      { $set: { productDefinitionId: defId, versionId, updatedAt: now }, $setOnInsert: { createdAt: now } },
-      { upsert: true },
-    );
+    // NOTE: Do NOT touch product_definition_active_versions here.
+    // The version starts as STAGED — the user must explicitly click Activate.
+    // Activate handler (nativeLifecycleHandler) will update the active pointer.
 
     // Clear old parameter_registry_entries for this definition
     await db.collection('parameter_registry_entries').deleteMany({ productDefinitionId: defId });

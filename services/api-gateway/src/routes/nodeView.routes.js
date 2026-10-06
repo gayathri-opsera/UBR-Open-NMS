@@ -205,6 +205,8 @@ router.get(
             }
             if (matched) {
               productDefinitionId = matched.definitionId;
+              // ── CRITICAL: update in-memory device so getCachedOnly() sees the link ──
+              device.productDefinitionId = productDefinitionId;
               // Persist the link on the device document so future requests skip this lookup
               const invDb = mongoose.connection.client.db(process.env.MONGO_DB_NAME || 'ubrnms');
               await invDb.collection('devices').updateOne(
