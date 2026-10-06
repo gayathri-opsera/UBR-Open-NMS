@@ -86,6 +86,8 @@ export interface NodeViewData {
   values:      NodeViewValues;
   pollStatus:  string;
   collectedAt: string | null;
+  /** True when no product definition is linked — wireframe contains basic SNMP MIB-2 system info only */
+  noFramework?: boolean;
 }
 
 export interface NodeViewResponse {

@@ -424,21 +424,40 @@ export default function V2DeviceDetailPage() {
             )}
 
             {nvData && (
-              <NodeViewParameters
-                wireframe={nvData.wireframe.groups}
-                values={nvData.values}
-                loading={nvLoading}
-                refreshing={nvRefreshing}
-                onRefresh={() => void loadNodeView(true)}
-                deviceStatus={device.status}
-                productDefinitionId={nvData.wireframe.productDefinitionId}
-                registryVersion={nvData.wireframe.registryVersion}
-                collectedAt={nvData.collectedAt}
-                pollStatus={nvData.pollStatus}
-              />
+              <>
+                {/* Banner when showing basic SNMP fallback (no product definition linked) */}
+                {nvData.noFramework && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    background: 'rgba(79,142,247,0.07)', border: '1px solid rgba(79,142,247,0.2)',
+                    borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12,
+                    color: 'var(--vf-text-secondary)',
+                  }}>
+                    <span style={{ fontSize: 16 }}>ℹ️</span>
+                    <span>
+                      No Product Definition linked — showing basic SNMP system info.{' '}
+                      <button onClick={() => navigate('/v2/product-definitions')} style={{ background: 'none', border: 'none', color: 'var(--vf-accent)', cursor: 'pointer', fontSize: 12, padding: 0, textDecoration: 'underline' }}>
+                        Upload &amp; activate a definition
+                      </button>{' '}to see full device parameters.
+                    </span>
+                  </div>
+                )}
+                <NodeViewParameters
+                  wireframe={nvData.wireframe.groups}
+                  values={nvData.values}
+                  loading={nvLoading}
+                  refreshing={nvRefreshing}
+                  onRefresh={() => void loadNodeView(true)}
+                  deviceStatus={device.status}
+                  productDefinitionId={nvData.wireframe.productDefinitionId ?? ''}
+                  registryVersion={nvData.wireframe.registryVersion}
+                  collectedAt={nvData.collectedAt}
+                  pollStatus={nvData.pollStatus}
+                />
+              </>
             )}
 
-            {/* No product definition placeholder */}
+            {/* No product definition placeholder — only shown when SNMP fallback also failed */}
             {!nvLoading && !nvData && !nvError && (
               <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 10, padding: '20px 16px', fontSize: 13, color: 'var(--vf-text-muted)' }}>
                 📋 No Product Definition linked to this device. Upload and activate a definition in

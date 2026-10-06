@@ -182,6 +182,94 @@ router.get(
 
       const productDefinitionId = await live.ensureDefinitionLink(device);
       if (!productDefinitionId) {
+        // ── Fallback: fetch MIB-2 system group via SNMP GET ──────────────────
+        // Returns basic device info even when no product definition is linked.
+        try {
+          const { walkSubtree, valueToString } = require('../live/snmpWalk');
+          const snmp = require('net-snmp');
+          const MIB2_SYSTEM = {
+            '.1.3.6.1.2.1.1.1.0': 'System Description',
+            '.1.3.6.1.2.1.1.2.0': 'System Object ID',
+            '.1.3.6.1.2.1.1.3.0': 'System Uptime',
+            '.1.3.6.1.2.1.1.4.0': 'System Contact',
+            '.1.3.6.1.2.1.1.5.0': 'System Name',
+            '.1.3.6.1.2.1.1.6.0': 'System Location',
+            '.1.3.6.1.2.1.1.7.0': 'System Services',
+          };
+          const host      = device.host || device.ipAddress || device.ip;
+          const port      = device.port || 161;
+          const community = device.community || 'public';
+
+          if (host) {
+            const session = snmp.createSession(host, community, {
+              port, retries: 1, timeout: 3000, version: snmp.Version2c,
+            });
+            const oidList = Object.keys(MIB2_SYSTEM).map((o) => o.replace(/^\./, ''));
+            const basicParams = await new Promise((resolve) => {
+              session.get(oidList, (err, varbinds) => {
+                try { session.close(); } catch { /* ignore */ }
+                if (err || !varbinds) return resolve([]);
+                const result = [];
+                for (const vb of varbinds) {
+                  if (snmp.isVarbindError(vb)) continue;
+                  const oidKey = `.${vb.oid}`;
+                  const label  = MIB2_SYSTEM[oidKey] || oidKey;
+                  result.push({ parameterId: oidKey, displayName: label, value: valueToString(vb), snmpOid: oidKey });
+                }
+                resolve(result);
+              });
+            });
+
+            if (basicParams.length > 0) {
+              return res.status(200).json({
+                status: 'ok',
+                data: {
+                  deviceId,
+                  productDefinitionId: null,
+                  noFramework: true,
+                  collectedAt: new Date().toISOString(),
+                  pollStatus: 'REACHABLE',
+                  wireframe: {
+                    registryVersion: 0,
+                    groups: [{
+                      groupId:      'system',
+                      label:        'System Info',
+                      displayOrder: 1,
+                      subGroups:    [],
+                      parameters:   basicParams.map((p, i) => ({
+                        parameterId:   p.parameterId,
+                        displayName:   p.displayName,
+                        snmpOid:       p.snmpOid,
+                        dataType:      'string',
+                        uiWidget:      'text',
+                        readOnly:      true,
+                        hidden:        false,
+                        displayOrder:  i + 1,
+                      })),
+                    }],
+                  },
+                  values: {
+                    status: 'ok',
+                    groups: [{
+                      groupId:    'system',
+                      parameters: basicParams.map((p) => ({
+                        parameterId: p.parameterId,
+                        value:       p.value,
+                        rawValue:    p.value,
+                        timestamp:   new Date().toISOString(),
+                        status:      'ok',
+                      })),
+                    }],
+                  },
+                },
+              });
+            }
+          }
+        } catch (snmpErr) {
+          logger.debug({ msg: 'node-view: basic SNMP fallback failed', deviceId, err: snmpErr.message });
+        }
+
+        // No SNMP data either — return the original no-framework response
         return res.status(200).json({
           status: 'NO_ACTIVE_FRAMEWORK',
           error: {
