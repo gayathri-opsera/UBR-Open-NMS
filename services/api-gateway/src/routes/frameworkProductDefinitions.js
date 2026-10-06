@@ -30,13 +30,14 @@ const {
   FRAMEWORK_CAPABILITY,
 } = require('../middleware/rbac.middleware');
 
-const { detectCredentials } = require('../middleware/credentialDetect.middleware');
-const live                  = require('../live/liveParameters');
-const { buildWireframe }    = require('../live/wireframeBuilder');
+const { detectCredentials }       = require('../middleware/credentialDetect.middleware');
+const live                        = require('../live/liveParameters');
+const { buildWireframe }          = require('../live/wireframeBuilder');
+const { parseDefinitionFile }     = require('../live/definitionParser');
 const {
   NodeViewWireframe,
   invalidateCache,
-}                           = require('../models/nodeViewWireframe.model');
+}                                 = require('../models/nodeViewWireframe.model');
 
 const router = express.Router();
 
@@ -407,17 +408,244 @@ function productDefinitionProxy(opts = {}) {
 // Health passthrough — unauthenticated health probe for infrastructure monitoring
 router.get('/health', productDefinitionProxy());
 
+// ── Native upload handler for non-NMS formats ────────────────────────────────
+/**
+ * Reads the multipart file, detects format, and if it is NOT NMS XML
+ * (raw XML / XLS / JSON) handles the upload entirely in the gateway:
+ *  1. Parses parameters with definitionParser.js
+ *  2. Upserts product_definition_versions + parameter_registry_entries in MongoDB
+ *  3. Builds and persists the Node View wireframe
+ *  4. Returns a success response that matches the Java service's shape
+ *
+ * NMS XML files fall through to the Java proxy below unchanged.
+ */
+async function nativeFormatUpload(req, res, next) {
+  // Collect the raw multipart body
+  const chunks = [];
+  let rawBody = Buffer.alloc(0);
+  await new Promise((resolve, reject) => {
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => { rawBody = Buffer.concat(chunks); resolve(); });
+    req.on('error', reject);
+  });
+
+  // Store raw body so the proxy can re-use it if we fall through
+  req._rawBody = rawBody;
+
+  // Extract the file from the multipart body (look for Content-Disposition: name="file")
+  const boundary = (() => {
+    const ct = req.headers['content-type'] || '';
+    const m  = ct.match(/boundary=([^\s;]+)/);
+    return m ? m[1] : null;
+  })();
+
+  if (!boundary) return next(); // not multipart — fall through
+
+  // Simple multipart extractor (no npm needed)
+  let filename = 'upload';
+  let fileBuf  = null;
+  const sep    = Buffer.from(`--${boundary}`);
+  const parts  = splitBuffer(rawBody, sep);
+
+  for (const part of parts) {
+    const strPart = part.toString('latin1');
+    const headerEnd = strPart.indexOf('\r\n\r\n');
+    if (headerEnd < 0) continue;
+    const headers = strPart.slice(0, headerEnd);
+    if (!headers.includes('name="file"') && !headers.includes("name='file'")) continue;
+    const fnMatch = headers.match(/filename="([^"]+)"/);
+    if (fnMatch) filename = fnMatch[1];
+    // Body is everything after the header separator, minus trailing \r\n
+    fileBuf = part.slice(headerEnd + 4, part.length - 2);
+    break;
+  }
+
+  if (!fileBuf || fileBuf.length === 0) return next(); // no file found
+
+  const fmt = (() => { try { return require('../live/definitionParser').detectFormat(filename, fileBuf); } catch { return 'NMS_XML'; } })();
+
+  // NMS_XML → let the Java proxy handle it
+  if (fmt === 'NMS_XML') return next();
+
+  // ── Native handling ─────────────────────────────────────────────────────────
+  logger.info({ msg: 'native-upload: handling non-NMS format', filename, fmt });
+
+  try {
+    const { parseDefinitionFile } = require('../live/definitionParser');
+    const parsed = parseDefinitionFile(fileBuf, filename);
+
+    if (parsed.isNmsFormat) return next();
+
+    const mongoose = require('mongoose');
+    const { v4: uuidv4 } = require('uuid');
+    const PRODUCTDEF_DB = process.env.PRODUCTDEF_DB_NAME || 'ubrnms_productdef';
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ status: 'error', error: { code: 'DB_UNAVAILABLE', message: 'MongoDB not connected' } });
+    }
+    const db = mongoose.connection.client.db(PRODUCTDEF_DB);
+
+    const versionId    = uuidv4();
+    const now          = new Date();
+    const defId        = parsed.id;
+    const totalParams  = parsed.groups.reduce((s, g) => s + g.parameters.length, 0);
+
+    // Upsert the version record
+    await db.collection('product_definition_versions').updateOne(
+      { definitionId: defId, lifecycleStatus: { $in: ['DRAFT', 'STAGED'] } },
+      {
+        $set: {
+          versionId, definitionId: defId,
+          name:            `${parsed.vendor} ${parsed.model}`,
+          vendor:          parsed.vendor,
+          model:           parsed.model,
+          deviceType:      '',
+          description:     parsed.description,
+          lifecycleStatus: 'STAGED',
+          validationStatus:'VALID',
+          uploadedFormat:  fmt,
+          parameterCount:  totalParams,
+          updatedAt:       now,
+        },
+        $setOnInsert: { createdAt: now },
+      },
+      { upsert: true },
+    );
+
+    // Supersede any previous ACTIVE version
+    await db.collection('product_definition_active_versions').updateOne(
+      { productDefinitionId: defId },
+      { $set: { productDefinitionId: defId, versionId, updatedAt: now }, $setOnInsert: { createdAt: now } },
+      { upsert: true },
+    );
+
+    // Clear old parameter_registry_entries for this definition
+    await db.collection('parameter_registry_entries').deleteMany({ productDefinitionId: defId });
+
+    // Insert fresh entries
+    const entries = [];
+    for (const g of parsed.groups) {
+      for (const p of g.parameters) {
+        entries.push({
+          productDefinitionId: defId,
+          versionId,
+          parameterId:    p.parameterId,
+          displayName:    p.displayName,
+          groupId:        p.groupId,
+          subGroup:       p.subGroup || null,
+          dataType:       p.dataType,
+          snmpOid:        p.snmpOid   ? `.${p.snmpOid}` : null,
+          uiWidget:       p.uiWidget  || null,
+          readOnly:       !!p.readOnly,
+          defaultValue:   p.defaultValue ?? null,
+          enumValues:     p.enumValues || [],
+          minValue:       p.minValue ?? null,
+          maxValue:       p.maxValue ?? null,
+          displayOrder:   p.displayOrder || 0,
+          groupDisplayOrder: g.displayOrder || 0,
+          createdAt:      now,
+          updatedAt:      now,
+        });
+      }
+    }
+    if (entries.length > 0) {
+      await db.collection('parameter_registry_entries').insertMany(entries);
+    }
+
+    // Build wireframe immediately
+    const redis = req.app.get('redis');
+    setImmediate(async () => {
+      try {
+        const { buildWireframe: bw } = require('../live/wireframeBuilder');
+        const definition = await live.loadDefinition(defId);
+        if (definition && definition.entries?.length > 0) {
+          const built = bw(definition);
+          await NodeViewWireframe.findOneAndUpdate(
+            { productDefinitionId: defId, versionId },
+            {
+              $set: {
+                productDefinitionId: defId, versionId,
+                registryVersion: '1',
+                status: 'ACTIVE',
+                wireframe: built.wireframe,
+                parameterCount: built.parameterCount,
+                groupCount: built.groupCount,
+                validationWarnings: built.validationErrors,
+                updatedAt: now,
+              },
+              $setOnInsert: { createdAt: now },
+            },
+            { upsert: true },
+          );
+          await invalidateCache(redis, defId);
+          logger.info({ msg: 'native-upload: wireframe built', defId, parameterCount: built.parameterCount, groupCount: built.groupCount });
+        }
+      } catch (e) {
+        logger.warn({ msg: 'native-upload: wireframe build failed', err: e.message });
+      }
+    });
+
+    // Return a response that matches the Java service's version shape
+    return res.status(200).json({
+      versionId,
+      definitionId:     defId,
+      name:             `${parsed.vendor} ${parsed.model}`,
+      vendor:           parsed.vendor,
+      model:            parsed.model,
+      lifecycleStatus:  'STAGED',
+      validationStatus: 'VALID',
+      uploadedFormat:   fmt,
+      parameterCount:   totalParams,
+      groupCount:       parsed.groups.length,
+      createdAt:        now.toISOString(),
+      updatedAt:        now.toISOString(),
+      _nativeUpload:    true,
+    });
+
+  } catch (err) {
+    logger.error({ msg: 'native-upload: failed', filename, err: err.message });
+    return res.status(500).json({
+      status: 'error',
+      error:  { code: 'PARSE_ERROR', message: `Failed to parse ${fmt}: ${err.message}` },
+    });
+  }
+}
+
+/** Split a Buffer by a separator Buffer. */
+function splitBuffer(buf, sep) {
+  const parts = [];
+  let start = 0;
+  while (start < buf.length) {
+    const idx = buf.indexOf(sep, start);
+    if (idx < 0) { parts.push(buf.slice(start)); break; }
+    parts.push(buf.slice(start, idx));
+    start = idx + sep.length;
+  }
+  return parts.map((p) => {
+    // strip leading \r\n
+    if (p[0] === 0x0d && p[1] === 0x0a) return p.slice(2);
+    return p;
+  });
+}
+
 // Upload: SuperAdmin only — triggers validation and ingestion pipeline.
 // WO-005: detectCredentials scans the request body for credential-like content
 // and rejects the upload before it reaches the product-definition-service.
+// nativeFormatUpload — handles raw XML / XLS / JSON before proxying to Java.
 router.post('/upload',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'product-definitions.upload'),
   detectCredentials,
-  // parseReqBody: false — stream the raw multipart body directly to avoid
-  // express-http-proxy re-serialising it and stripping the boundary.
-  // uploadIdempotencyDecorator — when the Java service rejects a duplicate file
-  // (UPLOAD_REJECTED), look up the existing version in MongoDB and return it as
-  // a success so the UI can recover and proceed to Stage & Activate.
+  nativeFormatUpload,         // ← handles non-NMS formats natively; NMS falls through
+  // parseReqBody: false — stream the raw multipart body directly
+  (req, res, next) => {
+    // Re-attach the raw body as a readable stream for the proxy
+    if (req._rawBody) {
+      const { Readable } = require('stream');
+      const s = new Readable(); s.push(req._rawBody); s.push(null);
+      req.pipe = s.pipe.bind(s);
+      req.on  = s.on.bind(s);
+    }
+    next();
+  },
   productDefinitionProxy({ parseReqBody: false, userResDecorator: uploadIdempotencyDecorator }),
   // ✅ Build wireframe immediately after any XML / XLS / JSON upload succeeds.
   buildWireframeAfterUpload,
@@ -593,20 +821,102 @@ router.get('/:definitionId/audit-history',
   productDefinitionProxy(),
 );
 
+// ── Native stage/activate for gateway-parsed definitions ─────────────────────
+async function nativeLifecycleHandler(action, req, res, next) {
+  const { definitionId, versionId } = req.params;
+  if (!definitionId) return next();
+
+  try {
+    const mongoose = require('mongoose');
+    const PRODUCTDEF_DB = process.env.PRODUCTDEF_DB_NAME || 'ubrnms_productdef';
+    if (mongoose.connection.readyState !== 1) return next();
+    const db = mongoose.connection.client.db(PRODUCTDEF_DB);
+
+    // Check if this is a gateway-native definition (uploadedFormat != 'XML' / not in Java)
+    const ver = await db.collection('product_definition_versions').findOne(
+      versionId
+        ? { definitionId, versionId }
+        : { definitionId },
+      { sort: { createdAt: -1 } },
+    );
+
+    if (!ver || !ver.uploadedFormat || ver.uploadedFormat === 'NMS_XML' || ver.uploadedFormat === 'XML') {
+      return next(); // let the Java proxy handle it
+    }
+
+    // Gateway-native: just update the lifecycle status
+    const now    = new Date();
+    const newStatus = action === 'activate' ? 'ACTIVE' : 'STAGED';
+    await db.collection('product_definition_versions').updateOne(
+      { definitionId, versionId: ver.versionId },
+      { $set: { lifecycleStatus: newStatus, updatedAt: now } },
+    );
+
+    if (action === 'activate') {
+      await db.collection('product_definition_active_versions').updateOne(
+        { productDefinitionId: definitionId },
+        { $set: { productDefinitionId: definitionId, versionId: ver.versionId, updatedAt: now }, $setOnInsert: { createdAt: now } },
+        { upsert: true },
+      );
+
+      // Rebuild wireframe
+      const redis = req.app.get('redis');
+      setImmediate(async () => {
+        try {
+          const definition = await live.loadDefinition(definitionId);
+          if (definition?.entries?.length > 0) {
+            const built = buildWireframe(definition);
+            await NodeViewWireframe.findOneAndUpdate(
+              { productDefinitionId: definitionId },
+              {
+                $set: {
+                  productDefinitionId: definitionId,
+                  versionId: ver.versionId,
+                  registryVersion: '1',
+                  status: 'ACTIVE',
+                  wireframe: built.wireframe,
+                  parameterCount: built.parameterCount,
+                  groupCount: built.groupCount,
+                  updatedAt: now,
+                },
+                $setOnInsert: { createdAt: now },
+              },
+              { upsert: true },
+            );
+            await invalidateCache(redis, definitionId);
+            logger.info({ msg: `native-${action}: wireframe built`, definitionId, parameterCount: built.parameterCount });
+          }
+        } catch (e) {
+          logger.warn({ msg: `native-${action}: wireframe failed`, err: e.message });
+        }
+      });
+    }
+
+    return res.json({
+      versionId:       ver.versionId,
+      definitionId,
+      name:            ver.name,
+      vendor:          ver.vendor,
+      model:           ver.model,
+      lifecycleStatus: newStatus,
+      updatedAt:       now.toISOString(),
+    });
+  } catch (err) {
+    logger.error({ msg: `native-${action}: error`, definitionId, err: err.message });
+    return next();
+  }
+}
+
 // Lifecycle mutations: Operator+ (admins and operators may mutate lifecycle state)
 router.put('/:definitionId/versions/:versionId/stage',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.stage'),
-  // stageIdempotencyDecorator — if the version is already STAGED or ACTIVE, treat as success
-  // so the caller can continue straight to activation without a confusing 422 error.
+  (req, res, next) => nativeLifecycleHandler('stage', req, res, next),
   productDefinitionProxy({ userResDecorator: stageIdempotencyDecorator }),
 );
 router.put('/:definitionId/versions/:versionId/activate',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'product-definitions.activate'),
-  // Activation rebuilds fingerprint + parameter registries and publishes Kafka events —
-  // give it 120 s to avoid timing out before the backend completes.
-  // activateIdempotencyDecorator — if the version is already ACTIVE, treat as success (idempotent).
+  (req, res, next) => nativeLifecycleHandler('activate', req, res, next),
   productDefinitionProxy({ timeout: 120000, userResDecorator: activateIdempotencyDecorator }),
-  // After the Java service activates the definition, build and persist the Node View wireframe.
   buildWireframeAfterActivation,
 );
 router.put('/:definitionId/rollback',
