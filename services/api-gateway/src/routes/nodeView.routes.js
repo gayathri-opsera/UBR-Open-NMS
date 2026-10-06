@@ -468,9 +468,13 @@ router.get(
 
       // Flatten values into a simple map: parameterId → value record
       // This is the new "simple binding" shape the frontend uses.
+      //
+      // NOTE: getCachedOnly() / getCurrent() return { body: { status, data: { groups, pollStatus, collectedAt } } }
+      //       so we must unwrap the `.data` envelope before accessing `groups`.
+      const valuesInner = valuesData?.data ?? valuesData ?? {};
       const valuesMap = {};
-      if (valuesData?.groups) {
-        for (const g of valuesData.groups) {
+      if (valuesInner.groups) {
+        for (const g of valuesInner.groups) {
           for (const p of (g.parameters || [])) {
             valuesMap[p.parameterId] = {
               value:          p.value         ?? null,
@@ -506,8 +510,8 @@ router.get(
             groups:          filteredGroups,
           },
           values: valuesMap,
-          pollStatus:  valuesData?.pollStatus  || 'NOT_POLLED',
-          collectedAt: valuesData?.collectedAt || null,
+          pollStatus:  valuesInner.pollStatus  || 'NOT_POLLED',
+          collectedAt: valuesInner.collectedAt || null,
         },
       });
     } catch (err) {

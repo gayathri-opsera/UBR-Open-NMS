@@ -188,7 +188,7 @@ function buildWireframe(definition, { strict = false } = {}) {
 
     return {
       groupId:             g.groupId,
-      label:               g.groupId.charAt(0).toUpperCase() + g.groupId.slice(1).replace(/_/g, ' '),
+      label:               g.groupId.charAt(0).toUpperCase() + g.groupId.slice(1).replace(/[-_]/g, ' '),
       displayOrder:        gi + 1,
       pollIntervalSeconds: parseInt(process.env.LIVE_POLL_INTERVAL_SECONDS || '60', 10),
       subGroups,
