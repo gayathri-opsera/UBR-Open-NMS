@@ -189,19 +189,54 @@ router.get(
           if (mongoose.connection.readyState === 1) {
             const PDEF_DB = process.env.PRODUCTDEF_DB_NAME || 'ubrnms_productdef';
             const db = mongoose.connection.client.db(PDEF_DB);
-            const vendor = (device.manufacturer || device.vendor || '').toLowerCase();
-            const model  = (device.model || '').toLowerCase();
-            // Find an ACTIVE version whose vendor matches
+
+            // ── Token-based fuzzy matching ────────────────────────────────────
+            // Splits a string into meaningful word tokens, stripping version numbers,
+            // separators, and short/numeric-only tokens.
+            // e.g. "EOC Configurations_GUI" → ['eoc', 'configurations', 'gui']
+            //      "Configurations GUI 3"   → ['configurations', 'gui']
+            //      "Unknown"                → [] (skipped — sentinel)
+            const SKIP_TOKENS = new Set(['unknown', 'generic', 'device', 'snmp']);
+            const tokenize = (s) => (s || '').toLowerCase()
+              .replace(/[_\-]/g, ' ')
+              .split(/\s+/)
+              .filter((w) => w.length > 2 && !/^\d+$/.test(w) && !SKIP_TOKENS.has(w));
+
+            const deviceVendorTokens = tokenize(device.manufacturer || device.vendor || '');
+            const deviceModelTokens  = tokenize(device.model || '');
+            const deviceDescrTokens  = tokenize(device.sysDescr || '');
+            const deviceAllTokens    = new Set([...deviceVendorTokens, ...deviceModelTokens, ...deviceDescrTokens]);
+
+            // Find an ACTIVE version whose vendor/model tokens appear in device tokens
             const candidates = await db.collection('product_definition_versions')
               .find({ lifecycleStatus: 'ACTIVE' })
               .sort({ updatedAt: -1 })
               .toArray();
+
             let matched = null;
             for (const c of candidates) {
-              const cv = (c.vendor || '').toLowerCase();
-              const cm = (c.model  || '').toLowerCase();
-              if (vendor && cv && cv.includes(vendor)) { matched = c; break; }
-              if (model  && cm && cm.includes(model))  { matched = c; break; }
+              const defVendorTokens = tokenize(c.vendor || '');
+              const defModelTokens  = tokenize(c.model  || '');
+
+              // Vendor match: all non-empty def vendor tokens appear in device tokens
+              const vendorMatch = defVendorTokens.length > 0 &&
+                defVendorTokens.every((t) => deviceAllTokens.has(t));
+
+              // Model match: all def model tokens appear in device tokens (version nums already stripped)
+              const modelMatch = defModelTokens.length > 0 &&
+                defModelTokens.every((t) => deviceAllTokens.has(t));
+
+              if (vendorMatch || modelMatch) {
+                matched = c;
+                logger.info({
+                  msg: 'node-view: auto-link token match',
+                  deviceId,
+                  definitionId: c.definitionId,
+                  defVendor: c.vendor, defModel: c.model,
+                  vendorMatch, modelMatch,
+                });
+                break;
+              }
             }
             if (matched) {
               productDefinitionId = matched.definitionId;
@@ -312,13 +347,26 @@ router.get(
           logger.debug({ msg: 'node-view: basic SNMP fallback failed', deviceId, err: snmpErr.message });
         }
 
-        // No SNMP data either — return the original no-framework response
+        // SNMP returned empty (device unreachable or community mismatch) — still return the
+        // noFramework banner shape so the frontend shows the blue "No definition linked" info
+        // banner instead of silently displaying a gray placeholder with no explanation.
         return res.status(200).json({
-          status: 'NO_ACTIVE_FRAMEWORK',
-          error: {
-            code: 'NO_ACTIVE_FRAMEWORK',
-            message: 'This device has no active Product Definition framework association.',
-            correlationId,
+          status: 'ok',
+          data: {
+            deviceId,
+            productDefinitionId: null,
+            noFramework:  true,
+            collectedAt:  null,
+            pollStatus:   'NOT_POLLED',
+            wireframe:    { productDefinitionId: null, versionId: '', registryVersion: '', parameterCount: 0, groupCount: 0, groups: [] },
+            values:       {},
+            device: {
+              id:          deviceId,
+              productDefinitionId: null,
+              deviceType:  device.genericDeviceType || device.deviceType || 'GENERIC',
+              status:      device.status || 'UNKNOWN',
+              ipAddress:   device.ipAddress,
+            },
           },
         });
       }

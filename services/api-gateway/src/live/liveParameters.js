@@ -231,12 +231,16 @@ async function loadDefinition(productDefinitionId) {
   if (!db || !productDefinitionId) return null;
   const active = await db.collection('product_definition_active_versions').findOne({ productDefinitionId });
   if (!active) return null;
+  // Support both field names: Java service writes `activeVersionId`, gateway-native
+  // lifecycle handler writes `versionId`. Accept whichever is present.
+  const resolvedVersionId = active.activeVersionId || active.versionId || null;
+  if (!resolvedVersionId) return null;
   const entries = await db.collection('parameter_registry_entries')
-    .find({ productDefinitionId, versionId: active.activeVersionId }).toArray();
+    .find({ productDefinitionId, versionId: resolvedVersionId }).toArray();
   if (!entries.length) return null;
   return {
     productDefinitionId,
-    versionId: active.activeVersionId,
+    versionId: resolvedVersionId,
     registryVersion: String(active.registryVersion ?? ''),
     vendor: active.vendor || null,
     entries,

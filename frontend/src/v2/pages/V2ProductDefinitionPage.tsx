@@ -1629,20 +1629,20 @@ export default function V2ProductDefinitionPage() {
                       not yet in a terminal lifecycle state (ACTIVE, ARCHIVED, etc.) */}
                   {draftVersion &&
                     draftVersion.validationStatus !== 'INVALID' &&
-                    !['ACTIVE', 'STAGED', 'ARCHIVED', 'SUPERSEDED', 'ROLLED_BACK'].includes(
+                    !['ACTIVE', 'ARCHIVED', 'SUPERSEDED', 'ROLLED_BACK'].includes(
                       draftVersion.lifecycleStatus ?? '',
                     ) && (
                     <button
                       onClick={handleStageAndActivate}
                       disabled={staging || activating}
-                      aria-label="Stage and activate this Product Definition"
+                      aria-label={draftVersion.lifecycleStatus === 'STAGED' ? 'Activate this Product Definition' : 'Stage and activate this Product Definition'}
                       style={{
                         ...BTN_PRIMARY,
                         opacity: staging || activating ? 0.7 : 1,
                         cursor: staging || activating ? 'not-allowed' : 'pointer',
                       }}
                     >
-                      {staging ? 'Staging…' : activating ? 'Activating…' : 'Stage and activate'}
+                      {staging ? 'Staging…' : activating ? 'Activating…' : draftVersion.lifecycleStatus === 'STAGED' ? 'Activate' : 'Stage and activate'}
                     </button>
                   )}
                 </>

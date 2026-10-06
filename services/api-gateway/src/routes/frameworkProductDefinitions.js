@@ -489,22 +489,27 @@ async function nativeFormatUpload(req, res, next) {
     const defId        = parsed.id;
     const totalParams  = parsed.groups.reduce((s, g) => s + g.parameters.length, 0);
 
+    const groupCount = parsed.groups.length;
+    const fingerprintCount = Array.isArray(parsed.fingerprints) ? parsed.fingerprints.length : 0;
+
     // Upsert the version record
     await db.collection('product_definition_versions').updateOne(
       { definitionId: defId, lifecycleStatus: { $in: ['DRAFT', 'STAGED'] } },
       {
         $set: {
           versionId, definitionId: defId,
-          name:            `${parsed.vendor} ${parsed.model}`,
-          vendor:          parsed.vendor,
-          model:           parsed.model,
-          deviceType:      '',
-          description:     parsed.description,
-          lifecycleStatus: 'STAGED',
-          validationStatus:'VALID',
-          uploadedFormat:  fmt,
-          parameterCount:  totalParams,
-          updatedAt:       now,
+          name:                `${parsed.vendor} ${parsed.model}`,
+          vendor:              parsed.vendor,
+          model:               parsed.model,
+          deviceType:          '',
+          description:         parsed.description,
+          lifecycleStatus:     'STAGED',
+          validationStatus:    'VALID',
+          uploadedFormat:      fmt,
+          parameterCount:      totalParams,
+          parameterGroupCount: groupCount,
+          fingerprintCount:    fingerprintCount,
+          updatedAt:           now,
         },
         $setOnInsert: { createdAt: now },
       },
@@ -581,21 +586,23 @@ async function nativeFormatUpload(req, res, next) {
       }
     });
 
-    // Return a response that matches the Java service's version shape
+    // Return a response that matches the Java service's version shape.
+    // Field names must match what the frontend reads (parameterGroupCount, fingerprintCount).
     return res.status(200).json({
       versionId,
-      definitionId:     defId,
-      name:             `${parsed.vendor} ${parsed.model}`,
-      vendor:           parsed.vendor,
-      model:            parsed.model,
-      lifecycleStatus:  'STAGED',
-      validationStatus: 'VALID',
-      uploadedFormat:   fmt,
-      parameterCount:   totalParams,
-      groupCount:       parsed.groups.length,
-      createdAt:        now.toISOString(),
-      updatedAt:        now.toISOString(),
-      _nativeUpload:    true,
+      definitionId:        defId,
+      name:                `${parsed.vendor} ${parsed.model}`,
+      vendor:              parsed.vendor,
+      model:               parsed.model,
+      lifecycleStatus:     'STAGED',
+      validationStatus:    'VALID',
+      uploadedFormat:      fmt,
+      parameterCount:      totalParams,
+      parameterGroupCount: groupCount,
+      fingerprintCount:    fingerprintCount,
+      createdAt:           now.toISOString(),
+      updatedAt:           now.toISOString(),
+      _nativeUpload:       true,
     });
 
   } catch (err) {
@@ -910,7 +917,21 @@ async function nativeLifecycleHandler(action, req, res, next) {
     if (action === 'activate') {
       await db.collection('product_definition_active_versions').updateOne(
         { productDefinitionId: definitionId },
-        { $set: { productDefinitionId: definitionId, versionId: ver.versionId, updatedAt: now }, $setOnInsert: { createdAt: now } },
+        {
+          $set: {
+            productDefinitionId: definitionId,
+            // Write both field names: Java service convention uses `activeVersionId`,
+            // gateway-native code originally wrote `versionId`. Support both.
+            activeVersionId:     ver.versionId,
+            versionId:           ver.versionId,
+            // Persist vendor + model so findDefinitionIdByVendor / auto-link can resolve this
+            // definition even when it was uploaded natively (not through the Java service).
+            vendor:              ver.vendor   || null,
+            model:               ver.model    || null,
+            updatedAt:           now,
+          },
+          $setOnInsert: { createdAt: now },
+        },
         { upsert: true },
       );
 

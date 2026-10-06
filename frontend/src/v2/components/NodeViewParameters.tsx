@@ -353,14 +353,72 @@ function TabPanel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function SubGroupHeader({ label }: { label: string }) {
+// ── Second-level sub-group tab bar ────────────────────────────────────────────
+// Renders inside a top-level tab to show sub-groups as a second tab tier.
+// Styled more compact than the top bar to express hierarchy.
+
+function SubGroupTabBar({
+  tabs, active, onChange,
+}: { tabs: { id: string; label: string }[]; active: string; onChange: (id: string) => void }) {
+  // Single sub-group — no tab bar needed, just render directly
+  if (tabs.length <= 1) return null;
   return (
     <div style={{
-      padding: '8px 16px 2px', fontSize: 12, fontWeight: 700,
-      color: 'var(--vf-text-secondary)', textTransform: 'uppercase',
-      letterSpacing: '0.05em',
+      display: 'flex', gap: 0,
+      borderBottom: '1px solid var(--vf-border-subtle)',
+      background: 'rgba(255,255,255,0.02)',
+      overflowX: 'auto', flexShrink: 0,
     }}>
-      {label}
+      {tabs.map((t) => {
+        const isActive = t.id === active;
+        return (
+          <button
+            key={t.id}
+            onClick={() => onChange(t.id)}
+            style={{
+              background: 'transparent', border: 'none',
+              borderBottom: isActive
+                ? '2px solid rgba(79,142,247,0.7)'
+                : '2px solid transparent',
+              padding: '7px 16px',
+              fontSize: 12,
+              fontWeight: isActive ? 600 : 400,
+              color: isActive ? 'var(--vf-text-secondary)' : 'var(--vf-text-muted)',
+              cursor: 'pointer', whiteSpace: 'nowrap',
+              marginBottom: -1,
+              transition: 'color 0.15s, border-color 0.15s',
+              outline: 'none',
+            }}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Sub-group tabs wrapper (stateful) ─────────────────────────────────────────
+
+function SubGroupTabs({
+  subGroupOrder,
+  renderSubGroup,
+}: {
+  subGroupOrder: string[];
+  renderSubGroup: (key: string) => React.ReactNode;
+}) {
+  const [activeKey, setActiveKey] = useState<string>(subGroupOrder[0] ?? '');
+  const tabs = subGroupOrder.map((k) => ({
+    id: k,
+    label: k === '\u0000none'
+      ? 'General'
+      : k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '),
+  }));
+  const current = subGroupOrder.includes(activeKey) ? activeKey : subGroupOrder[0];
+  return (
+    <div>
+      <SubGroupTabBar tabs={tabs} active={current} onChange={setActiveKey} />
+      {renderSubGroup(current)}
     </div>
   );
 }
@@ -441,12 +499,22 @@ export function NodeViewParameters(props: Props) {
             }
             const order = [NO_SUB, ...(g.subGroups ?? [])];
             for (const k of bySub.keys()) if (!order.includes(k)) order.push(k);
-            return order.filter((k) => bySub.has(k)).map((k) => (
-              <div key={k}>
-                {k !== NO_SUB && <SubGroupHeader label={k} />}
-                <NewSectionTable params={bySub.get(k) ?? []} values={values} />
-              </div>
-            ));
+            const filtered = order.filter((k) => bySub.has(k));
+
+            // Single sub-group → no second tab bar needed
+            if (filtered.length === 1) {
+              return <NewSectionTable params={bySub.get(filtered[0]) ?? []} values={values} />;
+            }
+
+            // Multiple sub-groups → render as second-level tabs
+            return (
+              <SubGroupTabs
+                subGroupOrder={filtered}
+                renderSubGroup={(k) => (
+                  <NewSectionTable params={bySub.get(k) ?? []} values={values} />
+                )}
+              />
+            );
           }}
         />
       </div>
@@ -490,12 +558,20 @@ export function NodeViewParameters(props: Props) {
           }
           const order = [NO_SUB, ...(g.subGroups ?? [])];
           for (const k of bySub.keys()) if (!order.includes(k)) order.push(k);
-          return order.filter((k) => bySub.has(k)).map((k) => (
-            <div key={k}>
-              {k !== NO_SUB && <SubGroupHeader label={k} />}
-              <LegacySectionTable groupId={g.groupId} params={bySub.get(k) ?? []} values={legacyValues} />
-            </div>
-          ));
+          const filtered = order.filter((k) => bySub.has(k));
+
+          if (filtered.length === 1) {
+            return <LegacySectionTable groupId={g.groupId} params={bySub.get(filtered[0]) ?? []} values={legacyValues} />;
+          }
+
+          return (
+            <SubGroupTabs
+              subGroupOrder={filtered}
+              renderSubGroup={(k) => (
+                <LegacySectionTable groupId={g.groupId} params={bySub.get(k) ?? []} values={legacyValues} />
+              )}
+            />
+          );
         }}
       />
     </div>

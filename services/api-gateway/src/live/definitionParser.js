@@ -257,6 +257,22 @@ function parseXls(buf, filename = '') {
   const baseName = filename.replace(/\.[^.]+$/, '') || 'imported';
   const id       = slugify(baseName);
 
+  // ── Extract vendor / model from spreadsheet metadata rows ──────────────────
+  // Some spreadsheets (especially operator-built EOC XLS files) include one or more
+  // metadata rows above the parameter data where the first column contains a label
+  // like "Vendor", "Manufacturer", or "Model" and the second column has the value.
+  // We scan the first 10 rows (before dropping into parameter parsing) to collect them.
+  let xlsVendor = '';
+  let xlsModel  = '';
+  for (const row of rows.slice(0, 10)) {
+    const vals = Object.values(row).map((v) => String(v || '').trim());
+    const key  = vals[0].toLowerCase();
+    const val  = vals[1] || vals[2] || '';
+    if (!val) continue;
+    if (/^vendor$|^manufacturer$|^make$/.test(key))   xlsVendor = val;
+    if (/^model$|^model.?name$|^product.?model$/.test(key)) xlsModel  = val;
+  }
+
   // Normalise header keys
   function col(row, ...candidates) {
     for (const k of Object.keys(row)) {
@@ -308,8 +324,8 @@ function parseXls(buf, filename = '') {
   return {
     isNmsFormat: false,
     id,
-    vendor:      'Unknown',
-    model:       baseName.replace(/[-_]/g, ' '),
+    vendor:      xlsVendor || 'Unknown',
+    model:       xlsModel  || baseName.replace(/[-_]/g, ' '),
     description: `Imported from ${filename}`,
     groups:      [...groupMap.values()],
   };
@@ -331,7 +347,47 @@ function parseJson(buf, filename = '') {
   const obj = JSON.parse(buf.toString('utf8'));
   const baseName = filename.replace(/\.[^.]+$/, '') || 'imported';
 
-  // Shape A: has `groups` or `parameterGroups` key
+  // ── Shape C: NMS productdef JSON schema (productDefinition.identity + productDefinition.parameters)
+  // e.g. { "$schema": "urn:nms:productdef:json:1.0", "productDefinition": { "identity": {...}, "parameters": [{groupName, parameters}] } }
+  if (obj?.productDefinition) {
+    const pd      = obj.productDefinition;
+    const identity = pd.identity || {};
+    const id       = slugify(identity.name || identity.model || baseName);
+    const groupsRaw = Array.isArray(pd.parameters) ? pd.parameters : [];
+    const groups = groupsRaw.map((g, gi) => {
+      const groupId = slugify(g.groupName || g.id || g.groupId || `group_${gi}`);
+      const params  = (g.parameters || []).map((p, pi) => {
+        const oid = p.snmpMapping?.oid || p.snmpOid || p.oid || null;
+        return {
+          parameterId:  p.id || p.parameterId || slugify(p.displayName || p.name || `param_${pi}`),
+          displayName:  p.displayName || p.name || p.id || `Parameter ${pi + 1}`,
+          groupId,
+          subGroup:     p.subGroup ? slugify(p.subGroup) : null,
+          dataType:     normaliseDataType(p.dataType || p.type),
+          snmpOid:      extractOid(oid),
+          uiWidget:     p.uiWidget || p.widget || null,
+          readOnly:     !!p.readOnly || !!p.read_only,
+          defaultValue: p.defaultValue ?? p.default ?? null,
+          enumValues:   Array.isArray(p.enumValues) ? p.enumValues : [],
+          minValue:     p.minValue ?? p.min ?? null,
+          maxValue:     p.maxValue ?? p.max ?? null,
+          displayOrder: p.displayOrder ?? pi + 1,
+        };
+      });
+      return { groupId, label: g.label || g.groupName || groupId, displayOrder: g.displayOrder ?? gi + 1, parameters: params };
+    });
+    return {
+      isNmsFormat: false,
+      id,
+      vendor:      identity.vendor || obj.vendor || 'Unknown',
+      model:       identity.model  || obj.model  || baseName,
+      description: identity.name   || obj.description || `Imported from ${filename}`,
+      fingerprints: Array.isArray(pd.fingerprints) ? pd.fingerprints : [],
+      groups,
+    };
+  }
+
+  // ── Shape A: has `groups` or `parameterGroups` key ───────────────────────
   const groupsArr = Array.isArray(obj?.groups) ? obj.groups
     : Array.isArray(obj?.parameterGroups) ? obj.parameterGroups
     : null;
@@ -372,7 +428,7 @@ function parseJson(buf, filename = '') {
     };
   }
 
-  // Shape B: flat array or {parameters:[...]}
+  // ── Shape B: flat array or {parameters:[...]} ─────────────────────────────
   const rows = Array.isArray(obj) ? obj : (obj.parameters || []);
   const id   = slugify(obj.id || obj.productDefinitionId || baseName);
   const groupMap = new Map();
