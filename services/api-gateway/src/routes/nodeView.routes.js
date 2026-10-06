@@ -180,12 +180,50 @@ router.get(
         });
       }
 
-      const productDefinitionId = await live.ensureDefinitionLink(device);
+      let productDefinitionId = await live.ensureDefinitionLink(device);
+
+      // ── Auto-link: try to match by manufacturer/vendor if still unlinked ──
+      if (!productDefinitionId) {
+        try {
+          const mongoose = require('mongoose');
+          if (mongoose.connection.readyState === 1) {
+            const PDEF_DB = process.env.PRODUCTDEF_DB_NAME || 'ubrnms_productdef';
+            const db = mongoose.connection.client.db(PDEF_DB);
+            const vendor = (device.manufacturer || device.vendor || '').toLowerCase();
+            const model  = (device.model || '').toLowerCase();
+            // Find an ACTIVE version whose vendor matches
+            const candidates = await db.collection('product_definition_versions')
+              .find({ lifecycleStatus: 'ACTIVE' })
+              .sort({ updatedAt: -1 })
+              .toArray();
+            let matched = null;
+            for (const c of candidates) {
+              const cv = (c.vendor || '').toLowerCase();
+              const cm = (c.model  || '').toLowerCase();
+              if (vendor && cv && cv.includes(vendor)) { matched = c; break; }
+              if (model  && cm && cm.includes(model))  { matched = c; break; }
+            }
+            if (matched) {
+              productDefinitionId = matched.definitionId;
+              // Persist the link on the device document so future requests skip this lookup
+              const invDb = mongoose.connection.client.db(process.env.MONGO_DB_NAME || 'ubrnms');
+              await invDb.collection('devices').updateOne(
+                { _id: device._id },
+                { $set: { productDefinitionId, updatedAt: new Date() } },
+              );
+              logger.info({ msg: 'node-view: auto-linked device to definition', deviceId, productDefinitionId });
+            }
+          }
+        } catch (autoErr) {
+          logger.warn({ msg: 'node-view: auto-link failed', deviceId, err: autoErr.message });
+        }
+      }
+
       if (!productDefinitionId) {
         // ── Fallback: fetch MIB-2 system group via SNMP GET ──────────────────
         // Returns basic device info even when no product definition is linked.
         try {
-          const { walkSubtree, valueToString } = require('../live/snmpWalk');
+          const { valueToString } = require('../live/snmpWalk');
           const snmp = require('net-snmp');
           const MIB2_SYSTEM = {
             '.1.3.6.1.2.1.1.1.0': 'System Description',
@@ -196,9 +234,12 @@ router.get(
             '.1.3.6.1.2.1.1.6.0': 'System Location',
             '.1.3.6.1.2.1.1.7.0': 'System Services',
           };
-          const host      = device.host || device.ipAddress || device.ip;
-          const port      = device.port || 161;
-          const community = device.community || 'public';
+          // Parse host:port from ipAddress (e.g. "host.docker.internal:1163")
+          const rawIp  = device.host || device.ipAddress || device.ip || '';
+          const colonIdx = rawIp.lastIndexOf(':');
+          const host   = colonIdx > 0 ? rawIp.slice(0, colonIdx) : rawIp;
+          const port   = device.snmpPort || device.port || (colonIdx > 0 ? parseInt(rawIp.slice(colonIdx + 1), 10) : 161) || 161;
+          const community = device.snmpCommunity || device.community || 'public';
 
           if (host) {
             const session = snmp.createSession(host, community, {
