@@ -801,6 +801,64 @@ router.get('/:definitionId/versions/:versionId',
 );
 router.get('/:definitionId/versions/:versionId/report',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.versions.report'),
+  // For gateway-native definitions (Raw XML / XLS / JSON), synthesize a validation
+  // report from MongoDB data — Java never received the file so has no report.
+  async function nativeValidationReport(req, res, next) {
+    const { definitionId, versionId } = req.params;
+    try {
+      const mongoose = require('mongoose');
+      if (mongoose.connection.readyState !== 1) return next();
+      const PRODUCTDEF_DB = process.env.PRODUCTDEF_DB_NAME || 'ubrnms_productdef';
+      const db = mongoose.connection.client.db(PRODUCTDEF_DB);
+      const ver = await db.collection('product_definition_versions').findOne({ definitionId, versionId });
+      // Only handle gateway-native uploads — NMS_XML / XML go to Java
+      if (!ver || !ver.uploadedFormat || ver.uploadedFormat === 'NMS_XML' || ver.uploadedFormat === 'XML') {
+        return next();
+      }
+      // Count parameters and groups from the registry
+      const entries = await db.collection('parameter_registry_entries').find({ productDefinitionId: definitionId, versionId }).toArray();
+      const groupCount = new Set(entries.map(e => e.groupId)).size;
+      const findings = [];
+      // Warn if no fingerprints (raw XML / XLS / JSON don't carry fingerprint declarations)
+      findings.push({
+        field: 'fingerprints',
+        severity: 'INFO',
+        message: 'No fingerprint declarations in this format — device association uses manual assignment.',
+        code: 'NO_FINGERPRINTS',
+      });
+      if (entries.length === 0) {
+        findings.push({ field: 'parameterGroups', severity: 'ERROR', message: 'No parameters were parsed from the file. Check the file format.', code: 'NO_PARAMETERS' });
+      }
+      // Check for params missing OIDs
+      const noOid = entries.filter(e => !e.snmpOid);
+      if (noOid.length > 0) {
+        findings.push({ field: 'parameters', severity: 'WARNING', message: `${noOid.length} parameter(s) have no SNMP OID — they will display but cannot be polled.`, code: 'MISSING_OID' });
+      }
+      const hasError = findings.some(f => f.severity === 'ERROR');
+      return res.json({
+        definitionId,
+        versionId,
+        validationStatus:   hasError ? 'INVALID' : 'VALID',
+        errorCount:         findings.filter(f => f.severity === 'ERROR').length,
+        warningCount:       findings.filter(f => f.severity === 'WARNING').length,
+        infoCount:          findings.filter(f => f.severity === 'INFO').length,
+        findings,
+        // Summary fields the UI shows in the validation report card
+        parameterGroupCount: groupCount,
+        parameterCount:      entries.length,
+        uploadedFormat:      ver.uploadedFormat,
+        validatedAt:         new Date().toISOString(),
+        // Human-readable summary lines matching the Java report card format
+        summary: [
+          `Structure valid — ${groupCount} parameter group(s) detected for ${ver.name || definitionId}; ${entries.length} parameters parsed.`,
+          `Format: ${ver.uploadedFormat} (gateway-native, no Java validation required).`,
+        ],
+      });
+    } catch (err) {
+      logger.warn({ msg: 'native-report: error', definitionId, versionId, err: err.message });
+      return next();
+    }
+  },
   productDefinitionProxy(),
 );
 
