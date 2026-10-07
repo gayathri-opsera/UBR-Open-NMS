@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_API_GATEWAY_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-api-gateway
-  newTag: dev-bd7dc14f-20261007034538
+  newTag: dev-989ec7c0-20261007035658
 
 labels:
 - pairs:
