@@ -18,6 +18,7 @@
 
 import axios, { type AxiosInstance, type AxiosError } from 'axios';
 import { getAccessToken } from '../auth/tokens';
+import { ensureFreshAccessToken } from './client';
 import type {
   AdaptiveUiTemplateResponse,
   AdaptivePanelError,
@@ -48,7 +49,8 @@ const BASE = '/api/framework/v1';
  * its baseURL prefix would corrupt the /api/framework/v1 path).
  */
 const frameworkAxios: AxiosInstance = axios.create();
-frameworkAxios.interceptors.request.use((config) => {
+frameworkAxios.interceptors.request.use(async (config) => {
+  await ensureFreshAccessToken(); // keeps long-open pages (auto-refreshing Node View) logged in
   const token = getAccessToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;

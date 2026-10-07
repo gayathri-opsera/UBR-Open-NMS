@@ -18,6 +18,7 @@
 const mongoose      = require('mongoose');
 const topologyStub  = require('./topology.stub');
 const live          = require('../live/liveParameters');
+const deviceFacts   = require('../live/deviceFacts');
 
 const MONGO_URI      = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms';
 const PRODUCTDEF_URI = (process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms')
@@ -137,19 +138,19 @@ getDevicesCol().catch((err) =>
  */
 async function resolveSnmpCredential(col, host, ip) {
   const port = parseInt(host.snmpPort || host.port, 10) || 161;
-  const prior = await col.findOne(
-    { ipAddress: ip, snmpCommunity: { $nin: [null, ''] } },
-    { projection: { snmpCommunity: 1, snmpPort: 1 } },
-  );
-  if (prior) return { community: prior.snmpCommunity, port: prior.snmpPort || port };
+  // The discovery record at this IP also carries the inventory facts discovery collected.
+  const projection = { snmpCommunity: 1, snmpPort: 1, registeredAt: 1, createdAt: 1 };
+  for (const k of deviceFacts.INVENTORY_FIELDS) projection[k] = 1;
+  const prior = await col.findOne({ ipAddress: ip, snmpCommunity: { $nin: [null, ''] } }, { projection });
+  if (prior) return { community: prior.snmpCommunity, port: prior.snmpPort || port, prior };
   if (host.credentialId) {
     try {
       const cred = await mongoose.connection.db.collection('snmp_credentials')
         .findOne({ _id: new mongoose.Types.ObjectId(host.credentialId) });
-      if (cred && cred.community) return { community: cred.community, port };
+      if (cred && cred.community) return { community: cred.community, port, prior: null };
     } catch { /* invalid id / missing collection */ }
   }
-  return { community: null, port };
+  return { community: null, port, prior: null };
 }
 
 /** Map discovery device type → hardware model string (mirrors devices.stub.js). */
@@ -233,6 +234,13 @@ async function provisionOne(host, col) {
       [fingerprintMeta?.productDefinitionId, hostDefinitionId], resolvedVendor,
     );
     const snmp = await resolveSnmpCredential(col, host, ip);
+    // Inventory facts collected at discovery (MAC, firmware, interfaces, …); a MAC sent by the
+    // caller wins over the carried-over one.
+    const carried = {};
+    for (const k of deviceFacts.INVENTORY_FIELDS) {
+      const v = snmp.prior && snmp.prior[k];
+      if (v !== undefined && v !== null) carried[k] = v;
+    }
 
     const doc = {
       _id:              serialNumber,
@@ -252,7 +260,7 @@ async function provisionOne(host, col) {
       macAddress:       macAddress || null,
       latitude:         (latitude != null && !isNaN(latitude)) ? parseFloat(latitude) : null,
       longitude:        (longitude != null && !isNaN(longitude)) ? parseFloat(longitude) : null,
-      networkId:        networkId || null,
+      networkId:        networkId || deviceFacts.networkIdFor(ip) || null,
       manufacturer:     resolvedVendor,
       sysName:          sysName   || null,
       sysLocation:      sysLocation || null,
@@ -264,6 +272,10 @@ async function provisionOne(host, col) {
       discoveryParadigm: paradigm,
       tags:             [paradigm.toLowerCase() + '-discovered'],
       uptimeSeconds:    0,
+      ...carried,
+      ...(macAddress ? { macAddress } : {}),
+      lastSeenAt:       now,
+      registeredAt:     snmp.prior?.registeredAt || snmp.prior?.createdAt || now,
       createdAt:        now,
       updatedAt:        now,
     };

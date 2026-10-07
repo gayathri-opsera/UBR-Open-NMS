@@ -22,6 +22,7 @@
 const mongoose = require('mongoose');
 const { walkSubtree, isUnreachable } = require('./snmpWalk');
 const logger = require('../utils/logger');
+const { deduplicateIds } = require('./wireframeBuilder');
 
 const POLL_INTERVAL_SECONDS = parseInt(process.env.LIVE_POLL_INTERVAL_SECONDS || '60', 10);
 const STALE_AFTER_SECONDS   = POLL_INTERVAL_SECONDS * 2;
@@ -116,6 +117,27 @@ function resolveDisplay(entry, raw) {
   return exact || raw;
 }
 
+/**
+ * Make parameter ids unique within each group (an id repeated in several sub-groups is
+ * prefixed with its sub-group — the same rule the wireframe builder applies). Without this
+ * two parameters share one `group::parameterId` key and their values merge.
+ * Entry order is preserved.
+ */
+function dedupeEntries(entries) {
+  const byGroup = new Map();
+  entries.forEach((e, i) => {
+    const gid = e.groupId || 'default';
+    if (!byGroup.has(gid)) byGroup.set(gid, []);
+    byGroup.get(gid).push({ e, i });
+  });
+  const out = new Array(entries.length);
+  for (const list of byGroup.values()) {
+    const unique = deduplicateIds(list.map((x) => x.e));
+    list.forEach((x, k) => { out[x.i] = unique[k]; });
+  }
+  return out;
+}
+
 /** Groups in definition order; parameters ordered by displayOrder then document order. */
 function groupEntries(entries) {
   const sorted = [...entries].sort((a, b) => String(a._id).localeCompare(String(b._id)));
@@ -177,6 +199,7 @@ function buildCurrentResponse({ device, definition, doc, now = new Date() }) {
 
       return {
         parameterId: e.parameterId,
+        subGroup: e.subGroup || null,
         label: e.displayName || e.parameterId,
         dataType: (e.dataType || '').toString(),
         unit: e.unit || '',
@@ -243,7 +266,7 @@ async function loadDefinition(productDefinitionId) {
     versionId: resolvedVersionId,
     registryVersion: String(active.registryVersion ?? ''),
     vendor: active.vendor || null,
-    entries,
+    entries: dedupeEntries(entries),
   };
 }
 
@@ -337,6 +360,16 @@ async function applyGps(device, definition, mapped) {
   return true;
 }
 
+/** A successful poll proves the device is reachable — keep "Last seen" current. */
+async function markSeen(device, when) {
+  const c = client();
+  if (!c) return;
+  for (const dbName of ['ubrnms_inventory', 'ubrnms']) {
+    await c.db(dbName).collection('devices')
+      .updateOne({ _id: device._id }, { $set: { lastSeenAt: when } }).catch(() => {});
+  }
+}
+
 // ── Polling ───────────────────────────────────────────────────────────────────
 
 function splitHostPort(device) {
@@ -402,6 +435,7 @@ async function doRefresh(device) {
     await col.replaceOne({ _id: base._id }, {
       ...base, pollStatus: 'OK', pollError: null, collectedAt: now, values,
     }, { upsert: true });
+    await markSeen(device, now);
     await applyGps(device, definition, mapped).catch((e) => logger.warn({ msg: 'live GPS update failed', err: e.message }));
     logger.info({ msg: 'live parameters refreshed', deviceId: base._id, host, varbinds: varbinds.length, mapped: values.length });
     return { pollStatus: 'OK' };
@@ -482,7 +516,7 @@ function startScheduler() {
 
 module.exports = {
   // pure
-  normOid, walkRoots, mapVarbinds, resolveDisplay, groupEntries, buildCurrentResponse,
+  normOid, walkRoots, mapVarbinds, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
   // io
   loadDefinition, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, refreshDevice, getCurrent, getCachedOnly, startScheduler, pollAll,
   POLL_INTERVAL_SECONDS,

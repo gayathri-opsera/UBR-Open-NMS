@@ -11,6 +11,17 @@ export interface DeviceTag {
   value: string;
 }
 
+export interface DeviceInterface {
+  index: number;
+  name: string;
+  type?: number | null;
+  speedMbps?: number | null;
+  macAddress?: string | null;
+  adminStatus?: string | null;
+  operStatus?: string | null;
+  ipAddresses?: string[];
+}
+
 export interface Device {
   id: string;
   deviceId: string;
@@ -23,6 +34,17 @@ export interface Device {
   /** Generic device type from SNMP classification (switch, router, access_point, etc.) */
   genericDeviceType?: string;
   firmwareVersion: string;
+  /** Inventory facts collected from the device at discovery (all optional) */
+  hardwareVersion?: string;
+  bootloaderVersion?: string;
+  /** Serial number the device reports about itself (serialNumber is the NMS record key) */
+  reportedSerialNumber?: string;
+  uptimeSeconds?: number;
+  sysContact?: string;
+  sysLocation?: string;
+  managementInterface?: string;
+  factsCollectedAt?: string;
+  interfaces?: DeviceInterface[];
   status: DeviceStatus;
   location?: GpsLocation;
   /** Flat lat/lng fields used by some API responses and the GPS search/export UI */

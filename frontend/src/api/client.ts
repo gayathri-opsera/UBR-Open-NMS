@@ -28,19 +28,23 @@ async function refreshAccessToken(): Promise<string> {
   return accessToken;
 }
 
-// Request interceptor: attach Bearer token, refresh if expired
-apiClient.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
-  const existingToken = getAccessToken();
-  const existingRefresh = getRefreshToken();
-
+/**
+ * Refresh the access token when it has expired (single in-flight refresh shared by all callers).
+ * Exported so clients that cannot use apiClient (different base path) stay logged in too.
+ */
+export async function ensureFreshAccessToken(): Promise<void> {
   // Only attempt refresh if we already have tokens and the access token is expired
-  if (existingToken && existingRefresh && isTokenExpired()) {
+  if (getAccessToken() && getRefreshToken() && isTokenExpired()) {
     if (!_refreshPromise) {
       _refreshPromise = refreshAccessToken().finally(() => { _refreshPromise = null; });
     }
     try { await _refreshPromise; } catch { /* refresh failed; proceed without token */ }
   }
+}
 
+// Request interceptor: attach Bearer token, refresh if expired
+apiClient.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
+  await ensureFreshAccessToken();
   const token = getAccessToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;

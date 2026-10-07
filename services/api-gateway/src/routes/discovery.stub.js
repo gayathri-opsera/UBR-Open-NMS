@@ -27,6 +27,7 @@
  */
 
 const liveParameters = require('../live/liveParameters');
+const deviceFacts    = require('../live/deviceFacts');
 const express    = require('express');
 const dgram      = require('dgram');
 const http       = require('http');
@@ -970,6 +971,7 @@ router.post('/runs', async (req, res, next) => {
       // Using bare `host` here was the root cause of "Provision Device" reappearing on
       // already-provisioned devices after a new discovery run.
       const displayIp = port !== 161 ? `${host}:${port}` : host;
+      let inventoryForHost = {};   // facts reported by the device, also returned in the run results
       try {
         const devicesCol = await getDevicesCol();
         const now = new Date();
@@ -980,7 +982,7 @@ router.post('/runs', async (req, res, next) => {
         // Re-discovery must honour that intent and NOT resurrect the device.
         const existingDoc = await devicesCol.findOne(
           { $or: [{ _id: serial }, { serialNumber: serial }, { ipAddress: displayIp }] },
-          { projection: { isDeprovisioned: 1 } }
+          { projection: { isDeprovisioned: 1, registeredAt: 1, createdAt: 1 } }
         );
         if (existingDoc && existingDoc.isDeprovisioned === true) {
           console.log(`[discovery-stub] bypass ⏭ ${serial} @ ${host}:${port} — previously deprovisioned, skipping re-provision`);
@@ -999,6 +1001,15 @@ router.post('/runs', async (req, res, next) => {
           });
           return;
         }
+
+        // Inventory facts straight from the device (standard MIBs + curated vendor objects):
+        // management MAC, serial/firmware/hardware/bootloader, uptime, contact, interfaces.
+        const facts = await Promise.race([
+          deviceFacts.collectDeviceFacts({ host, port, community, managementIp: host, sysObjectID: mib.sysObjectID }),
+          new Promise((resolve) => setTimeout(() => resolve(null), 25000)),
+        ]).catch(() => null);
+        const inventory = deviceFacts.inventoryFields(facts, now);
+        inventoryForHost = inventory;
 
         // Link to the ACTIVE product definition (the id from the built-in OID map can be stale).
         defId = (await liveParameters.resolveDefinitionId([defId], vendor).catch(() => null)) || defId;
@@ -1030,7 +1041,11 @@ router.post('/runs', async (req, res, next) => {
           sysContact:       mib.sysContact,
           discoveryParadigm: defId ? 'BANNER' : 'SNMP',
           tags:             isRealIpTarget ? ['snmp-discovered', 'real-device'] : ['snmp-discovered', 'icmp-bypass'],
-          createdAt:        now,
+          ...inventory,
+          networkId:        deviceFacts.networkIdFor(host),
+          lastSeenAt:       now,
+          registeredAt:     existingDoc?.registeredAt || existingDoc?.createdAt || now,
+          createdAt:        existingDoc?.createdAt || now,
           updatedAt:        now,
         };
         await devicesCol.replaceOne({ _id: doc._id }, doc, { upsert: true });
@@ -1061,7 +1076,8 @@ router.post('/runs', async (req, res, next) => {
         vendor, model,
         genericDeviceType: generic,
         productDefinitionId: defId,
-        macAddress:       null,
+        macAddress:       inventoryForHost.macAddress || null,
+        ...inventoryForHost,
         discoveryMethod:  'ICMP_BYPASS',
         // GPS sourced from the Product Definition's location block (uploaded config file).
         // Passed to the provisioning modal so operators see pre-filled coordinates

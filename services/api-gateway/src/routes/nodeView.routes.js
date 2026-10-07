@@ -31,7 +31,10 @@ const { v4: uuidv4 } = require('uuid');
 const logger     = require('../utils/logger');
 const live       = require('../live/liveParameters');
 const { getCachedOnly } = live;
-const { buildWireframe } = require('../live/wireframeBuilder');
+const crypto     = require('crypto');
+const { planChange } = require('../live/parameterWrite');
+const { setValues, writeCommunityFor } = require('../live/snmpSet');
+const { buildWireframe, WIREFRAME_SCHEMA_VERSION } = require('../live/wireframeBuilder');
 const {
   NodeViewWireframe,
   getFromCache,
@@ -141,6 +144,72 @@ router.get(
     }
   },
 );
+
+// ── Wireframe resolution (self-healing) ───────────────────────────────────────
+
+/** Hash of everything in the registry entries that shapes the wireframe. */
+function definitionFingerprint(entries) {
+  const h = crypto.createHash('sha1');
+  for (const e of entries) {
+    h.update(JSON.stringify([
+      e.groupId, e.subGroup, e.parameterId, e.displayName, e.dataType, e.uiWidget, e.readOnly,
+      e.snmpOid, e.displayOrder, e.groupDisplayOrder, e.enumValues, e.minValue, e.maxValue,
+      e.defaultValue, e.unit, e.hidden,
+    ]));
+  }
+  return h.digest('hex');
+}
+
+/**
+ * The wireframe for a product definition: the persisted one when it is current, otherwise
+ * rebuilt from the active registry (and persisted). "Current" = same shape version and the
+ * registry it was built from is unchanged — so a re-uploaded / re-activated definition can
+ * never be shown through a stale layout.
+ * @returns {Promise<null | { doc: object, definition: object }>}
+ */
+async function resolveWireframe(redis, productDefinitionId) {
+  const definition = await live.loadDefinition(productDefinitionId).catch(() => null);
+  if (!definition || !definition.entries?.length) return null;
+  const fingerprint = definitionFingerprint(definition.entries);
+
+  const isCurrent = (d) => d && d.schemaVersion === WIREFRAME_SCHEMA_VERSION
+    && d.fingerprint === fingerprint && d.versionId === definition.versionId;
+
+  let doc = await getFromCache(redis, productDefinitionId);
+  if (!isCurrent(doc)) {
+    doc = await NodeViewWireframe.findOne({ productDefinitionId, status: 'ACTIVE' }, { __v: 0 }).lean();
+  }
+  if (!isCurrent(doc)) {
+    const built = buildWireframe(definition);
+    doc = {
+      productDefinitionId,
+      versionId:       definition.versionId,
+      registryVersion: definition.registryVersion,
+      schemaVersion:   WIREFRAME_SCHEMA_VERSION,
+      fingerprint,
+      status:          'ACTIVE',
+      wireframe:       built.wireframe,
+      parameterCount:  built.parameterCount,
+      groupCount:      built.groupCount,
+      validationWarnings: built.validationErrors,
+    };
+    try {
+      await NodeViewWireframe.updateMany(
+        { productDefinitionId, status: 'ACTIVE', versionId: { $ne: definition.versionId } },
+        { $set: { status: 'SUPERSEDED' } },
+      );
+      await NodeViewWireframe.findOneAndUpdate(
+        { productDefinitionId, versionId: definition.versionId },
+        { $set: { ...doc, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+        { upsert: true },
+      );
+    } catch (e) {
+      logger.warn({ msg: 'node-view: wireframe persist failed (serving built copy)', productDefinitionId, err: e.message });
+    }
+  }
+  await setInCache(redis, productDefinitionId, doc);
+  return { doc, definition };
+}
 
 // ── GET /api/node-view/:deviceId ──────────────────────────────────────────────
 /**
@@ -371,78 +440,9 @@ router.get(
         });
       }
 
-      // ── Step 2: Load persisted wireframe (cache → DB → fallback build) ───
-      let wireframeDoc = null;
-
-      // Try Redis first
-      const cached = await getFromCache(redis, productDefinitionId);
-      if (cached) {
-        wireframeDoc = cached;
-      } else {
-        // Try MongoDB
-        wireframeDoc = await NodeViewWireframe.findOne(
-          { productDefinitionId, status: 'ACTIVE' },
-          { __v: 0 },
-        ).lean();
-
-        if (wireframeDoc) {
-          await setInCache(redis, productDefinitionId, wireframeDoc);
-        }
-      }
-
-      // Fallback: build on-the-fly if no persisted wireframe exists yet
-      // (handles pre-migration devices; also builds and persists for next time)
-      if (!wireframeDoc) {
-        logger.warn({
-          msg: 'node-view: no persisted wireframe — building on demand (run migration)',
-          productDefinitionId, deviceId,
-        });
-        const definition = await live.loadDefinition(productDefinitionId);
-        if (definition && definition.entries?.length > 0) {
-          const built = buildWireframe(definition);
-          // Persist async so next request hits the cache
-          setImmediate(async () => {
-            try {
-              await NodeViewWireframe.findOneAndUpdate(
-                { productDefinitionId, versionId: definition.versionId },
-                {
-                  $set: {
-                    productDefinitionId,
-                    versionId:       definition.versionId,
-                    registryVersion: definition.registryVersion,
-                    status:          'ACTIVE',
-                    wireframe:       built.wireframe,
-                    parameterCount:  built.parameterCount,
-                    groupCount:      built.groupCount,
-                    validationWarnings: built.validationErrors,
-                    updatedAt:       new Date(),
-                  },
-                  $setOnInsert: { createdAt: new Date() },
-                },
-                { upsert: true },
-              );
-              await setInCache(redis, productDefinitionId, {
-                productDefinitionId,
-                versionId: definition.versionId,
-                registryVersion: definition.registryVersion,
-                wireframe: built.wireframe,
-                parameterCount: built.parameterCount,
-                groupCount: built.groupCount,
-              });
-            } catch (e) {
-              logger.warn({ msg: 'node-view: fallback persist failed', err: e.message });
-            }
-          });
-          wireframeDoc = {
-            productDefinitionId,
-            versionId:      definition.versionId,
-            registryVersion: definition.registryVersion,
-            wireframe:      built.wireframe,
-            parameterCount: built.parameterCount,
-            groupCount:     built.groupCount,
-          };
-        }
-      }
+      // ── Step 2: Load the wireframe (persisted, rebuilt when the definition changed) ──
+      const resolved = await resolveWireframe(redis, productDefinitionId);
+      const wireframeDoc = resolved ? resolved.doc : null;
 
       // Apply role filter to groups
       const filteredGroups = wireframeDoc
@@ -476,7 +476,7 @@ router.get(
       if (valuesInner.groups) {
         for (const g of valuesInner.groups) {
           for (const p of (g.parameters || [])) {
-            valuesMap[p.parameterId] = {
+            valuesMap[`${g.groupId}::${p.parameterId}`] = {
               value:          p.value         ?? null,
               display:        p.display       ?? null,
               freshnessState: p.freshnessState,
@@ -510,6 +510,7 @@ router.get(
             groups:          filteredGroups,
           },
           values: valuesMap,
+          writable: { enabled: !!writeCommunityFor(device) },
           pollStatus:  valuesInner.pollStatus  || 'NOT_POLLED',
           collectedAt: valuesInner.collectedAt || null,
         },
@@ -520,6 +521,88 @@ router.get(
         status: 'error',
         error: { code: 'INTERNAL_ERROR', message: err.message, correlationId },
       });
+    }
+  },
+);
+
+// ── PUT /api/node-view/:deviceId/parameters ──────────────────────────────────
+/**
+ * Apply edited parameter values to the device (SNMP SET).
+ *
+ * Body: { changes: [{ groupId, parameterId, instance?, value }] }
+ *
+ * Only parameters of the device's active product definition can be written, and only when
+ * the definition marks them writable and the value fits the declared type / options /
+ * range. Requires an SNMP write community (device.snmpWriteCommunity or
+ * SNMP_WRITE_COMMUNITY); without one the request is refused with WRITE_NOT_CONFIGURED and
+ * nothing is sent to the device. Values are never logged.
+ */
+router.put(
+  '/:deviceId/parameters',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.Operator, 'node-view.write'),
+  async (req, res) => {
+    const correlationId = req.headers['x-correlation-id'] || uuidv4();
+    const { deviceId } = req.params;
+    const changes = req.body && req.body.changes;
+    const fail = (http, code, message) =>
+      res.status(http).json({ status: 'error', error: { code, message, correlationId } });
+
+    if (!Array.isArray(changes) || changes.length === 0 || changes.length > 100) {
+      return fail(400, 'VALIDATION_ERROR', 'Body must be { changes: [ … ] } with 1–100 entries');
+    }
+    try {
+      const device = await live.findDevice(deviceId);
+      if (!device) return fail(404, 'DEVICE_NOT_FOUND', `Device "${deviceId}" not found.`);
+      const productDefinitionId = await live.ensureDefinitionLink(device);
+      const definition = productDefinitionId ? await live.loadDefinition(productDefinitionId).catch(() => null) : null;
+      if (!definition) return fail(409, 'NO_ACTIVE_FRAMEWORK', 'This device has no active product definition.');
+
+      const plans = changes.map((c) => planChange(definition, c));
+      const community = writeCommunityFor(device);
+      if (!community) {
+        return fail(409, 'WRITE_NOT_CONFIGURED',
+          'No SNMP write community is configured for this device, so nothing was sent. ' +
+          'Set snmpWriteCommunity on the device (or SNMP_WRITE_COMMUNITY on the gateway).');
+      }
+
+      const results = plans.map((p, i) => ({
+        groupId: changes[i] && changes[i].groupId,
+        parameterId: changes[i] && changes[i].parameterId,
+        instance: changes[i] && changes[i].instance != null ? String(changes[i].instance) : '',
+        ok: false,
+        ...(p.ok ? {} : { code: p.code, error: p.error }),
+      }));
+
+      const toSend = plans.map((p, i) => ({ p, i })).filter((x) => x.p.ok);
+      if (toSend.length) {
+        const { host, port } = live.splitHostPort(device);
+        const sent = await setValues({
+          host, port, community,
+          items: toSend.map((x) => ({ oid: x.p.oid, value: x.p.value })),
+        });
+        sent.forEach((r, k) => {
+          const slot = results[toSend[k].i];
+          slot.ok = r.ok;
+          if (!r.ok) { slot.code = 'DEVICE_REJECTED'; slot.error = r.error; }
+        });
+        logger.info({
+          msg: 'node-view: parameters applied', deviceId, correlationId,
+          user: req.user && (req.user.username || req.user.sub),
+          applied: results.filter((r) => r.ok).map((r) => `${r.groupId}/${r.parameterId}${r.instance ? `#${r.instance}` : ''}`),
+          failed: results.filter((r) => !r.ok).length,
+        });
+        if (results.some((r) => r.ok)) await live.refreshDevice(device).catch(() => {});
+      }
+
+      const okCount = results.filter((r) => r.ok).length;
+      return res.status(okCount ? 200 : 422).json({
+        status: okCount === results.length ? 'ok' : okCount ? 'partial' : 'error',
+        results,
+        correlationId,
+      });
+    } catch (err) {
+      logger.error({ msg: 'node-view write error', deviceId, err: err.message, correlationId });
+      return fail(500, 'INTERNAL_ERROR', err.message);
     }
   },
 );

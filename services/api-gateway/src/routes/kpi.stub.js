@@ -122,7 +122,8 @@ router.get('/devices/:deviceId/metrics', async (req, res) => {
       let found = false;
       for (const col of collectionsToSearch) {
         try {
-          const doc = await col.findOne({ $or: orConditions });
+          // a soft-deleted (deprovisioned) device no longer exists as far as KPI is concerned
+          const doc = await col.findOne({ $or: orConditions, isDeprovisioned: { $ne: true } });
           if (doc) { found = true; break; }
         } catch (_) { /* skip unreachable collection */ }
       }

@@ -20,14 +20,17 @@
  *   by separate Spring Boot integration tests (e.g. @SpringBootTest + EmbeddedKafka).
  */
 
+// The Java inventory service is not running in unit tests: a closed port makes the best-effort
+// cascade call fail immediately (and exercises the "Java down" path) instead of waiting on DNS.
+process.env.INVENTORY_SERVICE_URL = 'http://127.0.0.1:1';
+
 // ── Shared in-memory device store (mirrors MongoDB 'devices' collection) ──────
 let deviceStore = new Map(); // _id → doc
 
 // ── Query helpers (mirror MongoDB semantics for $or, $ne) ─────────────────────
 function matchesFilter(doc, filter) {
-  if (filter.$or) {
-    return filter.$or.some((cond) => matchesFilter(doc, cond));
-  }
+  // $or and sibling conditions must BOTH hold (Mongo semantics)
+  if (filter.$or && !filter.$or.some((cond) => matchesFilter(doc, cond))) return false;
   for (const [key, val] of Object.entries(filter)) {
     if (key.startsWith('$')) continue;
     if (val && typeof val === 'object' && '$ne' in val) {
@@ -46,6 +49,8 @@ global.__devColMock = {
   replaceOne: jest.fn(),
   deleteMany: jest.fn(),
   deleteOne: jest.fn(),
+  updateOne: jest.fn(),
+  updateMany: jest.fn(),
 };
 
 // topology stub must be mocked before any require of topology.stub
@@ -63,6 +68,8 @@ jest.mock('mongoose', () => {
       db: {
         collection: jest.fn().mockReturnValue(global.__devColMock),
       },
+      // KPI stub also looks devices up in the inventory DB through connection.client
+      client: { db: () => ({ collection: () => global.__devColMock }) },
     },
     createConnection: jest.fn().mockReturnValue({
       asPromise: jest.fn().mockResolvedValue({
@@ -116,9 +123,22 @@ describe('Provision → Deprovision cascade (stub layer)', () => {
     jest.clearAllMocks();
 
     // Re-bind mock implementations to the live deviceStore after clearAllMocks.
-    global.__devColMock.find.mockImplementation(() => ({
-      toArray: jest.fn().mockResolvedValue([...deviceStore.values()]),
-    }));
+    global.__devColMock.find.mockImplementation((filter = {}) => {
+      const docs = [...deviceStore.values()].filter((d) => matchesFilter(d, filter));
+      const cursor = { limit: () => cursor, toArray: jest.fn().mockResolvedValue(docs) };
+      return cursor;
+    });
+
+    // Soft-delete: DELETE /devices/:id marks matching docs instead of removing them.
+    const applySet = (filter, update) => {
+      let matched = 0;
+      for (const doc of deviceStore.values()) {
+        if (matchesFilter(doc, filter)) { Object.assign(doc, update.$set || {}); matched++; }
+      }
+      return Promise.resolve({ matchedCount: matched, modifiedCount: matched });
+    };
+    global.__devColMock.updateOne.mockImplementation(applySet);
+    global.__devColMock.updateMany.mockImplementation(applySet);
 
     global.__devColMock.findOne.mockImplementation((filter) =>
       Promise.resolve([...deviceStore.values()].find((d) => matchesFilter(d, filter)) ?? null),
@@ -170,27 +190,25 @@ describe('Provision → Deprovision cascade (stub layer)', () => {
     expect(stored.status).toBe('ONLINE');
   });
 
-  // ── 2. IP+hostname uniqueness — duplicate rejected ────────────────────────
-  it('2. re-provisioning same IP+hostname with different serial is rejected', async () => {
-    // First provision succeeds.
+  // ── 2. Same IP + hostname, different serial → no second record ───────────
+  // Provisioning is idempotent: the host is already provisioned, so the existing device
+  // is returned as success and no duplicate record is created.
+  it('2. re-provisioning same IP+hostname with a different serial does not create a duplicate', async () => {
     const first = await request(app)
       .post('/api/v1/discovery/runs/run-001/provision')
       .send({ hosts: [CISCO_HOST] });
     expect(first.status).toBe(201);
     expect(deviceStore.size).toBe(1);
 
-    // Second provision — same IP, same sysName, different serial → conflict.
     const dup = { ...CISCO_HOST, serialNumber: 'SN-different-serial' };
     const res = await request(app)
       .post('/api/v1/discovery/runs/run-001/provision')
       .send({ hosts: [dup] });
 
-    expect(res.body.failed).toBe(1);
-    const failedResult = res.body.results.find((r) => r.status === 'failed');
-    expect(failedResult).toBeDefined();
-    expect(failedResult.error).toMatch(/already exists/i);
-    // Store should still have only the original record.
-    expect(deviceStore.has(CISCO_HOST.serialNumber)).toBe(true);
+    expect(res.body.failed).toBe(0);
+    const ok = res.body.results.find((r) => r.status === 'provisioned');
+    expect(ok.deviceId).toBe(CISCO_HOST.serialNumber);   // the existing device, not a new one
+    expect(deviceStore.size).toBe(1);
     expect(deviceStore.has('SN-different-serial')).toBe(false);
   });
 
@@ -236,7 +254,7 @@ describe('Provision → Deprovision cascade (stub layer)', () => {
     const delRes = await request(app)
       .delete(`/api/v1/devices/${CISCO_HOST.serialNumber}`);
     expect(delRes.status).toBe(204);
-    expect(deviceStore.has(CISCO_HOST.serialNumber)).toBe(false);
+    expect(deviceStore.get(CISCO_HOST.serialNumber).isDeprovisioned).toBe(true);
 
     // KPI metrics for the deleted device → 404.
     const metricsRes = await request(app)
@@ -263,23 +281,22 @@ describe('Provision → Deprovision cascade (stub layer)', () => {
     expect(topologyStub.bustTopologyCache).toHaveBeenCalledTimes(1);
   });
 
-  // ── 7. Topology node absent after deprovision ────────────────────────────
-  it('7. deprovisioned device is absent from device store (topology has no stale node)', async () => {
+  // ── 7. Deleted device is no longer listed ────────────────────────────────
+  it('7. deprovisioned device is flagged and no longer listed (record kept for audit)', async () => {
     await request(app)
       .post('/api/v1/discovery/runs/run-001/provision')
       .send({ hosts: [CISCO_HOST] });
     expect(deviceStore.has(CISCO_HOST.serialNumber)).toBe(true);
 
-    await request(app)
-      .delete(`/api/v1/devices/${CISCO_HOST.serialNumber}`);
+    await request(app).delete(`/api/v1/devices/${CISCO_HOST.serialNumber}`);
 
-    // The topology stub reads from the devices collection; after deletion it must
-    // have no entry for this device.
-    const remaining = [...deviceStore.values()];
-    const found = remaining.some(
+    // The record stays (soft delete) so re-discovery cannot resurrect it silently …
+    expect(deviceStore.get(CISCO_HOST.serialNumber)).toMatchObject({ isDeprovisioned: true, status: 'DEPROVISIONED' });
+    // … but the inventory list must not show it.
+    const list = await request(app).get('/api/v1/devices');
+    const listed = (list.body || []).some(
       (d) => d.serialNumber === CISCO_HOST.serialNumber || d.ipAddress === CISCO_HOST.ip,
     );
-    expect(found).toBe(false);
-    expect(deviceStore.size).toBe(0);
+    expect(listed).toBe(false);
   });
 });

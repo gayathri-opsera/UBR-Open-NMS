@@ -76,6 +76,55 @@ function fetchFromJava(query) {
   });
 }
 
+/** Mongo filter matching a device by any identifier the UI or other services use. */
+const deviceFilter = (id) => ({ $or: [{ _id: id }, { id }, { serialNumber: id }, { deviceId: id }] });
+
+/**
+ * Ask the Java inventory service to delete a device. It removes the record and publishes the
+ * DEVICE_DELETED tombstone that topology / KPI consumers use to drop derived state.
+ * Best-effort: the gateway has already soft-deleted the device, so a failure here never
+ * brings it back — it only means the downstream cleanup has to wait.
+ */
+function deleteInJava(id) {
+  const invUrl = process.env.INVENTORY_SERVICE_URL || 'http://nms-inventory:8082';
+  const url = new URL(`/api/v1/devices/${encodeURIComponent(id)}`, invUrl);
+  return new Promise((resolve) => {
+    const req = http.request(url.href, { method: 'DELETE', timeout: 8000 }, (res) => {
+      res.resume();
+      resolve(res.statusCode >= 200 && res.statusCode < 300);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+/**
+ * Identifiers (id / serial / deviceId) of every device an operator has deleted, from BOTH
+ * stores. Devices can be listed from the Java inventory, the local collection or the IDU
+ * inventory — each of them must hide what was deleted, or it reappears on refresh.
+ */
+async function getDeprovisionedKeys() {
+  const keys = new Set();
+  const add = (docs) => {
+    for (const d of docs) for (const k of [d._id, d.id, d.serialNumber, d.deviceId]) if (k) keys.add(String(k));
+  };
+  const q = { isDeprovisioned: true };
+  const proj = { projection: { _id: 1, id: 1, serialNumber: 1, deviceId: 1 } };
+  try { add(await (await getCol()).find(q, proj).toArray()); } catch { /* store unavailable */ }
+  try { add(await (await getInvCol()).find(q, proj).toArray()); } catch { /* store unavailable */ }
+  return keys;
+}
+
+/** Stored SNMP credentials must never leave the gateway in device payloads. */
+const SECRET_FIELDS = ['snmpCommunity', 'snmpAuthKey', 'snmpPrivKey', 'snmpPassword'];
+function publicDevice(doc) {
+  if (!doc || typeof doc !== 'object') return doc;
+  const out = { ...doc };
+  for (const k of SECRET_FIELDS) delete out[k];
+  return out;
+}
+
 /** Normalise an IDU MongoDB doc to the same shape as Java inventory devices */
 function normaliseIdu(doc) {
   return {
@@ -128,6 +177,11 @@ router.get('/', async (req, res, next) => {
         console.warn('[devices-stub] Java inventory fetch failed, returning MongoDB only:', err.message);
       }
     }
+
+    // Hide anything an operator deleted, whichever store it is listed from.
+    const deleted = await getDeprovisionedKeys();
+    const isDeleted = (d) => [d._id, d.id, d.serialNumber, d.deviceId].some((k) => k && deleted.has(String(k)));
+    javaDevices = javaDevices.filter((d) => !isDeleted(d));
 
     // Track serials already covered by Java to avoid duplicates.
     const javaSerials = new Set(javaDevices.map((d) => d.serialNumber).filter(Boolean));
@@ -198,7 +252,7 @@ router.get('/', async (req, res, next) => {
       }
 
       // Only include devices NOT already present in Java response.
-      localDevices = deduped.filter((d) => !javaSerials.has(d.serialNumber));
+      localDevices = deduped.filter((d) => !javaSerials.has(d.serialNumber)).map(publicDevice);
     } catch (err) {
       console.warn('[devices-stub] Local MongoDB fetch failed:', err.message);
     }
@@ -214,8 +268,8 @@ router.get('/', async (req, res, next) => {
           ...localDevices.map((d) => d.serialNumber).filter(Boolean),
         ]);
         const col  = await getInvCol();
-        const docs = await col.find({ deviceType: { $regex: 'IDU', $options: 'i' } }).limit(500).toArray();
-        iduDevices = docs.filter((d) => !allSerials.has(d.serialNumber)).map(normaliseIdu);
+        const docs = await col.find({ deviceType: { $regex: 'IDU', $options: 'i' }, isDeprovisioned: { $ne: true } }).limit(500).toArray();
+        iduDevices = docs.filter((d) => !allSerials.has(d.serialNumber) && !isDeleted(d)).map(normaliseIdu);
       } catch (err) {
         console.warn('[devices-stub] IDU MongoDB fetch failed:', err.message);
       }
@@ -301,7 +355,7 @@ router.put('/:id', async (req, res) => {
     );
 
     if (!result) return res.status(404).json({ code: 'NOT_FOUND', message: `Device '${id}' not found` });
-    res.json(result);
+    res.json(publicDevice(result));
   } catch (e) {
     console.error('[devices-stub] PUT /devices error:', e.message);
     res.status(500).json({ code: 'DB_ERROR', message: e.message });
@@ -309,27 +363,44 @@ router.put('/:id', async (req, res) => {
 });
 
 // ── DELETE /api/v1/devices/:id ────────────────────────────────────────────────
-// Soft-delete: marks the device as DEPROVISIONED rather than physically removing it.
-// This prevents re-discovery from silently resurrecting a device the operator intentionally removed.
-// The device disappears from inventory (filtered in GET /devices) but its MongoDB doc is preserved
-// for audit trail and to block future auto-provisioning during discovery runs.
+// Soft-delete: marks the device as DEPROVISIONED rather than only removing it, so re-discovery
+// cannot silently resurrect a device the operator intentionally removed.
+//
+// A device can live in more than one store — the local collection (ubrnms.devices) and the
+// inventory store (ubrnms_inventory.devices: IDU devices and the BTS/CPE the Java inventory
+// service owns). EVERY store that holds it is marked, otherwise the copy that was missed is
+// listed again on the next refresh. The Java inventory service is then asked to delete its
+// record too, which also publishes the DEVICE_DELETED tombstone for topology / KPI cleanup.
 router.delete('/:id', async (req, res) => {
   try {
+    const id = req.params.id;
+    const filter = deviceFilter(id);
+    const now = new Date();
+    const stamp = { status: 'DEPROVISIONED', isDeprovisioned: true, deprovisionedAt: now, updatedAt: now };
+
     const col = await getCol();
-    const id  = req.params.id;
-    const result = await col.updateOne(
-      { $or: [{ _id: id }, { id }, { serialNumber: id }, { deviceId: id }] },
-      { $set: {
-          status:           'DEPROVISIONED',
-          isDeprovisioned:  true,
-          deprovisionedAt:  new Date(),
-          updatedAt:        new Date(),
-        }
-      }
-    );
-    if (result.matchedCount === 0) {
+    const local = await col.updateMany(filter, { $set: stamp });
+
+    let inventoryIds = [];
+    try {
+      const inv = await getInvCol();
+      const docs = await inv.find(filter, { projection: { _id: 1 } }).toArray();
+      inventoryIds = docs.map((d) => String(d._id));
+      if (inventoryIds.length) await inv.updateMany(filter, { $set: stamp });
+    } catch (err) {
+      console.warn('[devices-stub] inventory store unavailable during delete:', err.message);
+    }
+
+    if (local.matchedCount === 0 && inventoryIds.length === 0) {
       return res.status(404).json({ code: 'NOT_FOUND', message: `Device '${id}' not found` });
     }
+
+    // Cascade through the Java inventory service (tombstone for topology / KPI). Best-effort.
+    for (const invId of inventoryIds) {
+      const ok = await deleteInJava(invId);
+      if (!ok) console.warn(`[devices-stub] Java inventory delete failed for '${invId}' — device stays hidden by the soft-delete flag`);
+    }
+
     // Bust the topology cache so deprovisioned devices disappear immediately from the map.
     bustTopologyCache();
     res.status(204).send();
@@ -351,10 +422,13 @@ router.put('/:id/tags', async (req, res) => {
       { returnDocument: 'after' }
     );
     if (!result) return res.status(404).json({ code: 'NOT_FOUND', message: `Device '${id}' not found` });
-    res.json(result);
+    res.json(publicDevice(result));
   } catch (e) {
     res.status(500).json({ code: 'DB_ERROR', message: e.message });
   }
 });
+
+// Shared with the topology view so deleted devices are hidden there too.
+router.getDeprovisionedKeys = getDeprovisionedKeys;
 
 module.exports = router;

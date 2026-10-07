@@ -41,6 +41,8 @@
  * ParameterSpec: all layout/rendering metadata needed at runtime — no SNMP values.
  */
 
+const { parseEnumOptions } = require('./enumOptions');
+
 // ── Widget auto-selection (mirrors the ui-template route) ─────────────────────
 
 /**
@@ -59,6 +61,12 @@ function deriveWidget(entry) {
   return 'textfield';
 }
 
+/** Parameters whose value is a credential — the UI masks them by default. */
+const SENSITIVE_RE = /(passphrase|password|passwd|secret|\bkey\b|community)/i;
+
+/** Bump when the persisted wireframe shape changes — older stored wireframes are rebuilt on read. */
+const WIREFRAME_SCHEMA_VERSION = 2;
+
 // ── Duplicate-ID deduplication (mirrors Java parser prefix logic) ─────────────
 
 /**
@@ -71,11 +79,19 @@ function deduplicateIds(params) {
   for (const p of params) {
     seen.set(p.parameterId, (seen.get(p.parameterId) || 0) + 1);
   }
-  return params.map((p) => {
+  const prefixed = params.map((p) => {
     if (seen.get(p.parameterId) > 1 && p.subGroup) {
       return { ...p, parameterId: `${p.subGroup}_${p.parameterId}` };
     }
     return p;
+  });
+  // Last resort: still-colliding ids (same id in the same sub-group) get a numeric suffix,
+  // so every parameter of a group has a unique id.
+  const used = new Map();
+  return prefixed.map((p) => {
+    const n = (used.get(p.parameterId) || 0) + 1;
+    used.set(p.parameterId, n);
+    return n > 1 ? { ...p, parameterId: `${p.parameterId}_${n}` } : p;
   });
 }
 
@@ -141,10 +157,16 @@ function buildWireframe(definition, { strict = false } = {}) {
   let totalParams = 0;
 
   const groups = sortedGroups.map((g, gi) => {
-    // Sort parameters within the group
-    const sortedParams = [...g.params].sort((a, b) =>
-      (a.displayOrder || 0) - (b.displayOrder || 0) || (a.parameterId || '').localeCompare(b.parameterId || ''),
-    );
+    // Sort parameters within the group: explicit displayOrder first, then document order
+    // (never alphabetical — the definition's own order is the hierarchy order).
+    const sortedParams = g.params
+      .map((e, i) => ({ e, i }))
+      .sort((a, b) => {
+        const ka = a.e.displayOrder > 0 ? a.e.displayOrder : Number.MAX_SAFE_INTEGER;
+        const kb = b.e.displayOrder > 0 ? b.e.displayOrder : Number.MAX_SAFE_INTEGER;
+        return ka < kb ? -1 : ka > kb ? 1 : a.i - b.i;
+      })
+      .map((x) => x.e);
 
     // Validate and deduplicate
     const allErrs = sortedParams.flatMap((e) => validateParameter(e, g.groupId));
@@ -152,7 +174,7 @@ function buildWireframe(definition, { strict = false } = {}) {
 
     const deduped = deduplicateIds(sortedParams);
 
-    // Collect ordered unique sub-groups
+    // Collect ordered unique sub-groups (order of first appearance in the definition)
     const subGroups = [];
     for (const p of deduped) {
       if (p.subGroup && !subGroups.includes(p.subGroup)) subGroups.push(p.subGroup);
@@ -172,14 +194,16 @@ function buildWireframe(definition, { strict = false } = {}) {
         readOnly:        e.readOnly === true,
         snmpOid:         e.snmpOid         || null,
         hidden:          e.hidden === true,
-        displayOrder:    e.displayOrder    || pi + 1,
+        displayOrder:    pi + 1,                 // final, gap-free position within the group
         subGroup:        e.subGroup        || null,
         enumValues:      Array.isArray(e.enumValues) ? e.enumValues : [],
+        options:         parseEnumOptions(e.enumValues),
         minValue:        e.minValue        ?? null,
         maxValue:        e.maxValue        ?? null,
         defaultValue:    e.defaultValue    ?? null,
         description:     e.description     || null,
         thresholds:      e.thresholds      || null,
+        sensitive:       SENSITIVE_RE.test(`${e.parameterId} ${e.displayName || ''}`),
         uiVisibleTo:     e.uiVisibleTo     || null,   // kept for server-side role filtering at runtime
       };
     });
@@ -221,4 +245,4 @@ function buildWireframe(definition, { strict = false } = {}) {
   };
 }
 
-module.exports = { buildWireframe, deriveWidget, validateParameter };
+module.exports = { buildWireframe, deriveWidget, validateParameter, deduplicateIds, WIREFRAME_SCHEMA_VERSION };

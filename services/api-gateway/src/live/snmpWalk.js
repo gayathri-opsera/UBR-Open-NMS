@@ -36,7 +36,7 @@ function valueToString(vb) {
  * @param {number} [opts.retries=1]
  * @param {number} [opts.maxRepetitions=25]
  * @param {number} [opts.overallTimeoutMs=30000]
- * @returns {Promise<Array<{ oid: string, value: string }>>}  OIDs always carry a leading dot
+ * @returns {Promise<Array<{ oid: string, value: string, hex?: string }>>}  OIDs always carry a leading dot
  */
 function walkSubtree({
   host, port = 161, community, rootOid,
@@ -70,7 +70,10 @@ function walkSubtree({
       (varbinds) => {
         for (const vb of varbinds) {
           if (snmp.isVarbindError(vb)) continue; // noSuchObject / endOfMibView
-          out.push({ oid: `.${vb.oid}`, value: valueToString(vb) });
+          const item = { oid: `.${vb.oid}`, value: valueToString(vb) };
+          // keep the raw bytes of OCTET STRINGs (needed for MAC addresses, which may look like text)
+          if (Buffer.isBuffer(vb.value)) item.hex = vb.value.toString('hex');
+          out.push(item);
         }
       },
       (err) => finish(err || null),

@@ -31,12 +31,14 @@ const ParameterSpecSchema = new mongoose.Schema({
   displayOrder:    { type: Number, default: 0 },
   subGroup:        { type: String, default: null },
   enumValues:      { type: [String], default: [] },
+  options:         { type: [new mongoose.Schema({ value: String, label: String }, { _id: false })], default: [] },
   minValue:        { type: Number, default: null },
   maxValue:        { type: Number, default: null },
   defaultValue:    { type: String, default: null },
   description:     { type: String, default: null },
   thresholds:      { type: mongoose.Schema.Types.Mixed, default: null },
   uiVisibleTo:     { type: [String], default: [] },
+  sensitive:       { type: Boolean, default: false },
 }, { _id: false });
 
 const GroupSpecSchema = new mongoose.Schema({
@@ -73,6 +75,10 @@ const NodeViewWireframeSchema = new mongoose.Schema(
     },
     /** The full layout — groups, sub-groups, parameters + all rendering metadata. */
     wireframe:      { type: WireframeBodySchema, required: true },
+    /** Shape version of the persisted wireframe; older documents are rebuilt on read. */
+    schemaVersion:  { type: Number, default: 1 },
+    /** Hash of the registry entries the wireframe was built from — a changed registry triggers a rebuild. */
+    fingerprint:    { type: String, default: '' },
     parameterCount: { type: Number, default: 0 },
     groupCount:     { type: Number, default: 0 },
     /** Non-fatal issues found during build (logged, not blocking). */

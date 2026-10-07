@@ -100,7 +100,16 @@ async function getInventoryDevices(bustCache = false) {
   const javaSerials  = new Set(javaDevices.map((d) => d.serialNumber).filter(Boolean));
   const mongoUniq    = mongoDevices.filter((d) => !javaSerials.has(d.serialNumber));
 
-  const all = [...javaDevices, ...mongoUniq];
+  // Hide devices an operator deleted even when a store (e.g. the Java inventory) still lists them.
+  let deleted = new Set();
+  try {
+    // eslint-disable-next-line global-require
+    const keysFn = require('./devices.stub').getDeprovisionedKeys;
+    if (typeof keysFn === 'function') deleted = await keysFn();
+  } catch { /* devices stub unavailable — nothing extra to hide */ }
+  const all = [...javaDevices, ...mongoUniq].filter(
+    (d) => ![d._id, d.id, d.serialNumber, d.deviceId].some((k) => k && deleted.has(String(k))),
+  );
   _devCache = all;
   _cacheAt  = now;
   return all;

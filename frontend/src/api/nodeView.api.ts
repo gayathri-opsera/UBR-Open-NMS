@@ -11,7 +11,9 @@
  */
 
 import { apiClient } from './client';
-import type { NodeViewResponse, WireframeOnlyResponse } from './nodeView.types';
+import type {
+  NodeViewApplyResponse, NodeViewChange, NodeViewResponse, WireframeOnlyResponse,
+} from './nodeView.types';
 
 const BASE = '/node-view';
 
@@ -51,6 +53,23 @@ export async function fetchWireframe(
 export async function triggerMigration(): Promise<{ status: string; results: unknown }> {
   const res = await apiClient.post<{ status: string; results: unknown }>(
     `${BASE}/wireframes/migrate`,
+  );
+  return res.data;
+}
+
+// ── applyNodeViewChanges ──────────────────────────────────────────────────────
+/**
+ * Write edited parameter values to the device. Resolves with the per-parameter results
+ * (the gateway answers 422 when nothing was applied — that is returned, not thrown).
+ */
+export async function applyNodeViewChanges(
+  deviceId: string,
+  changes: NodeViewChange[],
+): Promise<NodeViewApplyResponse> {
+  const res = await apiClient.put<NodeViewApplyResponse>(
+    `${BASE}/${encodeURIComponent(deviceId)}/parameters`,
+    { changes },
+    { validateStatus: (s) => s === 200 || s === 409 || s === 422 || s === 400 },
   );
   return res.data;
 }

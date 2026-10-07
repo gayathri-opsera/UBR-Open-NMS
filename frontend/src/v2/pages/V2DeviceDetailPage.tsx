@@ -15,8 +15,10 @@ import { MetricCard } from '../components/common/MetricCard';
 import { Spinner } from '../components/common/Spinner';
 import { EmptyState, LoadingState } from '../components/common/States';
 import { useToast } from '../components/common/Toast';
+import { useAuth } from '../../contexts/AuthContext';
 import { logger } from '../utils/logger';
 import { WirelessConfigTab } from '../components/device/WirelessConfigTab';
+import { DeviceInterfacesTable } from '../components/DeviceInterfacesTable';
 import { ParameterGroupTabs } from '../components/framework/parameters/ParameterGroupTabs';
 import { getDeviceUiTemplate } from '../../api/framework-panels.api';
 import { getDeviceCurrentParameterValues, flattenParameterValues, updateDeviceParameter } from '../../api/framework-parameters.api';
@@ -26,6 +28,13 @@ import type { ParameterCurrentValue, ParameterCurrentValueData } from '../../api
 // ── New wireframe architecture ─────────────────────────────────────────────────
 import { fetchNodeView } from '../../api/nodeView.api';
 import type { NodeViewData } from '../../api/nodeView.types';
+
+/** 358093 → "4d 3h 28m"; 0/undefined → "—" (uptime is only known once discovery has read it). */
+function formatUptime(seconds?: number): string {
+  if (!seconds || seconds <= 0) return '—';
+  const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600), m = Math.floor((seconds % 3600) / 60);
+  return `${d ? `${d}d ` : ''}${h}h ${m}m`;
+}
 
 const TABS = [
   { id: 'summary',   label: 'Node View' },
@@ -66,6 +75,7 @@ export default function V2DeviceDetailPage() {
   const location = useLocation();
   const fromTopology = (location.state as { from?: string } | null)?.from === 'topology';
   const { addToast } = useToast();
+  const { user } = useAuth();
   const [device, setDevice] = useState<Device | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('summary');
@@ -399,9 +409,14 @@ export default function V2DeviceDetailPage() {
                   { label: 'Device Type',   value: device.deviceType || '—' },
                   { label: 'IP Address',    value: device.ipAddress || '—', mono: true },
                   { label: 'MAC Address',   value: device.macAddress || '—', mono: true },
+                  { label: 'Mgmt Interface', value: device.managementInterface || '—' },
                   { label: 'Firmware',      value: device.firmwareVersion || '—', mono: true },
-                  { label: 'Serial No.',    value: device.serialNumber || '—', mono: true },
+                  { label: 'Hardware',      value: device.hardwareVersion || '—', mono: true },
+                  { label: 'Bootloader',    value: device.bootloaderVersion || '—', mono: true },
+                  { label: 'Serial No.',    value: device.reportedSerialNumber || device.serialNumber || '—', mono: true },
                   { label: 'Network',       value: device.networkId || '—' },
+                  { label: 'Uptime',        value: formatUptime(device.uptimeSeconds) },
+                  { label: 'Contact',       value: device.sysContact || '—' },
                   { label: 'Last Seen',     value: device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : '—' },
                   { label: 'Registered',    value: device.registeredAt ? new Date(device.registeredAt).toLocaleString() : '—' },
                 ].map(({ label, value, mono }) => (
@@ -412,6 +427,8 @@ export default function V2DeviceDetailPage() {
                 ))}
               </div>
             </div>
+
+            <DeviceInterfacesTable interfaces={device.interfaces ?? []} collectedAt={device.factsCollectedAt} />
 
             {nvLoading && !nvData && !nvError && (
               <div style={{ padding: 24, textAlign: 'center' }}><Spinner /></div>
@@ -443,6 +460,9 @@ export default function V2DeviceDetailPage() {
                   </div>
                 )}
                 <NodeViewParameters
+                  deviceId={devId}
+                  canEdit={!!user && !['user', 'viewer'].includes(String(user.role).toLowerCase())}
+                  deviceWritable={nvData.writable?.enabled === true}
                   wireframe={nvData.wireframe.groups}
                   values={nvData.values}
                   loading={nvLoading}

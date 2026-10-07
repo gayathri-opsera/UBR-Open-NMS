@@ -28,6 +28,10 @@ export interface WireframeParameter {
   displayOrder:    number;
   subGroup:        string | null;
   enumValues:      string[];
+  /** Dropdown options parsed from the definition's enumValues ("Label(raw)"). */
+  options:         Array<{ value: string; label: string }>;
+  /** Credential-like parameter — shown masked. */
+  sensitive?:      boolean;
   minValue:        number | null;
   maxValue:        number | null;
   defaultValue:    string | null;
@@ -67,8 +71,10 @@ export interface ParameterValueRecord {
   failureReason:  string | null;
 }
 
-/** Flat map: parameterId → live value record */
+/** Live value records keyed `${groupId}::${parameterId}` (parameter ids repeat across groups). */
 export type NodeViewValues = Record<string, ParameterValueRecord>;
+
+export const valueKey = (groupId: string, parameterId: string): string => `${groupId}::${parameterId}`;
 
 // ── Combined response ─────────────────────────────────────────────────────────
 
@@ -84,6 +90,8 @@ export interface NodeViewData {
   device:      NodeViewDevice;
   wireframe:   NodeViewWireframe;
   values:      NodeViewValues;
+  /** Whether the gateway can write to this device (an SNMP write community is configured). */
+  writable?:   { enabled: boolean };
   pollStatus:  string;
   collectedAt: string | null;
   /** True when no product definition is linked — wireframe contains basic SNMP MIB-2 system info only */
@@ -106,4 +114,26 @@ export interface WireframeOnlyResponse {
     updatedAt?: string;
   };
   error?: { code: string; message: string; correlationId?: string };
+}
+
+// ── Apply (write) ─────────────────────────────────────────────────────────────
+
+export interface NodeViewChange {
+  groupId:     string;
+  parameterId: string;
+  /** SNMP instance index ('' for a scalar). */
+  instance:    string;
+  value:       string;
+}
+
+export interface NodeViewChangeResult extends NodeViewChange {
+  ok:     boolean;
+  code?:  string;
+  error?: string;
+}
+
+export interface NodeViewApplyResponse {
+  status:  'ok' | 'partial' | 'error';
+  results?: NodeViewChangeResult[];
+  error?:  { code: string; message: string; correlationId?: string };
 }

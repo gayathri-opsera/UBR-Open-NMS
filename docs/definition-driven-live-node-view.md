@@ -147,6 +147,35 @@ Single-IP scans are handled by the gateway (`discovery.stub.js`, "ICMP-bypass" p
 CIDR scans are forwarded to the Go `discovery-service`, which additionally reads device
 role and GPS from vendor attribute profiles (see [§7](#7-gps-coordinates-and-topology)).
 
+#### Inventory facts collected at discovery (not limited to the XML)
+
+The XML-only rule applies to the **Node View parameters**. The **inventory record** (the
+Device Identity block, the discovered-interfaces table and the device list) is filled at
+discovery with *everything the device reports about itself that has a well-defined meaning*
+(`src/live/deviceFacts.js`, read-only SNMP):
+
+| Source | Facts stored on the device record |
+|---|---|
+| System group (MIB-II) | `uptimeSeconds` (from sysUpTime), `sysContact` |
+| IF-MIB / ifXTable | `interfaces[]`: index, name, type, speed, MAC, admin/oper status, IP addresses |
+| IP-MIB `ipAddrTable` | `ipAddresses[]` and the **management MAC** (`macAddress` = MAC of the interface that carries the management IP, here `br-lan`), `managementInterface` |
+| Curated vendor profile (EOC, enterprise 52619) | `reportedSerialNumber`, `firmwareVersion`, `hardwareVersion`, `bootloaderVersion`, `modelName` |
+| Derived | `networkId` (`net-a-b-c` from the /24), `lastSeenAt`, `registeredAt` (preserved on re-discovery) |
+
+The vendor profile is a short list of OIDs whose meaning was **cross-checked against the
+device's own web UI** (serial and firmware match its header, hardware/bootloader match its
+Home page, interface MACs match its Ethernet MACs). Add a vendor by adding an entry to
+`VENDOR_FACT_PROFILES`.
+
+**Deliberately not collected:** the vendor subtree as a whole. It holds values with no
+documented meaning and **secrets** (the verified device exposes its SNMP read/write
+communities, SNMPv3 keys and other passwords there — see [§11](#11-known-limitations-and-open-items)).
+Placeholder values (`-NA-`, `******`, empty) are dropped.
+
+`reportedSerialNumber` is shown as "Serial No." in the UI; `serialNumber` remains the NMS
+record key and is not changed. Provisioning carries these facts over from the discovery
+record at the same IP. Each successful live poll also refreshes `lastSeenAt`.
+
 ### 3.4 Provision
 
 `POST /api/v1/discovery/runs/{runId}/provision` (`provision.stub.js`):
@@ -294,9 +323,12 @@ Example: the device exposes ~786 values under its enterprise subtree; the sample
 declares 55 parameters (53 with OIDs), so the Node View shows exactly those 55 rows and
 nothing else. To show more, **add the parameters to the XML** and re-upload.
 
-The Device Identity block on the page still shows inventory fields (id, vendor, model, IP,
-serial number, …). Those come from discovery/inventory, not from the definition, and show
-`—` when absent.
+The **Device Identity** block and the **Interfaces (discovered)** table above the parameters
+are *inventory* data, not Node View parameters. They come from discovery
+([§3.3](#33-discovery-operations--discovery), "Inventory facts") and are **not** limited to
+the XML: management MAC, serial number, firmware / hardware / bootloader versions, uptime,
+contact, network, last seen, registered, and the full interface list. Fields the device does
+not report show `—`.
 
 ## 7. GPS coordinates and topology
 
@@ -413,6 +445,13 @@ Configuration knobs (gateway): `LIVE_POLL_INTERVAL_SECONDS` (default 60),
 ## 11. Known limitations and open items
 
 1. **No real-time GPS for the verified device** — see [§7](#7-gps-coordinates-and-topology).
+1a. **The device leaks its own secrets over SNMP.** Anyone holding the SNMP read community can
+    read the device's read/write community, SNMPv3 auth/priv keys and other passwords from its
+    vendor subtree (observed on the verified UBR655). Change the community strings, restrict SNMP
+    access to the NMS, and treat them as compromised. The NMS never copies those values.
+1b. **SNMP credentials were exposed by the device list API.** `GET /api/v1/devices` (and device
+    update responses) returned each device's stored `snmpCommunity`. They are now stripped in
+    `devices.stub.js` (`publicDevice`). Credentials are still stored in plain text in MongoDB.
 2. **Wi-Fi keys are displayed in plaintext.** A parameter such as `Key` is shown to every
    viewer; the definition format has no "secret" flag. Recommended: add a flag and mask such
    values (and restrict via `uiVisibleTo`).
@@ -432,6 +471,12 @@ Configuration knobs (gateway): `LIVE_POLL_INTERVAL_SECONDS` (default 60),
 9. **Dedupe by content hash** blocks re-uploading identical content after a parser fix.
 10. **Pre-existing test failures** listed in [§9](#9-verification-against-the-real-device) were
     not addressed.
+10a. **Long-open pages used to lose their session.** The framework API clients attached the
+     token but never refreshed it, so the Node View's 30 s auto-refresh started failing with
+     401 once the access token expired. They now share the main client's refresh logic
+     (`ensureFreshAccessToken` in `frontend/src/api/client.ts`); verified by replaying an expiry
+     in a browser (an `auth/refresh` call, then 200s). The app's *start-up* check still sends a
+     visitor with an expired token to the login page.
 11. **Frontend lint/type check** was verified through the Docker build only; `oxlint` was not run.
 12. **Not covered by the definition format:** tables as first-class objects (neighbours, ARP,
     learn table), per-instance names (radio/port labels), read-only monitoring values
@@ -470,18 +515,23 @@ Common theme worth considering: a **pending-review stage** between discovery and
   `ParameterRegistryBuilderTest`.
 
 **API gateway** (`services/api-gateway`)
-- `src/live/snmpWalk.js` *(new)* — read-only SNMP subtree walk.
+- `src/live/snmpWalk.js` *(new)* — read-only SNMP subtree walk (keeps raw bytes of OCTET STRINGs).
+- `src/live/deviceFacts.js` *(new)* — inventory facts collected at discovery (standard MIBs + curated vendor profile).
 - `src/live/liveParameters.js` *(new)* — registry loading, OID mapping, persistence,
   scheduler, `parameters/current` builder, definition-link healing.
 - `src/routes/frameworkParameters.routes.js` — `ui-template` and `parameters/current` rewritten.
 - `src/routes/provision.stub.js`, `src/routes/discovery.stub.js` — definition link,
   credential carry-over, first live read.
 - `src/server.js` — starts the scheduler; `package.json` — adds `net-snmp`.
-- `tests/unit/liveParameters.test.js` *(new)*.
+- `src/routes/devices.stub.js` — stored SNMP credentials are no longer returned in device payloads.
+- `tests/unit/liveParameters.test.js`, `tests/unit/deviceFacts.test.js` *(new)*.
 
 **Frontend** (`frontend/src`)
 - `v2/components/NodeViewParameters.tsx` *(new)* — definition-driven renderer.
-- `v2/pages/V2DeviceDetailPage.tsx` — Node View rebuilt; hardcoded aliases and KPI removed.
+- `v2/pages/V2DeviceDetailPage.tsx` — Node View rebuilt; hardcoded aliases and KPI removed; Device Identity shows the discovered inventory facts.
+- `v2/components/DeviceInterfacesTable.tsx` *(new)* — discovered interfaces (MAC, speed, status, IPs).
+- `api/client.ts`, `api/framework-parameters.api.ts`, `api/framework-panels.api.ts` — shared token refresh for long-open pages.
+- `api/devices.types.ts` — inventory fact fields on `Device`.
 - `v2/components/framework/parameters/ParameterValueCard.tsx` — lists all instances.
 - `api/framework-panels.types.ts`, `api/framework-parameters.types.ts`,
   `api/framework-parameters.api.ts` — new fields and the `refresh` option.
