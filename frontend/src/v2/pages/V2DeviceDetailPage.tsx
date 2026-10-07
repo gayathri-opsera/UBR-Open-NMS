@@ -18,7 +18,6 @@ import { useToast } from '../components/common/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { logger } from '../utils/logger';
 import { WirelessConfigTab } from '../components/device/WirelessConfigTab';
-import { DeviceInterfacesTable } from '../components/DeviceInterfacesTable';
 import { ParameterGroupTabs } from '../components/framework/parameters/ParameterGroupTabs';
 import { getDeviceUiTemplate } from '../../api/framework-panels.api';
 import { getDeviceCurrentParameterValues, flattenParameterValues, updateDeviceParameter } from '../../api/framework-parameters.api';
@@ -28,13 +27,6 @@ import type { ParameterCurrentValue, ParameterCurrentValueData } from '../../api
 // ── New wireframe architecture ─────────────────────────────────────────────────
 import { fetchNodeView } from '../../api/nodeView.api';
 import type { NodeViewData } from '../../api/nodeView.types';
-
-/** 358093 → "4d 3h 28m"; 0/undefined → "—" (uptime is only known once discovery has read it). */
-function formatUptime(seconds?: number): string {
-  if (!seconds || seconds <= 0) return '—';
-  const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600), m = Math.floor((seconds % 3600) / 60);
-  return `${d ? `${d}d ` : ''}${h}h ${m}m`;
-}
 
 const TABS = [
   { id: 'summary',   label: 'Node View' },
@@ -396,40 +388,6 @@ export default function V2DeviceDetailPage() {
         <TabPanel id="summary">
           {/* ── NODE VIEW: built only from the product definition + live values ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingTop: 16 }}>
-            {/* Device identity (real inventory fields only) */}
-            <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
-              <div style={{ padding: '10px 16px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--vf-border-subtle)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--vf-text-muted)' }}>
-                Device Identity
-              </div>
-              <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px 24px' }}>
-                {[
-                  { label: 'Device ID',     value: device.deviceId || device.id || '—' },
-                  { label: 'Vendor',        value: device.manufacturer || '—' },
-                  { label: 'Model',         value: device.model || '—' },
-                  { label: 'Device Type',   value: device.deviceType || '—' },
-                  { label: 'IP Address',    value: device.ipAddress || '—', mono: true },
-                  { label: 'MAC Address',   value: device.macAddress || '—', mono: true },
-                  { label: 'Mgmt Interface', value: device.managementInterface || '—' },
-                  { label: 'Firmware',      value: device.firmwareVersion || '—', mono: true },
-                  { label: 'Hardware',      value: device.hardwareVersion || '—', mono: true },
-                  { label: 'Bootloader',    value: device.bootloaderVersion || '—', mono: true },
-                  { label: 'Serial No.',    value: device.reportedSerialNumber || device.serialNumber || '—', mono: true },
-                  { label: 'Network',       value: device.networkId || '—' },
-                  { label: 'Uptime',        value: formatUptime(device.uptimeSeconds) },
-                  { label: 'Contact',       value: device.sysContact || '—' },
-                  { label: 'Last Seen',     value: device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : '—' },
-                  { label: 'Registered',    value: device.registeredAt ? new Date(device.registeredAt).toLocaleString() : '—' },
-                ].map(({ label, value, mono }) => (
-                  <div key={label}>
-                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 3 }}>{label}</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--vf-text-primary)', wordBreak: 'break-all', fontFamily: mono ? 'var(--vf-font-mono)' : undefined }}>{value}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <DeviceInterfacesTable interfaces={device.interfaces ?? []} collectedAt={device.factsCollectedAt} />
-
             {nvLoading && !nvData && !nvError && (
               <div style={{ padding: 24, textAlign: 'center' }}><Spinner /></div>
             )}
@@ -442,7 +400,7 @@ export default function V2DeviceDetailPage() {
 
             {nvData && (
               <>
-                {/* Banner when showing basic SNMP fallback (no product definition linked) */}
+                {/* No definition linked: the Node View shows definition parameters only, so there is nothing to render */}
                 {nvData.noFramework && (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 10,
@@ -452,10 +410,10 @@ export default function V2DeviceDetailPage() {
                   }}>
                     <span style={{ fontSize: 16 }}>ℹ️</span>
                     <span>
-                      No Product Definition linked — showing basic SNMP system info.{' '}
+                      No Product Definition is linked to this device, so there are no parameters to show.{' '}
                       <button onClick={() => navigate('/v2/product-definitions')} style={{ background: 'none', border: 'none', color: 'var(--vf-accent)', cursor: 'pointer', fontSize: 12, padding: 0, textDecoration: 'underline' }}>
                         Upload &amp; activate a definition
-                      </button>{' '}to see full device parameters.
+                      </button>.
                     </span>
                   </div>
                 )}

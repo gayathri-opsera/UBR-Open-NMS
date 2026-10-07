@@ -105,6 +105,18 @@ describe('snmpSet', () => {
   });
 });
 
+describe('SNMP instance indexes', () => {
+  const entry = { groupId: 'g', parameterId: 'mtu', snmpOid: '.1.5.3' };
+  it('a lone .0 is a scalar (no index)', () => {
+    const m = live.mapVarbinds([entry], [{ oid: '.1.5.3.0', value: '1500' }]);
+    expect(m.get('g::mtu')).toEqual([{ index: '', raw: '1500' }]);
+  });
+  it('.0 and .1 are two rows of a table and both keep their index', () => {
+    const m = live.mapVarbinds([entry], [{ oid: '.1.5.3.0', value: '1500' }, { oid: '.1.5.3.1', value: '9000' }]);
+    expect(m.get('g::mtu')).toEqual([{ index: '0', raw: '1500' }, { index: '1', raw: '9000' }]);
+  });
+});
+
 describe('wireframe hierarchy and ids', () => {
   const entries = [
     { groupId: 'network', groupDisplayOrder: 2, subGroup: 'ip', parameterId: 'ipAddress', displayName: 'IP Address', displayOrder: 1, snmpOid: '.1.2.0' },

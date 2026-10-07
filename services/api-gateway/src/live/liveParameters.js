@@ -92,13 +92,17 @@ function mapVarbinds(entries, varbinds) {
     const match = oidsLongestFirst.find((o) => vb.oid === o || vb.oid.startsWith(`${o}.`));
     if (!match) continue;
     const rest = vb.oid.slice(match.length).replace(/^\./, '');
-    // a trailing ".0" scalar instance carries no row index
-    const index = rest === '0' ? '' : rest;
     for (const e of byOid.get(match)) {
       const key = `${e.groupId}::${e.parameterId}`;
       if (!result.has(key)) result.set(key, []);
-      result.get(key).push({ index, raw: vb.value });
+      result.get(key).push({ index: rest, raw: vb.value });
     }
+  }
+  // A lone ".0" is the SNMP scalar instance and carries no row index. When a column has
+  // several instances, ".0" is just the first row of a table (e.g. ports numbered 0 and 1)
+  // and keeps its index so the rows stay distinguishable.
+  for (const list of result.values()) {
+    if (list.length === 1 && list[0].index === '0') list[0].index = '';
   }
   return result;
 }
