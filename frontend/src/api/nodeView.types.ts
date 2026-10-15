@@ -46,6 +46,10 @@ export interface WireframeGroup {
   pollIntervalSeconds: number;
   subGroups:           string[];
   parameters:          WireframeParameter[];
+  /** Sidebar hierarchy — mirrors real device left-nav structure */
+  uiPage?:   string;   // top-level nav: 'Wireless' | 'Network' | 'Management' | 'Monitor'
+  uiParent?: string;   // sub-item:      'Radio 1' | 'Radio 2' | '2.4 GHz Radio' | 'QoS' | 'IP Configuration' | …
+  uiTab?:    string;   // tab label:     'Properties' | 'DDRS/ATPC' | 'DFS' | 'DCS' | …
 }
 
 export interface NodeViewWireframe {

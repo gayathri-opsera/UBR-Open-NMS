@@ -274,12 +274,15 @@ function DeviceCard({
     { label: 'Device Type',   value: val(r.genericDeviceType) },
     { label: 'Device Role',   value: r.deviceRole ? r.deviceRole : 'Not reported' },
     { label: 'GPS',           value: r.latitude != null && r.longitude != null ? `${r.latitude}, ${r.longitude}` : 'Not reported' },
-    { label: 'sysObjectID',   value: val(r.sysObjectID) },
-    { label: 'sysDescr',      value: r.sysDescr ? (r.sysDescr.length > 80 ? r.sysDescr.slice(0, 80) + '…' : r.sysDescr) : 'N/A' },
-    { label: 'Location',      value: val(r.sysLocation) },
-    { label: 'Contact',       value: val(r.sysContact) },
-    { label: 'Uptime',        value: formatUptime(r.sysUpTimeSeconds) },
-    { label: 'Discovery',     value: overallIcon(r) === '✅' ? 'Successful' : 'Failed', icon: overallIcon(r) },
+    { label: 'sysObjectID',        value: val(r.sysObjectID) },
+    { label: 'sysDescr',           value: r.sysDescr ? (r.sysDescr.length > 80 ? r.sysDescr.slice(0, 80) + '…' : r.sysDescr) : 'N/A' },
+    { label: 'Location',           value: val(r.sysLocation) },
+    { label: 'Contact',            value: val(r.sysContact) },
+    { label: 'Uptime',             value: formatUptime(r.sysUpTimeSeconds) },
+    // ── Descriptor Registry resolution ─────────────────────────────────────
+    { label: '📋 Descriptor Match', value: (r as unknown as Record<string,string>).productDefinitionId || (r.classificationStatus === 'RECOGNISED' ? '✅ Matched' : '⚠ Unmatched'), icon: r.classificationStatus === 'RECOGNISED' ? '✅' : '⚠️' },
+    { label: '🔗 Radio Role',       value: (r as unknown as Record<string,string>).genericDeviceType ? val(r.genericDeviceType) : 'N/A' },
+    { label: 'Discovery',          value: overallIcon(r) === '✅' ? 'Successful' : 'Failed', icon: overallIcon(r) },
   ];
 
   const borderColor = overallIcon(r) === '✅' ? 'rgba(34,197,94,0.4)' : overallIcon(r) === '❌' ? 'rgba(239,68,68,0.4)' : 'rgba(251,191,36,0.4)';

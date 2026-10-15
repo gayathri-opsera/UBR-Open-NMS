@@ -28,6 +28,8 @@ const frameworkSecurity           = require('./routes/frameworkSecurity.routes')
 const frameworkParameters         = require('./routes/frameworkParameters.routes');
 const framework                   = require('./routes/framework.routes');
 const nodeView                    = require('./routes/nodeView.routes');
+const descriptors                 = require('./routes/descriptors.routes');
+const authStub                    = require('./routes/auth.stub');
 // Alarms router — proxies to local alarm-service when ALARM_SERVICE_URL is local,
 // otherwise serves stub data to avoid CORS/auth issues with the external Opsera dev env.
 const alarmsRoutes    = require('./routes/alarms.routes');
@@ -48,6 +50,11 @@ function createApp(redisClient) {
 
   app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
   app.get('/readyz', (_req, res) => res.json({ status: 'ready' }));
+
+  // ── Dev Auth Stub — mounted BEFORE the circuit-broken proxy routes ──────────
+  // Handles login/refresh/me locally when nms-auth container is not running.
+  // Uses the same MongoDB users collection and dev RSA private key as the real service.
+  app.use('/api/v1/auth', authStub);
 
   // SSE notification stream — before circuit-broken routes
   app.use('/api/v1/notifications/stream', createSseProxy(config.services.notification));
@@ -88,6 +95,14 @@ function createApp(redisClient) {
   // New architecture: wireframe built once at activation, loaded by index at runtime.
   app.use('/api/node-view', nodeView);
   app.use('/api/v1/node-view', nodeView); // legacy alias
+
+  // Descriptor Registry — full 9-state lifecycle CRUD (PDL PPT Slides 3, 9)
+  // Includes: upload, validate, approve, activate, deprecate, retire, purge,
+  // delete-draft, dependents, impact report, bulk deprovision, bulk migrate.
+  // Note: the /devices/deprovision sub-route is mounted BEFORE the :id/versions/:v routes
+  // so it is matched correctly by Express.
+  app.use('/api/descriptors', descriptors);
+  app.use('/api/v1/descriptors', descriptors); // legacy alias
 
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);

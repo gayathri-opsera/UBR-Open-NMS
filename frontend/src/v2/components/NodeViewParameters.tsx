@@ -53,6 +53,58 @@ function humanize(slug: string): string {
     .join(' ');
 }
 
+// ── Sidebar structure helpers ─────────────────────────────────────────────────
+
+/**
+ * Page → Parent → [groups] hierarchy derived from uiPage/uiParent/uiTab on each group.
+ * Falls back to flat rendering when no group has uiPage set.
+ */
+interface SidebarItem {
+  parent: string;
+  groups: WireframeGroup[];   // one per uiTab within this parent
+}
+interface SidebarPage {
+  page: string;
+  items: SidebarItem[];
+}
+
+/** Page order mirrors the real device left nav. */
+const PAGE_ORDER = ['Wireless', 'Network', 'Management', 'Monitor'];
+
+function buildSidebar(groups: WireframeGroup[]): SidebarPage[] {
+  const withHierarchy = groups.filter((g) => g.uiPage);
+  if (withHierarchy.length === 0) return [];   // flat fallback
+
+  const pageMap = new Map<string, Map<string, WireframeGroup[]>>();
+
+  for (const g of withHierarchy) {
+    const page   = g.uiPage   || 'Wireless';
+    const parent = g.uiParent || 'Settings';
+    if (!pageMap.has(page))   pageMap.set(page, new Map());
+    const parentMap = pageMap.get(page)!;
+    if (!parentMap.has(parent)) parentMap.set(parent, []);
+    parentMap.get(parent)!.push(g);
+  }
+
+  // Sort pages by canonical order, then alphabetically for unknowns
+  const sortedPages = [...pageMap.keys()].sort((a, b) => {
+    const ai = PAGE_ORDER.indexOf(a); const bi = PAGE_ORDER.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  return sortedPages.map((page) => {
+    const parentMap = pageMap.get(page)!;
+    const items: SidebarItem[] = [...parentMap.entries()].map(([parent, gs]) => ({
+      parent,
+      groups: gs.sort((a, b) => a.displayOrder - b.displayOrder),
+    }));
+    return { page, items };
+  });
+}
+
 const editKey = (groupId: string, parameterId: string, instance: string) => `${groupId}::${parameterId}::${instance}`;
 
 interface InstanceView {
@@ -285,11 +337,23 @@ export function NodeViewParameters({
   const [originals, setOriginals] = useState<Record<string, string | null>>({});
   const [errors, setErrors]     = useState<Record<string, string>>({});
   const [applying, setApplying] = useState(false);
+  const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set(['Wireless', 'Network']));
 
   const groups = useMemo(() => wireframe.filter((g) => g.parameters.some((p) => !p.hidden)), [wireframe]);
+  const sidebar = useMemo(() => buildSidebar(groups), [groups]);
+  const hasSidebar = sidebar.length > 0;
+
+  // Active group — defaults to first group
   const activeGroup = groups.find((g) => g.groupId === activeGroupId) ?? groups[0];
 
-  // sub-group → parameters, kept in the definition's order
+  // All groups under the same uiParent as the active group (for tab row)
+  const siblingGroups = useMemo(() => {
+    if (!activeGroup?.uiPage) return groups; // flat fallback
+    return groups.filter(
+      (g) => g.uiPage === activeGroup.uiPage && g.uiParent === activeGroup.uiParent,
+    );
+  }, [activeGroup, groups]);
+
   const cards = useMemo(() => {
     if (!activeGroup) return [] as Array<{ key: string; title: string; params: WireframeParameter[] }>;
     const bySub = new Map<string, WireframeParameter[]>();
@@ -305,9 +369,7 @@ export function NodeViewParameters({
     }));
   }, [activeGroup]);
 
-  // the notices below only matter for groups that have something to edit
   const groupHasWritable = !!activeGroup && activeGroup.parameters.some((p) => !p.hidden && !p.readOnly && !!p.snmpOid);
-
   const pending = Object.entries(edits).filter(([k, v]) => v !== (originals[k] ?? ''));
   const editingAllowed = canEdit && deviceWritable;
 
@@ -316,11 +378,9 @@ export function NodeViewParameters({
     setEdits((e) => ({ ...e, [key]: value }));
     setErrors((er) => { if (!(key in er)) return er; const { [key]: _drop, ...rest } = er; return rest; });
   };
-
   const reset = () => { setEdits({}); setOriginals({}); setErrors({}); };
 
-  // locate a parameter by its edit key
-  const paramFor = (key: string): { groupId: string; param: WireframeParameter; instance: string } | null => {
+  const paramFor = (key: string) => {
     const [groupId, parameterId, instance] = key.split('::');
     const param = wireframe.find((g) => g.groupId === groupId)?.parameters.find((p) => p.parameterId === parameterId);
     return param ? { groupId, param, instance: instance ?? '' } : null;
@@ -341,22 +401,18 @@ export function NodeViewParameters({
       if (Object.keys(nextErrors).length) addToast('Fix the highlighted fields before applying.', 'error');
       return;
     }
-
     setApplying(true);
     try {
       const resp = await applyNodeViewChanges(deviceId, changes);
-      if (resp.error && !resp.results) {
-        addToast(resp.error.message, 'error');
-        return;
-      }
+      if (resp.error && !resp.results) { addToast(resp.error.message, 'error'); return; }
       const results: NodeViewChangeResult[] = resp.results ?? [];
       const failed = results.filter((r) => !r.ok);
       const okKeys = new Set(results.filter((r) => r.ok).map((r) => editKey(r.groupId, r.parameterId, r.instance)));
       setEdits((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !okKeys.has(k))));
       setOriginals((o) => Object.fromEntries(Object.entries(o).filter(([k]) => !okKeys.has(k))));
       setErrors(Object.fromEntries(failed.map((r) => [editKey(r.groupId, r.parameterId, r.instance), r.error ?? 'Rejected'])));
-      if (failed.length === 0) addToast(`Applied ${results.length} change${results.length === 1 ? '' : 's'} to the device.`, 'success');
-      else addToast(`${results.length - failed.length} applied, ${failed.length} failed — see the highlighted fields.`, 'error');
+      if (failed.length === 0) addToast(`Applied ${results.length} change${results.length === 1 ? '' : 's'}.`, 'success');
+      else addToast(`${results.length - failed.length} applied, ${failed.length} failed.`, 'error');
       if (okKeys.size) onRefresh();
     } catch (e) {
       addToast(e instanceof Error ? e.message : 'Failed to apply changes.', 'error');
@@ -365,33 +421,179 @@ export function NodeViewParameters({
     }
   }
 
+  const togglePage = (page: string) =>
+    setExpandedPages((s) => { const n = new Set(s); n.has(page) ? n.delete(page) : n.add(page); return n; });
+
+  // ── Render parameter cards (shared between sidebar and flat modes) ───────────
+  const renderCards = () => (
+    <>
+      {canEdit && !deviceWritable && groupHasWritable && (
+        <div style={{ padding: '8px 12px', marginBottom: 12, background: 'var(--vf-warning-subtle)', border: '1px solid var(--vf-warning)', borderRadius: 6, fontSize: 12, color: 'var(--vf-warning)' }}>
+          Read-only — no SNMP write community is configured for this device, so changes cannot be applied.
+        </div>
+      )}
+      {!canEdit && groupHasWritable && (
+        <div style={{ padding: '8px 12px', marginBottom: 12, background: 'var(--vf-warning-subtle)', border: '1px solid var(--vf-warning)', borderRadius: 6, fontSize: 12, color: 'var(--vf-warning)' }}>
+          Read-only mode — you do not have permission to modify device configuration.
+        </div>
+      )}
+      {cards.map((c) => (
+        <Card key={c.key} title={c.title || undefined} style={{ marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+            {c.params.map((p) => (
+              <ParameterField
+                key={p.parameterId} groupId={activeGroup!.groupId} param={p}
+                record={values[valueKey(activeGroup!.groupId, p.parameterId)]}
+                canEdit={editingAllowed} edits={edits} errors={errors} onEdit={onEdit}
+              />
+            ))}
+          </div>
+        </Card>
+      ))}
+    </>
+  );
+
+  // ── Sidebar layout (uiPage/uiParent/uiTab hierarchy) ──────────────────────
+  if (hasSidebar) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
+        <StatusBar
+          deviceStatus={deviceStatus} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
+          collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing} onRefresh={onRefresh}
+        />
+        {loading && Object.keys(values).length === 0 && (
+          <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>
+        )}
+
+        <div style={{ display: 'flex', gap: 0, alignItems: 'flex-start', minHeight: 400 }}>
+          {/* ── LEFT SIDEBAR ────────────────────────────────────────── */}
+          <nav style={{
+            width: 210, flexShrink: 0,
+            background: 'var(--vf-surface)',
+            border: '1px solid var(--vf-border-subtle)', borderRadius: 8,
+            marginRight: 16, padding: '8px 0', userSelect: 'none',
+          }}>
+            {sidebar.map(({ page, items }) => (
+              <div key={page}>
+                {/* Page header (collapsible) */}
+                <button
+                  onClick={() => togglePage(page)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 14px', background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--vf-text-secondary)', fontSize: 11, fontWeight: 700,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                  }}
+                >
+                  <span>{page}</span>
+                  <span style={{ fontSize: 9 }}>{expandedPages.has(page) ? '▾' : '▸'}</span>
+                </button>
+
+                {expandedPages.has(page) && items.map(({ parent, groups: pGroups }) => {
+                  const isParentActive = pGroups.some((g) => g.groupId === activeGroup?.groupId);
+                  return (
+                    <div key={parent}>
+                      {/* Sub-item (parent) */}
+                      <button
+                        onClick={() => {
+                          const first = pGroups[0];
+                          if (first) setActiveGroupId(first.groupId);
+                          // Auto-expand the page if collapsed
+                          setExpandedPages((s) => { const n = new Set(s); n.add(page); return n; });
+                        }}
+                        style={{
+                          width: '100%', textAlign: 'left',
+                          padding: '6px 14px 6px 20px',
+                          background: isParentActive ? 'var(--vf-accent-subtle, rgba(59,130,246,.1))' : 'none',
+                          border: 'none', borderLeft: isParentActive ? '3px solid var(--vf-accent)' : '3px solid transparent',
+                          color: isParentActive ? 'var(--vf-accent)' : 'var(--vf-text-primary)',
+                          fontSize: 13, fontWeight: isParentActive ? 600 : 400,
+                          cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {parent}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+
+          {/* ── RIGHT CONTENT AREA ──────────────────────────────────── */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Tab row for siblings (Properties / DDRS/ATPC / DFS / DCS …) */}
+            {siblingGroups.length > 1 && (
+              <div style={{ display: 'flex', gap: 2, marginBottom: 16, borderBottom: '1px solid var(--vf-border-subtle)', overflowX: 'auto' }}>
+                {siblingGroups.map((g) => {
+                  const active = g.groupId === activeGroup?.groupId;
+                  return (
+                    <button
+                      key={g.groupId} onClick={() => setActiveGroupId(g.groupId)}
+                      style={{
+                        padding: '7px 16px', background: 'none', border: 'none',
+                        borderBottom: active ? '2px solid var(--vf-accent)' : '2px solid transparent',
+                        color: active ? 'var(--vf-accent)' : 'var(--vf-text-secondary)',
+                        fontFamily: 'var(--vf-font-sans)', fontSize: 13, fontWeight: active ? 600 : 400,
+                        cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {g.uiTab || g.label || humanize(g.groupId)}
+                    </button>
+                  );
+                })}
+                {editingAllowed && (
+                  <div style={{ marginLeft: 'auto', paddingBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {pending.length > 0 && <Button variant="ghost" size="sm" onClick={reset} disabled={applying}>Reset</Button>}
+                    <Button size="sm" onClick={() => void apply()} disabled={applying || pending.length === 0} loading={applying}>
+                      {pending.length > 0 ? `Apply (${pending.length})` : 'Apply'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Apply button when only one tab */}
+            {siblingGroups.length <= 1 && editingAllowed && pending.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
+                <Button variant="ghost" size="sm" onClick={reset} disabled={applying}>Reset</Button>
+                <Button size="sm" onClick={() => void apply()} disabled={applying || pending.length === 0} loading={applying}>
+                  Apply ({pending.length})
+                </Button>
+              </div>
+            )}
+
+            {activeGroup ? renderCards() : (
+              <div style={{ padding: 32, textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 13 }}>
+                Select a section from the left menu.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Flat layout fallback (legacy descriptors without uiPage) ──────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
       <StatusBar
         deviceStatus={deviceStatus} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
         collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing} onRefresh={onRefresh}
       />
-
       {loading && Object.keys(values).length === 0 && (
         <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>
       )}
-
-      {/* Group tabs + Apply (same bar as the Wireless tab) */}
       {groups.length > 0 && (
         <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--vf-border-subtle)', overflowX: 'auto' }}>
           {groups.map((g) => {
             const active = g.groupId === activeGroup?.groupId;
             return (
-              <button
-                key={g.groupId} onClick={() => setActiveGroupId(g.groupId)} aria-selected={active}
-                style={{
-                  padding: '8px 16px', background: 'none', border: 'none',
+              <button key={g.groupId} onClick={() => setActiveGroupId(g.groupId)}
+                style={{ padding: '8px 16px', background: 'none', border: 'none',
                   borderBottom: active ? '2px solid var(--vf-accent)' : '2px solid transparent',
                   color: active ? 'var(--vf-accent)' : 'var(--vf-text-secondary)',
                   fontFamily: 'var(--vf-font-sans)', fontSize: 13, fontWeight: active ? 600 : 400,
-                  cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
-                }}
-              >
+                  cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap' }}>
                 {g.label || humanize(g.groupId)}
               </button>
             );
@@ -406,39 +608,7 @@ export function NodeViewParameters({
           )}
         </div>
       )}
-
-      {canEdit && !deviceWritable && groupHasWritable && (
-        <div style={{
-          padding: '8px 12px', marginBottom: 12, background: 'var(--vf-warning-subtle)',
-          border: '1px solid var(--vf-warning)', borderRadius: 6, fontSize: 12, color: 'var(--vf-warning)',
-        }}>
-          Read-only — no SNMP write community is configured for this device, so changes cannot be applied.
-        </div>
-      )}
-      {!canEdit && groupHasWritable && (
-        <div style={{
-          padding: '8px 12px', marginBottom: 12, background: 'var(--vf-warning-subtle)',
-          border: '1px solid var(--vf-warning)', borderRadius: 6, fontSize: 12, color: 'var(--vf-warning)',
-        }}>
-          Read-only mode — you do not have permission to modify device configuration.
-        </div>
-      )}
-
-      {/* One Card per sub-group, parameters in definition order */}
-      {cards.map((c) => (
-        <Card key={c.key} title={c.title || undefined} style={{ marginBottom: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
-            {c.params.map((p) => (
-              <ParameterField
-                key={p.parameterId} groupId={activeGroup.groupId} param={p}
-                record={values[valueKey(activeGroup.groupId, p.parameterId)]}
-                canEdit={editingAllowed} edits={edits} errors={errors} onEdit={onEdit}
-              />
-            ))}
-          </div>
-        </Card>
-      ))}
-
+      {activeGroup ? renderCards() : null}
       {groups.length === 0 && !loading && (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 13 }}>
           No parameters defined in this definition.

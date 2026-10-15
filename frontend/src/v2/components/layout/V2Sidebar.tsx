@@ -59,7 +59,8 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Framework',
     items: [
       { path: '/v2/framework',           label: 'Framework Ops',        icon: <FrameworkIcon /> },
-      { path: '/v2/product-definitions', label: 'Product Definitions',  icon: <ProductDefIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
+      { path: '/v2/product-definitions', label: 'Product Definitions',  icon: <ProductDefIcon />, allowedRoles: ['Admin', 'Operator', 'descriptor_admin', 'descriptor_author'] as Role[] },
+      { path: '/v2/descriptors',         label: 'Descriptor Registry',  icon: <DescriptorIcon />, allowedRoles: ['Admin', 'Operator', 'descriptor_admin', 'descriptor_author'] as Role[] },
       { path: '/v2/security-audit',      label: 'Security & Audit',     icon: <AuditIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
     ],
   },
@@ -70,9 +71,12 @@ function normalizeRole(role: string): string {
 }
 
 function canAccess(item: NavItem, role: string | undefined): boolean {
-  if (!item.allowedRoles || !role) return !item.allowedRoles;
-  const normalized = normalizeRole(role);
-  return item.allowedRoles.some((r) => r === normalized || r === role);
+  if (!item.allowedRoles) return true;
+  if (!role) return false;
+  const userRoleLower = role.toLowerCase();
+  return item.allowedRoles.some(
+    (r) => r === role || r.toLowerCase() === userRoleLower
+  );
 }
 
 export interface V2SidebarProps {
@@ -276,6 +280,8 @@ function ShieldIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" f
 function FrameworkIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="10" y="1" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="1" y="10" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4"/><path d="M10 12.5h5M13 10v5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M3.5 13.5V7.5h9V7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>; }
 /** Product Definitions icon — document with upload arrow */
 function ProductDefIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="2" width="9" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><path d="M11 10l2-2 2 2M13 8v5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+/** Descriptor Registry icon — document with a lifecycle arrow */
+function DescriptorIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="1" width="9" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5 5h5M5 8h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><path d="M12 9l2 2-2 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M14 11H9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>; }
 /** Security & Audit icon — lock with checkmark */
 function AuditIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5 7V5a3 3 0 116 0v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M6.5 11l1.5 1.5 2-2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 

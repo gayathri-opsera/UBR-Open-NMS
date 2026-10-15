@@ -48,6 +48,10 @@ const GroupSpecSchema = new mongoose.Schema({
   pollIntervalSeconds: { type: Number, default: 60 },
   subGroups:           { type: [String], default: [] },
   parameters:          { type: [ParameterSpecSchema], default: [] },
+  // Sidebar hierarchy — mirrors the real device web UI left-nav structure
+  uiPage:   { type: String, default: '' },   // 'Wireless' | 'Network' | 'Management' | 'Monitor'
+  uiParent: { type: String, default: '' },   // e.g. 'Radio 1' | 'IP Configuration'
+  uiTab:    { type: String, default: '' },   // e.g. 'Properties' | 'DFS' | 'DDRS/ATPC'
 }, { _id: false });
 
 const WireframeBodySchema = new mongoose.Schema({

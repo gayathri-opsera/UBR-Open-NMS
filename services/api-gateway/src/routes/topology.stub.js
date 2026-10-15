@@ -121,7 +121,7 @@ async function getInventoryDevices(bustCache = false) {
 function toNode(d, idx, parentNode) {
   const type   = d.deviceType || d.type || 'CPE';
   const health = toHealth(d.status || d.health);
-  const id     = d.id || d._id || d.deviceId || `dev-${idx}`;
+  const id     = String(d.id || d.deviceId || d._id || `dev-${idx}`);
   const rssi   = d.rssi ?? (type !== 'IDU' ? -60 - (idx % 20) : null);
   const snr    = d.snr  ?? (type !== 'IDU' ? 25  - (idx % 10) : null);
 
@@ -204,7 +204,7 @@ function buildEdges(nodes) {
       if (sibling) { n.parentDeviceId = sibling.id; return; }
     }
     // Priority 3: nearest CPE by round-robin (never BTS)
-    if (allCpes.length) n.parentDeviceId = allCpes[Math.abs(n.id.charCodeAt(0)) % allCpes.length].id;
+    if (allCpes.length) n.parentDeviceId = allCpes[Math.abs((String(n.id || '')).charCodeAt(0) || 0) % allCpes.length].id;
   });
 
   // 3. Round-robin fallback for CPEs still without a parent BTS

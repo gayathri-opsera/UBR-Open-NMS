@@ -168,9 +168,10 @@ export function DiscoveryRunStatusView({ runId, onComplete, onBack }: DiscoveryR
   const snmpDone    = run.status === 'COMPLETED' || (run.snmpAttemptCount !== undefined && run.snmpSuccessCount !== undefined);
   const classifyDone = run.status === 'COMPLETED';
 
-  const steps: Array<{ label: string; detail: string; done: boolean; active: boolean }> = [
+  const steps: Array<{ icon: string; label: string; detail: string; done: boolean; active: boolean }> = [
     {
-      label:  'ICMP Sweep',
+      icon:   '🔎',
+      label:  'Discover — ICMP Sweep',
       detail: sweep
         ? `${sweep.reachableHosts} reachable of ${sweep.totalHosts} hosts`
         : run.status === 'QUEUED' ? 'Waiting for worker…' : 'Scanning…',
@@ -178,22 +179,36 @@ export function DiscoveryRunStatusView({ runId, onComplete, onBack }: DiscoveryR
       active: !icmpDone,
     },
     {
-      label:  'SNMP Fingerprint',
+      icon:   '🔑',
+      label:  'Identify — SNMP Fingerprint',
       detail: run.snmpAttemptCount !== undefined
-        ? `${run.snmpSuccessCount ?? 0} / ${run.snmpAttemptCount} succeeded`
-        : icmpDone ? 'Querying MIB-II OIDs…' : 'Waiting for ICMP sweep…',
+        ? `${run.snmpSuccessCount ?? 0} / ${run.snmpAttemptCount} sysObjectID reads succeeded`
+        : icmpDone ? 'Querying MIB-II sysObjectID OIDs…' : 'Waiting for ICMP sweep…',
       done:   snmpDone,
       active: icmpDone && !snmpDone,
     },
     {
-      label:  'Classification',
-      detail: classifyDone ? 'Vendor / model identified' : snmpDone ? 'Mapping OIDs to vendor catalogue…' : 'Waiting for SNMP data…',
+      icon:   '📋',
+      label:  'Resolve — Descriptor Registry Lookup',
+      detail: classifyDone
+        ? 'sysObjectID matched against descriptor registry — vendor / model / role resolved'
+        : snmpDone ? 'Matching OIDs against active descriptor registry…' : 'Waiting for sysObjectID data…',
       done:   classifyDone,
       active: snmpDone && !classifyDone,
     },
     {
-      label:  'Discovery Complete',
-      detail: classifyDone ? 'Results ready — see below' : 'Pending',
+      icon:   '🔗',
+      label:  'Bind — BTS / CPE Role Assignment',
+      detail: classifyDone
+        ? 'Radio devices paired by enterprise OID arc (BTS ↔ CPE connectedBtsSerial set)'
+        : 'Pending descriptor resolution…',
+      done:   classifyDone,
+      active: false,
+    },
+    {
+      icon:   '📡',
+      label:  'Manage — Results Ready',
+      detail: classifyDone ? 'Provision devices to start live polling and Node View' : 'Pending',
       done:   classifyDone,
       active: false,
     },
@@ -232,12 +247,6 @@ export function DiscoveryRunStatusView({ runId, onComplete, onBack }: DiscoveryR
         }}
       >
         {steps.map((step, idx) => {
-          const icon = step.done
-            ? '✅'
-            : step.active
-            ? '⏳'
-            : '⬜';
-
           const isLast = idx === steps.length - 1;
           return (
             <div key={step.label}>
@@ -251,7 +260,7 @@ export function DiscoveryRunStatusView({ runId, onComplete, onBack }: DiscoveryR
               >
                 {/* Icon + vertical connector */}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, minWidth: 24 }}>
-                  <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>{icon}</span>
+                  <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>{step.done ? '✅' : step.active ? '⏳' : '⬜'}</span>
                   {!isLast && (
                     <div style={{
                       width: 2,

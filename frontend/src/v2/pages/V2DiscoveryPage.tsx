@@ -980,6 +980,70 @@ function SnmpDiscoveryTab({ initialScope }: SnmpDiscoveryTabProps) {
         </p>
       </div>
 
+      {/* ── Descriptor Registry Pipeline (PPT Architecture) ──────────────────── */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(59,130,246,0.06) 0%, rgba(16,185,129,0.06) 100%)',
+        border: '1px solid rgba(59,130,246,0.25)',
+        borderRadius: 12,
+        padding: '16px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            📡 Descriptor Registry — Template-Driven Discovery Pipeline
+          </div>
+          <div style={{
+            fontSize: 11, padding: '3px 10px', borderRadius: 20,
+            background: 'rgba(16,185,129,0.15)', color: '#10b981',
+            border: '1px solid rgba(16,185,129,0.3)', fontWeight: 600,
+          }}>
+            ✅ Select a Device Template below to filter results to matching devices only
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: 0, overflowX: 'auto' }}>
+          {([
+            { icon: '🔎', label: 'Discover',  sub: 'ICMP sweep + SNMP probe across scope',     color: '#3b82f6' },
+            { icon: '🔑', label: 'Identify',  sub: 'Read sysObjectID from each responding device', color: '#8b5cf6' },
+            { icon: '📋', label: 'Resolve',   sub: 'Match OID against selected Device Template', color: '#f59e0b', highlight: true },
+            { icon: '🔗', label: 'Bind',      sub: 'Assign BTS / CPE role from enterprise OID arc', color: '#10b981' },
+            { icon: '📡', label: 'Manage',    sub: 'Live poll + Node View sidebar per descriptor', color: '#22c55e' },
+          ] as const).map((step, i, arr) => (
+            <div key={step.label} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                padding: '10px 14px',
+                background: (step as {highlight?: boolean}).highlight ? `${step.color}22` : `${step.color}0d`,
+                border: `1px solid ${step.color}${(step as {highlight?: boolean}).highlight ? '70' : '35'}`,
+                borderRadius: 8, minWidth: 115,
+                boxShadow: (step as {highlight?: boolean}).highlight ? `0 0 12px ${step.color}30` : 'none',
+              }}>
+                <span style={{ fontSize: 22 }}>{step.icon}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: step.color, marginTop: 2 }}>{step.label}</span>
+                <span style={{ fontSize: 10, color: 'var(--vf-text-muted)', textAlign: 'center', lineHeight: 1.4, marginTop: 2 }}>{step.sub}</span>
+                {(step as {highlight?: boolean}).highlight && (
+                  <span style={{ fontSize: 9, marginTop: 4, padding: '1px 6px', borderRadius: 10, background: `${step.color}30`, color: step.color, fontWeight: 700 }}>
+                    KEY STEP
+                  </span>
+                )}
+              </div>
+              {i < arr.length - 1 && (
+                <div style={{ color: 'var(--vf-text-muted)', fontSize: 20, padding: '0 4px', flexShrink: 0, alignSelf: 'center' }}>→</div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{
+          fontSize: 11, color: 'var(--vf-text-muted)',
+          borderTop: '1px solid rgba(59,130,246,0.15)', paddingTop: 10,
+          display: 'flex', gap: 16, flexWrap: 'wrap',
+        }}>
+          <span>🎯 <strong style={{ color: 'var(--vf-text-secondary)' }}>With template selected:</strong> Only devices whose <code style={{ fontFamily: 'var(--vf-font-mono)', background: 'var(--vf-surface-raised)', padding: '1px 4px', borderRadius: 3 }}>sysObjectID</code> matches the template's OID arc are returned.</span>
+          <span>🌐 <strong style={{ color: 'var(--vf-text-secondary)' }}>Without template:</strong> All SNMP-responding devices are shown and auto-classified via the descriptor registry.</span>
+        </div>
+      </div>
+
       {/* Workflow: Form → Status → Results */}
       {view === 'form' && (
         <div style={{ maxWidth: 640 }}>

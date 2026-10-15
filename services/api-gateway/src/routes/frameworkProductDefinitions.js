@@ -222,6 +222,23 @@ async function buildWireframeAfterActivation(req, res, next) {
  * This decorator extracts the existing versionId, looks it up in MongoDB, and
  * returns the full version object — allowing the frontend to recover seamlessly.
  */
+/**
+ * Lifecycle-aware duplicate upload handler.
+ *
+ * When the Java service rejects an upload as UPLOAD_REJECTED (same content hash
+ * already on record), this decorator intercepts the 422, looks up the existing
+ * version, and returns a structured 200 response with:
+ *   - alreadyUploaded: true
+ *   - duplicateNote:   machine-readable signal for the frontend
+ *   - suggestedAction: what the user should do next
+ *   - message:         human-readable explanation
+ *
+ * Lifecycle state → suggested action mapping:
+ *   STAGED           → Activate it directly (already staged)
+ *   ACTIVE           → Nothing needed; it's live
+ *   DELETED/SUPERSEDED → Re-upload under a new version number
+ *   anything else    → Stage then activate
+ */
 async function uploadIdempotencyDecorator(proxyRes, proxyResData, userReq, userRes) {
   const text = proxyResData.toString('utf8');
   try {
@@ -243,16 +260,67 @@ async function uploadIdempotencyDecorator(proxyRes, proxyResData, userReq, userR
       .findOne({ versionId: existingVersionId });
     if (!existing) return proxyResData;
 
-    // Override the response status to 200 on the ACTUAL client response (userRes),
-    // NOT proxyRes — express-http-proxy reads proxyRes.statusCode before calling
-    // this decorator, so only userRes.statusCode controls what the client sees.
-    userRes.statusCode = 200;
+    const status = (existing.lifecycleStatus || 'STAGED').toUpperCase();
+
+    // ── Determine duplicate note and suggested action by lifecycle state ──────
+    let duplicateNote;
+    let suggestedAction;
+    let httpStatus = 200;
+    let message;
+
+    switch (status) {
+      case 'ACTIVE':
+        duplicateNote   = 'DUPLICATE_ACTIVE';
+        suggestedAction = 'none';
+        message         = `This file is already uploaded and ACTIVE as version "${existing.versionId}". No action needed.`;
+        break;
+
+      case 'STAGED':
+        duplicateNote   = 'DUPLICATE_STAGED';
+        suggestedAction = 'activate';
+        message         = 'This file is already uploaded and staged. Click Activate to make it live.';
+        break;
+
+      case 'DELETED':
+      case 'SUPERSEDED':
+        // Terminal state — the content hash is on record but can't be re-used.
+        // Return 409 with guidance to upload under a new version number.
+        duplicateNote   = 'DUPLICATE_TERMINAL';
+        suggestedAction = 'upload_new_version';
+        message         = `This file was previously uploaded (now ${status}). Please upload again using a new version number to create a fresh copy.`;
+        httpStatus      = 409;
+        break;
+
+      default:
+        // UPLOADED, VALIDATING, etc. — in-progress; return existing so user can resume
+        duplicateNote   = 'DUPLICATE_IN_PROGRESS';
+        suggestedAction = 'stage_then_activate';
+        message         = `This file is already uploaded (${status}). Stage it then activate to make it live.`;
+        break;
+    }
+
+    userRes.statusCode = httpStatus;
     logger.info({
-      msg:       'upload: returning existing version for duplicate upload',
-      versionId: existingVersionId,
-      defId:     existing.definitionId,
-      status:    existing.lifecycleStatus,
+      msg:           'upload: duplicate content detected',
+      versionId:     existingVersionId,
+      defId:         existing.definitionId,
+      status,
+      duplicateNote,
+      suggestedAction,
     });
+
+    if (httpStatus === 409) {
+      return JSON.stringify({
+        error:          'DUPLICATE_CONTENT',
+        message,
+        duplicateNote,
+        suggestedAction,
+        existingVersionId,
+        definitionId:  existing.definitionId,
+        lifecycleStatus: status,
+      });
+    }
+
     return JSON.stringify({
       versionId:        existing.versionId,
       definitionId:     existing.definitionId,
@@ -262,11 +330,14 @@ async function uploadIdempotencyDecorator(proxyRes, proxyResData, userReq, userR
       deviceType:       existing.deviceType  || '',
       lifecycleStatus:  existing.lifecycleStatus || 'STAGED',
       validationStatus: existing.validationStatus || 'VALID',
-      uploadedFormat:   existing.uploadedFormat || 'XML',
-      description:      existing.description || '',
+      uploadedFormat:   existing.uploadedFormat   || 'XML',
+      description:      existing.description      || '',
       createdAt:        existing.createdAt,
       updatedAt:        existing.updatedAt,
-      alreadyUploaded:  true,   // ← frontend key: show recovery banner + enable Stage & Activate
+      alreadyUploaded:  true,
+      duplicateNote,
+      suggestedAction,
+      message,
     });
   } catch (e) {
     logger.warn({ msg: 'upload: idempotency decorator error', err: e.message });
@@ -725,9 +796,169 @@ router.get('/',
 
 // Global upload history across all definitions — Admin/SuperAdmin only.
 // Must be registered before /:definitionId/* routes so "history" is not treated as a definitionId.
+//
+// Supplement with any Descriptor Registry active descriptors that are not yet in the
+// Java service's product_definition_versions (e.g. activations that pre-date the
+// normalizedMetadataJson write or that wrote only partial fields).
+async function historyWithRegistryDecorator(proxyRes, proxyResData, userReq, userRes) {
+  if (proxyRes.statusCode !== 200) return proxyResData;
+  try {
+    const text = proxyResData.toString('utf8');
+    let javaItems = [];
+    try {
+      const parsed = JSON.parse(text);
+      javaItems = Array.isArray(parsed) ? parsed : [];
+    } catch { return proxyResData; }
+
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState !== 1) return proxyResData;
+
+    // ── Inject normalizedMetadataJson for any Java items that are missing it ──
+    // The Java service reads from product_definition_versions but does NOT map the
+    // normalizedMetadataJson field if it was added after the entity was first created.
+    const PDEF_DB = process.env.PRODUCTDEF_DB_NAME || 'ubrnms_productdef';
+    const pdb = mongoose.connection.client.db(PDEF_DB);
+    const rdb = mongoose.connection.client.db('ubrnms'); // Descriptor Registry
+
+    const missingIds = javaItems
+      .filter((item) => !item.normalizedMetadataJson)
+      .map((item) => item.definitionId || item.productDefinitionId)
+      .filter(Boolean);
+
+    if (missingIds.length > 0) {
+      // Fetch normalizedMetadataJson from product_definition_versions (our writes)
+      const pdvDocs = await pdb.collection('product_definition_versions')
+        .find({ definitionId: { $in: missingIds } })
+        .project({ definitionId: 1, normalizedMetadataJson: 1, _id: 0 })
+        .toArray();
+      const pdvMap = Object.fromEntries(pdvDocs.map((d) => [d.definitionId, d.normalizedMetadataJson]));
+
+      // Fetch from Descriptor Registry (canonical source when still missing)
+      const drDocs = await rdb.collection('descriptor_versions')
+        .find({ productDefinitionId: { $in: missingIds }, state: 'Active' })
+        .project({ productDefinitionId: 1, canonicalJson: 1, _id: 0 })
+        .toArray();
+      const drMap = Object.fromEntries(drDocs.map((d) => [d.productDefinitionId, d.canonicalJson]));
+
+      for (const item of javaItems) {
+        const id = item.definitionId || item.productDefinitionId;
+        if (!id) continue;
+        if (pdvMap[id]) {
+          item.normalizedMetadataJson = pdvMap[id];
+          continue;
+        }
+        const cj = drMap[id];
+        if (!cj) continue;
+        const matchRules = cj.identity?.matchRules || [];
+        const normalizedGroups = [
+          ...(cj.config?.groups || []),
+          ...(cj.monitor?.groups || []),
+        ].map((g) => ({
+          groupName: g.groupId,
+          parameters: (g.parameters || []).map((p) => ({
+            id:           p.parameterId || p.id,
+            displayName:  p.displayName || p.label || p.parameterId,
+            dataType:     p.dataType || 'STRING',
+            unit:         p.units || null,
+            defaultValue: p.defaultValue ?? null,
+            minValue:     p.minValue ?? null,
+            maxValue:     p.maxValue ?? null,
+            enumValues:   p.enumValues?.length ? p.enumValues : null,
+            snmpOid:      p.snmpOid ? `.${p.snmpOid.replace(/^\./, '')}` : (p.oid ? `.${p.oid.replace(/^\./, '')}` : null),
+            cliCommand:   null, cliParseRegex: null, apiPath: null, grpcPath: null,
+            uiVisibleTo:  p.readOnly ? ['ReadOnly'] : ['Operator'],
+            thresholdHigh: null, thresholdLow: null,
+          })),
+        }));
+        item.normalizedMetadataJson = JSON.stringify({
+          name:                `${cj.identity?.vendor || ''} ${cj.identity?.model || ''}`.trim(),
+          vendor:              cj.identity?.vendor || null,
+          model:               cj.identity?.model  || null,
+          productFamily:       cj.identity?.productFamily || null,
+          fingerprints:        matchRules.map((r) => ({ sysObjectId: r.value, matchOp: r.op })),
+          supportedProtocols:  (cj.capabilities?.protocols || []).map((p) =>
+                                 (typeof p === 'string' ? p : p.type || 'SNMP').toUpperCase()),
+          parameterGroups:     normalizedGroups,
+        });
+      }
+    }
+
+    // ── Supplement with Descriptor Registry active entries not in Java list ────
+    const knownIds = new Set(javaItems.map((d) => d.definitionId || d.productDefinitionId));
+    const activeDescriptors = await rdb.collection('descriptor_versions')
+      .find({ state: 'Active' })
+      .project({ productDefinitionId: 1, version: 1, canonicalJson: 1, contentHash: 1, _id: 1, createdAt: 1, updatedAt: 1 })
+      .toArray();
+
+    const extras = [];
+    for (const d of activeDescriptors) {
+      if (knownIds.has(d.productDefinitionId)) continue;
+      const cj = d.canonicalJson || {};
+      const matchRules = cj.identity?.matchRules || [];
+      const normalizedGroups = [
+        ...(cj.config?.groups || []),
+        ...(cj.monitor?.groups || []),
+      ].map((g) => ({
+        groupName: g.groupId,
+        parameters: (g.parameters || []).map((p) => ({
+          id:           p.parameterId || p.id,
+          displayName:  p.displayName || p.label || p.parameterId,
+          dataType:     p.dataType || 'STRING',
+          unit:         p.units || null,
+          defaultValue: p.defaultValue ?? null,
+          minValue:     p.minValue ?? null,
+          maxValue:     p.maxValue ?? null,
+          enumValues:   p.enumValues?.length ? p.enumValues : null,
+          snmpOid:      p.snmpOid ? `.${p.snmpOid.replace(/^\./, '')}` : (p.oid ? `.${p.oid.replace(/^\./, '')}` : null),
+          cliCommand:   null, cliParseRegex: null, apiPath: null, grpcPath: null,
+          uiVisibleTo:  p.readOnly ? ['ReadOnly'] : ['Operator'],
+          thresholdHigh: null, thresholdLow: null,
+        })),
+      }));
+      const normMeta = JSON.stringify({
+        name:               `${cj.identity?.vendor || ''} ${cj.identity?.model || ''}`.trim(),
+        vendor:             cj.identity?.vendor || null,
+        model:              cj.identity?.model  || null,
+        productFamily:      cj.identity?.productFamily || null,
+        fingerprints:       matchRules.map((r) => ({ sysObjectId: r.value, matchOp: r.op })),
+        supportedProtocols: (cj.capabilities?.protocols || []).map((p) =>
+                              (typeof p === 'string' ? p : p.type || 'SNMP').toUpperCase()),
+        parameterGroups:    normalizedGroups,
+      });
+      extras.push({
+        id:                    d._id.toString(),
+        definitionId:          d.productDefinitionId,
+        versionId:             d._id.toString(),
+        name:                  `${cj.identity?.vendor || ''} ${cj.identity?.model || ''}`.trim(),
+        vendor:                cj.identity?.vendor || null,
+        model:                 cj.identity?.model  || null,
+        deviceType:            null,
+        schemaVersion:         'urn:nms:descriptor:2.0',
+        lifecycleStatus:       'ACTIVE',
+        validationStatus:      'VALID',
+        contentHash:           d.contentHash || null,
+        normalizedMetadataJson: normMeta,
+        version:               1,
+        registryVersion:       null,
+        createdAt:             d.createdAt || null,
+        updatedAt:             d.updatedAt || null,
+        _fromDescriptorRegistry: true,
+      });
+      knownIds.add(d.productDefinitionId);
+    }
+
+    if (missingIds.length === 0 && extras.length === 0) return proxyResData;
+    logger.info({ msg: 'history: injected normalizedMetadata + registry extras', patched: missingIds.length, extras: extras.length });
+    return JSON.stringify([...javaItems, ...extras]);
+  } catch (e) {
+    logger.warn({ msg: 'history: registry supplement error', err: e.message });
+    return proxyResData;
+  }
+}
+
 router.get('/history',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.Admin, 'product-definitions.history'),
-  productDefinitionProxy(),
+  productDefinitionProxy({ userResDecorator: historyWithRegistryDecorator }),
 );
 
 /**
@@ -799,9 +1030,103 @@ router.get('/:definitionId/versions/:fromVersionId/diff/:toVersionId',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.versions.diff'),
   productDefinitionProxy(),
 );
+/**
+ * Inject normalizedMetadataJson from the Descriptor Registry when the Java
+ * service returns it as null.  This handles descriptors that were activated
+ * via the Descriptor Registry pathway (not through the Java upload flow), and
+ * cases where the field was added to the MongoDB document after the initial
+ * activation (backfill-safe: checks both product_definition_versions and
+ * descriptor_versions for the canonical JSON).
+ */
+async function versionSchemaDecorator(proxyRes, proxyResData, userReq, userRes) {
+  if (proxyRes.statusCode !== 200) return proxyResData;
+  try {
+    const text = proxyResData.toString('utf8');
+    let record;
+    try { record = JSON.parse(text); } catch { return proxyResData; }
+
+    // Nothing to do if the Java service already filled in the field.
+    if (record.normalizedMetadataJson) return proxyResData;
+
+    const definitionId = record.definitionId || record.productDefinitionId;
+    if (!definitionId) return proxyResData;
+
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState !== 1) return proxyResData;
+
+    const PDEF_DB = process.env.PRODUCTDEF_DB_NAME || 'ubrnms_productdef';
+    const pdb = mongoose.connection.client.db(PDEF_DB);
+
+    // 1. Try product_definition_versions first (our writes have it there after fix)
+    const pdv = await pdb.collection('product_definition_versions').findOne(
+      { definitionId },
+      { projection: { normalizedMetadataJson: 1, _id: 0 } },
+    );
+    if (pdv?.normalizedMetadataJson) {
+      record.normalizedMetadataJson = pdv.normalizedMetadataJson;
+      logger.info({ msg: 'versionSchema: injected from product_definition_versions', definitionId });
+      return JSON.stringify(record);
+    }
+
+    // 2. Fall back to Descriptor Registry canonical JSON
+    const rdb = mongoose.connection.client.db('ubrnms');
+    const descriptor = await rdb.collection('descriptor_versions').findOne(
+      { productDefinitionId: definitionId, state: 'Active' },
+      { projection: { canonicalJson: 1, _id: 0 } },
+    );
+    if (!descriptor?.canonicalJson) return proxyResData;
+
+    const cj = descriptor.canonicalJson;
+    const matchRules = cj.identity?.matchRules || [];
+    const normalizedGroups = [
+      ...(cj.config?.groups || []),
+      ...(cj.monitor?.groups || []),
+    ].map((g) => ({
+      groupName: g.groupId,
+      parameters: (g.parameters || []).map((p) => ({
+        id:           p.parameterId || p.id,
+        displayName:  p.displayName || p.label || p.parameterId,
+        dataType:     p.dataType || 'STRING',
+        unit:         p.units || null,
+        defaultValue: p.defaultValue ?? null,
+        minValue:     p.minValue ?? null,
+        maxValue:     p.maxValue ?? null,
+        enumValues:   p.enumValues?.length ? p.enumValues : null,
+        snmpOid:      p.snmpOid ? `.${p.snmpOid.replace(/^\./, '')}` : (p.oid ? `.${p.oid.replace(/^\./, '')}` : null),
+        cliCommand:   null, cliParseRegex: null, apiPath: null, grpcPath: null,
+        uiVisibleTo:  p.readOnly ? ['ReadOnly'] : ['Operator'],
+        thresholdHigh: null, thresholdLow: null,
+      })),
+    }));
+
+    record.normalizedMetadataJson = JSON.stringify({
+      name:               `${cj.identity?.vendor || ''} ${cj.identity?.model || ''}`.trim(),
+      vendor:             cj.identity?.vendor || null,
+      model:              cj.identity?.model  || null,
+      productFamily:      cj.identity?.productFamily || null,
+      fingerprints:       matchRules.map((r) => ({ sysObjectId: r.value, matchOp: r.op })),
+      supportedProtocols: (cj.capabilities?.protocols || []).map((p) =>
+                            (typeof p === 'string' ? p : p.type || 'SNMP').toUpperCase()),
+      parameterGroups:    normalizedGroups,
+    });
+
+    // Backfill the product_definition_versions document so subsequent calls are fast
+    pdb.collection('product_definition_versions').updateOne(
+      { definitionId },
+      { $set: { normalizedMetadataJson: record.normalizedMetadataJson, updatedAt: new Date() } },
+    ).catch(() => {});
+
+    logger.info({ msg: 'versionSchema: injected from descriptor_versions canonicalJson', definitionId });
+    return JSON.stringify(record);
+  } catch (e) {
+    logger.warn({ msg: 'versionSchema: injection error', err: e.message });
+    return proxyResData;
+  }
+}
+
 router.get('/:definitionId/versions/:versionId',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.versions.get'),
-  productDefinitionProxy(),
+  productDefinitionProxy({ userResDecorator: versionSchemaDecorator }),
 );
 router.get('/:definitionId/versions/:versionId/report',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.versions.report'),
@@ -867,9 +1192,11 @@ router.get('/:definitionId/versions/:versionId/report',
 );
 
 // Active version and lifecycle history: ReadOnly+
+// Decorator: inject normalizedMetadataJson when the Java service returns it as null.
+// This happens for Descriptor-Registry-created or gateway-native definitions.
 router.get('/:definitionId/active',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.active.get'),
-  productDefinitionProxy(),
+  productDefinitionProxy({ userResDecorator: versionSchemaDecorator }),
 );
 router.get('/:definitionId/lifecycle-history',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'product-definitions.lifecycle-history'),
@@ -915,6 +1242,75 @@ async function nativeLifecycleHandler(action, req, res, next) {
     );
 
     if (action === 'activate') {
+      // ── Build normalizedMetadataJson from parameter_registry_entries ──────────
+      // This is the field getVersionSchema() reads to populate the Discovery form.
+      // For gateway-native uploads (Config GUI, XLSX) the Java service never built
+      // this, so we compute it now from the registry entries we wrote at upload time.
+      let normalizedMetadataJson = ver.normalizedMetadataJson || null;
+      if (!normalizedMetadataJson) {
+        try {
+          const paramEntries = await db.collection('parameter_registry_entries')
+            .find({ productDefinitionId: definitionId, versionId: ver.versionId })
+            .sort({ groupDisplayOrder: 1, displayOrder: 1 })
+            .toArray();
+          const fpEntries = await db.collection('fingerprint_registry_entries')
+            .find({ productDefinitionId: definitionId })
+            .toArray();
+
+          if (paramEntries.length > 0) {
+            // Group by groupId
+            const groupMap = new Map();
+            for (const p of paramEntries) {
+              const gid = p.groupId || 'default';
+              if (!groupMap.has(gid)) groupMap.set(gid, []);
+              groupMap.get(gid).push({
+                id:           p.parameterId,
+                displayName:  p.displayName || p.parameterId,
+                dataType:     p.dataType    || 'STRING',
+                unit:         p.unit        || null,
+                defaultValue: p.defaultValue ?? null,
+                minValue:     p.minValue    ?? null,
+                maxValue:     p.maxValue    ?? null,
+                enumValues:   p.enumValues?.length ? p.enumValues : null,
+                snmpOid:      p.snmpOid     || null,
+                cliCommand:   null,
+                uiVisibleTo:  p.readOnly ? ['ReadOnly'] : ['Operator'],
+                thresholdHigh: null, thresholdLow: null,
+              });
+            }
+            const parameterGroups = Array.from(groupMap.entries()).map(([groupName, parameters]) => ({
+              groupName,
+              parameters,
+            }));
+            const fingerprints = fpEntries.map((f) => ({
+              sysObjectId:     f.fingerprintValue || null,
+              sysDescrPattern: f.fingerprintType === 'SNMP_SYSDESCR' ? f.fingerprintValue : undefined,
+              matchOp:         f.matchOp || 'prefix',
+            })).filter((f) => f.sysObjectId);
+            const supportedProtocols = fpEntries.length > 0
+              ? (fpEntries[0].supportedProtocols || ['SNMP'])
+              : ['SNMP'];
+            normalizedMetadataJson = JSON.stringify({
+              name:               ver.name   || `${ver.vendor || ''} ${ver.model || ''}`.trim(),
+              vendor:             ver.vendor || null,
+              model:              ver.model  || null,
+              productFamily:      ver.vendor || null,
+              fingerprints,
+              supportedProtocols,
+              parameterGroups,
+            });
+            // Persist so next reads are fast (backfill)
+            await db.collection('product_definition_versions').updateOne(
+              { definitionId, versionId: ver.versionId },
+              { $set: { normalizedMetadataJson, updatedAt: now } },
+            );
+            logger.info({ msg: 'native-activate: normalizedMetadataJson built from registry', definitionId, groups: parameterGroups.length, params: paramEntries.length });
+          }
+        } catch (nmErr) {
+          logger.warn({ msg: 'native-activate: normalizedMetadataJson build failed', err: nmErr.message });
+        }
+      }
+
       await db.collection('product_definition_active_versions').updateOne(
         { productDefinitionId: definitionId },
         {

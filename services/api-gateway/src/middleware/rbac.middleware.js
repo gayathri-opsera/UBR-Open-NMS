@@ -13,6 +13,14 @@ const { v4: uuidv4 } = require('uuid');
 // enforced via checkActionPermission_mw on specific route handlers.
 const ROLE_HIERARCHY = {
   admin: 3,
+  // ── Descriptor lifecycle roles (PPT Slide 9, PDL-110) ──────────────────────
+  // descriptor_admin: global role that can approve, deprecate, retire, purge
+  //   descriptors. Approve/retire/purge require maker-checker (a different user
+  //   from the one who initiated the request).
+  descriptor_admin:  3,
+  // descriptor_author: can upload and validate Draft descriptors only.
+  //   Cannot approve, activate or retire.
+  descriptor_author: 2,
   operator: 2,
   network_engineer: 2,
   noc_operator: 1,
@@ -56,6 +64,26 @@ const MFA_REQUIRED_ADMIN_ROUTES = [
  * Deny-by-default: unlisted roles are forbidden.
  */
 const ACTION_PERMISSIONS = {
+  // ── Descriptor lifecycle actions (PPT Slide 9, PDL §10) ───────────────────
+  // Upload/validate — Descriptor Author or Admin
+  'descriptor.upload':                new Set(['admin', 'descriptor_admin', 'descriptor_author']),
+  'descriptor.validate':              new Set(['admin', 'descriptor_admin', 'descriptor_author']),
+  // Approve/Activate — Descriptor Admin ONLY (not the uploader; enforced in route)
+  'descriptor.approve':               new Set(['admin', 'descriptor_admin']),
+  'descriptor.activate':              new Set(['admin', 'descriptor_admin']),
+  // Deprecate — Descriptor Admin ONLY
+  'descriptor.deprecate':             new Set(['admin', 'descriptor_admin']),
+  // Retire/Purge — Descriptor Admin, second approver required (enforced in route)
+  'descriptor.retire':                new Set(['admin', 'descriptor_admin']),
+  'descriptor.purge':                 new Set(['admin', 'descriptor_admin']),
+  // Delete Draft/Invalid (no dependents) — Descriptor Admin or Author
+  'descriptor.delete_draft':          new Set(['admin', 'descriptor_admin', 'descriptor_author']),
+  // Migrate devices between versions — Descriptor Admin or Network Admin
+  'descriptor.migrate':               new Set(['admin', 'descriptor_admin', 'network_engineer']),
+  // Deprovision devices — Descriptor Admin or Network Admin
+  'descriptor.deprovision':           new Set(['admin', 'descriptor_admin', 'network_engineer']),
+  // Read dependents/impact — all authenticated roles
+  'descriptor.read':                  new Set(['admin', 'descriptor_admin', 'descriptor_author', 'operator', 'network_engineer', 'noc_operator', 'compliance', 'auditor', 'viewer', 'user']),
   'discovery.mode.manage':            new Set(['admin']),
   'discovery.status.read':            new Set(['admin', 'network_engineer', 'noc_operator', 'compliance', 'auditor', 'viewer']),
   'onboarding.assignment.override':   new Set(['admin']),
@@ -241,21 +269,23 @@ const FRAMEWORK_CAPABILITY = {
  */
 const PLATFORM_ROLE_TO_FRAMEWORK_CAPABILITY = {
   // SuperAdmin tier
-  admin:            FRAMEWORK_CAPABILITY.SuperAdmin,
-  super_admin:      FRAMEWORK_CAPABILITY.SuperAdmin,
-  framework_admin:  FRAMEWORK_CAPABILITY.SuperAdmin,
-  system_admin:     FRAMEWORK_CAPABILITY.SuperAdmin,
+  admin:             FRAMEWORK_CAPABILITY.SuperAdmin,
+  super_admin:       FRAMEWORK_CAPABILITY.SuperAdmin,
+  framework_admin:   FRAMEWORK_CAPABILITY.SuperAdmin,
+  system_admin:      FRAMEWORK_CAPABILITY.SuperAdmin,
+  descriptor_admin:  FRAMEWORK_CAPABILITY.SuperAdmin,   // PPT Slide 9
   // Operator tier
-  operator:         FRAMEWORK_CAPABILITY.Operator,
-  nms_operator:     FRAMEWORK_CAPABILITY.Operator,
-  network_engineer: FRAMEWORK_CAPABILITY.Operator,
-  noc_operator:     FRAMEWORK_CAPABILITY.Operator,
+  operator:          FRAMEWORK_CAPABILITY.Operator,
+  nms_operator:      FRAMEWORK_CAPABILITY.Operator,
+  network_engineer:  FRAMEWORK_CAPABILITY.Operator,
+  noc_operator:      FRAMEWORK_CAPABILITY.Operator,
+  descriptor_author: FRAMEWORK_CAPABILITY.Operator,     // PPT Slide 9
   // ReadOnly tier
-  viewer:           FRAMEWORK_CAPABILITY.ReadOnly,
-  readonly:         FRAMEWORK_CAPABILITY.ReadOnly,
-  compliance:       FRAMEWORK_CAPABILITY.ReadOnly,
-  auditor:          FRAMEWORK_CAPABILITY.ReadOnly,
-  user:             FRAMEWORK_CAPABILITY.ReadOnly,
+  viewer:            FRAMEWORK_CAPABILITY.ReadOnly,
+  readonly:          FRAMEWORK_CAPABILITY.ReadOnly,
+  compliance:        FRAMEWORK_CAPABILITY.ReadOnly,
+  auditor:           FRAMEWORK_CAPABILITY.ReadOnly,
+  user:              FRAMEWORK_CAPABILITY.ReadOnly,
 };
 
 /**
@@ -337,12 +367,31 @@ function requireFrameworkCapability(requiredCapability, routeLabel) {
   };
 }
 
+// ── Descriptor-specific capability check ─────────────────────────────────────
+/**
+ * Returns true when the user's role is allowed to perform the given descriptor action.
+ * Used inside descriptors.routes.js for fine-grained per-action gating.
+ */
+function canDescriptor(action, user) {
+  return checkActionPermission(`descriptor.${action}`, user);
+}
+
+/**
+ * Express middleware factory for descriptor action gating.
+ * Usage: router.post('/retire', requireDescriptorAction('retire'), handler)
+ */
+function requireDescriptorAction(action) {
+  return checkActionPermission_mw(`descriptor.${action}`, 'descriptor');
+}
+
 module.exports = {
   requireRole,
   checkActionPermission,
   checkActionPermission_mw,
   requireFrameworkCapability,
   resolveFrameworkCapability,
+  canDescriptor,
+  requireDescriptorAction,
   ROUTE_PERMISSIONS,
   ROLE_HIERARCHY,
   ACTION_PERMISSIONS,

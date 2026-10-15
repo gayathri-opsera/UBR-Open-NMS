@@ -1,4 +1,6 @@
-export type Role = 'Admin' | 'Operator' | 'User' | 'admin' | 'operator' | 'user';
+export type Role = 'Admin' | 'Operator' | 'User' | 'admin' | 'operator' | 'user'
+  | 'descriptor_admin' | 'descriptor_author' | 'Descriptor_admin' | 'Descriptor_author'
+  | 'network_engineer' | 'noc_operator' | 'compliance' | 'auditor' | 'viewer';
 
 export interface AuthTokens {
   accessToken: string;

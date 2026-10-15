@@ -724,6 +724,7 @@ services:
       <<: *node-env
       PORT: "3000"
       JWT_PUBLIC_KEY: "${JWT_PUBLIC_KEY}"
+      JWT_PRIVATE_KEY: "${JWT_PRIVATE_KEY}"
       JWT_ISSUER: ubr-nms
       JWT_AUDIENCE: ubr-nms-api
       CORS_ORIGIN: "http://localhost:5173"

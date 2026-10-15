@@ -129,6 +129,154 @@ function validateParameter(entry, groupId) {
  * @param {boolean}  [options.strict=false]  Throw on validation errors instead of logging them.
  * @returns {{ wireframe: object, parameterCount: number, groupCount: number, validationErrors: string[] }}
  */
+
+// ── UI Hierarchy helpers ───────────────────────────────────────────────────────
+
+function humanizeGroupLabel(groupId) {
+  const ACRONYMS = new Set(['ip', 'vlan', 'dhcp', 'dcs', 'ddrs', 'atpc', 'snr', 'qos', 'gps', 'ofdma', 'snmp', 'kpi', 'mtu']);
+  return (groupId || '')
+    .replace(/[-_.]+/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/**
+ * Derive sidebar hierarchy (uiPage, uiParent, uiTab) from a descriptor groupId.
+ * Mirrors the real device UI structure (Wireless → Radio 1/2/2.4GHz/QoS, Network, Management, Monitor).
+ * @param {string} groupId
+ * @param {object} [firstEntry]  first parameter entry (forward-compat: may carry uiPage from future Java service)
+ * @returns {{ uiPage: string, uiParent: string, uiTab: string }}
+ */
+function deriveUiHierarchy(groupId, firstEntry) {
+  if (firstEntry && firstEntry.uiPage) {
+    return { uiPage: firstEntry.uiPage, uiParent: firstEntry.uiParent || '', uiTab: firstEntry.uiTab || '' };
+  }
+  const id = (groupId || '').toLowerCase();
+
+  // ── Radio 1 ─────────────────────────────────────────────────────────────────
+  if (id === 'radio1.properties' || id === 'radio.properties')
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'Properties' };
+  if (id === 'radio1.ddrs' || id === 'radio1.ddrsatpc' || id === 'radio1.atpc')
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'DDRS/ATPC' };
+  if (id === 'radio1.dfs')  return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'DFS' };
+  if (id === 'radio1.dcs')  return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'DCS' };
+  if (id === 'radio1.kpi')  return { uiPage: 'Monitor',  uiParent: 'Radio 1', uiTab: 'KPIs' };
+  if (id.startsWith('radio1.'))
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: humanizeGroupLabel(id.replace('radio1.', '')) };
+
+  // ── Radio 2 ─────────────────────────────────────────────────────────────────
+  if (id === 'radio2.properties')
+    return { uiPage: 'Wireless', uiParent: 'Radio 2', uiTab: 'Properties' };
+  if (id === 'radio2.ddrs' || id === 'radio2.ddrsatpc' || id === 'radio2.atpc')
+    return { uiPage: 'Wireless', uiParent: 'Radio 2', uiTab: 'DDRS/ATPC' };
+  if (id === 'radio2.dfs')  return { uiPage: 'Wireless', uiParent: 'Radio 2', uiTab: 'DFS' };
+  if (id === 'radio2.dcs')  return { uiPage: 'Wireless', uiParent: 'Radio 2', uiTab: 'DCS' };
+  if (id === 'radio2.kpi')  return { uiPage: 'Monitor',  uiParent: 'Radio 2', uiTab: 'KPIs' };
+  if (id.startsWith('radio2.'))
+    return { uiPage: 'Wireless', uiParent: 'Radio 2', uiTab: humanizeGroupLabel(id.replace('radio2.', '')) };
+
+  // ── 2.4 GHz Radio ───────────────────────────────────────────────────────────
+  if (id === 'radio24.properties' || id === 'radio24ghz.properties' || id === 'radio24' || id === 'radio24ghz')
+    return { uiPage: 'Wireless', uiParent: '2.4 GHz Radio', uiTab: 'Properties' };
+  if (id === 'radio24.kpi' || id === 'radio24ghz.kpi')
+    return { uiPage: 'Monitor',  uiParent: '2.4 GHz Radio', uiTab: 'KPIs' };
+  if (id.startsWith('radio24.'))
+    return { uiPage: 'Wireless', uiParent: '2.4 GHz Radio', uiTab: humanizeGroupLabel(id.replace('radio24.', '')) };
+
+  // ── QoS ─────────────────────────────────────────────────────────────────────
+  if (id === 'qos') return { uiPage: 'Wireless', uiParent: 'QoS', uiTab: 'QoS Settings' };
+
+  // ── Hyphen-separated variants (legacy descriptors: wireless-properties, network-ipconfiguration…) ──
+  if (id === 'wireless-properties' || id === 'wireless.properties')
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'Properties' };
+  if (id === 'wireless-ddrs' || id === 'wireless.ddrs')
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'DDRS/ATPC' };
+  if (id === 'wireless-atpc' || id === 'wireless.atpc')
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'ATPC' };
+  if (id === 'wireless-dcs' || id === 'wireless.dcs')
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'DCS' };
+  if (id === 'wireless-dfs' || id === 'wireless.dfs')
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'DFS' };
+  if (id.startsWith('wireless-') || id.startsWith('wireless.'))
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: humanizeGroupLabel(id.replace(/^wireless[-.]/, '')) };
+
+  if (id === 'network-ipconfiguration' || id === 'network-ip' || id === 'network.ipconfiguration')
+    return { uiPage: 'Network', uiParent: 'IP Configuration', uiTab: 'IPv4' };
+  if (id === 'network-vlan' || id === 'network.vlan')
+    return { uiPage: 'Network', uiParent: 'VLAN', uiTab: 'VLAN Settings' };
+  if (id === 'network-ethernet' || id === 'network.ethernet')
+    return { uiPage: 'Network', uiParent: 'Ethernet', uiTab: 'Ethernet Settings' };
+  if (id === 'network-dhcp' || id === 'network-dhcp24' || id === 'network.dhcp')
+    return { uiPage: 'Network', uiParent: 'DHCP / Leases', uiTab: id.includes('24') ? '2.4 GHz' : 'DHCP Settings' };
+  if (id.startsWith('network-') || id.startsWith('network.'))
+    return { uiPage: 'Network', uiParent: humanizeGroupLabel(id.replace(/^network[-.]/, '')), uiTab: 'Settings' };
+
+  if (id === 'monitor-linkstats' || id === 'monitor.linkstats' || id === 'monitor-links')
+    return { uiPage: 'Monitor', uiParent: 'Links', uiTab: 'Link Statistics' };
+  if (id === 'monitor-wirelessstats' || id === 'monitor.wirelessstats')
+    return { uiPage: 'Monitor', uiParent: 'Wireless', uiTab: 'Wireless KPIs' };
+  if (id.startsWith('monitor-') || id.startsWith('monitor.'))
+    return { uiPage: 'Monitor', uiParent: humanizeGroupLabel(id.replace(/^monitor[-.]/, '')), uiTab: 'KPIs' };
+
+  // ── Generic "radio" (single-radio devices) ───────────────────────────────────
+  if (id === 'radio' || id === 'wireless' || id === 'radio.settings')
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'Properties' };
+  if (id.startsWith('radio.'))
+    return { uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: humanizeGroupLabel(id.replace('radio.', '')) };
+
+  // ── Network ─────────────────────────────────────────────────────────────────
+  if (id === 'network.ip.5ghz')
+    return { uiPage: 'Network', uiParent: 'IP Configuration', uiTab: '5 GHz Radio' };
+  if (id === 'network.ip.24ghz' || id === 'network.ip.2ghz')
+    return { uiPage: 'Network', uiParent: 'IP Configuration', uiTab: '2.4 GHz Radio' };
+  if (id === 'network.ip' || id === 'network.ipconfiguration' || id.startsWith('network.ip'))
+    return { uiPage: 'Network', uiParent: 'IP Configuration', uiTab: 'IPv4' };
+  if (id === 'network.vlan' || id === 'vlan')
+    return { uiPage: 'Network', uiParent: 'VLAN', uiTab: 'VLAN Settings' };
+  if (id === 'network.ethernet' || id === 'ethernet' || id === 'ethernet.settings')
+    return { uiPage: 'Network', uiParent: 'Ethernet', uiTab: 'Ethernet Settings' };
+  if (id === 'network.dhcp' || id === 'dhcp' || id === 'network.dhcpleases')
+    return { uiPage: 'Network', uiParent: 'DHCP / Leases', uiTab: 'DHCP Settings' };
+  if (id === 'network' || id === 'network.settings')
+    return { uiPage: 'Network', uiParent: 'IP Configuration', uiTab: 'Settings' };
+  if (id.startsWith('network.'))
+    return { uiPage: 'Network', uiParent: humanizeGroupLabel(id.replace('network.', '')), uiTab: 'Settings' };
+
+  // ── Management ──────────────────────────────────────────────────────────────
+  if (id === 'management' || id === 'mgmt')
+    return { uiPage: 'Management', uiParent: 'Management', uiTab: 'Settings' };
+  if (id === 'snmp' || id === 'snmp.settings')
+    return { uiPage: 'Management', uiParent: 'Management', uiTab: 'SNMP' };
+
+  // ── Monitor — well-known telemetry/stats groupIds ───────────────────────────
+  if (id === 'summary')          return { uiPage: 'Monitor', uiParent: 'Summary',     uiTab: 'Overview' };
+  if (id === 'system' || id === 'system.health')
+    return { uiPage: 'Monitor', uiParent: 'System',     uiTab: 'Health' };
+  if (id === 'cpu')              return { uiPage: 'Monitor', uiParent: 'System',     uiTab: 'CPU' };
+  if (id === 'memory')           return { uiPage: 'Monitor', uiParent: 'System',     uiTab: 'Memory' };
+  if (id === 'environment')      return { uiPage: 'Monitor', uiParent: 'System',     uiTab: 'Environment' };
+  if (id === 'interface' || id === 'interfaces')
+    return { uiPage: 'Monitor', uiParent: 'Interfaces',  uiTab: 'Port Stats' };
+  if (id === 'spanning_tree' || id === 'spanning-tree')
+    return { uiPage: 'Monitor', uiParent: 'Interfaces',  uiTab: 'Spanning Tree' };
+  if (id === 'vpn')              return { uiPage: 'Monitor', uiParent: 'Security',   uiTab: 'VPN' };
+  if (id === 'security')         return { uiPage: 'Monitor', uiParent: 'Security',   uiTab: 'Policies' };
+  if (id === 'radio_rf' || id === 'radio-rf')
+    return { uiPage: 'Wireless', uiParent: 'Radio 1',   uiTab: 'RF Settings' };
+  if (id === 'link_quality' || id === 'link-quality')
+    return { uiPage: 'Monitor', uiParent: 'Links',       uiTab: 'Link Quality' };
+  if (id === 'throughput')       return { uiPage: 'Monitor', uiParent: 'Links',       uiTab: 'Throughput' };
+  if (id === 'ethernet.kpi' || id === 'ethernet.stats' || id === 'ethernet-kpi' || id === 'ethernet-stats')
+    return { uiPage: 'Monitor', uiParent: 'Ethernet',   uiTab: 'Port KPIs' };
+  if (id.includes('kpi') || id.includes('.stats') || id.includes('-stats') || id.startsWith('monitor.'))
+    return { uiPage: 'Monitor', uiParent: humanizeGroupLabel(id.replace(/[-_.](kpi|stats|monitor)$/, '')), uiTab: 'KPIs' };
+
+  // ── Default: treat as a Wireless setting ────────────────────────────────────
+  return { uiPage: 'Wireless', uiParent: 'Settings', uiTab: humanizeGroupLabel(id) };
+}
+
 function buildWireframe(definition, { strict = false } = {}) {
   const { productDefinitionId, versionId, registryVersion, entries = [] } = definition;
 
@@ -210,13 +358,25 @@ function buildWireframe(definition, { strict = false } = {}) {
 
     totalParams += parameters.length;
 
+    // ── Derive UI hierarchy (sidebar structure) from groupId naming convention ──
+    // groupId patterns (dot-separated): <page>.<parent>.<tab>
+    // e.g. "radio1.properties" → Wireless / Radio 1 / Properties
+    //      "network.ip.5ghz"   → Network / IP Configuration / 5 GHz Radio
+    // Falls back gracefully for legacy flat groupIds ("radio", "network", "snmp").
+    const uiHierarchy = deriveUiHierarchy(g.groupId, g.params[0]);
+
     return {
       groupId:             g.groupId,
-      label:               g.groupId.charAt(0).toUpperCase() + g.groupId.slice(1).replace(/[-_]/g, ' '),
+      label:               uiHierarchy.uiTab || humanizeGroupLabel(g.groupId),
       displayOrder:        gi + 1,
       pollIntervalSeconds: parseInt(process.env.LIVE_POLL_INTERVAL_SECONDS || '60', 10),
       subGroups,
       parameters,
+      // Sidebar hierarchy — used by NodeViewParameters to render the
+      // left navigation tree that mirrors the real device web UI.
+      uiPage:   uiHierarchy.uiPage,
+      uiParent: uiHierarchy.uiParent,
+      uiTab:    uiHierarchy.uiTab,
     };
   });
 

@@ -792,24 +792,54 @@ export default function V2ProductDefinitionPage() {
       // uploaded and then "deleted" from the UI (the Java service keeps the hash).
       // In that case we recover the existing version object so the operator can
       // proceed directly to Stage & Activate without re-uploading a different file.
-      const v = version as typeof version & { alreadyUploaded?: boolean };
+      const v = version as typeof version & {
+        alreadyUploaded?: boolean;
+        duplicateNote?: string;
+        suggestedAction?: string;
+        message?: string;
+      };
+
       if (v.alreadyUploaded) {
-        // Populate draftVersion so Stage & Activate button is enabled.
-        setDraftVersion(version);
-        // Inject the recovered STAGED version directly into allVersions so it
-        // appears in the Versions tab even though the Java service won't list it
-        // (it only returns definitions with an ACTIVE version).
-        setAllVersions((prev) => {
-          const exists = prev.some((x) => x.versionId === version.versionId);
-          return exists ? prev : [version as ProductDefinitionVersion, ...prev];
-        });
-        // Switch to validation tab — that's where Stage & Activate button lives.
-        setRightTab('validation');
-        addToast(
-          `"${version.name || selectedFile?.name}" was previously uploaded and is ${version.lifecycleStatus || 'STAGED'}. Click Stage & Activate to make it active.`,
-          'warning',
-        );
-        void loadVersions();
+        const note   = v.duplicateNote   || '';
+        const action = v.suggestedAction || '';
+        const status = (v.lifecycleStatus || 'STAGED').toUpperCase();
+
+        // ── Lifecycle-aware duplicate handling ──────────────────────────────
+        if (note === 'DUPLICATE_ACTIVE') {
+          // Already live — no action needed
+          addToast(
+            v.message || `"${v.name || selectedFile?.name}" is already ACTIVE. No upload needed.`,
+            'info',
+          );
+          void loadVersions();
+
+        } else if (note === 'DUPLICATE_TERMINAL') {
+          // DELETED or SUPERSEDED — can't re-use, guide to upload new version
+          setDuplicateMsg(
+            v.message ||
+            `This file was previously uploaded (now ${status}). Upload again with a new version number to create a fresh copy.`,
+          );
+
+        } else {
+          // STAGED, IN_PROGRESS, or unknown → recover and show next step
+          setDraftVersion(version);
+          // Inject into allVersions so it appears in the Versions tab
+          setAllVersions((prev) => {
+            const exists = prev.some((x) => x.versionId === version.versionId);
+            return exists ? prev : [version as ProductDefinitionVersion, ...prev];
+          });
+          setRightTab('validation');
+
+          let toastMsg: string;
+          if (action === 'activate') {
+            toastMsg = v.message || `"${v.name || selectedFile?.name}" is already staged. Click Stage & Activate to make it live.`;
+          } else {
+            toastMsg = v.message || `"${v.name || selectedFile?.name}" was previously uploaded (${status}). Click Stage & Activate to proceed.`;
+          }
+          addToast(toastMsg, 'warning');
+          void loadVersions();
+        }
+
       } else {
         setDraftVersion(version);
         setRightTab('validation');
@@ -820,14 +850,22 @@ export default function V2ProductDefinitionPage() {
       // uploadProductDefinition already normalises to FrameworkApiError via extractApiError.
       const apiErr = extractApiError(err);
 
+      // Handle the new DUPLICATE_CONTENT error (DELETED/SUPERSEDED content)
+      if (apiErr.error.code === 'DUPLICATE_CONTENT') {
+        const details = apiErr.error.details as Record<string, unknown> | undefined;
+        const existingStatus = String(details?.lifecycleStatus ?? 'unknown').toUpperCase();
+        setDuplicateMsg(
+          apiErr.error.message ||
+          `This file was previously uploaded (now ${existingStatus}). Upload with a new version number to create a fresh copy.`,
+        );
+
       // Fallback: if the gateway idempotency decorator isn't deployed yet,
       // still surface a useful message (old behaviour kept as safety net).
-      const isDuplicate =
+      } else if (
         apiErr.error.code === 'UPLOAD_REJECTED' ||
         apiErr.error.message?.toLowerCase().includes('already been uploaded') ||
-        apiErr.error.message?.toLowerCase().includes('already uploaded');
-
-      if (isDuplicate) {
+        apiErr.error.message?.toLowerCase().includes('already uploaded')
+      ) {
         const msg = (apiErr.error.message || '').includes('already')
           ? apiErr.error.message
           : 'This file has already been uploaded. Check the Versions tab to find the existing version.';

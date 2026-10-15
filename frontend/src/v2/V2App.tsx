@@ -46,6 +46,8 @@ const V2FrameworkOperationsPage = lazy(() => import('./pages/V2FrameworkOperatio
 const V2SecurityAuditPage = lazy(() => import('./pages/V2SecurityAuditPage'));
 // Product Definition Lifecycle — upload XML/XLS/JSON, validate, stage, activate, rollback
 const V2ProductDefinitionPage = lazy(() => import('./pages/V2ProductDefinitionPage'));
+// Descriptor Registry — 9-state lifecycle (Draft→Purged), maker-checker, delete guard, wireframe build
+const V2DescriptorPage = lazy(() => import('./pages/V2DescriptorPage'));
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
@@ -62,8 +64,11 @@ function V2ProtectedRoute({ children, allowedRoles }: V2ProtectedRouteProps) {
 
   if (allowedRoles && user) {
     const normalize = (r: string) => r.charAt(0).toUpperCase() + r.slice(1).toLowerCase();
-    const userRole = normalize(String(user.role));
-    const permitted = allowedRoles.some((r) => r === user.role || normalize(r) === userRole);
+    const userRole = String(user.role).toLowerCase();
+    // Match by: exact string, case-insensitive, or normalized (for simple single-word roles)
+    const permitted = allowedRoles.some(
+      (r) => r === user.role || r.toLowerCase() === userRole || normalize(r) === normalize(String(user.role))
+    );
     if (!permitted) return <Navigate to="/v2/dashboard" replace />;
   }
 
@@ -187,8 +192,17 @@ export function V2App() {
                 <Route
                   path="product-definitions"
                   element={
-                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator']}>
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator', 'descriptor_admin', 'descriptor_author']}>
                       <V2ProductDefinitionPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                {/* Descriptor Registry — 9-state lifecycle, maker-checker, delete guard, wireframe build */}
+                <Route
+                  path="descriptors"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'Operator', 'descriptor_admin', 'descriptor_author']}>
+                      <V2DescriptorPage />
                     </V2ProtectedRoute>
                   }
                 />

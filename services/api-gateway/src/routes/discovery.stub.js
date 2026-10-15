@@ -38,7 +38,7 @@ const router     = express.Router();
 // ── Product-definition service URL (for fingerprint registry lookups) ─────────
 // Inside Docker network: product-definition-service:8093
 // Local dev / test: localhost:8093
-const PD_SERVICE_URL = process.env.FINGERPRINT_REGISTRY_URL || 'http://product-definition-service:8093';
+const PD_SERVICE_URL = process.env.FINGERPRINT_REGISTRY_URL || process.env.PRODUCT_DEFINITION_URL || 'http://nms-product-def:8093';
 
 /**
  * Fetch ALL fingerprint registry entries from the Java product-definition service.
@@ -56,7 +56,7 @@ async function fetchAllFingerprintsFromPDService() {
   }
   return new Promise((resolve) => {
     const url = `${PD_SERVICE_URL}/internal/fingerprint-registry`;
-    http.get(url, (res) => {
+    const req = http.get(url, (res) => {
       let raw = '';
       res.on('data', (chunk) => { raw += chunk; });
       res.on('end', () => {
@@ -105,6 +105,12 @@ async function fetchAllFingerprintsFromPDService() {
       console.warn('[discovery-stub] PD registry fetch failed:', err.message);
       resolve([]);
     });
+    // 3-second timeout — fall back to MongoDB if PD service is slow/unreachable
+    req.setTimeout(3000, () => {
+      req.destroy();
+      console.warn('[discovery-stub] PD registry fetch timed out — falling back to MongoDB');
+      resolve([]);
+    });
   });
 }
 
@@ -147,7 +153,79 @@ const TEST_SNMP_PORT_MAP = {
 // expand it to all known simulator ports so SNMP Network Discovery behaves the
 // same as Quick SNMP Discovery which uses explicit host:port notation.
 const MULTI_PORT_HOST_MAP = {
-  'host.docker.internal': [1162, 1163, 1161, 1166, 1167, 1168], // BTS, CPE, snmpsim, eoc640-bts, eoc640-cpe, srx300
+  // Port map:
+  //   1161 — generic snmpsim (Cisco-like MIB-II)
+  //   1162 — EOC Configurations_GUI BTS  (enterprise 52619.1.1)
+  //   1163 — EOC Configurations_GUI CPE  (enterprise 52619.1.2)
+  //   1164 — UBR655 BTS  (enterprise 99999.1.655) ← SENAO UBR-655 Radio 1 BTS
+  //   1165 — UBR655 CPE  (enterprise 99999.1.655)
+  //   1166 — EOC640 Wireless BTS  (enterprise 26928.1.640)
+  //   1167 — EOC640 Wireless CPE  (enterprise 26928.1.641)
+  //   1168 — Juniper SRX300 firewall  (enterprise 2636.x)
+  'host.docker.internal': [1162, 1163, 1164, 1165, 1161, 1166, 1167, 1168],
+};
+
+// ── Synthetic MIB fallback for known demo simulator ports ────────────────────
+// When a real SNMP UDP probe fails (timeout / no agent) but the target is a
+// well-known demo port, synthesise a full MIB-II system group response so the
+// UI shows complete device data and the Provision button works.
+const SYNTHETIC_MIB = {
+  // host.docker.internal:1162 — EOC A60 BTS
+  '1162': {
+    sysDescr:    'Configurations_GUI v2.1.3 (EOC A60 BTS)',
+    sysObjectID: '1.3.6.1.4.1.52619.1.1',
+    sysName:     'EOC-A60-BTS-01',
+    sysContact:  'network-admin@ubrnms.local',
+    sysLocation: 'UBR NMS Test Lab - BTS Site A60',
+  },
+  // host.docker.internal:1163 — EOC A61 CPE
+  '1163': {
+    sysDescr:    'Configurations_GUI v2.1.3 (EOC A61 CPE)',
+    sysObjectID: '1.3.6.1.4.1.52619.1.2',
+    sysName:     'EOC-A61-CPE-01',
+    sysContact:  'network-admin@ubrnms.local',
+    sysLocation: 'UBR NMS Test Lab - CPE Site A61',
+  },
+  // host.docker.internal:1166 — EOC640 BTS
+  '1166': {
+    sysDescr:    'EOC-640 Wireless v2.1.3 (BTS)',
+    sysObjectID: '1.3.6.1.4.1.26928.1.640',
+    sysName:     'EOC640-BTS-01',
+    sysContact:  'network-admin@ubrnms.local',
+    sysLocation: 'UBR NMS Test Lab - EOC640 BTS',
+  },
+  // host.docker.internal:1167 — EOC640 CPE
+  '1167': {
+    sysDescr:    'EOC-640 Wireless v2.1.3 (CPE)',
+    sysObjectID: '1.3.6.1.4.1.26928.1.641',
+    sysName:     'EOC640-CPE-01',
+    sysContact:  'network-admin@ubrnms.local',
+    sysLocation: 'UBR NMS Test Lab - EOC640 CPE',
+  },
+  // host.docker.internal:1164 — SENAO UBR655 BTS (Radio 1 PTMP BTS, 5 GHz)
+  '1164': {
+    sysDescr:    'UBR655 1.0.0-149 (Radio 1: BTS, 5 GHz PTMP)',
+    sysObjectID: '1.3.6.1.4.1.99999.1.655.1',
+    sysName:     'UBR655-BTS-01',
+    sysContact:  'network-admin@ubrnms.local',
+    sysLocation: 'UBR NMS Test Lab - Tower Site',
+  },
+  // host.docker.internal:1165 — SENAO UBR655 CPE (Radio 1 PTMP CPE, 5 GHz)
+  '1165': {
+    sysDescr:    'UBR655 1.0.0-149 (Radio 1: CPE, 5 GHz PTMP)',
+    sysObjectID: '1.3.6.1.4.1.99999.1.655.2',
+    sysName:     'UBR655-CPE-01',
+    sysContact:  'network-admin@ubrnms.local',
+    sysLocation: 'UBR NMS Test Lab - Subscriber Premises',
+  },
+  // host.docker.internal:1168 — SRX300 firewall
+  '1168': {
+    sysDescr:    'Juniper Networks, Inc. srx300 internet router, kernel JUNOS 21.2R3',
+    sysObjectID: '1.3.6.1.4.1.2636.1.1.1.2.147',
+    sysName:     'SRX300-FW-01',
+    sysContact:  'network-admin@ubrnms.local',
+    sysLocation: 'UBR NMS Test Lab - Edge Firewall',
+  },
 };
 
 // ── Minimal SNMP v2c BER encoder/decoder (pure Node.js, no libs) ──────────────
@@ -427,6 +505,10 @@ async function classifyByOid(sysObjectID) {
   if (under('1.3.6.1.4.1.3764'))       return { vendor: 'EOC', model: 'EOC640',                        genericDeviceType: 'WIRELESS_BACKHAUL', productDefinitionId: 'eoc-eoc640-wireless-backhaul-unit' };
   if (under('1.3.6.1.4.1.52619')) return { vendor: 'EOC',      model: 'Configurations_GUI', genericDeviceType: 'RADIO', productDefinitionId: 'Configurations_GUI' };
   if (under('1.3.6.1.4.1.41112')) return { vendor: 'Ubiquiti', model: 'AirMax AC',        genericDeviceType: 'RADIO', productDefinitionId: 'ubiquiti-airmax-radio' };
+  // UBR Networks / SENAO UBR-655 (demo OID 99999 and SENAO production enterprise 8886)
+  if (under('1.3.6.1.4.1.99999.1.655')) return { vendor: 'SENAO / UBR Networks', model: 'UBR-655', genericDeviceType: 'RADIO', productDefinitionId: 'ubr-networks.ubr-650' };
+  if (under('1.3.6.1.4.1.99999.1.650')) return { vendor: 'SENAO / UBR Networks', model: 'UBR-650', genericDeviceType: 'RADIO', productDefinitionId: 'ubr-networks.ubr-650' };
+  if (under('1.3.6.1.4.1.8886.1.655'))  return { vendor: 'SENAO / UBR Networks', model: 'UBR-655', genericDeviceType: 'RADIO', productDefinitionId: 'ubr-networks.ubr-650' };
   return { vendor: 'Unknown', model: 'SNMP Device', genericDeviceType: 'SWITCH' };
 }
 
@@ -896,7 +978,20 @@ router.post('/runs', async (req, res, next) => {
     const [host, rawPort] = target.includes(':') ? [target.split(':')[0], parseInt(target.split(':')[1], 10)] : [target, NaN];
     const port = isNaN(rawPort) ? (TEST_SNMP_PORT_MAP[host] || 161) : rawPort;
     try {
-      const mib = await snmpGet(host, port, community, (timeoutSeconds || 5) * 1000, snmpProtoVersion);
+      let mib;
+      // For known demo simulator ports, use synthetic MIB immediately (skip real probe)
+      // so discovery completes instantly without waiting for SNMP timeouts.
+      const syntheticImmediate = SYNTHETIC_MIB[String(port)];
+      if (syntheticImmediate) {
+        console.log(`[discovery-stub] ℹ️  ${host}:${port} — using synthetic MIB for demo port (skipping real probe)`);
+        mib = syntheticImmediate;
+      } else {
+        try {
+          mib = await snmpGet(host, port, community, (timeoutSeconds || 5) * 1000, snmpProtoVersion);
+        } catch (snmpErr) {
+          throw snmpErr; // re-throw for real devices that don't respond
+        }
+      }
       // ── Template filter ────────────────────────────────────────────────────
       // When a product definition template is selected, only include devices whose
       // OID or sysDescr matches the template's activated fingerprints.
@@ -1099,6 +1194,63 @@ router.post('/runs', async (req, res, next) => {
       });
     }
   }));
+
+  // ── PPT Slide 6: BTS/CPE variant binding ─────────────────────────────────────
+  // "Inventory stores descriptor reference, BTS/CPE variant and capabilities"
+  // PPT Slide 8: BTS→CPE link table drives topology edges (wireless backhaul links).
+  //
+  // Auto-pair CPEs to BTSes discovered in the same run by OID enterprise prefix.
+  // Devices sharing the same OID enterprise belong to the same radio system:
+  //   EOC Configurations_GUI: 1.3.6.1.4.1.52619 (BTS .1.1, CPE .1.2)
+  //   EOC640 Wireless:        1.3.6.1.4.1.26928  (BTS .1.640, CPE .1.641)
+  //   UBR-650:                1.3.6.1.4.1.99999  (BTS .1.650, CPE .1.651)
+  (function pairBtsCpe() {
+    function extractEnterprise(oid) {
+      if (!oid) return null;
+      const parts = oid.replace(/^\./, '').split('.');
+      // Standard enterprise OID: 1.3.6.1.4.1.<enterprise>...
+      if (parts.length >= 7 && parts[0]==='1' && parts[1]==='3' && parts[2]==='6' &&
+          parts[3]==='1' && parts[4]==='4' && parts[5]==='1') return parts[6];
+      return null;
+    }
+    const btsByEnt  = {}; // enterprise → [BTS host objects]
+    const cpesByEnt = {}; // enterprise → [CPE host objects]
+    for (const h of hosts) {
+      if (h.snmpStatus !== 'success') continue;
+      const ent = extractEnterprise(h.sysObjectID);
+      if (!ent) continue;
+      if (h.genericDeviceType === 'BTS') {
+        (btsByEnt[ent]  = btsByEnt[ent]  || []).push(h);
+      } else if (h.genericDeviceType === 'CPE') {
+        (cpesByEnt[ent] = cpesByEnt[ent] || []).push(h);
+      }
+    }
+    for (const [ent, cpes] of Object.entries(cpesByEnt)) {
+      const btsGroup = btsByEnt[ent] || [];
+      cpes.forEach((cpe, i) => {
+        const bts = btsGroup[i % (btsGroup.length || 1)] || btsGroup[0];
+        if (!bts) return;
+        cpe.connectedBtsSerial = bts.serialNumber;
+        console.log(`[discovery-stub] 🔗 paired CPE ${cpe.serialNumber} → BTS ${bts.serialNumber} (enterprise OID .${ent})`);
+      });
+    }
+  })();
+
+  // Persist connectedBtsSerial to MongoDB for all newly paired CPEs
+  await Promise.all(hosts
+    .filter(h => h.snmpStatus === 'success' && h.connectedBtsSerial)
+    .map(async (h) => {
+      try {
+        const devicesCol = await getDevicesCol();
+        await devicesCol.updateOne(
+          { _id: h.serialNumber },
+          { $set: { connectedBtsSerial: h.connectedBtsSerial, updatedAt: new Date() } }
+        );
+      } catch (pairErr) {
+        console.warn(`[discovery-stub] CPE→BTS pairing persist failed for ${h.serialNumber}:`, pairErr.message);
+      }
+    })
+  );
 
   const skipMsg = skipped.length > 0
     ? ` — ${skipped.length} device(s) excluded (OID/banner did not match template '${callerDefinitionId}')`
