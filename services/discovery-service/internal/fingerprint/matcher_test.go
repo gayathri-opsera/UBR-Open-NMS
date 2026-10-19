@@ -501,3 +501,34 @@ func (c *countingReader) ListActive(ctx context.Context) ([]RegistryEntry, strin
 	*c.count++
 	return c.inner.ListActive(ctx)
 }
+
+// ── Re-rooted enterprise tree (UBR650/655 newer firmware, sysObjectID .1.3.6.1.4.1.14125.123) ──
+
+func ubrMatcher() *Matcher {
+	reader := NewInMemoryRegistryReader([]RegistryEntry{{
+		RegistryEntryID:     "reg-ubr655-001",
+		ProductDefinitionID: "eoc-ubr655",
+		RegistryVersion:     "rv-001",
+		SNMPOIDPrefix:       ".1.3.6.1.4.1.52619", // the definition declares the canonical root once
+		PreferredProtocol:   "SNMP",
+		SupportedProtocols:  []string{"SNMP"},
+		CreatedAt:           time.Now().UTC(),
+	}}, "rv-001")
+	return NewMatcher(NewRegistryClient(reader, 0))
+}
+
+func TestMatcher_NewFirmwareRoot_MatchesTheSameDefinition(t *testing.T) {
+	for _, oid := range []string{"1.3.6.1.4.1.14125.123", ".1.3.6.1.4.1.52619"} {
+		result := ubrMatcher().Match(context.Background(), ProbeEvidence{IP: "10.0.150.16", SNMPOIDSysObjectID: oid})
+		if result.Status != FingerprintStatusMatched || result.ProductDefinitionID != "eoc-ubr655" {
+			t.Fatalf("sysObjectID %s: status=%s pd=%q, want MATCHED eoc-ubr655", oid, result.Status, result.ProductDefinitionID)
+		}
+	}
+}
+
+func TestMatcher_NewFirmwareRoot_DoesNotMatchOtherVendors(t *testing.T) {
+	result := ubrMatcher().Match(context.Background(), ProbeEvidence{IP: "10.0.0.9", SNMPOIDSysObjectID: ".1.3.6.1.4.1.9.1.2071"})
+	if result.Status == FingerprintStatusMatched {
+		t.Fatalf("a Cisco OID must not match the UBR655 definition, got %s", result.ProductDefinitionID)
+	}
+}

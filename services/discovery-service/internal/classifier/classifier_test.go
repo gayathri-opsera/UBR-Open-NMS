@@ -400,3 +400,24 @@ func TestClassify_EOCModelFromSimulatorSysDescr(t *testing.T) {
 		t.Fatalf("model = %q, want A60", cl.Model)
 	}
 }
+
+// UBR650/655 newer firmware reports .1.3.6.1.4.1.14125.123 (same MIB tree, re-rooted). It must classify
+// exactly like the same product on older firmware — it used to come back DEFERRED_UNSUPPORTED.
+func TestClassify_UBRNewFirmwareRoot_RecognisedLikeOldFirmware(t *testing.T) {
+	for _, oid := range []string{".1.3.6.1.4.1.14125.123", "1.3.6.1.4.1.14125.123", ".1.3.6.1.4.1.52619"} {
+		result := classifier.Classify(successFingerprint("10.0.150.16", "run-1", oid, "Linux UBR655 4.4.60 #1 SMP armv7l"), "corr-1")
+		if result.Status != classifier.ClassificationRecognised {
+			t.Fatalf("%s: expected RECOGNISED, got %s (%s)", oid, result.Status, result.DeferReason)
+		}
+		if result.Vendor != "EOC" || result.GenericDeviceType != "RADIO" || result.Model != "UBR655" {
+			t.Errorf("%s: got vendor=%q type=%q model=%q", oid, result.Vendor, result.GenericDeviceType, result.Model)
+		}
+	}
+}
+
+func TestClassify_UBRNewFirmwareRoot_DoesNotSwallowALongerArc(t *testing.T) {
+	result := classifier.Classify(successFingerprint("10.0.0.7", "run-1", ".1.3.6.1.4.1.14125.1234", "Something"), "corr-1")
+	if result.Status == classifier.ClassificationRecognised {
+		t.Fatalf("an unrelated enterprise arc must stay unrecognised, got %+v", result)
+	}
+}

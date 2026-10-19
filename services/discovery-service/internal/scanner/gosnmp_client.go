@@ -152,14 +152,17 @@ func (c *GoSNMPClient) GetOIDs(ctx context.Context, host string, oids []string) 
 
 	// Build a per-request GoSNMP session. Sessions are NOT reused across calls
 	// because FingerprintBatch runs hosts concurrently from separate goroutines.
+	// The attempt's timeout is split into several transmissions: the agent on some radios goes quiet for
+	// several seconds at a time (measured on a UBR650: ~8 s out of every 23 s), and with one datagram per
+	// attempt a single lost packet loses the whole attempt. SNMPFingerprinter's loop still retries on top.
+	perTry, extraTries := splitAttemptTimeout(clientTimeout)
 	g := &gosnmp.GoSNMP{
 		Target:    host,
 		Port:      c.port,
 		Community: c.community,
 		Version:   c.version,
-		Timeout:   clientTimeout,
-		// Retries are handled by SNMPFingerprinter's retry loop; set to 0 here.
-		Retries: 0,
+		Timeout:   perTry,
+		Retries:   extraTries,
 		// Suppress gosnmp's own log output; the fingerprinter logs at the right level.
 		Logger: gosnmp.NewLogger(&silentLogger{}),
 	}
@@ -191,6 +194,27 @@ func (c *GoSNMPClient) GetOIDs(ctx context.Context, host string, oids []string) 
 		values[key] = pduValueToString(pdu)
 	}
 	return values, nil
+}
+
+// splitAttemptTimeout divides one attempt's timeout into several transmissions: it returns the
+// per-transmission timeout and the number of EXTRA transmissions (gosnmp "Retries"). The total wait is
+// unchanged, but a request lost to a briefly unresponsive agent is sent again inside the same attempt.
+func splitAttemptTimeout(total time.Duration) (time.Duration, int) {
+	const wantTries = 4
+	const minPerTry = time.Second
+	if total <= 0 {
+		return total, 0
+	}
+	tries := wantTries
+	perTry := total / time.Duration(tries)
+	if perTry < minPerTry {
+		tries = int(total / minPerTry)
+		if tries < 1 {
+			tries = 1
+		}
+		perTry = total / time.Duration(tries)
+	}
+	return perTry, tries - 1
 }
 
 // pduValueToString converts a gosnmp PDU value to its string representation.
@@ -252,8 +276,10 @@ func (c *GoSNMPClient) WalkOID(ctx context.Context, host string, rootOID string)
 		Community: c.community,
 		Version:   c.version,
 		Timeout:   clientTimeout,
-		Retries:   0,
-		Logger:    gosnmp.NewLogger(&silentLogger{}),
+		// A lost request must not fail the walk: re-send it, so a radio whose agent is quiet for a few
+		// seconds (see GetOIDs) is still walked once it answers again. A walk is bounded by ctx.
+		Retries: 2,
+		Logger:  gosnmp.NewLogger(&silentLogger{}),
 	}
 	if err := g.Connect(); err != nil {
 		return nil, fmt.Errorf("snmp walk connect to %s: %w", host, err)

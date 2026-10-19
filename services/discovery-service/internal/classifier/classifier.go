@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/airtel-ubrnms/discovery-service/internal/model"
+	"github.com/airtel-ubrnms/discovery-service/internal/oidalias"
 )
 
 // ClassificationStatus indicates the outcome of classifying a fingerprint.
@@ -176,6 +177,8 @@ func Classify(fp model.SNMPFingerprintResult, correlationID string) Classificati
 // matchOIDPrefix returns the OIDMapping for the longest matching prefix of the given OID.
 // Returns (zero, false) if no prefix matches.
 func matchOIDPrefix(oid string) (OIDMapping, bool) {
+	// A unit on a re-rooted enterprise tree (newer firmware) classifies like the same product on older firmware.
+	oid = oidalias.Canonical(oid)
 	var bestLen int
 	var bestMapping OIDMapping
 	found := false

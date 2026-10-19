@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/airtel-ubrnms/discovery-service/internal/oidalias"
 )
 
 // DeviceAttributes holds device-reported facts that go beyond the MIB-II system
@@ -47,8 +49,12 @@ type vendorAttributeProfile struct {
 // attributeProfiles is the per-vendor attribute map. Add a vendor's role and GPS
 // OIDs here when its MIB is known.
 var attributeProfiles = []vendorAttributeProfile{
-	// EOC Networks (enterprise 52619) — radioMode from the Configurations_GUI
-	// product definition: 1 = BTS(ap), 2 = CPE(sta).
+	// EOC Networks (enterprise 52619, also served as 14125.123 by newer firmware — see
+	// package oidalias) — radioMode from the Configurations_GUI product definition:
+	// 1 = BTS(ap), 2 = CPE(sta). The radio table reports "ap" or "sta" PER RADIO, so the role
+	// is decided from the whole column: any radio in station mode makes the unit a CPE (its
+	// backhaul radio is linked to a BTS — the 2.4 GHz management radio of a CPE is still an
+	// AP), otherwise it is a BTS. This agrees with the unit's own web UI (mode "sta" / "ap").
 	{
 		enterprisePrefix: ".1.3.6.1.4.1.52619",
 		roleOID:          ".1.3.6.1.4.1.52619.1.1.1.1.1.2",
@@ -63,16 +69,15 @@ func FetchDeviceAttributes(ctx context.Context, client SNMPClient, host, sysObje
 
 	if p, ok := matchAttributeProfile(sysObjectID); ok {
 		if p.roleOID != "" {
-			if oid, raw := readFirstInstance(ctx, client, host, p.roleOID); raw != "" {
-				if role := normaliseRole(raw, p.roleValues); role != "" {
-					attrs.Role = role
-					attrs.RoleSource = "snmp " + oid + "=" + raw
-				}
+			// addressed under the device's own enterprise root
+			if role, source := readRole(ctx, client, host, oidalias.Rebase(p.roleOID, sysObjectID), p.roleValues); role != "" {
+				attrs.Role = role
+				attrs.RoleSource = source
 			}
 		}
 		if p.latitudeOID != "" && p.longitudeOID != "" {
-			_, latRaw := readFirstInstance(ctx, client, host, p.latitudeOID)
-			_, lngRaw := readFirstInstance(ctx, client, host, p.longitudeOID)
+			_, latRaw := readFirstInstance(ctx, client, host, oidalias.Rebase(p.latitudeOID, sysObjectID))
+			_, lngRaw := readFirstInstance(ctx, client, host, oidalias.Rebase(p.longitudeOID, sysObjectID))
 			lat, latOK := parseCoordinate(latRaw, p.coordScale, 90)
 			lng, lngOK := parseCoordinate(lngRaw, p.coordScale, 180)
 			if latOK && lngOK && !(lat == 0 && lng == 0) {
@@ -93,7 +98,7 @@ func FetchDeviceAttributes(ctx context.Context, client SNMPClient, host, sysObje
 }
 
 func matchAttributeProfile(sysObjectID string) (vendorAttributeProfile, bool) {
-	oid := "." + strings.TrimPrefix(sysObjectID, ".")
+	oid := oidalias.Canonical(sysObjectID)
 	var best vendorAttributeProfile
 	found := false
 	for _, p := range attributeProfiles {
@@ -103,6 +108,48 @@ func matchAttributeProfile(sysObjectID string) (vendorAttributeProfile, bool) {
 		}
 	}
 	return best, found
+}
+
+// readRole decides the unit's role from the radio-mode column at roleOID: CPE when any radio is a
+// station, otherwise the first recognised role. When the column cannot be walked it falls back to
+// the first scalar/row instance. Returns "" when nothing recognisable is reported.
+func readRole(ctx context.Context, client SNMPClient, host, roleOID string, roleValues map[string]string) (string, string) {
+	type row struct{ oid, raw, role string }
+	var rows []row
+	if walker, ok := client.(MACWalker); ok {
+		if entries, err := walker.WalkOID(ctx, host, roleOID); err == nil {
+			for _, e := range entries {
+				raw := strings.TrimSpace(e.Value)
+				if role := normaliseRole(raw, roleValues); raw != "" && role != "" {
+					rows = append(rows, row{e.OID, raw, role})
+				}
+			}
+		}
+	}
+	if len(rows) == 0 {
+		if oid, raw := readFirstInstance(ctx, client, host, roleOID); raw != "" {
+			if role := normaliseRole(raw, roleValues); role != "" {
+				return role, "snmp " + oid + "=" + raw
+			}
+		}
+		return "", ""
+	}
+	decisive := rows[0]
+	for _, r := range rows {
+		if r.role == "CPE" {
+			decisive = r
+			break
+		}
+	}
+	source := "snmp " + decisive.oid + "=" + decisive.raw
+	if len(rows) > 1 {
+		parts := make([]string, 0, len(rows))
+		for _, r := range rows {
+			parts = append(parts, r.oid[strings.LastIndex(r.oid, ".")+1:]+"="+r.raw)
+		}
+		source += " (radios: " + strings.Join(parts, ", ") + ")"
+	}
+	return decisive.role, source
 }
 
 // readFirstInstance returns the first non-empty value at oid, trying the bare

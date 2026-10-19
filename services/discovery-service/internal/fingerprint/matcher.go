@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/airtel-ubrnms/discovery-service/internal/oidalias"
 )
 
 // Matcher applies active registry entries against device probe evidence and
@@ -161,13 +163,17 @@ func (m *Matcher) Match(ctx context.Context, evidence ProbeEvidence) *MatchResul
 // Returns (0, "") when the entry does not match any evidence.
 func score(entry RegistryEntry, ev ProbeEvidence) (float64, string) {
 	// SNMP OID — highest confidence (exact) or medium (prefix).
+	// A unit on a re-rooted enterprise tree (newer firmware) matches the definition's fingerprint too:
+	// the evidence is compared both as reported and under the canonical root.
+	rawOID := normaliseOID(ev.SNMPOIDSysObjectID)
+	canonOID := oidalias.Canonical(ev.SNMPOIDSysObjectID)
 	if entry.SNMPOIDExact != "" && ev.SNMPOIDSysObjectID != "" {
-		if normaliseOID(ev.SNMPOIDSysObjectID) == normaliseOID(entry.SNMPOIDExact) {
+		if want := normaliseOID(entry.SNMPOIDExact); rawOID == want || canonOID == want {
 			return 1.0, fmt.Sprintf("snmpOid exact match: %s", entry.SNMPOIDExact)
 		}
 	}
 	if entry.SNMPOIDPrefix != "" && ev.SNMPOIDSysObjectID != "" {
-		if strings.HasPrefix(normaliseOID(ev.SNMPOIDSysObjectID), normaliseOID(entry.SNMPOIDPrefix)) {
+		if want := normaliseOID(entry.SNMPOIDPrefix); strings.HasPrefix(rawOID, want) || strings.HasPrefix(canonOID, want) {
 			return 0.8, fmt.Sprintf("snmpOid prefix match: %s*", entry.SNMPOIDPrefix)
 		}
 	}

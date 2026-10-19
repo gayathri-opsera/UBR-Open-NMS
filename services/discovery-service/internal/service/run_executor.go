@@ -360,7 +360,14 @@ func (e *RunExecutor) classifyFingerprint(ctx context.Context, fp model.SNMPFing
 			}
 			deviceType := mr.DeviceType
 			if deviceType == "" {
-				deviceType = "SWITCH"
+				// The definition declares no device type. Use what the OID map knows about this vendor
+				// (a UBR radio is a RADIO) before falling back to the generic default — labelling every
+				// registry-matched radio a SWITCH is wrong.
+				if known := classifier.Classify(fp, fp.CorrelationID); known.Status == classifier.ClassificationRecognised && known.GenericDeviceType != "" {
+					deviceType = known.GenericDeviceType
+				} else {
+					deviceType = "SWITCH"
+				}
 			}
 			return classifier.ClassificationResult{
 				Status:              classifier.ClassificationRecognised,
