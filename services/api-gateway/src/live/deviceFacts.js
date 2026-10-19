@@ -17,6 +17,7 @@
  */
 
 const { walkSubtree } = require('./snmpWalk');
+const { canonicalOid, rebaseOid } = require('./oidAliases');
 
 const SYS  = '.1.3.6.1.2.1.1';
 const IFT  = '.1.3.6.1.2.1.2.2.1';
@@ -128,11 +129,11 @@ function parseFacts(varbinds, { managementIp, sysObjectID } = {}) {
   facts.managementInterface = mgmtIf?.name || null;
 
   // ── vendor profile ─────────────────────────────────────────────────────────
-  const oid = `.${String(sysObjectID || '').replace(/^\./, '')}`;
+  const oid = `.${String(canonicalOid(sysObjectID) || '').replace(/^\./, '')}`;
   const profile = VENDOR_FACT_PROFILES.find((p) => oid === p.enterprise || oid.startsWith(`${p.enterprise}.`));
   if (profile) {
     for (const [field, o] of Object.entries(profile.facts)) {
-      const v = clean(val(o));
+      const v = clean(val(rebaseOid(o, sysObjectID)));
       if (v) facts[field] = v;
     }
   }
@@ -142,12 +143,12 @@ function parseFacts(varbinds, { managementIp, sysObjectID } = {}) {
 /** Walk exactly the subtrees parseFacts needs (read-only). Never throws. */
 async function collectDeviceFacts({ host, port = 161, community, managementIp, sysObjectID }) {
   const vendorRoots = [];
-  const oid = `.${String(sysObjectID || '').replace(/^\./, '')}`;
+  const oid = `.${String(canonicalOid(sysObjectID) || '').replace(/^\./, '')}`;
   const profile = VENDOR_FACT_PROFILES.find((p) => oid === p.enterprise || oid.startsWith(`${p.enterprise}.`));
-  if (profile) vendorRoots.push(...Object.values(profile.facts));
+  if (profile) vendorRoots.push(...Object.values(profile.facts).map((o) => rebaseOid(o, sysObjectID)));
 
   const varbinds = [];
-  const opts = { host, port, community, timeoutMs: 3000, retries: 1, overallTimeoutMs: 20000 };
+  const opts = { host, port, community, timeoutMs: 3000, retries: 3, overallTimeoutMs: 24000 };
   try {
     for (const root of [`${SYS}`, IFT, IFX, IPA]) {
       varbinds.push(...await walkSubtree({ ...opts, rootOid: root }).catch(() => []));

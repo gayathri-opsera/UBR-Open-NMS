@@ -11,6 +11,7 @@
  */
 
 const defaultSnmp = require('net-snmp');
+const { runExclusive } = require('./snmpGate');
 
 /** Write community for a device: its own, else the deployment-wide one; null when neither is set. */
 function writeCommunityFor(device, env = process.env) {
@@ -51,6 +52,10 @@ const call = (fn) => new Promise((resolve, reject) => fn((err, res) => (err ? re
  */
 async function setValues({ host, port = 161, community, items, snmp = defaultSnmp, timeoutMs = 4000 }) {
   if (!community) throw Object.assign(new Error('no SNMP write community configured'), { code: 'WRITE_NOT_CONFIGURED' });
+  return runExclusive(host, port, () => setValuesNow({ host, port, community, items, snmp, timeoutMs }));
+}
+
+async function setValuesNow({ host, port, community, items, snmp, timeoutMs }) {
   const session = snmp.createSession(host, community, { port, retries: 1, timeout: timeoutMs, version: snmp.Version2c });
   const results = [];
   try {

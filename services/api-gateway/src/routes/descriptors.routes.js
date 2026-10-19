@@ -511,6 +511,11 @@ function parseUpload(buf, filename = '') {
     const gid          = extractAttr(`<x${openTag}>`, 'id');
     const gname        = extractAttr(`<x${openTag}>`, 'displayName') || gid;
     const gorder       = parseInt(extractAttr(`<x${openTag}>`, 'displayOrder') || '0', 10);
+    // Sidebar placement declared by the descriptor (Wireless > Radio 1 > Properties). Kept so the
+    // hierarchy is data-driven instead of guessed from the group id.
+    const uiPage       = extractAttr(`<x${openTag}>`, 'uiPage')   || null;
+    const uiParent     = extractAttr(`<x${openTag}>`, 'uiParent') || null;
+    const uiTab        = extractAttr(`<x${openTag}>`, 'uiTab')    || null;
     const paramXmls    = extractAll(groupFull, 'parameter');
 
     const parameters = paramXmls.map((p) => {
@@ -538,7 +543,7 @@ function parseUpload(buf, filename = '') {
       return base;
     });
 
-    return { groupId: gid, displayName: gname, displayOrder: gorder, parameters, section };
+    return { groupId: gid, displayName: gname, displayOrder: gorder, uiPage, uiParent, uiTab, parameters, section };
   }
 
   // ── Config groups ────────────────────────────────────────────────────────────
@@ -1089,6 +1094,9 @@ router.post('/:id/versions/:v/activate', requireDescriptorAction('activate'), as
             maxValue:      p.maxValue ?? null,
             displayOrder:  p.displayOrder || 0,
             groupDisplayOrder: g.displayOrder || 0,
+            uiPage:        g.uiPage   || null,
+            uiParent:      g.uiParent || null,
+            uiTab:         g.uiTab    || null,
             createdAt:     now,
             updatedAt:     now,
           });
@@ -1119,7 +1127,11 @@ router.post('/:id/versions/:v/activate', requireDescriptorAction('activate'), as
           firmwareTo:          (doc.identity?.firmwareRange || '').split('–')[1]?.trim() || null,
           supportedProtocols:  (doc.capabilities?.protocols || []).map((p) =>
                                  (typeof p === 'string' ? p : p.type || 'SNMP').toUpperCase()),
-          registryVersion:     { high: 0, low: 1, unsigned: false },
+          // A real 64-bit integer: the Java registry reads this field as a long. A hand-built
+          // { high, low, unsigned } object is stored as an embedded document, which makes the
+          // product-definition service answer /internal/fingerprint-registry with HTTP 500 — and
+          // that takes down fingerprint matching for EVERY product in subnet scans.
+          registryVersion:     mongoose.mongo.Long.fromNumber(1),
           createdAt:           now,
           updatedAt:           now,
         }));
@@ -1573,3 +1585,4 @@ router.post('/:id/versions/:v/migrate', requireDescriptorAction('migrate'), asyn
 });
 
 module.exports = router;
+module.exports.parseUpload = parseUpload;

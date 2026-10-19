@@ -154,7 +154,7 @@ function definitionFingerprint(entries) {
     h.update(JSON.stringify([
       e.groupId, e.subGroup, e.parameterId, e.displayName, e.dataType, e.uiWidget, e.readOnly,
       e.snmpOid, e.displayOrder, e.groupDisplayOrder, e.enumValues, e.minValue, e.maxValue,
-      e.defaultValue, e.unit, e.hidden,
+      e.defaultValue, e.unit, e.hidden, e.uiPage, e.uiParent, e.uiTab,
     ]));
   }
   return h.digest('hex');
@@ -466,7 +466,8 @@ router.put(
       const definition = productDefinitionId ? await live.loadDefinition(productDefinitionId).catch(() => null) : null;
       if (!definition) return fail(409, 'NO_ACTIVE_FRAMEWORK', 'This device has no active product definition.');
 
-      const plans = changes.map((c) => planChange(definition, c));
+      const deviceDefinition = live.definitionForDevice(definition, device);   // OIDs as this device serves them
+      const plans = changes.map((c) => planChange(deviceDefinition, c));
       const community = writeCommunityFor(device);
       if (!community) {
         return fail(409, 'WRITE_NOT_CONFIGURED',

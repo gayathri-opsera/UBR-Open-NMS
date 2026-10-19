@@ -10,6 +10,7 @@
  */
 
 const snmp = require('net-snmp');
+const { runExclusive } = require('./snmpGate');
 
 const TEXT_OK = /^[\x09\x0a\x0d\x20-\x7e]*$/;
 
@@ -38,7 +39,7 @@ function valueToString(vb) {
  * @param {number} [opts.overallTimeoutMs=30000]
  * @returns {Promise<Array<{ oid: string, value: string, hex?: string }>>}  OIDs always carry a leading dot
  */
-function walkSubtree({
+function walkSubtreeUngated({
   host, port = 161, community, rootOid,
   timeoutMs = 3000, retries = 1, maxRepetitions = 25, overallTimeoutMs = 30000,
 }) {
@@ -79,6 +80,14 @@ function walkSubtree({
       (err) => finish(err || null),
     );
   });
+}
+
+/**
+ * Walk the subtree rooted at `rootOid` — one operation at a time per device (see snmpGate.js).
+ * The overall timeout starts when the walk actually begins, not while it waits its turn.
+ */
+function walkSubtree(opts) {
+  return runExclusive(opts.host, opts.port || 161, () => walkSubtreeUngated(opts));
 }
 
 /** True when the error means the device could not be reached (as opposed to a bad community, etc.). */

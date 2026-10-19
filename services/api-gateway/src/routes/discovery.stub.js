@@ -32,7 +32,11 @@ const express    = require('express');
 const dgram      = require('dgram');
 const http       = require('http');
 const mongoose   = require('mongoose');
-const { createProvisionHandler } = require('./provision.stub');
+const { createProvisionHandler, linkCpeToBts } = require('./provision.stub');
+const deviceAttributes = require('../live/deviceAttributes');
+const runStore       = require('../live/discoveryRunStore');
+const { canonicalOid } = require('../live/oidAliases');
+const { runExclusive } = require('../live/snmpGate');
 const router     = express.Router();
 
 // ── Product-definition service URL (for fingerprint registry lookups) ─────────
@@ -358,6 +362,15 @@ function parseSnmpResponse(buf) {
 }
 
 /**
+ * Wait this long, at least, for a host to answer the discovery handshake. The agent on some radios goes
+ * quiet for ~8 s at a time (measured on a UBR650: silent about 8 s out of every 23 s), so a window shorter
+ * than that misses a healthy device whenever the request lands in a quiet spell. Hosts that do answer are
+ * not slowed down; only silent ones are waited on for the full window (hosts are probed in parallel).
+ */
+const MIN_DISCOVERY_WINDOW_MS = 10_000;
+const discoveryWindowMs = (requestedMs) => Math.max(requestedMs || 0, MIN_DISCOVERY_WINDOW_MS);
+
+/**
  * Send a real SNMP v1/v2c GetRequest and return parsed MIB-II system group values.
  * @param {string} host
  * @param {number} port
@@ -366,6 +379,11 @@ function parseSnmpResponse(buf) {
  * @param {string} [version]  - 'v1' | 'v2c'
  */
 function snmpGet(host, port, community, timeoutMs = 4000, version = 'v2c') {
+  // one request at a time per device: a slow agent drops a GET that lands during a walk (snmpGate.js)
+  return runExclusive(host, port, () => snmpGetNow(host, port, community, timeoutMs, version));
+}
+
+function snmpGetNow(host, port, community, timeoutMs, version) {
   return new Promise((resolve, reject) => {
     const SYSTEM_OIDS = [
       '1.3.6.1.2.1.1.1.0',  // sysDescr
@@ -375,9 +393,16 @@ function snmpGet(host, port, community, timeoutMs = 4000, version = 'v2c') {
       '1.3.6.1.2.1.1.6.0',  // sysLocation
     ];
     const sock = dgram.createSocket('udp4');
-    const timer = setTimeout(() => { sock.close(); reject(new Error(`SNMP timeout → ${host}:${port}`)); }, timeoutMs);
+    // UDP gives no delivery guarantee and an embedded agent can miss a datagram, so one lost packet
+    // must not read as "device unreachable": the same request (same request-id) is retransmitted a
+    // few times inside the overall timeout, like every SNMP manager does (net-snmp retries too).
+    const pkt = buildGetRequest(community, SYSTEM_OIDS, version);
+    const retryEveryMs = Math.max(500, Math.floor(timeoutMs / 4));
+    let resend = null;
+    const stop = () => { clearTimeout(timer); clearInterval(resend); };
+    const timer = setTimeout(() => { clearInterval(resend); sock.close(); reject(new Error(`SNMP timeout → ${host}:${port}`)); }, timeoutMs);
     sock.on('message', (msg) => {
-      clearTimeout(timer);
+      stop();
       sock.close();
       const parsed = parseSnmpResponse(msg);
       resolve({
@@ -389,9 +414,11 @@ function snmpGet(host, port, community, timeoutMs = 4000, version = 'v2c') {
         raw: parsed,
       });
     });
-    sock.on('error', (err) => { clearTimeout(timer); reject(err); });
-    const pkt = buildGetRequest(community, SYSTEM_OIDS, version);
+    sock.on('error', (err) => { stop(); reject(err); });
     sock.send(pkt, 0, pkt.length, port, host);
+    resend = setInterval(() => {
+      try { sock.send(pkt, 0, pkt.length, port, host); } catch { /* socket already closed */ }
+    }, retryEveryMs);
   });
 }
 
@@ -420,10 +447,12 @@ function matchesTemplateFingerprints(mib, entries) {
   if (!entries || entries.length === 0) return true; // no fingerprint constraint → accept all
   if (!hasSnmpOidFingerprint(entries)) return true;  // banner-only template → can't identify SNMP devices
   const deviceOid = (mib.sysObjectID || '').replace(/^\./, '');
+  // A device on a re-rooted enterprise tree (newer firmware) matches the definition's fingerprint too.
+  const canonOid  = (canonicalOid(mib.sysObjectID) || '').replace(/^\./, '');
   for (const entry of entries) {
     if (entry.fingerprintType === 'SNMP_OID') {
       const oidVal = (entry.sysObjectId || entry.fingerprintValue || '').replace(/^\./, '');
-      if (oidVal && deviceOid && deviceOid.startsWith(oidVal)) return true;
+      if (oidVal && deviceOid && (deviceOid.startsWith(oidVal) || canonOid.startsWith(oidVal))) return true;
     }
     if (entry.fingerprintType === 'BANNER') {
       try {
@@ -453,7 +482,9 @@ const SNMP_OID_TTL_MS  = 30_000; // 30 s
 
 async function classifyByOid(sysObjectID) {
   if (!sysObjectID) return {};
-  const oid = sysObjectID.startsWith('.') ? sysObjectID.slice(1) : sysObjectID;
+  // Compare under the canonical enterprise root so a unit on newer firmware (re-rooted tree)
+  // classifies exactly like the same product on older firmware.
+  const oid = canonicalOid(sysObjectID).replace(/^\./, '');
 
   // ── Layer 1: fingerprint registry (product-definition driven, zero-code) ───
   try {
@@ -987,7 +1018,7 @@ router.post('/runs', async (req, res, next) => {
         mib = syntheticImmediate;
       } else {
         try {
-          mib = await snmpGet(host, port, community, (timeoutSeconds || 5) * 1000, snmpProtoVersion);
+          mib = await snmpGet(host, port, community, discoveryWindowMs((timeoutSeconds || 5) * 1000), snmpProtoVersion);
         } catch (snmpErr) {
           throw snmpErr; // re-throw for real devices that don't respond
         }
@@ -1002,6 +1033,23 @@ router.post('/runs', async (req, res, next) => {
         skipped.push({ target: `${host}:${port}`, oid: mib.sysObjectID, sysDescr: (mib.sysDescr || '').substring(0, 80) });
         return; // don't provision, don't add to hosts
       }
+
+      // Everything the device reports about itself — role / GPS and inventory facts — is read here
+      // (read-only). Discovery only REPORTS: nothing is written to the inventory until an
+      // admin provisions the device, so a device is never "already provisioned" before that click.
+      const displayIp = port !== 161 ? `${host}:${port}` : host;
+      const attrsPromise = syntheticImmediate
+        ? Promise.resolve(null)   // demo simulator ports have no real agent to ask
+        : Promise.race([
+            deviceAttributes.fetchDeviceAttributes({ host, port, community, sysObjectID: mib.sysObjectID, sysLocation: mib.sysLocation }),
+            new Promise((resolve) => setTimeout(() => resolve(null), 20000)),
+          ]).catch(() => null);
+      // Facts are read AFTER the role: the device takes one request at a time (snmpGate.js), and the
+      // role decides the device type, so it must not wait behind a long interface-table walk.
+      const factsPromise = attrsPromise.then(() => Promise.race([
+        deviceFacts.collectDeviceFacts({ host, port, community, managementIp: host, sysObjectID: mib.sysObjectID }),
+        new Promise((resolve) => setTimeout(() => resolve(null), 45000)),
+      ])).catch(() => null);
 
       const oidClass = await classifyByOid(mib.sysObjectID);
       let vendor  = oidClass.vendor  || 'Unknown';
@@ -1056,101 +1104,55 @@ router.post('/runs', async (req, res, next) => {
         if (callerDefMeta.defaultLongitude != null) pdLon = callerDefMeta.defaultLongitude;
       }
 
+      // The role the device itself reports (vendor role OID) is the truth: it wins over the
+      // template's default type, the sysDescr keywords and the OID map above.
+      const attrs = (await attrsPromise) || {};
+      if (attrs.role) generic = attrs.role;
+
       const serial = mib.sysName
         ? mib.sysName.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 64)
         : `snmp-${host.replace(/\./g, '-')}-${port}`;
 
-      // Provision to inventory — direct MongoDB upsert (same pattern as snmp-probe route)
-      // NOTE: ipAddress MUST use displayIp (host:port when port ≠ 161) so the inventory
-      // cross-reference in the results view (inventoryDeviceMap.get(result.ip)) succeeds.
-      // Using bare `host` here was the root cause of "Provision Device" reappearing on
-      // already-provisioned devices after a new discovery run.
-      const displayIp = port !== 161 ? `${host}:${port}` : host;
-      let inventoryForHost = {};   // facts reported by the device, also returned in the run results
+      // ── Inventory cross-reference (READ-ONLY) ─────────────────────────────────
+      // The run only reports what it found. Whether the device is already managed — or was
+      // deprovisioned — is looked up so the result can say so, but discovery never creates,
+      // revives or overwrites an inventory record:
+      //   • not in inventory        → shown as a candidate; it enters inventory only when an admin
+      //                               clicks Provision (POST /runs/:runId/provision)
+      //   • deprovisioned           → stays deprovisioned until an admin provisions it again
+      //   • already managed (active)→ only its live facts (MAC, firmware, interfaces, uptime) and
+      //                               last-seen time are refreshed; nothing else is touched
+      const facts = await factsPromise;
+      const inventory = deviceFacts.inventoryFields(facts, new Date());
+      const inventoryForHost = inventory;   // facts reported by the device, also returned in the run results
+
+      // Link to the ACTIVE product definition (the id from the built-in OID map can be stale).
+      defId = (await liveParameters.resolveDefinitionId([defId], vendor).catch(() => null)) || defId;
+
+      let managed = null;          // active inventory record for this device, if any
+      let deprovisioned = false;   // a soft-deleted record exists and no active one does
       try {
         const devicesCol = await getDevicesCol();
-        const now = new Date();
-
-        // ── Deprovision guard: skip re-provisioning soft-deleted devices ──────
-        // When an operator clicks "Deprovision", the device is marked with
-        // isDeprovisioned: true (soft delete) rather than physically removed.
-        // Re-discovery must honour that intent and NOT resurrect the device.
-        const existingDoc = await devicesCol.findOne(
-          { $or: [{ _id: serial }, { serialNumber: serial }, { ipAddress: displayIp }] },
-          { projection: { isDeprovisioned: 1, registeredAt: 1, createdAt: 1 } }
-        );
-        if (existingDoc && existingDoc.isDeprovisioned === true) {
-          console.log(`[discovery-stub] bypass ⏭ ${serial} @ ${host}:${port} — previously deprovisioned, skipping re-provision`);
-          hosts.push({
-            ip: displayIp, serialNumber: serial, port,
-            icmpStatus: 'bypassed', snmpStatus: 'success',
-            sysName: mib.sysName, sysDescr: mib.sysDescr, sysObjectID: mib.sysObjectID,
-            sysLocation: mib.sysLocation, sysContact: mib.sysContact,
-            vendor, model, genericDeviceType: generic,
-            classificationStatus: 'RECOGNISED',
-            productDefinitionId: defId, macAddress: null,
-            defaultLatitude: pdLat, defaultLongitude: pdLon,
-            discoveryMethod: 'ICMP_BYPASS',
-            provisioned: false,
-            deprovisionedFlag: true,
-          });
-          return;
+        const or = [{ _id: serial }, { serialNumber: serial }, { ipAddress: displayIp }];
+        if (inventory.reportedSerialNumber) or.push({ reportedSerialNumber: inventory.reportedSerialNumber });
+        const known = await devicesCol.find({ $or: or }, { projection: { _id: 1, isDeprovisioned: 1 } }).toArray();
+        managed = known.find((d) => d.isDeprovisioned !== true) || null;
+        deprovisioned = !managed && known.some((d) => d.isDeprovisioned === true);
+        if (managed) {
+          await devicesCol.updateOne(
+            { _id: managed._id, isDeprovisioned: { $ne: true } },
+            { $set: { ...inventory, status: 'ONLINE', snmpPort: port, snmpCommunity: community, lastSeenAt: new Date(), updatedAt: new Date() } },
+          );
         }
-
-        // Inventory facts straight from the device (standard MIBs + curated vendor objects):
-        // management MAC, serial/firmware/hardware/bootloader, uptime, contact, interfaces.
-        const facts = await Promise.race([
-          deviceFacts.collectDeviceFacts({ host, port, community, managementIp: host, sysObjectID: mib.sysObjectID }),
-          new Promise((resolve) => setTimeout(() => resolve(null), 25000)),
-        ]).catch(() => null);
-        const inventory = deviceFacts.inventoryFields(facts, now);
-        inventoryForHost = inventory;
-
-        // Link to the ACTIVE product definition (the id from the built-in OID map can be stale).
-        defId = (await liveParameters.resolveDefinitionId([defId], vendor).catch(() => null)) || defId;
-
-        const doc = {
-          _id:              serial,
-          id:               serial,
-          deviceId:         serial,
-          serialNumber:     serial,
-          name:             mib.sysName || serial,
-          deviceName:       mib.sysName || serial,
-          deviceType:       generic === 'RADIO' ? 'RADIO' : null,
-          genericDeviceType: generic,
-          model,
-          manufacturer:     vendor,
-          productDefinitionId: defId,
-          status:           'ONLINE',
-          ipAddress:        displayIp,
-          snmpPort:         port,
-          snmpCommunity:    community,
-          // GPS — sourced from the Product Definition uploaded by the operator.
-          // Falls back to null if no definition was selected or it had no location block.
-          latitude:         pdLat,
-          longitude:        pdLon,
-          sysDescr:         mib.sysDescr,
-          sysObjectID:      mib.sysObjectID,
-          sysName:          mib.sysName,
-          sysLocation:      mib.sysLocation,
-          sysContact:       mib.sysContact,
-          discoveryParadigm: defId ? 'BANNER' : 'SNMP',
-          tags:             isRealIpTarget ? ['snmp-discovered', 'real-device'] : ['snmp-discovered', 'icmp-bypass'],
-          ...inventory,
-          networkId:        deviceFacts.networkIdFor(host),
-          lastSeenAt:       now,
-          registeredAt:     existingDoc?.registeredAt || existingDoc?.createdAt || now,
-          createdAt:        existingDoc?.createdAt || now,
-          updatedAt:        now,
-        };
-        await devicesCol.replaceOne({ _id: doc._id }, doc, { upsert: true });
-        console.log(`[discovery-stub] bypass provisioned ${serial} (${generic}) @ ${host}:${port} defId=${defId}`);
-        // First live read of the definition's parameters (fire-and-forget) so the Node View has data.
-        if (defId) liveParameters.refreshDevice(doc).catch(() => {});
-        try { require('./topology.stub').bustTopologyCache(); } catch { /* ignore */ }
-      } catch (provErr) {
-        console.warn(`[discovery-stub] bypass provision failed for ${serial}: ${provErr.message}`);
+      } catch (lookupErr) {
+        console.warn(`[discovery-stub] inventory cross-reference failed for ${serial}: ${lookupErr.message}`);
       }
+      if (deprovisioned) {
+        console.log(`[discovery-stub] bypass ⏭ ${serial} @ ${host}:${port} — deprovisioned, not re-provisioned (admin must provision it again)`);
+      }
+
+      // What Provision needs but the browser must never see (SNMP credential, collected facts).
+      runStore.put(runId, displayIp, { community, port, inventory, serial, productDefinitionId: defId || null });
 
       // displayIp is already computed above (before provisioning) — reuse it here.
       // serialNumber MUST be included so inventoryDeviceMap.get(result.serialNumber)
@@ -1179,8 +1181,15 @@ router.post('/runs', async (req, res, next) => {
         // from their network planning document rather than having to enter manually.
         defaultLatitude:  pdLat,
         defaultLongitude: pdLon,
+        // Device-reported role / GPS (same fields the Java discovery service returns) — the
+        // Provision modal pre-selects the type and coordinates from these.
+        ...(attrs.role ? { deviceRole: attrs.role, deviceRoleSource: attrs.roleSource } : {}),
+        ...(attrs.latitude != null ? { latitude: attrs.latitude, longitude: attrs.longitude, locationSource: attrs.locationSource } : {}),
+        // Inventory state at discovery time: true only for a device an admin already provisioned.
+        provisioned:       !!managed,
+        ...(deprovisioned ? { deprovisionedFlag: true } : {}),
       });
-      console.log(`[discovery-stub] bypass ✅ ${host}:${port} vendor=${vendor} defId=${defId}`);
+      console.log(`[discovery-stub] bypass ✅ ${host}:${port} vendor=${vendor} type=${generic}${attrs.role ? ` (device-reported ${attrs.roleSource})` : ''} defId=${defId} inventory=${managed ? 'managed' : deprovisioned ? 'deprovisioned' : 'not-provisioned'}`);
     } catch (err) {
       console.warn(`[discovery-stub] bypass ❌ ${host}:${port} → ${err.message}`);
       errors.push({ target, error: err.message });
@@ -1207,7 +1216,8 @@ router.post('/runs', async (req, res, next) => {
   (function pairBtsCpe() {
     function extractEnterprise(oid) {
       if (!oid) return null;
-      const parts = oid.replace(/^\./, '').split('.');
+      // canonical root: a CPE on newer firmware (re-rooted tree) still belongs to the same radio system
+      const parts = canonicalOid(oid).replace(/^\./, '').split('.');
       // Standard enterprise OID: 1.3.6.1.4.1.<enterprise>...
       if (parts.length >= 7 && parts[0]==='1' && parts[1]==='3' && parts[2]==='6' &&
           parts[3]==='1' && parts[4]==='4' && parts[5]==='1') return parts[6];
@@ -1231,23 +1241,22 @@ router.post('/runs', async (req, res, next) => {
         const bts = btsGroup[i % (btsGroup.length || 1)] || btsGroup[0];
         if (!bts) return;
         cpe.connectedBtsSerial = bts.serialNumber;
+        runStore.put(runId, cpe.ip, { pairedBtsIp: bts.ip });
         console.log(`[discovery-stub] 🔗 paired CPE ${cpe.serialNumber} → BTS ${bts.serialNumber} (enterprise OID .${ent})`);
       });
     }
   })();
 
-  // Persist connectedBtsSerial to MongoDB for all newly paired CPEs
+  // BTS↔CPE links only ever join devices that are ALREADY in the inventory (provisioned by an
+  // admin); a link between candidates is applied when the second of the pair is provisioned.
   await Promise.all(hosts
     .filter(h => h.snmpStatus === 'success' && h.connectedBtsSerial)
     .map(async (h) => {
       try {
-        const devicesCol = await getDevicesCol();
-        await devicesCol.updateOne(
-          { _id: h.serialNumber },
-          { $set: { connectedBtsSerial: h.connectedBtsSerial, updatedAt: new Date() } }
-        );
+        const bts = hosts.find((x) => x.serialNumber === h.connectedBtsSerial);
+        if (bts) await linkCpeToBts(await getDevicesCol(), h.ip, bts.ip);
       } catch (pairErr) {
-        console.warn(`[discovery-stub] CPE→BTS pairing persist failed for ${h.serialNumber}:`, pairErr.message);
+        console.warn(`[discovery-stub] CPE→BTS pairing failed for ${h.serialNumber}:`, pairErr.message);
       }
     })
   );
@@ -1589,7 +1598,7 @@ router.post('/snmp-probe', async (req, res) => {
     const [host, rawPort] = target.includes(':') ? [target.split(':')[0], parseInt(target.split(':')[1], 10)] : [target, NaN];
     const port = isNaN(rawPort) ? (TEST_SNMP_PORT_MAP[host] || 161) : rawPort;
     try {
-      const mib = await snmpGet(host, port, community, 5000, snmpProtoVersion);
+      const mib = await snmpGet(host, port, community, discoveryWindowMs(5000), snmpProtoVersion);
       console.log(`[snmp-probe] ✅ ${host}:${port} → sysName=${mib.sysName} sysDescr=${(mib.sysDescr||'').substring(0,50)}`);
 
       // ── Template filter ────────────────────────────────────────────────────
@@ -1659,6 +1668,13 @@ router.post('/snmp-probe', async (req, res) => {
         if (callerDefMeta.defaultLongitude != null) pdLon = callerDefMeta.defaultLongitude;
       }
 
+      // Role / GPS the device reports about itself win over every heuristic above.
+      const probeAttrs = (await Promise.race([
+        deviceAttributes.fetchDeviceAttributes({ host, port, community, sysObjectID: mib.sysObjectID, sysLocation: mib.sysLocation }),
+        new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+      ]).catch(() => null)) || {};
+      if (probeAttrs.role) resolvedGeneric = probeAttrs.role;
+
       const serialNumber = mib.sysName
         ? mib.sysName.replace(/[^a-zA-Z0-9_-]/g, '-').substring(0, 64)
         : `snmp-${host.replace(/\./g, '-')}-${port}`;
@@ -1678,7 +1694,9 @@ router.post('/snmp-probe', async (req, res) => {
         vendor:              resolvedVendor,
         model:               resolvedModel,
         genericDeviceType:   resolvedGeneric,
-        deviceType:          resolvedGeneric === 'RADIO' ? 'RADIO' : null,
+        deviceType:          probeAttrs.role || (resolvedGeneric === 'RADIO' ? 'RADIO' : null),
+        ...(probeAttrs.role ? { deviceRole: probeAttrs.role, deviceRoleSource: probeAttrs.roleSource } : {}),
+        ...(probeAttrs.latitude != null ? { latitude: probeAttrs.latitude, longitude: probeAttrs.longitude, locationSource: probeAttrs.locationSource } : {}),
         productDefinitionId,
         defaultLatitude:     pdLat,
         defaultLongitude:    pdLon,
@@ -1799,3 +1817,6 @@ module.exports = router;
 // Shared with provision.stub so provisioning accepts what discovery classified.
 module.exports.fetchAllFingerprintsFromPDService = fetchAllFingerprintsFromPDService;
 module.exports.classifyByOid = classifyByOid;
+module.exports.snmpGet = snmpGet;
+module.exports.discoveryWindowMs = discoveryWindowMs;
+module.exports.matchesTemplateFingerprints = matchesTemplateFingerprints;

@@ -1,0 +1,2074 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  UBR-655 Wireless Backhaul Unit - Device Descriptor v3.0.0  (schema urn:nms:descriptor:2.0)
+  Vendor MIB    : EnGenius / SENAO  ENGENIUS-MIB   enterprise .1.3.6.1.4.1.52619   (SENAO-MIB.mib)
+  Reference unit: UBR655 firmware 1.0.0.149 at 10.0.150.88 (EOC655)
+  Source sheet  : Configurations_GUI 3.xlsx  (parameter list, labels, defaults)
+
+  Replaces the v2.0.0 demo descriptor, which used the placeholder enterprise .99999.
+
+  HIERARCHY   Wireless -> Radio 1 / Radio 2 / 2.4 GHz Radio -> Properties | DDRS/ATPC | DFS | DCS
+              Network  -> IP Configuration (5 GHz | 2.4 GHz), VLAN (Radio 1 | Radio 2), Ethernet, DHCP
+              Management, Monitor -> Radio 1 / Radio 2 / 2.4 GHz -> Wireless Stats | Link Stats
+  Every group carries uiPage / uiParent / uiTab, which the gateway stores and Node View renders.
+
+  INSTANCES   Every per-radio parameter is declared with its own OID = column OID + table instance,
+              so each radio is a separate field. Mapping (device notes, verify with a live walk):
+                wirelessTable / wirelessStatsTable / assocTable : 1 = 2.4 GHz, 2 = Radio 1 (5 GHz), 3 = Radio 2 (6 GHz)
+                linkProfileTable (index.secIndex) / dcsTable    : 1 = Radio 1, 2 = Radio 2   (suffix .1 = secIndex)
+                vlanTable                                       : 1 = Radio 1 (ath1), 2 = Radio 2 (ath2)
+                ethTable                                        : 1 = eth0, 2 = eth1
+              NOTE: SENAO-MIB.mib declares wirelessIndex as (1..2); the unit is believed to expose 3 radios.
+
+  KNOWN GAPS  OFDMA has no OID in the MIB or the sheet; it is listed without an OID (reported UNMAPPED).
+              Sheet VLAN columns 14-17 do not exist in SENAO-MIB.mib; flagged where they appear.
+              Parameter visibility rules (e.g. Key hidden when Encryption = None) are not expressible here.
+-->
+<descriptor xmlns="urn:nms:descriptor:2.0" schemaVersion="2.0">
+
+  <identity>
+    <vendor>EOC</vendor>
+    <productFamily>UBR 650/655 Series</productFamily>
+    <model>UBR655</model>
+    <variants>
+      <variant>UBR655</variant>
+      <variant>EOC655</variant>
+    </variants>
+    <firmwareFrom>1.0.0</firmwareFrom>
+    <firmwareTo>99.99.99</firmwareTo>
+    <description>UBR-655 tri-radio wireless backhaul unit: Radio 1 and Radio 2 (5/6 GHz, PTP/PTMP) plus a 2.4 GHz radio</description>
+    <fingerprints>
+      <!-- EnGenius/SENAO enterprise OID (the unit at 10.0.150.88 answers under this arc).
+           Narrow to .1.3.6.1.4.1.52619.2.1 (ptp) / .2.2 (ptmp) once the unit's sysObjectID is read live. -->
+      <fingerprint>
+        <sysObjectId>.1.3.6.1.4.1.52619</sysObjectId>
+        <firmwareFrom>1.0.0</firmwareFrom>
+        <firmwareTo>99.99.99</firmwareTo>
+      </fingerprint>
+    </fingerprints>
+    <matchRules>
+      <rule priority="1">
+        <field>sysObjectId</field>
+        <op>prefix</op>
+        <value>.1.3.6.1.4.1.52619</value>
+      </rule>
+    </matchRules>
+  </identity>
+
+  <capabilities>
+    <protocols>
+      <protocol>
+        <type>snmp</type>
+        <version>v2c</version>
+        <defaultPort>161</defaultPort>
+      </protocol>
+    </protocols>
+    <features>
+      <feature name="radio1">true</feature>
+      <feature name="radio2">true</feature>
+      <feature name="radio24ghz">true</feature>
+      <feature name="ddrsAtpc">true</feature>
+      <feature name="dfs">true</feature>
+      <feature name="dcs">true</feature>
+      <feature name="vlan">true</feature>
+      <feature name="snmpTraps">true</feature>
+      <feature name="reboot">true</feature>
+    </features>
+    <snmpMibs>
+      <mib>ENGENIUS-MIB</mib>
+    </snmpMibs>
+  </capabilities>
+
+  <config>
+    <!-- WIRELESS -> RADIO 1 -> PROPERTIES   (wirelessTable instance 2) -->
+    <group id="radio1.properties" displayName="Radio 1 - Properties" displayOrder="1"
+           uiPage="Wireless" uiParent="Radio 1" uiTab="Properties">
+      <parameter>
+        <parameterId>config.radio1.properties.radio_status</parameterId>
+        <displayName>Radio status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.33.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(0),Disable(1)</enumValues>
+        <defaultValue>Enable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.properties.link_type</parameterId>
+        <displayName>LinkType</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.35.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>PTP(1),PTMP(3)</enumValues>
+        <defaultValue>PTMP(3)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.properties.radio_mode</parameterId>
+        <displayName>Radio Mode</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.2.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>BTS(ap),CPE(sta)</enumValues>
+        <defaultValue>BTS(ap)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.properties.ssid</parameterId>
+        <displayName>SSID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.3.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>UBR650</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <!-- Sheet: available bandwidths depend on the selected country (see wirelessSupportedBandwidths .6) -->
+      <parameter>
+        <parameterId>config.radio1.properties.bandwidth</parameterId>
+        <displayName>Bandwidth</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.7.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>HT20(HT20),HT40+(HT40+),HT80(HT80),HT160(HT160)</enumValues>
+        <defaultValue>HT80(HT80)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.properties.country</parameterId>
+        <displayName>Country</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.4.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>US-Non DFS(5011),US-5GHz ALL(5012),Europe(276),Canada(124),5 Ghz(5019)</enumValues>
+        <defaultValue>5 Ghz(5019)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <!-- Sheet: channel list depends on country (see wirelessSupportedChannels .8) - free text here -->
+      <parameter>
+        <parameterId>config.radio1.properties.configured_channel</parameterId>
+        <displayName>Configured channel</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.9.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>36(5180 Mhz)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.properties.active_channel</parameterId>
+        <displayName>Active channel</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.23.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.properties.encryption</parameterId>
+        <displayName>Encryption</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.16.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>AES-256(psk2+ccmp-256),None(none)</enumValues>
+        <defaultValue>AES-256(psk2+ccmp-256)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <!-- Sheet: 8-63 characters -->
+      <parameter>
+        <parameterId>config.radio1.properties.key</parameterId>
+        <displayName>Key</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.17.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>ubr@1234</defaultValue>
+        <readOnly>false</readOnly>
+        <isSecret>true</isSecret>
+        <displayOrder>10</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.properties.maximum_sus</parameterId>
+        <displayName>Maximum Sus</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.37.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1</minValue>
+        <maxValue>32</maxValue>
+        <defaultValue>16</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>11</displayOrder>
+      </parameter>
+      <!-- NO OID: not in SENAO-MIB.mib and "-" in the sheet - shown as UNMAPPED, cannot be read or set over SNMP -->
+      <parameter>
+        <parameterId>config.radio1.properties.ofdma</parameterId>
+        <displayName>OFDMA</displayName>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(1),Disable(0)</enumValues>
+        <defaultValue>Disable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>12</displayOrder>
+      </parameter>
+      <!-- Sheet labels are "75/25"; written "75:25" because "/" separates options in enumValues -->
+      <parameter>
+        <parameterId>config.radio1.properties.dl_ul_ratio</parameterId>
+        <displayName>DL/UL Ratio</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.57.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Auto(0),50:50(50),60:40(60),70:30(70),75:25(75),80:20(80)</enumValues>
+        <defaultValue>75:25(75)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>13</displayOrder>
+      </parameter>
+    </group>
+    <!-- WIRELESS -> RADIO 1 -> DDRS/ATPC   (linkProfileTable instance 1.1; EIRP/gain from wirelessTable 2) -->
+    <group id="radio1.ddrs" displayName="Radio 1 - DDRS/ATPC" displayOrder="2"
+           uiPage="Wireless" uiParent="Radio 1" uiTab="DDRS/ATPC">
+      <parameter>
+        <parameterId>config.radio1.ddrs.ddrs_status</parameterId>
+        <displayName>DDRS Status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.3.1.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(1),Disable(0)</enumValues>
+        <defaultValue>Enable(1)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <!-- Sheet lists this OID twice: "Auto" is valid only while DDRS is enabled, otherwise Single/Dual -->
+      <parameter>
+        <parameterId>config.radio1.ddrs.spatial_stream</parameterId>
+        <displayName>Spatial Stream</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.4.1.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Single(1),Dual(2),Auto(3)</enumValues>
+        <defaultValue>Auto(3)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <!-- MCS 0-11 -->
+      <parameter>
+        <parameterId>config.radio1.ddrs.max_rate_single</parameterId>
+        <displayName>Max. Data Rate - Single Stream</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.17.1.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>11</maxValue>
+        <defaultValue>11</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <!-- MCS 12-23 -->
+      <parameter>
+        <parameterId>config.radio1.ddrs.max_rate_dual</parameterId>
+        <displayName>Max. Data Rate - Dual Stream</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.18.1.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>12</minValue>
+        <maxValue>23</maxValue>
+        <defaultValue>23</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <!-- MCS 0-23 (single 0-11, dual 12-23) -->
+      <parameter>
+        <parameterId>config.radio1.ddrs.min_modulation_index</parameterId>
+        <displayName>Min. Modulation Index</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.5.1.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>23</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <!-- MCS 0-23 (single 0-11, dual 12-23) -->
+      <parameter>
+        <parameterId>config.radio1.ddrs.max_modulation_index</parameterId>
+        <displayName>Max. Modulation Index</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.6.1.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>23</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <!-- Fixed MCS when DDRS is disabled -->
+      <parameter>
+        <parameterId>config.radio1.ddrs.modulation_index</parameterId>
+        <displayName>Modulation Index</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.9.1.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>23</maxValue>
+        <defaultValue>3</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.ddrs.atpc_status</parameterId>
+        <displayName>ATPC Status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.11.1.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(1),Disable(0)</enumValues>
+        <defaultValue>Disable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.ddrs.transmit_power</parameterId>
+        <displayName>Transmit Power</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.12.1.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1</minValue>
+        <maxValue>26</maxValue>
+        <units>dBm</units>
+        <defaultValue>26</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <!-- INFERRED: sheet OID is "-"; mapped to wirelessAntennaGain (.24, range 0-30) from the MIB -->
+      <parameter>
+        <parameterId>config.radio1.ddrs.antenna_gain</parameterId>
+        <displayName>Connectorized Antenna Gain</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.24.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>30</maxValue>
+        <units>dBi</units>
+        <defaultValue>23</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>10</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.ddrs.maximum_eirp</parameterId>
+        <displayName>Maximum EIRP</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.30.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+        <units>dBm</units>
+        <defaultValue>0</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>11</displayOrder>
+      </parameter>
+    </group>
+    <group id="radio1.dfs" displayName="Radio 1 - DFS" displayOrder="3"
+           uiPage="Wireless" uiParent="Radio 1" uiTab="DFS">
+      <!-- Not in the sheet; present in the MIB (wirelessDFSStatus) and on the device DFS tab -->
+      <parameter>
+        <parameterId>config.radio1.dfs.dfs_status</parameterId>
+        <displayName>DFS Status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.49.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Disable(0),Enable(1)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+    </group>
+    <!-- WIRELESS -> RADIO 1 -> DCS   (dcsTable instance 1) -->
+    <group id="radio1.dcs" displayName="Radio 1 - DCS" displayOrder="4"
+           uiPage="Wireless" uiParent="Radio 1" uiTab="DCS">
+      <parameter>
+        <parameterId>config.radio1.dcs.dcs_status</parameterId>
+        <displayName>DCS Status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.2.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Disable(0),Enable(1)</enumValues>
+        <defaultValue>Disable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.dcs.rtx_threshold</parameterId>
+        <displayName>RTX Threshold</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.3.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+        <units>%</units>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.dcs.background_scan</parameterId>
+        <displayName>Background Scan</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.11.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Disable(0),Enable(1)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+    </group>
+    <!-- WIRELESS -> RADIO 2 -> PROPERTIES   (wirelessTable instance 3) -->
+    <group id="radio2.properties" displayName="Radio 2 - Properties" displayOrder="5"
+           uiPage="Wireless" uiParent="Radio 2" uiTab="Properties">
+      <parameter>
+        <parameterId>config.radio2.properties.radio_status</parameterId>
+        <displayName>Radio status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.33.3</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(0),Disable(1)</enumValues>
+        <defaultValue>Enable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.properties.link_type</parameterId>
+        <displayName>LinkType</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.35.3</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>PTP(1),PTMP(3)</enumValues>
+        <defaultValue>PTMP(3)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.properties.radio_mode</parameterId>
+        <displayName>Radio Mode</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.2.3</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>BTS(ap),CPE(sta)</enumValues>
+        <defaultValue>BTS(ap)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.properties.ssid</parameterId>
+        <displayName>SSID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.3.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>UBR650</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <!-- Sheet: available bandwidths depend on the selected country (see wirelessSupportedBandwidths .6) -->
+      <parameter>
+        <parameterId>config.radio2.properties.bandwidth</parameterId>
+        <displayName>Bandwidth</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.7.3</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>HT20(HT20),HT40+(HT40+),HT80(HT80),HT160(HT160)</enumValues>
+        <defaultValue>HT80(HT80)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.properties.country</parameterId>
+        <displayName>Country</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.4.3</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>US-Non DFS(5011),US-5GHz ALL(5012),Europe(276),Canada(124),5 Ghz(5019)</enumValues>
+        <defaultValue>5 Ghz(5019)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <!-- Sheet: channel list depends on country (see wirelessSupportedChannels .8) - free text here -->
+      <parameter>
+        <parameterId>config.radio2.properties.configured_channel</parameterId>
+        <displayName>Configured channel</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.9.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>36(5180 Mhz)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.properties.active_channel</parameterId>
+        <displayName>Active channel</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.23.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.properties.encryption</parameterId>
+        <displayName>Encryption</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.16.3</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>AES-256(psk2+ccmp-256),None(none)</enumValues>
+        <defaultValue>AES-256(psk2+ccmp-256)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <!-- Sheet: 8-63 characters -->
+      <parameter>
+        <parameterId>config.radio2.properties.key</parameterId>
+        <displayName>Key</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.17.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>ubr@1234</defaultValue>
+        <readOnly>false</readOnly>
+        <isSecret>true</isSecret>
+        <displayOrder>10</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.properties.maximum_sus</parameterId>
+        <displayName>Maximum Sus</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.37.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1</minValue>
+        <maxValue>32</maxValue>
+        <defaultValue>16</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>11</displayOrder>
+      </parameter>
+      <!-- NO OID: not in SENAO-MIB.mib and "-" in the sheet - shown as UNMAPPED, cannot be read or set over SNMP -->
+      <parameter>
+        <parameterId>config.radio2.properties.ofdma</parameterId>
+        <displayName>OFDMA</displayName>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(1),Disable(0)</enumValues>
+        <defaultValue>Disable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>12</displayOrder>
+      </parameter>
+      <!-- Sheet labels are "75/25"; written "75:25" because "/" separates options in enumValues -->
+      <parameter>
+        <parameterId>config.radio2.properties.dl_ul_ratio</parameterId>
+        <displayName>DL/UL Ratio</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.57.3</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Auto(0),50:50(50),60:40(60),70:30(70),75:25(75),80:20(80)</enumValues>
+        <defaultValue>75:25(75)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>13</displayOrder>
+      </parameter>
+    </group>
+    <!-- WIRELESS -> RADIO 2 -> DDRS/ATPC   (linkProfileTable instance 2.1; EIRP/gain from wirelessTable 3) -->
+    <group id="radio2.ddrs" displayName="Radio 2 - DDRS/ATPC" displayOrder="6"
+           uiPage="Wireless" uiParent="Radio 2" uiTab="DDRS/ATPC">
+      <parameter>
+        <parameterId>config.radio2.ddrs.ddrs_status</parameterId>
+        <displayName>DDRS Status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.3.2.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(1),Disable(0)</enumValues>
+        <defaultValue>Enable(1)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <!-- Sheet lists this OID twice: "Auto" is valid only while DDRS is enabled, otherwise Single/Dual -->
+      <parameter>
+        <parameterId>config.radio2.ddrs.spatial_stream</parameterId>
+        <displayName>Spatial Stream</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.4.2.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Single(1),Dual(2),Auto(3)</enumValues>
+        <defaultValue>Auto(3)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <!-- MCS 0-11 -->
+      <parameter>
+        <parameterId>config.radio2.ddrs.max_rate_single</parameterId>
+        <displayName>Max. Data Rate - Single Stream</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.17.2.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>11</maxValue>
+        <defaultValue>11</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <!-- MCS 12-23 -->
+      <parameter>
+        <parameterId>config.radio2.ddrs.max_rate_dual</parameterId>
+        <displayName>Max. Data Rate - Dual Stream</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.18.2.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>12</minValue>
+        <maxValue>23</maxValue>
+        <defaultValue>23</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <!-- MCS 0-23 (single 0-11, dual 12-23) -->
+      <parameter>
+        <parameterId>config.radio2.ddrs.min_modulation_index</parameterId>
+        <displayName>Min. Modulation Index</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.5.2.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>23</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <!-- MCS 0-23 (single 0-11, dual 12-23) -->
+      <parameter>
+        <parameterId>config.radio2.ddrs.max_modulation_index</parameterId>
+        <displayName>Max. Modulation Index</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.6.2.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>23</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <!-- Fixed MCS when DDRS is disabled -->
+      <parameter>
+        <parameterId>config.radio2.ddrs.modulation_index</parameterId>
+        <displayName>Modulation Index</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.9.2.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>23</maxValue>
+        <defaultValue>3</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.ddrs.atpc_status</parameterId>
+        <displayName>ATPC Status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.11.2.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(1),Disable(0)</enumValues>
+        <defaultValue>Disable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.ddrs.transmit_power</parameterId>
+        <displayName>Transmit Power</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.12.2.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1</minValue>
+        <maxValue>26</maxValue>
+        <units>dBm</units>
+        <defaultValue>26</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <!-- INFERRED: sheet OID is "-"; mapped to wirelessAntennaGain (.24, range 0-30) from the MIB -->
+      <parameter>
+        <parameterId>config.radio2.ddrs.antenna_gain</parameterId>
+        <displayName>Connectorized Antenna Gain</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.24.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>30</maxValue>
+        <units>dBi</units>
+        <defaultValue>23</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>10</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.ddrs.maximum_eirp</parameterId>
+        <displayName>Maximum EIRP</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.30.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+        <units>dBm</units>
+        <defaultValue>0</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>11</displayOrder>
+      </parameter>
+    </group>
+    <group id="radio2.dfs" displayName="Radio 2 - DFS" displayOrder="7"
+           uiPage="Wireless" uiParent="Radio 2" uiTab="DFS">
+      <!-- Not in the sheet; present in the MIB (wirelessDFSStatus) and on the device DFS tab -->
+      <parameter>
+        <parameterId>config.radio2.dfs.dfs_status</parameterId>
+        <displayName>DFS Status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.49.3</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Disable(0),Enable(1)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+    </group>
+    <!-- WIRELESS -> RADIO 2 -> DCS   (dcsTable instance 2) -->
+    <group id="radio2.dcs" displayName="Radio 2 - DCS" displayOrder="8"
+           uiPage="Wireless" uiParent="Radio 2" uiTab="DCS">
+      <parameter>
+        <parameterId>config.radio2.dcs.dcs_status</parameterId>
+        <displayName>DCS Status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.2.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Disable(0),Enable(1)</enumValues>
+        <defaultValue>Disable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.dcs.rtx_threshold</parameterId>
+        <displayName>RTX Threshold</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.3.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>0</minValue>
+        <maxValue>100</maxValue>
+        <units>%</units>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.dcs.background_scan</parameterId>
+        <displayName>Background Scan</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.11.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Disable(0),Enable(1)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+    </group>
+    <!-- WIRELESS -> 2.4 GHZ RADIO -> PROPERTIES   (wirelessTable instance 1) -->
+    <group id="radio24.properties" displayName="2.4 GHz Radio - Properties" displayOrder="9"
+           uiPage="Wireless" uiParent="2.4 GHz Radio" uiTab="Properties">
+      <parameter>
+        <parameterId>config.radio24.properties.radio_status</parameterId>
+        <displayName>Radio status</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.33.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(0),Disable(1)</enumValues>
+        <defaultValue>Enable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio24.properties.link_type</parameterId>
+        <displayName>LinkType</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.35.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>PTP(1),PTMP(3)</enumValues>
+        <defaultValue>PTMP(3)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio24.properties.radio_mode</parameterId>
+        <displayName>Radio Mode</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.2.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>BTS(ap),CPE(sta)</enumValues>
+        <defaultValue>BTS(ap)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio24.properties.ssid</parameterId>
+        <displayName>SSID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.3.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>UBR650</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <!-- Sheet: available bandwidths depend on the selected country (see wirelessSupportedBandwidths .6) -->
+      <parameter>
+        <parameterId>config.radio24.properties.bandwidth</parameterId>
+        <displayName>Bandwidth</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.7.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>HT20(HT20),HT40+(HT40+),HT80(HT80),HT160(HT160)</enumValues>
+        <defaultValue>HT80(HT80)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio24.properties.country</parameterId>
+        <displayName>Country</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.4.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>US-Non DFS(5011),US-5GHz ALL(5012),Europe(276),Canada(124),5 Ghz(5019)</enumValues>
+        <defaultValue>5 Ghz(5019)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <!-- Sheet: channel list depends on country (see wirelessSupportedChannels .8) - free text here -->
+      <parameter>
+        <parameterId>config.radio24.properties.configured_channel</parameterId>
+        <displayName>Configured channel</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.9.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>36(5180 Mhz)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio24.properties.active_channel</parameterId>
+        <displayName>Active channel</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.23.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio24.properties.encryption</parameterId>
+        <displayName>Encryption</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.16.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>AES-256(psk2+ccmp-256),None(none)</enumValues>
+        <defaultValue>AES-256(psk2+ccmp-256)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <!-- Sheet: 8-63 characters -->
+      <parameter>
+        <parameterId>config.radio24.properties.key</parameterId>
+        <displayName>Key</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.17.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <defaultValue>ubr@1234</defaultValue>
+        <readOnly>false</readOnly>
+        <isSecret>true</isSecret>
+        <displayOrder>10</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio24.properties.maximum_sus</parameterId>
+        <displayName>Maximum Sus</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.37.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1</minValue>
+        <maxValue>32</maxValue>
+        <defaultValue>16</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>11</displayOrder>
+      </parameter>
+      <!-- NO OID: not in SENAO-MIB.mib and "-" in the sheet - shown as UNMAPPED, cannot be read or set over SNMP -->
+      <parameter>
+        <parameterId>config.radio24.properties.ofdma</parameterId>
+        <displayName>OFDMA</displayName>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Enable(1),Disable(0)</enumValues>
+        <defaultValue>Disable(0)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>12</displayOrder>
+      </parameter>
+      <!-- Sheet labels are "75/25"; written "75:25" because "/" separates options in enumValues -->
+      <parameter>
+        <parameterId>config.radio24.properties.dl_ul_ratio</parameterId>
+        <displayName>DL/UL Ratio</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.1.1.57.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Auto(0),50:50(50),60:40(60),70:30(70),75:25(75),80:20(80)</enumValues>
+        <defaultValue>75:25(75)</defaultValue>
+        <readOnly>false</readOnly>
+        <displayOrder>13</displayOrder>
+      </parameter>
+    </group>
+    <group id="network.ip_5ghz" displayName="IP Configuration - 5 GHz Radio" displayOrder="10"
+           uiPage="Network" uiParent="IP Configuration" uiTab="5 GHz Radio">
+      <!-- Sheet row has no enum; MIB declares DisplayString - option list is an assumption to verify live -->
+      <parameter>
+        <parameterId>config.network.ip_5ghz.address_type</parameterId>
+        <displayName>Address Type</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.2.1.0</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Static(static),DHCP(dhcp)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_5ghz.ip_address</parameterId>
+        <displayName>IP Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.2.2.0</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_5ghz.subnet_mask</parameterId>
+        <displayName>Subnet Mask</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.2.3.0</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_5ghz.gateway</parameterId>
+        <displayName>Gateway</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.2.4.0</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_5ghz.ipv6_address</parameterId>
+        <displayName>IPv6 Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.2.15.0</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_5ghz.ipv6_gateway</parameterId>
+        <displayName>IPv6 Gateway</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.2.17.0</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+    </group>
+    <group id="network.ip_24ghz" displayName="IP Configuration - 2.4 GHz Radio" displayOrder="11"
+           uiPage="Network" uiParent="IP Configuration" uiTab="2.4 GHz Radio">
+      <parameter>
+        <parameterId>config.network.ip_24ghz.ip_address</parameterId>
+        <displayName>IP Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.5.1.0</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_24ghz.subnet_mask</parameterId>
+        <displayName>Subnet Mask</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.5.2.0</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_24ghz.dhcp_server</parameterId>
+        <displayName>DHCP Server(Pool Configuration)</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.5.3.0</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Disable(1),Enable(0)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_24ghz.start_ip</parameterId>
+        <displayName>Start IP Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.5.4.0</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_24ghz.end_ip</parameterId>
+        <displayName>End IP Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.5.5.0</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.ip_24ghz.lease_time</parameterId>
+        <displayName>Lease Time</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.5.6.0</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>120</minValue>
+        <maxValue>86400</maxValue>
+        <units>s</units>
+        <readOnly>false</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+    </group>
+    <!-- NETWORK -> VLAN -> RADIO 1   (vlanTable instance 1) -->
+    <group id="radio1.vlan" displayName="VLAN - Radio 1" displayOrder="12"
+           uiPage="Network" uiParent="VLAN" uiTab="Radio 1">
+      <parameter>
+        <parameterId>config.radio1.vlan.mgmt_vlan_id</parameterId>
+        <displayName>Mgmt VLAN ID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.11.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1</minValue>
+        <maxValue>4094</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.vlan.mode</parameterId>
+        <displayName>Mode</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.3.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Transparent(0),Access(1),Trunk(2),Q-in-Q(3)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.vlan.trunk_option</parameterId>
+        <displayName>Trunk Option</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.5.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>List(1),All(2)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.vlan.trunk_vlan_id</parameterId>
+        <displayName>Trunk VLAN ID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.6.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <!-- NOT IN SENAO-MIB.mib (vlanTblEntry ends at column 11) - taken from the sheet, verify on the device -->
+      <parameter>
+        <parameterId>config.radio1.vlan.cvlan_priority</parameterId>
+        <displayName>CVLAN Priority</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.16.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <!-- NOT IN SENAO-MIB.mib (vlanTblEntry ends at column 11) - taken from the sheet, verify on the device -->
+      <parameter>
+        <parameterId>config.radio1.vlan.cvlan_id</parameterId>
+        <displayName>CVLAN ID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.17.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <!-- NOT IN SENAO-MIB.mib (vlanTblEntry ends at column 11) - taken from the sheet, verify on the device -->
+      <parameter>
+        <parameterId>config.radio1.vlan.cvlan_ethertype</parameterId>
+        <displayName>CVLAN EtherType</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.15.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <!-- NOT IN SENAO-MIB.mib (vlanTblEntry ends at column 11) - taken from the sheet, verify on the device -->
+      <parameter>
+        <parameterId>config.radio1.vlan.svlan_priority</parameterId>
+        <displayName>SVLAN Priority</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.14.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.vlan.svlan_id</parameterId>
+        <displayName>SVLAN ID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.8.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1</minValue>
+        <maxValue>4094</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio1.vlan.svlan_ethertype</parameterId>
+        <displayName>SVLAN EtherType</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.9.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>10</displayOrder>
+      </parameter>
+    </group>
+    <!-- NETWORK -> VLAN -> RADIO 2   (vlanTable instance 2) -->
+    <group id="radio2.vlan" displayName="VLAN - Radio 2" displayOrder="13"
+           uiPage="Network" uiParent="VLAN" uiTab="Radio 2">
+      <parameter>
+        <parameterId>config.radio2.vlan.mgmt_vlan_id</parameterId>
+        <displayName>Mgmt VLAN ID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.11.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1</minValue>
+        <maxValue>4094</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.vlan.mode</parameterId>
+        <displayName>Mode</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.3.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Transparent(0),Access(1),Trunk(2),Q-in-Q(3)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.vlan.trunk_option</parameterId>
+        <displayName>Trunk Option</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.5.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>List(1),All(2)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.vlan.trunk_vlan_id</parameterId>
+        <displayName>Trunk VLAN ID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.6.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <!-- NOT IN SENAO-MIB.mib (vlanTblEntry ends at column 11) - taken from the sheet, verify on the device -->
+      <parameter>
+        <parameterId>config.radio2.vlan.cvlan_priority</parameterId>
+        <displayName>CVLAN Priority</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.16.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <!-- NOT IN SENAO-MIB.mib (vlanTblEntry ends at column 11) - taken from the sheet, verify on the device -->
+      <parameter>
+        <parameterId>config.radio2.vlan.cvlan_id</parameterId>
+        <displayName>CVLAN ID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.17.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <!-- NOT IN SENAO-MIB.mib (vlanTblEntry ends at column 11) - taken from the sheet, verify on the device -->
+      <parameter>
+        <parameterId>config.radio2.vlan.cvlan_ethertype</parameterId>
+        <displayName>CVLAN EtherType</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.15.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <!-- NOT IN SENAO-MIB.mib (vlanTblEntry ends at column 11) - taken from the sheet, verify on the device -->
+      <parameter>
+        <parameterId>config.radio2.vlan.svlan_priority</parameterId>
+        <displayName>SVLAN Priority</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.14.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.vlan.svlan_id</parameterId>
+        <displayName>SVLAN ID</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.8.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1</minValue>
+        <maxValue>4094</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.radio2.vlan.svlan_ethertype</parameterId>
+        <displayName>SVLAN EtherType</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.4.18.1.9.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>10</displayOrder>
+      </parameter>
+    </group>
+    <group id="eth0.ethernet" displayName="Ethernet - eth0" displayOrder="14"
+           uiPage="Network" uiParent="Ethernet" uiTab="eth0">
+      <parameter>
+        <parameterId>config.eth0.ethernet.speed_duplex</parameterId>
+        <displayName>Speed / Duplex</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.5.6.1.2.1</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>AutoNegotation(0),Full100Mbps(4),Full1000Mbps(5),Full2500Mbps(7)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <!-- Device quirk: ethMtu returns 0 on firmware 1.0.0.149 while legacy ethernetMTU (.1.1.5.3) returns 1500 -->
+      <parameter>
+        <parameterId>config.eth0.ethernet.mtu</parameterId>
+        <displayName>MTU</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.5.6.1.4.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1500</minValue>
+        <maxValue>9000</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+    </group>
+    <group id="eth1.ethernet" displayName="Ethernet - eth1" displayOrder="15"
+           uiPage="Network" uiParent="Ethernet" uiTab="eth1">
+      <parameter>
+        <parameterId>config.eth1.ethernet.speed_duplex</parameterId>
+        <displayName>Speed / Duplex</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.5.6.1.2.2</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>AutoNegotation(0),Full100Mbps(4),Full1000Mbps(5),Full2500Mbps(7)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <!-- Device quirk: ethMtu returns 0 on firmware 1.0.0.149 while legacy ethernetMTU (.1.1.5.3) returns 1500 -->
+      <parameter>
+        <parameterId>config.eth1.ethernet.mtu</parameterId>
+        <displayName>MTU</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.5.6.1.4.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>1500</minValue>
+        <maxValue>9000</maxValue>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+    </group>
+    <group id="network.dhcp" displayName="DHCP" displayOrder="16"
+           uiPage="Network" uiParent="DHCP" uiTab="DHCP Settings">
+      <parameter>
+        <parameterId>config.network.dhcp.dhcp_server</parameterId>
+        <displayName>DHCP Server</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.1.0</snmpOid>
+        <dataType>ENUM</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <enumValues>Disable(1),Enable(0)</enumValues>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.dhcp.start_ip</parameterId>
+        <displayName>Start IP Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.2.0</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.dhcp.end_ip</parameterId>
+        <displayName>End IP Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.3.0</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.network.dhcp.lease_time</parameterId>
+        <displayName>Lease Time</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.6.4.0</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>textfield</uiWidget>
+        <minValue>120</minValue>
+        <maxValue>86400</maxValue>
+        <units>s</units>
+        <readOnly>false</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+    </group>
+    <group id="management.system" displayName="Management - System" displayOrder="17"
+           uiPage="Management" uiParent="Management" uiTab="System">
+      <parameter>
+        <parameterId>config.management.system.name</parameterId>
+        <displayName>System Name</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.2.2.1.0</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.management.system.location</parameterId>
+        <displayName>Location</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.2.2.2.0</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.management.system.contact</parameterId>
+        <displayName>Contact</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.2.2.3.0</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <!-- GPS: the NMS reads latitude/longitude parameters for topology -->
+      <parameter>
+        <parameterId>config.management.system.latitude</parameterId>
+        <displayName>Latitude</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.2.2.5.0</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>config.management.system.longitude</parameterId>
+        <displayName>Longitude</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.2.2.6.0</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+    </group>
+  </config>
+
+  <monitor>
+    <group id="radio1.wireless_stats" displayName="Radio 1 - Wireless Stats" displayOrder="1"
+           uiPage="Monitor" uiParent="Radio 1" uiTab="Wireless Stats">
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.total_tx_packets</parameterId>
+        <displayName>Total Tx packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.4.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.total_rx_packets</parameterId>
+        <displayName>Total Rx packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.5.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.tx_broadcast_packets</parameterId>
+        <displayName>Tx Broadcast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.32.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.rx_broadcast_packets</parameterId>
+        <displayName>Rx Broadcast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.33.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.tx_multicast_packets</parameterId>
+        <displayName>Tx MultiCast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.6.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.rx_multicast_packets</parameterId>
+        <displayName>Rx MultiCast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.7.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.tx_unicast_packets</parameterId>
+        <displayName>Tx Unicast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.8.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.rx_unicast_packets</parameterId>
+        <displayName>Rx Unicast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.9.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.tx_throughput</parameterId>
+        <displayName>Tx Throughput</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.30.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.rx_throughput</parameterId>
+        <displayName>Rx Throughput</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.31.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>10</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.crc_errors</parameterId>
+        <displayName>CRC Errors</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.28.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>11</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.frame_errors</parameterId>
+        <displayName>Frame Errors</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.29.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>12</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.rtx_percent</parameterId>
+        <displayName>RTX Percent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.37.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>13</displayOrder>
+      </parameter>
+    </group>
+    <!-- assocTable rows for Radio 1: one value per associated station (index = station) -->
+    <group id="radio1.link_stats" displayName="Radio 1 - Link Stats" displayOrder="2"
+           uiPage="Monitor" uiParent="Radio 1" uiTab="Link Stats">
+      <parameter>
+        <parameterId>monitor.radio1.link_stats.mac_address</parameterId>
+        <displayName>MAC Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.3.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.link_stats.ip_address</parameterId>
+        <displayName>IP Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.4.2</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.link_stats.uptime</parameterId>
+        <displayName>Uptime</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.52.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.link_stats.customer_name</parameterId>
+        <displayName>CustomerName</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.29.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.link_stats.local_snr_a1</parameterId>
+        <displayName>Local SNR A1</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.13.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.link_stats.local_snr_a2</parameterId>
+        <displayName>Local SNR A2</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.14.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.link_stats.remote_snr_a1</parameterId>
+        <displayName>Remote SNR A1</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.15.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.link_stats.remote_snr_a2</parameterId>
+        <displayName>Remote SNR A2</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.16.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+    </group>
+    <group id="radio2.wireless_stats" displayName="Radio 2 - Wireless Stats" displayOrder="3"
+           uiPage="Monitor" uiParent="Radio 2" uiTab="Wireless Stats">
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.total_tx_packets</parameterId>
+        <displayName>Total Tx packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.4.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.total_rx_packets</parameterId>
+        <displayName>Total Rx packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.5.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.tx_broadcast_packets</parameterId>
+        <displayName>Tx Broadcast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.32.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.rx_broadcast_packets</parameterId>
+        <displayName>Rx Broadcast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.33.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.tx_multicast_packets</parameterId>
+        <displayName>Tx MultiCast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.6.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.rx_multicast_packets</parameterId>
+        <displayName>Rx MultiCast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.7.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.tx_unicast_packets</parameterId>
+        <displayName>Tx Unicast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.8.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.rx_unicast_packets</parameterId>
+        <displayName>Rx Unicast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.9.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.tx_throughput</parameterId>
+        <displayName>Tx Throughput</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.30.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.rx_throughput</parameterId>
+        <displayName>Rx Throughput</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.31.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>10</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.crc_errors</parameterId>
+        <displayName>CRC Errors</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.28.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>11</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.frame_errors</parameterId>
+        <displayName>Frame Errors</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.29.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>12</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.rtx_percent</parameterId>
+        <displayName>RTX Percent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.37.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>13</displayOrder>
+      </parameter>
+    </group>
+    <!-- assocTable rows for Radio 2: one value per associated station (index = station) -->
+    <group id="radio2.link_stats" displayName="Radio 2 - Link Stats" displayOrder="4"
+           uiPage="Monitor" uiParent="Radio 2" uiTab="Link Stats">
+      <parameter>
+        <parameterId>monitor.radio2.link_stats.mac_address</parameterId>
+        <displayName>MAC Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.3.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.link_stats.ip_address</parameterId>
+        <displayName>IP Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.4.3</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.link_stats.uptime</parameterId>
+        <displayName>Uptime</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.52.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.link_stats.customer_name</parameterId>
+        <displayName>CustomerName</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.29.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.link_stats.local_snr_a1</parameterId>
+        <displayName>Local SNR A1</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.13.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.link_stats.local_snr_a2</parameterId>
+        <displayName>Local SNR A2</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.14.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.link_stats.remote_snr_a1</parameterId>
+        <displayName>Remote SNR A1</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.15.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.link_stats.remote_snr_a2</parameterId>
+        <displayName>Remote SNR A2</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.16.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+    </group>
+    <group id="radio24.wireless_stats" displayName="2.4 GHz Radio - Wireless Stats" displayOrder="5"
+           uiPage="Monitor" uiParent="2.4 GHz Radio" uiTab="Wireless Stats">
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.total_tx_packets</parameterId>
+        <displayName>Total Tx packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.4.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.total_rx_packets</parameterId>
+        <displayName>Total Rx packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.5.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.tx_broadcast_packets</parameterId>
+        <displayName>Tx Broadcast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.32.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.rx_broadcast_packets</parameterId>
+        <displayName>Rx Broadcast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.33.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.tx_multicast_packets</parameterId>
+        <displayName>Tx MultiCast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.6.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.rx_multicast_packets</parameterId>
+        <displayName>Rx MultiCast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.7.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.tx_unicast_packets</parameterId>
+        <displayName>Tx Unicast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.8.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.rx_unicast_packets</parameterId>
+        <displayName>Rx Unicast Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.9.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.tx_throughput</parameterId>
+        <displayName>Tx Throughput</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.30.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>9</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.rx_throughput</parameterId>
+        <displayName>Rx Throughput</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.31.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>10</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.crc_errors</parameterId>
+        <displayName>CRC Errors</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.28.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>11</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.frame_errors</parameterId>
+        <displayName>Frame Errors</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.29.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>12</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.rtx_percent</parameterId>
+        <displayName>RTX Percent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.37.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>13</displayOrder>
+      </parameter>
+    </group>
+    <!-- assocTable rows for 2.4 GHz Radio: one value per associated station (index = station) -->
+    <group id="radio24.link_stats" displayName="2.4 GHz Radio - Link Stats" displayOrder="6"
+           uiPage="Monitor" uiParent="2.4 GHz Radio" uiTab="Link Stats">
+      <parameter>
+        <parameterId>monitor.radio24.link_stats.mac_address</parameterId>
+        <displayName>MAC Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.3.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>1</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.link_stats.ip_address</parameterId>
+        <displayName>IP Address</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.4.1</snmpOid>
+        <dataType>IPADDRESS</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>2</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.link_stats.uptime</parameterId>
+        <displayName>Uptime</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.52.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>3</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.link_stats.customer_name</parameterId>
+        <displayName>CustomerName</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.29.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>4</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.link_stats.local_snr_a1</parameterId>
+        <displayName>Local SNR A1</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.13.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>5</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.link_stats.local_snr_a2</parameterId>
+        <displayName>Local SNR A2</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.14.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>6</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.link_stats.remote_snr_a1</parameterId>
+        <displayName>Remote SNR A1</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.15.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>7</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.link_stats.remote_snr_a2</parameterId>
+        <displayName>Remote SNR A2</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.3.1.16.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>8</displayOrder>
+      </parameter>
+    </group>
+  </monitor>
+
+  <alarms>
+    <mapping>
+      <canonicalType>ubr655.link.down</canonicalType>
+      <severity>CRITICAL</severity>
+      <source>snmpTrap</source>
+      <trapOid>.1.3.6.1.4.1.52619.1.3.4.2</trapOid>
+      <description>Wireless link down (disassociatedTrap)</description>
+      <clearTrapOid>.1.3.6.1.4.1.52619.1.3.4.1</clearTrapOid>
+      <autoAck>false</autoAck>
+    </mapping>
+    <mapping>
+      <canonicalType>ubr655.power.dyingGasp</canonicalType>
+      <severity>CRITICAL</severity>
+      <source>snmpTrap</source>
+      <trapOid>.1.3.6.1.4.1.52619.1.3.4.3</trapOid>
+      <description>Remote device powered off (dyinggaspRemoteDeviceTrap)</description>
+      <autoAck>false</autoAck>
+    </mapping>
+    <mapping>
+      <canonicalType>ubr655.power.dyingGaspBsu</canonicalType>
+      <severity>CRITICAL</severity>
+      <source>snmpTrap</source>
+      <trapOid>.1.3.6.1.4.1.52619.1.3.4.4</trapOid>
+      <description>Base unit powered off (dyinggaspBSUTrap)</description>
+      <autoAck>false</autoAck>
+    </mapping>
+    <mapping>
+      <canonicalType>ubr655.memory.high</canonicalType>
+      <severity>MAJOR</severity>
+      <source>snmpTrap</source>
+      <trapOid>.1.3.6.1.4.1.52619.1.3.4.12</trapOid>
+      <description>System memory reached 85% (systemMemoryTrap)</description>
+      <autoAck>false</autoAck>
+    </mapping>
+    <mapping>
+      <canonicalType>ubr655.ethernet.mismatch</canonicalType>
+      <severity>MINOR</severity>
+      <source>snmpTrap</source>
+      <trapOid>.1.3.6.1.4.1.52619.1.3.4.14</trapOid>
+      <description>Ethernet duplex/speed mismatch (ethernetMismatchTrap)</description>
+      <autoAck>false</autoAck>
+    </mapping>
+    <mapping>
+      <canonicalType>ubr655.radio.chipUnresponsive</canonicalType>
+      <severity>CRITICAL</severity>
+      <source>snmpTrap</source>
+      <trapOid>.1.3.6.1.4.1.52619.1.3.4.18</trapOid>
+      <description>Radio chip unresponsive, device resetting (radioChipUnresponsiveTrap)</description>
+      <autoAck>false</autoAck>
+    </mapping>
+    <mapping>
+      <canonicalType>ubr655.dcs.channelsExhausted</canonicalType>
+      <severity>MAJOR</severity>
+      <source>snmpTrap</source>
+      <trapOid>.1.3.6.1.4.1.52619.1.3.4.16</trapOid>
+      <description>DCS best channels exhausted (dcsChanExhaustTrap)</description>
+      <autoAck>false</autoAck>
+    </mapping>
+    <mapping>
+      <canonicalType>ubr655.device.reboot</canonicalType>
+      <severity>INFO</severity>
+      <source>snmpTrap</source>
+      <trapOid>.1.3.6.1.4.1.52619.1.3.4.10</trapOid>
+      <description>Device rebooting (deviceRebootTrap)</description>
+      <autoAck>false</autoAck>
+    </mapping>
+    <mapping>
+      <canonicalType>ubr655.device.init</canonicalType>
+      <severity>INFO</severity>
+      <source>snmpTrap</source>
+      <trapOid>.1.3.6.1.4.1.52619.1.3.4.7</trapOid>
+      <description>Device initialised (devInitializationTrap)</description>
+      <autoAck>false</autoAck>
+    </mapping>
+  </alarms>
+
+  <operations>
+    <action>
+      <id>reboot</id>
+      <displayName>Reboot Device</displayName>
+      <description>sysMgmtReboot = yes(1). The unit is unreachable while it restarts.</description>
+      <protocol>snmp</protocol>
+      <snmpSetOid>.1.3.6.1.4.1.52619.1.2.1.3.0</snmpSetOid>
+      <snmpSetValue>1</snmpSetValue>
+      <requiresConfirmation>true</requiresConfirmation>
+      <requiredRole>descriptor_admin</requiredRole>
+      <expectedDurationSec>90</expectedDurationSec>
+    </action>
+    <action>
+      <id>apply</id>
+      <displayName>Apply Configuration</displayName>
+      <description>sysMgmtApply = yes(1). Commits pending configuration on the unit.</description>
+      <protocol>snmp</protocol>
+      <snmpSetOid>.1.3.6.1.4.1.52619.1.2.1.1.0</snmpSetOid>
+      <snmpSetValue>1</snmpSetValue>
+      <requiresConfirmation>true</requiresConfirmation>
+      <requiredRole>network_engineer</requiredRole>
+      <expectedDurationSec>30</expectedDurationSec>
+    </action>
+  </operations>
+</descriptor>

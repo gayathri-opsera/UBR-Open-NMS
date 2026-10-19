@@ -21,6 +21,7 @@
 
 const mongoose = require('mongoose');
 const { walkSubtree, isUnreachable } = require('./snmpWalk');
+const { rebaseEntries } = require('./oidAliases');
 const logger = require('../utils/logger');
 const { deduplicateIds } = require('./wireframeBuilder');
 
@@ -376,6 +377,37 @@ async function markSeen(device, when) {
 
 // ── Polling ───────────────────────────────────────────────────────────────────
 
+/**
+ * A device provisioned (or re-provisioned) at a new address must not keep showing the poll
+ * outcome of its previous address — e.g. "UNREACHABLE" from when it still answered on another IP —
+ * while its first poll is running. Live state is keyed by device id, so a stale document
+ * outlives the address it was collected from. Removing it makes the Node View say "not polled
+ * yet" instead of reporting a device that is up as unreachable. A healthy document for the same
+ * address is left alone so its values stay visible.
+ * @returns {Promise<boolean>} true when a stale document was removed
+ */
+async function resetStaleLiveState(device) {
+  const col = valuesCol();
+  if (!col || !device || device._id == null) return false;
+  const id = String(device._id);
+  const doc = await col.findOne({ _id: id }, { projection: { ipAddress: 1, pollStatus: 1 } });
+  if (!doc || !doc.pollStatus) return false;   // nothing recorded → nothing stale
+  if (doc.pollStatus === 'OK' && doc.ipAddress === device.ipAddress) return false;
+  await col.deleteOne({ _id: id });
+  return true;
+}
+
+/**
+ * The definition as it applies to ONE device: its OIDs addressed under the enterprise root the
+ * device really serves (newer firmware re-roots the tree — see oidAliases.js). The registry itself
+ * is never changed; devices on the canonical root get the definition back untouched.
+ */
+function definitionForDevice(definition, device) {
+  if (!definition) return definition;
+  const entries = rebaseEntries(definition.entries, device && device.sysObjectID);
+  return entries === definition.entries ? definition : { ...definition, entries };
+}
+
 function splitHostPort(device) {
   const raw = String(device.ipAddress || device.ip || '');
   const [host, p] = raw.includes(':') ? raw.split(':') : [raw, null];
@@ -424,14 +456,17 @@ async function doRefresh(device) {
     return { pollStatus: 'NO_CREDENTIALS' };
   }
 
-  const oids = definition.entries.map((e) => normOid(e.snmpOid)).filter(Boolean);
+  const entries = rebaseEntries(definition.entries, device.sysObjectID);   // OIDs as THIS device serves them
+  const oids = entries.map((e) => normOid(e.snmpOid)).filter(Boolean);
   const { host, port } = splitHostPort(device);
   try {
     const varbinds = [];
     for (const rootOid of walkRoots(oids)) {
-      varbinds.push(...await walkSubtree({ host, port, community: device.snmpCommunity, rootOid }));
+      // retries: the agent on some radios is silent for ~8 s at a time; a poll that gave up after one
+      // lost request would flag a healthy device UNREACHABLE until the next cycle.
+      varbinds.push(...await walkSubtree({ host, port, community: device.snmpCommunity, rootOid, retries: 3 }));
     }
-    const mapped = mapVarbinds(definition.entries, varbinds);
+    const mapped = mapVarbinds(entries, varbinds);
     const values = Array.from(mapped.entries()).map(([k, instances]) => {
       const [groupId, parameterId] = k.split('::');
       return { groupId, parameterId, instances };
@@ -522,6 +557,6 @@ module.exports = {
   // pure
   normOid, walkRoots, mapVarbinds, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
   // io
-  loadDefinition, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, refreshDevice, getCurrent, getCachedOnly, startScheduler, pollAll,
+  loadDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, startScheduler, pollAll,
   POLL_INTERVAL_SECONDS,
 };

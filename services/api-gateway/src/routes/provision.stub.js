@@ -19,6 +19,8 @@ const mongoose      = require('mongoose');
 const topologyStub  = require('./topology.stub');
 const live          = require('../live/liveParameters');
 const deviceFacts   = require('../live/deviceFacts');
+const runStore      = require('../live/discoveryRunStore');
+const { canonicalOid } = require('../live/oidAliases');
 
 const MONGO_URI      = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms';
 const PRODUCTDEF_URI = (process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms')
@@ -93,7 +95,8 @@ async function resolveFingerprint(sysDescr, sysObjectID) {
   const banner = await resolveBannerFingerprint(sysDescr);
   if (banner) return { ...banner, paradigm: 'BANNER' };
 
-  const oid  = (sysObjectID || '').replace(/^\./, '');
+  // canonical enterprise root: a unit on newer firmware (re-rooted tree) resolves like older ones
+  const oid  = (canonicalOid(sysObjectID) || '').replace(/^\./, '');
   const pick = (e, paradigm) => ({
     vendor: e.vendor, model: e.model, productDefinitionId: e.productDefinitionId, paradigm,
   });
@@ -136,12 +139,15 @@ getDevicesCol().catch((err) =>
  * device record at the same IP; a credentialId on the host (saved credential) is honoured too.
  * A community supplied directly in the request body is intentionally not accepted.
  */
-async function resolveSnmpCredential(col, host, ip) {
+async function resolveSnmpCredential(col, host, ip, priv) {
   const port = parseInt(host.snmpPort || host.port, 10) || 161;
   // The discovery record at this IP also carries the inventory facts discovery collected.
   const projection = { snmpCommunity: 1, snmpPort: 1, registeredAt: 1, createdAt: 1 };
   for (const k of deviceFacts.INVENTORY_FIELDS) projection[k] = 1;
   const prior = await col.findOne({ ipAddress: ip, snmpCommunity: { $nin: [null, ''] } }, { projection });
+  // The credential the discovery run just used successfully — held server-side for this run only —
+  // is the freshest; it wins over whatever an older record at this IP carries.
+  if (priv && priv.community) return { community: priv.community, port: priv.port || port, prior };
   if (prior) return { community: prior.snmpCommunity, port: prior.snmpPort || port, prior };
   if (host.credentialId) {
     try {
@@ -176,14 +182,50 @@ const BUILTIN_TYPES = new Set([
 ]);
 
 /**
+ * Join a CPE to the BTS it pairs with. Both must already be ACTIVE inventory records (matched by
+ * IP); returns true when the link was written. Used by discovery for already-managed devices and
+ * by provisioning for the second device of a pair.
+ */
+async function linkCpeToBts(col, cpeIp, btsIp) {
+  if (!cpeIp || !btsIp) return false;
+  const active = { isDeprovisioned: { $ne: true } };
+  const bts = await col.findOne({ ipAddress: btsIp, ...active });
+  const cpe = await col.findOne({ ipAddress: cpeIp, ...active });
+  if (!bts || !cpe) return false;
+  await col.updateOne({ _id: cpe._id }, { $set: { connectedBtsSerial: bts.serialNumber || String(bts._id), updatedAt: new Date() } });
+  return true;
+}
+
+/**
+ * BTS↔CPE pairing found by the discovery run is applied as each device is provisioned: a CPE
+ * links to its BTS once the BTS is in the inventory, and a BTS links the run's CPEs that are.
+ */
+async function applyBtsCpeLinks(col, doc, ctx) {
+  try {
+    const priv = ctx && ctx.priv;
+    if (doc.deviceType === 'CPE' && priv && priv.pairedBtsIp) {
+      await linkCpeToBts(col, doc.ipAddress, priv.pairedBtsIp);
+    }
+    if (doc.deviceType === 'BTS' && ctx && ctx.runId) {
+      for (const [cpeIp, p] of runStore.entries(ctx.runId)) {
+        if (p.pairedBtsIp === doc.ipAddress) await linkCpeToBts(col, cpeIp, doc.ipAddress);
+      }
+    }
+  } catch (err) {
+    console.warn(`[provision-stub] BTS/CPE link failed for ${doc.serialNumber}:`, err.message);
+  }
+}
+
+/**
  * Writes a single ProvisionHost to MongoDB and returns the result object.
  * Upserts by serialNumber so re-provisioning the same device is idempotent.
  *
  * @param {object} host  One element from req.body.hosts
  * @param {object} col   Mongoose Collection handle
+ * @param {{ runId?: string, priv?: object }} ctx  discovery-run data kept server-side (credential, facts, pairing)
  * @returns {{ ip, deviceId, serialNumber, status, error? }}
  */
-async function provisionOne(host, col) {
+async function provisionOne(host, col, ctx = {}) {
   const {
     ip, deviceType, genericDeviceType, serialNumber, macAddress,
     networkId, vendor, model, sysName, sysLocation,
@@ -230,15 +272,26 @@ async function provisionOne(host, col) {
 
     // Link the device to the ACTIVE product definition (drives the Node View) and keep the SNMP
     // credential discovery used, so live values can be read from the device afterwards.
-    const productDefinitionId = await live.resolveDefinitionId(
-      [fingerprintMeta?.productDefinitionId, hostDefinitionId], resolvedVendor,
+    const priv = ctx.priv || null;   // what the discovery run learned about this host (server-side only)
+    let productDefinitionId = await live.resolveDefinitionId(
+      [fingerprintMeta?.productDefinitionId, hostDefinitionId, priv && priv.productDefinitionId], resolvedVendor,
     );
-    const snmp = await resolveSnmpCredential(col, host, ip);
+    if (!productDefinitionId) {
+      // Nothing supplied a definition (e.g. a host from a subnet scan, whose request carries none, and a
+      // built-in BTS/CPE type skips the registry lookup above). Ask the registry about the device's OWN
+      // evidence so it is linked — and polled — at provision time, not only once someone opens its Node View.
+      const byEvidence = fingerprintMeta || await resolveFingerprint(sysDescr, sysObjectID);
+      if (byEvidence && byEvidence.productDefinitionId) {
+        productDefinitionId = await live.resolveDefinitionId([byEvidence.productDefinitionId], resolvedVendor);
+      }
+    }
+    const snmp = await resolveSnmpCredential(col, host, ip, priv);
     // Inventory facts collected at discovery (MAC, firmware, interfaces, …); a MAC sent by the
     // caller wins over the carried-over one.
     const carried = {};
+    const factSource = (priv && priv.inventory) || snmp.prior || {};
     for (const k of deviceFacts.INVENTORY_FIELDS) {
-      const v = snmp.prior && snmp.prior[k];
+      const v = factSource[k];
       if (v !== undefined && v !== null) carried[k] = v;
     }
 
@@ -279,6 +332,45 @@ async function provisionOne(host, col) {
       createdAt:        now,
       updatedAt:        now,
     };
+
+    // ── Physical-device identity (no duplicates) ──────────────────────────────
+    // The serial number the device itself reports is its true identity. The admin-chosen serial
+    // is only a label (it defaults to one derived from the hostname), so the same unit can show
+    // up under another IP or label — and two different units can share a hostname.
+    const deviceSerial = doc.reportedSerialNumber || null;
+    if (deviceSerial) {
+      // Same unit already in inventory under another record → update THAT record, never add a second.
+      const sameUnit = (await col.find({
+        reportedSerialNumber: deviceSerial, isDeprovisioned: { $ne: true }, _id: { $ne: doc._id },
+      }).toArray()).sort((a, b) => (b.ipAddress === ip) - (a.ipAddress === ip)
+        || new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0];
+      if (sameUnit) {
+        const keepId = String(sameUnit._id);
+        const merged = {
+          ...doc,
+          _id: keepId, id: keepId, deviceId: keepId,
+          serialNumber: sameUnit.serialNumber || keepId,
+          createdAt: sameUnit.createdAt || doc.createdAt,
+          registeredAt: sameUnit.registeredAt || sameUnit.createdAt || doc.registeredAt,
+          ...(sameUnit.connectedBtsSerial ? { connectedBtsSerial: sameUnit.connectedBtsSerial } : {}),
+        };
+        await col.replaceOne({ _id: keepId }, merged, { upsert: true });
+        console.log(`[provision-stub] ${ip} is the same unit (serial ${deviceSerial}) as '${keepId}' — updated that record instead of adding '${doc._id}'`);
+        await live.resetStaleLiveState(merged).catch(() => {});
+        if (productDefinitionId) live.refreshDevice(merged).catch(() => {});
+        await applyBtsCpeLinks(col, merged, ctx);
+        return { ip, deviceId: keepId, serialNumber: merged.serialNumber, status: 'provisioned', merged: true };
+      }
+      // The chosen serial belongs to a DIFFERENT unit → refuse rather than overwrite it.
+      const holder = await col.findOne({ _id: doc._id, isDeprovisioned: { $ne: true } });
+      if (holder && holder.reportedSerialNumber && holder.reportedSerialNumber !== deviceSerial) {
+        return {
+          ip, deviceId: '', serialNumber, status: 'failed',
+          error: `Serial number '${serialNumber}' is already used by a different device (${holder.ipAddress || 'unknown IP'}, ` +
+                 `device serial ${holder.reportedSerialNumber}). Enter a unique serial number — this device reports ${deviceSerial}.`,
+        };
+      }
+    }
 
     // ── IP + hostname uniqueness (spec requirement) ────────────────────────
     // Only one ACTIVE (non-deprovisioned) provisioned record may exist for a
@@ -331,7 +423,12 @@ async function provisionOne(host, col) {
     console.log(`[provision-stub] Provisioned ${serialNumber} (${deviceType}) @ ${ip} productDef=${productDefinitionId || 'none'}`);
 
     // First live read straight away (fire-and-forget) so the Node View has data when opened.
+    // A poll outcome left by an earlier record with this id (e.g. UNREACHABLE from its old
+    // address) must not be shown as this device's state while that first read runs.
+    await live.resetStaleLiveState(doc).catch(() => {});
     if (productDefinitionId) live.refreshDevice(doc).catch(() => {});
+
+    await applyBtsCpeLinks(col, doc, ctx);
 
     return { ip, deviceId: serialNumber, serialNumber, status: 'provisioned' };
   } catch (err) {
@@ -376,7 +473,7 @@ function createProvisionHandler(_config) {
     }
 
     // Provision all hosts, collecting individual results (partial failure is allowed).
-    const results = await Promise.all(hosts.map((h) => provisionOne(h, col)));
+    const results = await Promise.all(hosts.map((h) => provisionOne(h, col, { runId, priv: runStore.get(runId, h.ip) })));
 
     const provisioned = results.filter((r) => r.status === 'provisioned').length;
     const failed      = results.filter((r) => r.status === 'failed').length;
@@ -394,4 +491,4 @@ function createProvisionHandler(_config) {
   };
 }
 
-module.exports = { createProvisionHandler };
+module.exports = { createProvisionHandler, linkCpeToBts };
