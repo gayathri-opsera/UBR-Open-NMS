@@ -1071,7 +1071,12 @@ function SnmpDiscoveryTab({ initialScope }: SnmpDiscoveryTabProps) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => navigate('/v2/discovery?tab=all')}
+                    onClick={() => {
+                      // One device provisioned → its Node View; several → the list.
+                      const only = provisionedIPs.size === 1 ? inventoryDeviceMap.get([...provisionedIPs][0]) : undefined;
+                      const id = only?.id || only?.deviceId || only?.serialNumber;
+                      navigate(id ? `/v2/devices/${encodeURIComponent(String(id))}` : '/v2/discovery?tab=all');
+                    }}
                   >
                     📋 View in Inventory ({provisionedIPs.size})
                   </Button>

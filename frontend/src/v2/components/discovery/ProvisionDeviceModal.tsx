@@ -204,7 +204,9 @@ function SuccessView({
 
   function goInventory() {
     onClose();
-    navigate('/v2/discovery?tab=all');
+    // The device that was just provisioned: open its own page (Node View). Fall back to the
+    // discovered-devices list only when the id is not known.
+    navigate(deviceId ? `/v2/devices/${encodeURIComponent(deviceId)}` : '/v2/discovery?tab=all');
   }
 
   function goTopology() {
@@ -264,7 +266,7 @@ function SuccessView({
             View in Inventory
           </div>
           <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', lineHeight: 1.4 }}>
-            Open the All Discovered tab to monitor this device's status and metrics.
+            Open this device's Node View to see its live parameters, status and metrics.
           </div>
         </button>
 

@@ -456,7 +456,14 @@ function DeviceCard({
             </div>
               {onNavigate && (
               <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => onNavigate('/v2/devices')}                                    style={navBtnStyle}>📋 Inventory</button>
+                {/* The device just provisioned from this card: open ITS page (Node View), not the list. */}
+                <button
+                  onClick={() => {
+                    const id = inventoryDevice?.id || inventoryDevice?.deviceId || inventoryDevice?.serialNumber;
+                    onNavigate(id ? `/v2/devices/${id}` : '/v2/devices');
+                  }}
+                  style={navBtnStyle}
+                >📋 Inventory</button>
                 <button onClick={() => onNavigate(`/v2/topology?highlight=${encodeURIComponent(r.ip)}`)} style={navBtnStyle}>🗺 Topology</button>
               </div>
             )}
