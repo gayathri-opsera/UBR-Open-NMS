@@ -20,6 +20,7 @@
  * which validates against the definition and writes to the device.
  */
 
+import type React from 'react';
 import { useMemo, useState } from 'react';
 
 import type {
@@ -51,6 +52,30 @@ function humanize(slug: string): string {
     .filter(Boolean)
     .map((w) => (ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
     .join(' ');
+}
+
+/**
+ * uiTab keywords that always imply table rendering for Monitor groups.
+ * Used as fallback when the device is unreachable and no live values are loaded yet.
+ */
+const TABLE_TAB_KEYWORDS = [
+  'link stats', 'link statistics', 'rtx', 'interface stats',
+  'learn table', 'arp', 'bridge', 'ethernet stats', 'port stats', 'associated',
+];
+
+// ── Table styles (shared constants for Monitor table rendering) ───────────────
+const thStyle: React.CSSProperties = {
+  padding: '8px 12px', textAlign: 'left', fontSize: 12, fontWeight: 600,
+  color: 'var(--vf-text-secondary)', borderBottom: '1px solid var(--vf-border-subtle)',
+  whiteSpace: 'nowrap',
+};
+const tdStyle: React.CSSProperties = {
+  padding: '8px 12px', borderBottom: '1px solid var(--vf-border-subtle)',
+  fontSize: 13, verticalAlign: 'middle',
+};
+const NUMERIC_TYPES = new Set(['INTEGER', 'UINT', 'FLOAT', 'GAUGE', 'COUNTER', 'TIMETICKS']);
+function isNumericParam(p: WireframeParameter) {
+  return NUMERIC_TYPES.has((p.dataType || '').toUpperCase());
 }
 
 // ── Sidebar structure helpers ─────────────────────────────────────────────────
@@ -424,8 +449,184 @@ export function NodeViewParameters({
   const togglePage = (page: string) =>
     setExpandedPages((s) => { const n = new Set(s); n.has(page) ? n.delete(page) : n.add(page); return n; });
 
+  // ── Table renderer (Monitor groups — stats rendered like the device UI) ───────
+
+  /**
+   * Determines if the active group should render as a table.
+   *
+   * Rules (in priority order):
+   * 1. uiPage must be 'Monitor'
+   * 2. Any parameter's record has isTable=true → table
+   * 3. Any parameter has an instance with non-empty, non-scalar index
+   *    (index !== '' AND index !== '0') → SNMP table row indexed by station/port
+   * 4. No live data yet (device unreachable) but uiTab name suggests a table
+   *    (e.g. "Link Stats", "RTX", "Interface Stats") → table (show empty table + note)
+   */
+  const isTableGroup = useMemo(() => {
+    if (!activeGroup || activeGroup.uiPage !== 'Monitor') return false;
+
+    // Check live data for table signals
+    const hasTableData = activeGroup.parameters.some((p) => {
+      const rec = values[valueKey(activeGroup.groupId, p.parameterId)];
+      if (!rec) return false;
+      if (rec.isTable) return true;
+      // Non-empty, non-scalar SNMP index (e.g. "1" for station 1 in assocTable)
+      return rec.instances?.some((i) => i.index !== '' && i.index !== '0') ?? false;
+    });
+    if (hasTableData) return true;
+
+    // Fallback when no values loaded: infer from tab name
+    const tabLabel = (activeGroup.uiTab || activeGroup.label || '').toLowerCase();
+    return TABLE_TAB_KEYWORDS.some((kw) => tabLabel.includes(kw));
+  }, [activeGroup, values]);
+
+  /**
+   * Collect all unique instance indices across all parameters in the group.
+   * Only collect non-empty, non-scalar indices (e.g. "1", "2" for stations).
+   * Sort numerically so rows appear in natural order (1, 2, 3…).
+   */
+  const tableIndices = useMemo(() => {
+    if (!activeGroup || !isTableGroup) return [] as string[];
+    const idxSet = new Set<string>();
+    for (const p of activeGroup.parameters) {
+      const rec = values[valueKey(activeGroup.groupId, p.parameterId)];
+      if (!rec) continue;
+      if (rec.instances?.length) {
+        rec.instances
+          .filter((i) => i.index !== '' && i.index !== '0')
+          .forEach((i) => idxSet.add(i.index));
+      }
+    }
+    return [...idxSet].sort((a, b) => {
+      const na = parseInt(a, 10), nb = parseInt(b, 10);
+      return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : a.localeCompare(b);
+    });
+  }, [activeGroup, values, isTableGroup]);
+
+  /** Get a specific instance value from a record by station/row index. */
+  const instanceValue = (rec: ParameterValueRecord | undefined, idx: string) => {
+    if (!rec) return null;
+    // If this parameter has indexed instances, look up the specific one
+    if (rec.instances?.length) {
+      const inst = rec.instances.find((i) => i.index === idx);
+      if (inst) return inst.display ?? inst.value ?? null;
+      // Fallback: if all instances have same value (scalar reported under table walk)
+      if (rec.instances.length === 1) return rec.instances[0].display ?? rec.instances[0].value ?? null;
+    }
+    return rec.display ?? rec.value ?? null;
+  };
+
+  const renderTable = () => {
+    if (!activeGroup) return null;
+    // Separate scalar params (summaries shown above table) from tabular params
+    const scalarParams = activeGroup.parameters.filter((p) => !p.hidden && (() => {
+      const rec = values[valueKey(activeGroup.groupId, p.parameterId)];
+      return !rec || (!rec.isTable && (rec.instances?.length ?? 0) <= 1);
+    })());
+    // Params that have SNMP table instances (non-empty, non-scalar index) → table columns
+    const visibleParams = activeGroup.parameters.filter((p) => !p.hidden && (() => {
+      const rec = values[valueKey(activeGroup.groupId, p.parameterId)];
+      if (!rec) return false;
+      if (rec.isTable) return true;
+      return rec.instances?.some((i) => i.index !== '' && i.index !== '0') ?? false;
+    })());
+    // Fall back to all params if none are tabular (show scalar summary table)
+    const tableParams = visibleParams.length > 0 ? visibleParams : activeGroup.parameters.filter(p => !p.hidden);
+    const noData = tableIndices.length === 0;
+
+    return (
+      <div>
+        {/* ── Scalar summary rows (Avg RTX %, system fields, etc.) ── */}
+        {scalarParams.length > 0 && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+            gap: 12, marginBottom: 16,
+            padding: '12px 16px',
+            background: 'var(--vf-surface)',
+            border: '1px solid var(--vf-border-subtle)', borderRadius: 8,
+          }}>
+            {scalarParams.map((p) => {
+              const rec = values[valueKey(activeGroup.groupId, p.parameterId)];
+              const val = rec?.display ?? rec?.value ?? null;
+              const stale = rec?.freshnessState === 'STALE' || rec?.freshnessState === 'FAILED';
+              return (
+                <div key={p.parameterId}>
+                  <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginBottom: 2 }}>{p.displayName}{p.unit ? ` (${p.unit})` : ''}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: stale ? 'var(--vf-text-muted)' : 'var(--vf-text-primary)' }}>
+                    {val ?? '—'}{stale && val && <span title="Stale" style={{ marginLeft: 4, fontSize: 10 }}>⚠</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Instance table ── */}
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{
+            width: '100%', borderCollapse: 'collapse',
+            fontSize: 13, fontFamily: 'var(--vf-font-sans)',
+            background: 'var(--vf-surface)',
+            border: '1px solid var(--vf-border-subtle)',
+            borderRadius: 8, overflow: 'hidden',
+          }}>
+            {/* ── Header ── */}
+            <thead>
+              <tr style={{ background: 'var(--vf-surface-raised, #f8f9fa)' }}>
+                <th style={thStyle}>Index</th>
+                {tableParams.map((p) => (
+                  <th key={p.parameterId} style={thStyle}>
+                    {p.displayName}
+                    {p.unit ? <span style={{ fontWeight: 400, color: 'var(--vf-text-muted)', marginLeft: 4 }}>({p.unit})</span> : null}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            {/* ── Body ── */}
+            <tbody>
+              {noData ? (
+                <tr>
+                  <td colSpan={tableParams.length + 1} style={{ ...tdStyle, textAlign: 'center', color: 'var(--vf-text-muted)', padding: '24px 12px' }}>
+                    No data — device unreachable or no connected stations.
+                  </td>
+                </tr>
+              ) : tableIndices.map((idx, rowIdx) => (
+                <tr key={idx} style={{ background: rowIdx % 2 === 0 ? 'transparent' : 'var(--vf-surface-subtle, rgba(0,0,0,.02))' }}>
+                  <td style={{ ...tdStyle, fontWeight: 600, color: 'var(--vf-text-secondary)' }}>{idx || '1'}</td>
+                  {tableParams.map((p) => {
+                    const rec = values[valueKey(activeGroup.groupId, p.parameterId)];
+                    const val = instanceValue(rec, idx);
+                    const fresh = rec?.freshnessState;
+                    const stale = fresh === 'STALE' || fresh === 'FAILED';
+                    return (
+                      <td key={p.parameterId} style={{
+                        ...tdStyle,
+                        color: stale ? 'var(--vf-text-muted)' : 'var(--vf-text-primary)',
+                        fontFamily: isNumericParam(p) ? 'var(--vf-font-mono, monospace)' : undefined,
+                      }}>
+                        {val != null ? val : <span style={{ color: 'var(--vf-text-muted)' }}>—</span>}
+                        {stale && val != null && <span title="Stale data" style={{ marginLeft: 4, fontSize: 10, color: 'var(--vf-text-muted)' }}>⚠</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {tableIndices.length > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 6 }}>
+              {tableIndices.length} entr{tableIndices.length === 1 ? 'y' : 'ies'} · polled {collectedAt ? new Date(collectedAt).toLocaleTimeString() : '—'}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // ── Render parameter cards (shared between sidebar and flat modes) ───────────
-  const renderCards = () => (
+  const renderCards = () => {
+    if (isTableGroup) return renderTable();
+    return (
     <>
       {canEdit && !deviceWritable && groupHasWritable && (
         <div style={{ padding: '8px 12px', marginBottom: 12, background: 'var(--vf-warning-subtle)', border: '1px solid var(--vf-warning)', borderRadius: 6, fontSize: 12, color: 'var(--vf-warning)' }}>
@@ -451,7 +652,8 @@ export function NodeViewParameters({
         </Card>
       ))}
     </>
-  );
+    );
+  };
 
   // ── Sidebar layout (uiPage/uiParent/uiTab hierarchy) ──────────────────────
   if (hasSidebar) {
