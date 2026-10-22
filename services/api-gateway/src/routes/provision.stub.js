@@ -226,7 +226,7 @@ async function applyBtsCpeLinks(col, doc, ctx) {
  * @returns {{ ip, deviceId, serialNumber, status, error? }}
  */
 async function provisionOne(host, col, ctx = {}) {
-  const {
+  let {
     ip, deviceType, genericDeviceType, serialNumber, macAddress,
     networkId, vendor, model, sysName, sysLocation,
     sysObjectID, sysDescr, latitude, longitude,
@@ -361,14 +361,25 @@ async function provisionOne(host, col, ctx = {}) {
         await applyBtsCpeLinks(col, merged, ctx);
         return { ip, deviceId: keepId, serialNumber: merged.serialNumber, status: 'provisioned', merged: true };
       }
-      // The chosen serial belongs to a DIFFERENT unit → refuse rather than overwrite it.
+      // The chosen record key belongs to a DIFFERENT unit. Labels/hostnames may repeat across units
+      // (e.g. two radios both named 'EOC655'), but the record key is the Mongo _id and must stay
+      // unique — never overwrite the other unit. Re-key this one from its own reported serial
+      // (stable, so re-provisioning finds it again through the same-unit lookup above).
       const holder = await col.findOne({ _id: doc._id, isDeprovisioned: { $ne: true } });
       if (holder && holder.reportedSerialNumber && holder.reportedSerialNumber !== deviceSerial) {
-        return {
-          ip, deviceId: '', serialNumber, status: 'failed',
-          error: `Serial number '${serialNumber}' is already used by a different device (${holder.ipAddress || 'unknown IP'}, ` +
-                 `device serial ${holder.reportedSerialNumber}). Enter a unique serial number — this device reports ${deviceSerial}.`,
-        };
+        const rekeyed = `${serialNumber}-${deviceSerial}`;
+        const clash = await col.findOne({ _id: rekeyed, isDeprovisioned: { $ne: true } });
+        if (clash && clash.reportedSerialNumber !== deviceSerial) {
+          return {
+            ip, deviceId: '', serialNumber, status: 'failed',
+            error: `Record key '${serialNumber}' is used by a different device (${holder.ipAddress || 'unknown IP'}, ` +
+                   `device serial ${holder.reportedSerialNumber}) and '${rekeyed}' is taken too. Enter a unique serial number.`,
+          };
+        }
+        console.log(`[provision-stub] ${ip}: record key '${serialNumber}' belongs to ${holder.ipAddress || 'another device'} ` +
+                    `(device serial ${holder.reportedSerialNumber}) — provisioning this unit (${deviceSerial}) as '${rekeyed}'`);
+        serialNumber = rekeyed;
+        doc._id = doc.id = doc.deviceId = doc.serialNumber = rekeyed;
       }
     }
 
@@ -479,6 +490,11 @@ function createProvisionHandler(_config) {
     const failed      = results.filter((r) => r.status === 'failed').length;
 
     console.log(`[provision-stub] Run ${runId}: ${provisioned} provisioned, ${failed} failed`);
+    for (const r of results) {
+      if (r.status === 'failed') {
+        console.warn(`[provision-stub] Run ${runId}: ${r.ip || '(no ip)'} rejected — ${r.error || 'no reason given'}`);
+      }
+    }
 
     // Invalidate topology cache so the next GET /api/v1/topology picks up new devices immediately.
     if (provisioned > 0) {

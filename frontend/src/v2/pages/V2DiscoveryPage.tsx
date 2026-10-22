@@ -103,6 +103,12 @@ interface DiscoveryModesResponse {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+/** A 422/207 provision response still carries the per-host reason; axios throws on 422, so dig it out of the error. */
+function provisionRejectionReason(err: unknown): string | undefined {
+  const data = (err as { response?: { data?: { results?: { error?: string }[]; message?: string } } })?.response?.data;
+  return data?.results?.find((r) => r?.error)?.error ?? data?.message;
+}
+
 function relTime(iso?: string): string {
   if (!iso) return '—';
   const diff = Date.now() - new Date(iso).getTime();
@@ -843,7 +849,10 @@ function SnmpDiscoveryTab({ initialScope }: SnmpDiscoveryTabProps) {
     } catch (err: unknown) {
       logger.error('SnmpDiscoveryTab: provision failed', err);
       const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 409) {
+      const reason = provisionRejectionReason(err);
+      if (reason) {
+        addToast(reason, 'error');
+      } else if (status === 409) {
         addToast('Device with this serial/IP already exists in inventory.', 'error');
       } else {
         addToast('Failed to provision device. Is the discovery service running?', 'error');
@@ -1547,7 +1556,10 @@ function QuickDiscoveryBar() {
     } catch (err: unknown) {
       logger.error('QuickDiscoveryBar: provision failed', err);
       const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 409) {
+      const reason = provisionRejectionReason(err);
+      if (reason) {
+        addToast(reason, 'error');
+      } else if (status === 409) {
         addToast('Device already exists in inventory.', 'error');
       } else {
         addToast('Failed to provision device. Is the inventory service running?', 'error');
