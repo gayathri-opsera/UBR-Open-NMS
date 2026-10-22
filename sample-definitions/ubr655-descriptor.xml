@@ -15,7 +15,7 @@
   INSTANCES   Every per-radio parameter is declared with its own OID = column OID + table instance,
               so each radio is a separate field. Mapping (device notes, verify with a live walk):
                 wirelessTable / wirelessStatsTable / assocTable : 1 = 2.4 GHz, 2 = Radio 1 (5 GHz), 3 = Radio 2 (6 GHz)
-                linkProfileTable (index.secIndex) / dcsTable    : 1 = Radio 1, 2 = Radio 2   (suffix .1 = secIndex)
+                linkProfileTable (index.secIndex) / dcsTable    : 2 = Radio 1, 3 = Radio 2   (suffix .1 = secIndex; verified on UBR655 hardware, instance 1 = 2.4 GHz has no DDRS/DCS)
                 vlanTable                                       : 1 = Radio 1 (ath1), 2 = Radio 2 (ath2)
                 ethTable                                        : 1 = eth0, 2 = eth1
               NOTE: SENAO-MIB.mib declares wirelessIndex as (1..2); the unit is believed to expose 3 radios.
@@ -228,13 +228,13 @@
         <displayOrder>13</displayOrder>
       </parameter>
     </group>
-    <!-- WIRELESS -> RADIO 1 -> DDRS/ATPC   (linkProfileTable instance 1.1; EIRP/gain from wirelessTable 2) -->
+    <!-- WIRELESS -> RADIO 1 -> DDRS/ATPC   (linkProfileTable instance 2.1; EIRP/gain from wirelessTable 2) -->
     <group id="radio1.ddrs" displayName="Radio 1 - DDRS/ATPC" displayOrder="2"
            uiPage="Wireless" uiParent="Radio 1" uiTab="DDRS/ATPC">
       <parameter>
         <parameterId>config.radio1.ddrs.ddrs_status</parameterId>
         <displayName>DDRS Status</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.3.1.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.3.2.1</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Enable(1),Disable(0)</enumValues>
@@ -246,7 +246,7 @@
       <parameter>
         <parameterId>config.radio1.ddrs.spatial_stream</parameterId>
         <displayName>Spatial Stream</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.4.1.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.4.2.1</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Single(1),Dual(2),Auto(3)</enumValues>
@@ -258,7 +258,7 @@
       <parameter>
         <parameterId>config.radio1.ddrs.max_rate_single</parameterId>
         <displayName>Max. Data Rate - Single Stream</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.17.1.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.17.2.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -271,7 +271,7 @@
       <parameter>
         <parameterId>config.radio1.ddrs.max_rate_dual</parameterId>
         <displayName>Max. Data Rate - Dual Stream</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.18.1.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.18.2.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>12</minValue>
@@ -284,7 +284,7 @@
       <parameter>
         <parameterId>config.radio1.ddrs.min_modulation_index</parameterId>
         <displayName>Min. Modulation Index</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.5.1.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.5.2.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -296,7 +296,7 @@
       <parameter>
         <parameterId>config.radio1.ddrs.max_modulation_index</parameterId>
         <displayName>Max. Modulation Index</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.6.1.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.6.2.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -308,7 +308,7 @@
       <parameter>
         <parameterId>config.radio1.ddrs.modulation_index</parameterId>
         <displayName>Modulation Index</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.9.1.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.9.2.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -320,7 +320,7 @@
       <parameter>
         <parameterId>config.radio1.ddrs.atpc_status</parameterId>
         <displayName>ATPC Status</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.11.1.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.11.2.1</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Enable(1),Disable(0)</enumValues>
@@ -331,7 +331,7 @@
       <parameter>
         <parameterId>config.radio1.ddrs.transmit_power</parameterId>
         <displayName>Transmit Power</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.12.1.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.12.2.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>1</minValue>
@@ -383,13 +383,13 @@
         <displayOrder>1</displayOrder>
       </parameter>
     </group>
-    <!-- WIRELESS -> RADIO 1 -> DCS   (dcsTable instance 1) -->
+    <!-- WIRELESS -> RADIO 1 -> DCS   (dcsTable instance 2) -->
     <group id="radio1.dcs" displayName="Radio 1 - DCS" displayOrder="4"
            uiPage="Wireless" uiParent="Radio 1" uiTab="DCS">
       <parameter>
         <parameterId>config.radio1.dcs.dcs_status</parameterId>
         <displayName>DCS Status</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.2.2</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Disable(0),Enable(1)</enumValues>
@@ -400,7 +400,7 @@
       <parameter>
         <parameterId>config.radio1.dcs.rtx_threshold</parameterId>
         <displayName>RTX Threshold</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.3.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.3.2</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -412,7 +412,7 @@
       <parameter>
         <parameterId>config.radio1.dcs.background_scan</parameterId>
         <displayName>Background Scan</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.11.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.11.2</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Disable(0),Enable(1)</enumValues>
@@ -568,13 +568,13 @@
         <displayOrder>13</displayOrder>
       </parameter>
     </group>
-    <!-- WIRELESS -> RADIO 2 -> DDRS/ATPC   (linkProfileTable instance 2.1; EIRP/gain from wirelessTable 3) -->
+    <!-- WIRELESS -> RADIO 2 -> DDRS/ATPC   (linkProfileTable instance 3.1; EIRP/gain from wirelessTable 3) -->
     <group id="radio2.ddrs" displayName="Radio 2 - DDRS/ATPC" displayOrder="6"
            uiPage="Wireless" uiParent="Radio 2" uiTab="DDRS/ATPC">
       <parameter>
         <parameterId>config.radio2.ddrs.ddrs_status</parameterId>
         <displayName>DDRS Status</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.3.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.3.3.1</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Enable(1),Disable(0)</enumValues>
@@ -586,7 +586,7 @@
       <parameter>
         <parameterId>config.radio2.ddrs.spatial_stream</parameterId>
         <displayName>Spatial Stream</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.4.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.4.3.1</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Single(1),Dual(2),Auto(3)</enumValues>
@@ -598,7 +598,7 @@
       <parameter>
         <parameterId>config.radio2.ddrs.max_rate_single</parameterId>
         <displayName>Max. Data Rate - Single Stream</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.17.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.17.3.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -611,7 +611,7 @@
       <parameter>
         <parameterId>config.radio2.ddrs.max_rate_dual</parameterId>
         <displayName>Max. Data Rate - Dual Stream</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.18.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.18.3.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>12</minValue>
@@ -624,7 +624,7 @@
       <parameter>
         <parameterId>config.radio2.ddrs.min_modulation_index</parameterId>
         <displayName>Min. Modulation Index</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.5.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.5.3.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -636,7 +636,7 @@
       <parameter>
         <parameterId>config.radio2.ddrs.max_modulation_index</parameterId>
         <displayName>Max. Modulation Index</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.6.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.6.3.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -648,7 +648,7 @@
       <parameter>
         <parameterId>config.radio2.ddrs.modulation_index</parameterId>
         <displayName>Modulation Index</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.9.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.9.3.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -660,7 +660,7 @@
       <parameter>
         <parameterId>config.radio2.ddrs.atpc_status</parameterId>
         <displayName>ATPC Status</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.11.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.11.3.1</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Enable(1),Disable(0)</enumValues>
@@ -671,7 +671,7 @@
       <parameter>
         <parameterId>config.radio2.ddrs.transmit_power</parameterId>
         <displayName>Transmit Power</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.12.2.1</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.2.1.12.3.1</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>1</minValue>
@@ -723,13 +723,13 @@
         <displayOrder>1</displayOrder>
       </parameter>
     </group>
-    <!-- WIRELESS -> RADIO 2 -> DCS   (dcsTable instance 2) -->
+    <!-- WIRELESS -> RADIO 2 -> DCS   (dcsTable instance 3) -->
     <group id="radio2.dcs" displayName="Radio 2 - DCS" displayOrder="8"
            uiPage="Wireless" uiParent="Radio 2" uiTab="DCS">
       <parameter>
         <parameterId>config.radio2.dcs.dcs_status</parameterId>
         <displayName>DCS Status</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.2.2</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.2.3</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Disable(0),Enable(1)</enumValues>
@@ -740,7 +740,7 @@
       <parameter>
         <parameterId>config.radio2.dcs.rtx_threshold</parameterId>
         <displayName>RTX Threshold</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.3.2</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.3.3</snmpOid>
         <dataType>INTEGER</dataType>
         <uiWidget>textfield</uiWidget>
         <minValue>0</minValue>
@@ -752,7 +752,7 @@
       <parameter>
         <parameterId>config.radio2.dcs.background_scan</parameterId>
         <displayName>Background Scan</displayName>
-        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.11.2</snmpOid>
+        <snmpOid>.1.3.6.1.4.1.52619.1.1.1.3.1.11.3</snmpOid>
         <dataType>ENUM</dataType>
         <uiWidget>dropdown</uiWidget>
         <enumValues>Disable(0),Enable(1)</enumValues>

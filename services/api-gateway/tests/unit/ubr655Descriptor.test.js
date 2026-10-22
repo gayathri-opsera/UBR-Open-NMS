@@ -44,8 +44,12 @@ describe('ubr655-descriptor.xml', () => {
     expect(param('config.radio24.properties.ssid').snmpOid).toBe('.1.3.6.1.4.1.52619.1.1.1.1.1.3.1');
     expect(param('config.radio1.properties.ssid').snmpOid).toBe('.1.3.6.1.4.1.52619.1.1.1.1.1.3.2');
     expect(param('config.radio2.properties.ssid').snmpOid).toBe('.1.3.6.1.4.1.52619.1.1.1.1.1.3.3');
-    expect(param('config.radio1.ddrs.ddrs_status').snmpOid).toBe('.1.3.6.1.4.1.52619.1.1.1.2.1.3.1.1');
-    expect(param('config.radio2.dcs.dcs_status').snmpOid).toBe('.1.3.6.1.4.1.52619.1.1.1.3.1.2.2');
+    // linkProfileTable / dcsTable use the same instance numbering as wirelessTable: 2 = Radio 1, 3 = Radio 2
+    // (verified on UBR655 hardware; instance 1 = 2.4 GHz has no DDRS/DCS).
+    expect(param('config.radio1.ddrs.ddrs_status').snmpOid).toBe('.1.3.6.1.4.1.52619.1.1.1.2.1.3.2.1');
+    expect(param('config.radio2.ddrs.ddrs_status').snmpOid).toBe('.1.3.6.1.4.1.52619.1.1.1.2.1.3.3.1');
+    expect(param('config.radio1.dcs.dcs_status').snmpOid).toBe('.1.3.6.1.4.1.52619.1.1.1.3.1.2.2');
+    expect(param('config.radio2.dcs.dcs_status').snmpOid).toBe('.1.3.6.1.4.1.52619.1.1.1.3.1.2.3');
     expect(entries.filter((e) => e.snmpOid).every((e) => e.snmpOid.startsWith('.1.3.6.1.4.1.52619.1.'))).toBe(true);
   });
 
