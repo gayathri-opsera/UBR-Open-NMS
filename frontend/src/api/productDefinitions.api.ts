@@ -635,3 +635,69 @@ export async function getVersionSchema(
     return null;
   }
 }
+
+// ── MIB upload ────────────────────────────────────────────────────────────────
+
+/** Summary of one parsed MIB object returned by the /parse-mib endpoint. */
+export interface MibObjectSummary {
+  name: string;
+  oid: string | null;
+  nmsDataType: string;
+  access: string;
+  indexType: 'SCALAR' | 'SINGLE_INDEX' | 'DOUBLE_INDEX' | 'TRIPLE_INDEX';
+  indexLabel: string;
+  section: string;
+  subSection: string;
+  isEnum: boolean;
+  enumValueCount: number;
+  description?: string;
+  units?: string;
+}
+
+/** Statistics returned by /parse-mib. */
+export interface MibStatistics {
+  totalObjects: number;
+  scalarCount: number;
+  singleIndexCount: number;
+  doubleIndexCount: number;
+  tripleIndexCount: number;
+  enumCount: number;
+}
+
+/** Full response from POST /parse-mib. */
+export interface ParseMibResult {
+  moduleName: string;
+  vendor: string;
+  productLine: string;
+  enterpriseOid: string;
+  statistics: MibStatistics;
+  objects: MibObjectSummary[];
+  generatedXml: string;
+  warnings?: string[];
+}
+
+/**
+ * Uploads a MIB file to the product-definition service for parsing and XML generation.
+ *
+ * The returned {@link ParseMibResult.generatedXml} can be submitted to
+ * {@link uploadProductDefinition} to enter the standard Validate → Stage → Activate
+ * lifecycle without any further changes.
+ *
+ * @param file  MIB file to upload (.mib, .txt, .my, .smi extensions accepted)
+ * @returns parsed object list, statistics, and generated discovery XML
+ * @throws {@link FrameworkApiError} on validation or parse errors
+ */
+export async function parseMibFile(file: File): Promise<ParseMibResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await apiClient.post<ParseMibResult>(
+      `${BASE}/parse-mib`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return res.data;
+  } catch (err) {
+    throw extractApiError(err);
+  }
+}

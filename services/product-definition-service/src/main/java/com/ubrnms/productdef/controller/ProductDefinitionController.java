@@ -1,6 +1,8 @@
 package com.ubrnms.productdef.controller;
 
 import com.ubrnms.productdef.lifecycle.ProductDefinitionLifecycleException;
+import com.ubrnms.productdef.mib.MibUploadService;
+import com.ubrnms.productdef.mib.ParsedMibResult;
 import com.ubrnms.productdef.model.ProductDefinitionLifecycleEvent;
 import com.ubrnms.productdef.model.ProductDefinitionVersion;
 import com.ubrnms.productdef.model.ValidationReport;
@@ -41,6 +43,57 @@ public class ProductDefinitionController {
     private final ProductDefinitionLifecycleService lifecycleService;
     private final ProductDefinitionAuditService     auditService;
     private final VersionDiffService                versionDiffService;
+    private final MibUploadService                  mibUploadService;
+
+    // ── POST /parse-mib ───────────────────────────────────────────────────────
+
+    /**
+     * Parses a MIB file and returns the parsed object list + generated discovery XML.
+     *
+     * <p>The caller (typically the NMS frontend) can then:
+     * <ol>
+     *   <li>Display the parsed objects and statistics for admin review.</li>
+     *   <li>Submit the {@code generatedXml} field to {@code POST /upload} as an XML file
+     *       to enter the standard Validate → Stage → Activate lifecycle (FR-08).</li>
+     * </ol>
+     *
+     * <p>Accepts {@code text/plain}, {@code application/octet-stream}, or any MIME type
+     * for files with extensions {@code .mib}, {@code .txt}, {@code .my}, {@code .smi}.
+     *
+     * @return 200 with parsed object list + generated XML, or 400/422 on error.
+     */
+    @PostMapping(value = "/parse-mib", consumes = "multipart/form-data")
+    public ResponseEntity<?> parseMib(
+            @RequestParam("file")                   MultipartFile file,
+            @RequestHeader(value = "X-Correlation-Id", defaultValue = "") String correlationId,
+            @RequestHeader(value = "X-User-Id",    defaultValue = "unknown") String userId,
+            @RequestHeader(value = "X-Username",   defaultValue = "unknown") String username) {
+
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(errorBody("FILE_REQUIRED", "No MIB file was attached to the request"));
+        }
+
+        String filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown.mib";
+        log.info("[{}] MIB parse request from user={} file={} size={}",
+                correlationId, username, filename, file.getSize());
+
+        try {
+            byte[] bytes = file.getBytes();
+            ParsedMibResult result = mibUploadService.parseMibAndGenerateXml(bytes, filename);
+            Map<String, Object> response = mibUploadService.buildApiResponse(result);
+            return ResponseEntity.ok(response);
+
+        } catch (IllegalArgumentException e) {
+            log.warn("[{}] MIB parse rejected: {}", correlationId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(errorBody("MIB_PARSE_REJECTED", e.getMessage()));
+        } catch (Exception e) {
+            log.error("[{}] Unexpected MIB parse error for file {}", correlationId, filename, e);
+            return ResponseEntity.internalServerError()
+                    .body(errorBody("INTERNAL_ERROR", "MIB parsing failed: " + e.getMessage()));
+        }
+    }
 
     // ── POST /upload ──────────────────────────────────────────────────────────
 

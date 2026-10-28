@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Forge Deployment Architecture — On-Prem &amp; Customer Cloud</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink:   #131314;
+    --amber: #FFB028;
+    --rust:  #D04C01;
+    --brown: #352725;
+    --cream: #FAF5F4;
+    --line:  #E7DFDD;
+    --muted: #867675;
+    --tx:    #39302E;
+    --blue:  #2B5D8A;
+    --green: #1E7A48;
+  }
+
+  html, body {
+    font-family: "Segoe UI", "Source Sans Pro", Helvetica, Arial, sans-serif;
+    background: #fff;
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ── page wrapper ── */
+  .wrapper {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 36px 40px 48px;
+  }
+
+  /* ── header ── */
+  .page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    border-bottom: 3px solid var(--brown);
+    padding-bottom: 14px;
+    margin-bottom: 28px;
+    gap: 20px;
+  }
+  .page-header h1 {
+    font-size: 22px;
+    font-weight: 900;
+    color: var(--ink);
+    letter-spacing: -.3px;
+    line-height: 1.15;
+  }
+  .page-header h1 span { color: var(--amber); }
+  .page-header .subtitle {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .badge {
+    display: inline-block;
+    background: rgba(255,176,40,.13);
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 5px 13px;
+    border-radius: 20px;
+    white-space: nowrap;
+    align-self: flex-start;
+    margin-top: 4px;
+  }
+
+  /* ── diagram shell ── */
+  .diag {
+    border: 2px dashed var(--brown);
+    border-radius: 14px;
+    padding: 20px 22px 22px;
+    background: #FBFAF9;
+    position: relative;
+  }
+  .blabel {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--brown);
+    margin-bottom: 16px;
+  }
+
+  /* ── tier rows ── */
+  .tier {
+    margin-bottom: 14px;
+  }
+  .tier:last-of-type {
+    margin-bottom: 0;
+  }
+  .tl {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  /* ── nodes ── */
+  .nodes {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .node {
+    flex: 1;
+    min-width: 140px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 11px 14px;
+    background: #fff;
+    text-align: center;
+  }
+  /* color-coded top accents */
+  .node.app   { border-top: 4px solid var(--amber); }
+  .node.data  { border-top: 4px solid var(--blue);  }
+  .node.model { border-top: 4px solid var(--green); }
+  .node.sec   { border-top: 4px solid var(--rust);  }
+
+  .node .nt {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--ink);
+    line-height: 1.3;
+  }
+  .node .nd {
+    font-size: 10.5px;
+    color: var(--tx);
+    margin-top: 4px;
+    line-height: 1.35;
+  }
+
+  /* ── egress bar ── */
+  .egress {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 11px 14px;
+    background: #F5F7FA;
+    margin-top: 16px;
+  }
+  .egress .el {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--blue);
+    margin-bottom: 5px;
+  }
+  .egress .ed {
+    font-size: 11px;
+    color: var(--tx);
+    line-height: 1.5;
+  }
+
+  /* ── divider arrows between tiers ── */
+  .tier-arrow {
+    text-align: center;
+    font-size: 18px;
+    color: var(--muted);
+    margin: -4px 0 10px;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  /* ── legend ── */
+  .legend {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 22px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    color: var(--tx);
+  }
+  .legend-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  /* ── footer ── */
+  .footer {
+    margin-top: 26px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-size: 10px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .footer .brand {
+    font-weight: 800;
+    color: var(--amber);
+    letter-spacing: .5px;
+  }
+  .footer .conf {
+    font-weight: 800;
+    color: var(--rust);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- Header -->
+  <div class="page-header">
+    <div>
+      <h1>Forge — Deploying in Your <span>Cloud or Data Center</span></h1>
+      <div class="subtitle">Reference architecture · On-Prem &amp; Customer-Cloud · Single-tenant &amp; Air-gapped options</div>
+    </div>
+    <div class="badge">Deployment Architecture</div>
+  </div>
+
+  <!-- Diagram -->
+  <div class="diag">
+    <div class="blabel">&#9646; Customer Cloud Account / Data Center &mdash; Trust Boundary</div>
+
+    <!-- INGRESS -->
+    <div class="tier">
+      <div class="tl">Ingress</div>
+      <div class="nodes">
+        <div class="node app">
+          <div class="nt">Load Balancer / Ingress</div>
+          <div class="nd">TLS termination &middot; nginx / ALB / Ingress-NGINX</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tier-arrow">&#8595;</div>
+
+    <!-- APPLICATION TIER -->
+    <div class="tier">
+      <div class="tl">Application Tier &mdash; Stateless, K8s Pods (Scale Horizontally)</div>
+      <div class="nodes">
+        <div class="node app">
+          <div class="nt">web-ui</div>
+          <div class="nd">React SPA served by nginx</div>
+        </div>
+        <div class="node app">
+          <div class="nt">api-gateway</div>
+          <div class="nd">Fastify API &middot; :3001 &middot; auth, journey, migration, shipping</div>
+        </div>
+        <div class="node app">
+          <div class="nt">workers</div>
+          <div class="nd">Background jobs &middot; coding agent &middot; repo analysis</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tier-arrow">&#8595;</div>
+
+    <!-- DATA TIER -->
+    <div class="tier">
+      <div class="tl">Data Tier &mdash; Stateful, Persistent Volumes (Your Storage)</div>
+      <div class="nodes">
+        <div class="node data">
+          <div class="nt">PostgreSQL 16 + pgvector</div>
+          <div class="nd">Artifacts, RTM, code context &amp; RAG embeddings</div>
+        </div>
+        <div class="node sec">
+          <div class="nt">HashiCorp Vault</div>
+          <div class="nd">Connector creds &amp; secrets</div>
+        </div>
+        <div class="node data">
+          <div class="nt">Redis</div>
+          <div class="nd">Cache / queues / sessions</div>
+        </div>
+        <div class="node data">
+          <div class="nt">Object / File Store</div>
+          <div class="nd">Session files &amp; artifacts</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tier-arrow">&#8595;</div>
+
+    <!-- MODEL TIER -->
+    <div class="tier">
+      <div class="tl">Model Tier &mdash; In-Boundary or Private</div>
+      <div class="nodes">
+        <div class="node model">
+          <div class="nt">LLM Endpoint</div>
+          <div class="nd">Bedrock (in-account) &middot; Azure OpenAI &middot; self-hosted (OpenAI-compatible)</div>
+        </div>
+        <div class="node model">
+          <div class="nt">Embeddings</div>
+          <div class="nd">OpenAI-compatible / Bedrock Titan / self-hosted</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EGRESS -->
+    <div class="egress">
+      <div class="el">&#8596; Controlled Egress &mdash; Optional, Policy-Gated</div>
+      <div class="ed">
+        Connectors &rarr; your internal SCM/ALM (GitHub / GitLab / Jira / Azure DevOps) &middot;
+        optional public LLM &middot; optional SSO (Scalekit) &middot; optional web research (deep-search).
+        All can be disabled or pointed at internal endpoints.
+      </div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:var(--amber);"></div>
+      Application &amp; Ingress (Stateless)
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:var(--blue);"></div>
+      Data / Storage (Stateful)
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:var(--rust);"></div>
+      Security / Secrets
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:var(--green);"></div>
+      AI / Model Layer (In-Boundary)
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:var(--blue); opacity:.5;"></div>
+      Optional Egress (Policy-Gated)
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div><span class="brand">FORGE &middot; OPSERA</span> &nbsp;&nbsp; Deployment Architecture &mdash; On-Prem &amp; Customer Cloud</div>
+    <div class="conf">CONFIDENTIAL &middot; 2026</div>
+  </div>
+
+</div>
+</body>
+</html>

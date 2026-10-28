@@ -38,8 +38,9 @@ import {
   extractApiError,
   getVersionDiff,
   getVersionSchema,
+  parseMibFile,
 } from '../../api/productDefinitions.api';
-import type { VersionDiffResult } from '../../api/productDefinitions.api';
+import type { VersionDiffResult, ParseMibResult, MibObjectSummary } from '../../api/productDefinitions.api';
 import type {
   DefinitionSummary,
   ProductDefinitionVersion,
@@ -180,6 +181,317 @@ function UploadDropZone({
         </label>
         <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>No file chosen</span>
       </div>
+    </div>
+  );
+}
+
+// ── MIB Upload Panel ──────────────────────────────────────────────────────────
+
+/** Index type badge colour scheme. */
+const INDEX_BADGE: Record<string, { bg: string; color: string }> = {
+  SCALAR:       { bg: 'rgba(34,197,94,0.12)',    color: '#16a34a' },
+  SINGLE_INDEX: { bg: 'rgba(96,165,250,0.12)',   color: '#2563eb' },
+  DOUBLE_INDEX: { bg: 'rgba(245,158,11,0.12)',   color: '#d97706' },
+  TRIPLE_INDEX: { bg: 'rgba(239,68,68,0.12)',    color: '#dc2626' },
+};
+
+function IndexBadge({ indexType, label }: { indexType: string; label: string }) {
+  const c = INDEX_BADGE[indexType] ?? { bg: 'var(--vf-elevated)', color: 'var(--vf-text-muted)' };
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+      background: c.bg, color: c.color, fontSize: 10, fontWeight: 700,
+      textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
+    }}>
+      {label}
+    </span>
+  );
+}
+
+interface MibUploadPanelProps {
+  onGeneratedXmlUploaded: (file: File) => void;
+  uploading: boolean;
+}
+
+function MibUploadPanel({ onGeneratedXmlUploaded, uploading }: MibUploadPanelProps) {
+  const [mibFile,       setMibFile]       = useState<File | null>(null);
+  const [parsing,       setParsing]       = useState(false);
+  const [parseResult,   setParseResult]   = useState<ParseMibResult | null>(null);
+  const [parseError,    setParseError]    = useState<string | null>(null);
+  const [xmlPreviewOpen,setXmlPreviewOpen]= useState(false);
+  const [filterSection, setFilterSection] = useState<string>('all');
+  const [filterIndex,   setFilterIndex]   = useState<string>('all');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleParse() {
+    if (!mibFile) return;
+    setParsing(true);
+    setParseError(null);
+    setParseResult(null);
+    try {
+      const result = await parseMibFile(mibFile);
+      setParseResult(result);
+    } catch (err) {
+      const ae = extractApiError(err);
+      setParseError(ae.error.message ?? 'MIB parse failed');
+    } finally {
+      setParsing(false);
+    }
+  }
+
+  function handleGenerateAndUpload() {
+    if (!parseResult?.generatedXml) return;
+    // Convert generated XML to a File and pass to the standard upload handler
+    const blob = new Blob([parseResult.generatedXml], { type: 'application/xml' });
+    const filename = `${parseResult.moduleName ?? 'generated'}-descriptor.xml`;
+    const file = new File([blob], filename, { type: 'application/xml' });
+    onGeneratedXmlUploaded(file);
+  }
+
+  // Filter objects for the preview table
+  const filteredObjects: MibObjectSummary[] = parseResult?.objects.filter((o) => {
+    if (filterSection !== 'all' && o.section !== filterSection) return false;
+    if (filterIndex !== 'all' && o.indexType !== filterIndex) return false;
+    return true;
+  }) ?? [];
+
+  const sections = parseResult
+    ? ['all', ...new Set(parseResult.objects.map((o) => o.section))]
+    : ['all'];
+  const indexTypes = ['all', 'SCALAR', 'SINGLE_INDEX', 'DOUBLE_INDEX', 'TRIPLE_INDEX'];
+
+  return (
+    <div>
+      {/* ── Step 1: Choose MIB file ── */}
+      <div style={{ marginBottom: 16 }}>
+        <label style={FORM_LABEL}>MIB file</label>
+        <div style={{
+          border: `2px dashed var(--vf-border-subtle)`,
+          borderRadius: 'var(--vf-radius-md)', background: 'var(--vf-elevated)',
+          padding: '20px 16px', textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--vf-text-primary)' }}>
+            Drop MIB file here or choose file
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginBottom: 12 }}>
+            Accepts: .mib, .txt, .my, .smi — standard SMIv2 textual MIB files
+          </div>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".mib,.txt,.my,.smi,text/plain,application/octet-stream"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) { setMibFile(f); setParseResult(null); setParseError(null); }
+            }}
+          />
+          <button
+            style={BTN_SECONDARY}
+            onClick={() => inputRef.current?.click()}
+          >
+            Choose MIB file
+          </button>
+          {mibFile && (
+            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--vf-accent)', fontFamily: 'var(--vf-font-mono)' }}>
+              ✓ {mibFile.name} ({(mibFile.size / 1024).toFixed(1)} KB)
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Step 2: Parse button ── */}
+      <button
+        onClick={handleParse}
+        disabled={!mibFile || parsing || uploading}
+        style={{
+          ...BTN_PRIMARY, width: '100%', marginBottom: 16,
+          opacity: !mibFile || parsing || uploading ? 0.5 : 1,
+          cursor: !mibFile || parsing || uploading ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {parsing ? '⚙ Parsing MIB…' : '⚙ Parse MIB'}
+      </button>
+
+      {/* ── Error ── */}
+      {parseError && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 6, marginBottom: 16,
+          background: 'var(--vf-danger-subtle)', border: '1px solid var(--vf-danger)',
+          fontSize: 12, color: 'var(--vf-danger)',
+        }}>
+          ❌ {parseError}
+        </div>
+      )}
+
+      {/* ── Step 3: Preview parsed result ── */}
+      {parseResult && (
+        <div>
+          {/* Statistics cards */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 10 }}>
+              Parsed: <strong style={{ color: 'var(--vf-text-primary)' }}>{parseResult.moduleName}</strong>
+              {parseResult.vendor && <span style={{ marginLeft: 8 }}>· {parseResult.vendor}</span>}
+            </div>
+
+            {/* OID badge */}
+            {parseResult.enterpriseOid && (
+              <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginBottom: 10, fontFamily: 'var(--vf-font-mono)' }}>
+                Enterprise OID: {parseResult.enterpriseOid}
+              </div>
+            )}
+
+            {/* Stats row */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              {[
+                { label: `${parseResult.statistics.totalObjects} total`,      bg: 'var(--vf-elevated)',             color: 'var(--vf-text-secondary)' },
+                { label: `${parseResult.statistics.scalarCount} scalar`,      bg: 'rgba(34,197,94,0.08)',           color: '#16a34a' },
+                { label: `${parseResult.statistics.singleIndexCount} 1-idx`,  bg: 'rgba(96,165,250,0.08)',          color: '#2563eb' },
+                { label: `${parseResult.statistics.doubleIndexCount} 2-idx`,  bg: 'rgba(245,158,11,0.08)',          color: '#d97706' },
+                { label: `${parseResult.statistics.tripleIndexCount} 3-idx`,  bg: 'rgba(239,68,68,0.08)',           color: '#dc2626' },
+                { label: `${parseResult.statistics.enumCount} enum`,           bg: 'rgba(168,85,247,0.08)',          color: '#7c3aed' },
+              ].map((s) => (
+                <span key={s.label} style={{
+                  padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600,
+                  background: s.bg, color: s.color, border: `1px solid ${s.color}33`,
+                }}>
+                  {s.label}
+                </span>
+              ))}
+            </div>
+
+            {/* Warnings */}
+            {parseResult.warnings && parseResult.warnings.length > 0 && (
+              <div style={{
+                padding: '8px 12px', borderRadius: 6, marginBottom: 12,
+                background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)',
+                fontSize: 11, color: '#b45309',
+              }}>
+                ⚠ {parseResult.warnings.length} warning{parseResult.warnings.length > 1 ? 's' : ''}: {parseResult.warnings[0]}
+                {parseResult.warnings.length > 1 && ` (+${parseResult.warnings.length - 1} more)`}
+              </div>
+            )}
+
+            {/* Filters */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <select
+                value={filterSection}
+                onChange={(e) => setFilterSection(e.target.value)}
+                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)' }}
+              >
+                {sections.map((s) => (
+                  <option key={s} value={s}>{s === 'all' ? 'All sections' : s}</option>
+                ))}
+              </select>
+              <select
+                value={filterIndex}
+                onChange={(e) => setFilterIndex(e.target.value)}
+                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)' }}
+              >
+                {indexTypes.map((t) => (
+                  <option key={t} value={t}>{t === 'all' ? 'All index types' : t.replace('_', ' ')}</option>
+                ))}
+              </select>
+              <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', alignSelf: 'center' }}>
+                {filteredObjects.length} objects
+              </span>
+            </div>
+
+            {/* Object table */}
+            <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--vf-border-subtle)', borderRadius: 6 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead style={{ position: 'sticky', top: 0, background: 'var(--vf-elevated)', zIndex: 1 }}>
+                  <tr>
+                    {(['Object name', 'Type', 'Index', 'Section'] as const).map((h) => (
+                      <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--vf-text-muted)', borderBottom: '1px solid var(--vf-border-subtle)', whiteSpace: 'nowrap' }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredObjects.slice(0, 200).map((obj) => (
+                    <tr key={obj.name} style={{ borderBottom: '1px solid var(--vf-border-subtle)' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--vf-elevated)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}>
+                      <td style={{ padding: '5px 10px', fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-primary)' }}>
+                        {obj.name}
+                        {obj.oid && <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginTop: 1 }}>{obj.oid}</div>}
+                      </td>
+                      <td style={{ padding: '5px 10px', color: 'var(--vf-text-secondary)' }}>
+                        <span style={{ fontSize: 10, background: obj.nmsDataType === 'ENUM' ? 'rgba(168,85,247,0.1)' : 'var(--vf-elevated)', color: obj.nmsDataType === 'ENUM' ? '#7c3aed' : 'var(--vf-text-muted)', padding: '1px 5px', borderRadius: 3 }}>
+                          {obj.nmsDataType}
+                        </span>
+                      </td>
+                      <td style={{ padding: '5px 10px' }}>
+                        <IndexBadge indexType={obj.indexType} label={obj.indexLabel} />
+                      </td>
+                      <td style={{ padding: '5px 10px', color: 'var(--vf-text-muted)', whiteSpace: 'nowrap' }}>
+                        {obj.section}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredObjects.length > 200 && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 11 }}>
+                        … {filteredObjects.length - 200} more objects (use filters to narrow)
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* XML preview accordion */}
+            <div style={{ marginTop: 12 }}>
+              <button
+                onClick={() => setXmlPreviewOpen((o) => !o)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 12, fontWeight: 600, color: 'var(--vf-text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}
+              >
+                <span aria-hidden>{xmlPreviewOpen ? '▼' : '▶'}</span>
+                Preview generated XML ({parseResult.generatedXml.split('\n').length} lines)
+              </button>
+              {xmlPreviewOpen && (
+                <pre style={{
+                  marginTop: 8, padding: 12, borderRadius: 6, maxHeight: 240, overflowY: 'auto',
+                  background: 'var(--vf-elevated)', border: '1px solid var(--vf-border-subtle)',
+                  fontSize: 10, fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-secondary)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                }}>
+                  {parseResult.generatedXml.slice(0, 4000)}
+                  {parseResult.generatedXml.length > 4000 && '\n… (truncated for preview)'}
+                </pre>
+              )}
+            </div>
+          </div>
+
+          {/* ── Step 4: Generate & upload into standard pipeline ── */}
+          <div style={{
+            padding: '14px 16px', borderRadius: 8,
+            background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.3)',
+            marginTop: 4,
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#16a34a', marginBottom: 6 }}>
+              ✓ MIB parsed successfully
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--vf-text-secondary)', marginBottom: 12, lineHeight: 1.6 }}>
+              The generated XML uses correct data types and index classifications.
+              Click below to upload it into the standard Validate → Stage → Activate pipeline.
+            </div>
+            <button
+              onClick={handleGenerateAndUpload}
+              disabled={uploading}
+              style={{
+                ...BTN_PRIMARY, width: '100%',
+                opacity: uploading ? 0.6 : 1,
+                cursor: uploading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {uploading ? 'Uploading XML…' : '↑ Upload generated definition'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -677,6 +989,9 @@ function DeleteVersionDialog({
 export default function V2ProductDefinitionPage() {
   const { addToast }  = useToast();
   const navigate      = useNavigate();
+
+  // ── Upload mode: 'file' (XML/XLS/JSON) | 'mib' ───────────────────────────
+  const [uploadMode,         setUploadMode]         = useState<'file' | 'mib'>('file');
 
   // ── Upload state ───────────────────────────────────────────────────────────
   const [selectedFile,       setSelectedFile]       = useState<File | null>(null);
@@ -1506,6 +1821,65 @@ export default function V2ProductDefinitionPage() {
         <section aria-labelledby="upload-title" style={CARD_STYLE}>
           <h2 id="upload-title" style={CARD_TITLE}>Upload definition</h2>
 
+          {/* ── Upload mode toggle ── */}
+          <div style={{
+            display: 'flex', borderRadius: 'var(--vf-radius-md)',
+            border: '1px solid var(--vf-border-subtle)', overflow: 'hidden', marginBottom: 20,
+          }}>
+            {([
+              { id: 'file', label: '📄 XML / XLS / JSON', desc: 'Upload existing descriptor' },
+              { id: 'mib',  label: '🧬 From MIB',         desc: 'Auto-generate from MIB file' },
+            ] as const).map(({ id, label }) => (
+              <button
+                key={id}
+                onClick={() => setUploadMode(id)}
+                style={{
+                  flex: 1, padding: '8px 6px', border: 'none',
+                  background: uploadMode === id ? 'var(--vf-accent)' : 'var(--vf-elevated)',
+                  color: uploadMode === id ? '#fff' : 'var(--vf-text-secondary)',
+                  cursor: 'pointer', fontSize: 12, fontWeight: uploadMode === id ? 700 : 400,
+                  transition: 'background 0.15s',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── MIB upload mode ── */}
+          {uploadMode === 'mib' && (
+            <MibUploadPanel
+              onGeneratedXmlUploaded={(file) => {
+                setUploadMode('file');    // switch back to file mode
+                setSelectedFile(file);   // pre-populate with generated XML
+                setDraftVersion(null);
+                // Auto-trigger the upload
+                void (async () => {
+                  setUploading(true);
+                  try {
+                    const version = await uploadProductDefinition(
+                      file,
+                      `Generated from MIB — ${new Date().toISOString()}`,
+                    );
+                    setDraftVersion(version);
+                    setRightTab('validation');
+                    addToast(`MIB-generated definition uploaded. Validation complete.`, 'success');
+                    void loadVersions();
+                  } catch (err) {
+                    const apiErr = extractApiError(err);
+                    addToast(`Upload failed: ${apiErr.error.message ?? 'Unexpected error'}`, 'error');
+                  } finally {
+                    setUploading(false);
+                  }
+                })();
+              }}
+              uploading={uploading}
+            />
+          )}
+
+          {/* ── Standard file upload mode ── */}
+          {uploadMode === 'file' && (
+            <>
           {/* Drop zone */}
           <UploadDropZone
             onFile={(f) => { setSelectedFile(f); setDraftVersion(null); }}
@@ -1605,6 +1979,8 @@ export default function V2ProductDefinitionPage() {
           >
             {uploading ? 'Validating…' : 'Validate file'}
           </button>
+            </>
+          )}
         </section>
 
         {/* ── RIGHT: Tabbed results ── */}
