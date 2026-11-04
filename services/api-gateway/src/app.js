@@ -28,7 +28,9 @@ const frameworkSecurity           = require('./routes/frameworkSecurity.routes')
 const frameworkParameters         = require('./routes/frameworkParameters.routes');
 const framework                   = require('./routes/framework.routes');
 const nodeView                    = require('./routes/nodeView.routes');
+const nodeViewDesignRoutes        = require('./routes/nodeViewDesign.routes');
 const descriptors                 = require('./routes/descriptors.routes');
+const uiBuilderRoutes             = require('./routes/uiBuilder.routes');
 const authStub                    = require('./routes/auth.stub');
 // Alarms router — proxies to local alarm-service when ALARM_SERVICE_URL is local,
 // otherwise serves stub data to avoid CORS/auth issues with the external Opsera dev env.
@@ -103,6 +105,10 @@ function createApp(redisClient) {
   // so it is matched correctly by Express.
   app.use('/api/descriptors', descriptors);
   app.use('/api/v1/descriptors', descriptors); // legacy alias
+
+  // MIB UI Builder — descriptor drafts, publish, and generated screen XML
+  app.use('/api/v1/ui-builder', uiBuilderRoutes);
+  app.use('/api/v1/node-view-designs', nodeViewDesignRoutes);
 
   // Config stub intercepts before the Java config-service (which is 503)
   app.use('/api/v1/config',        configStub);

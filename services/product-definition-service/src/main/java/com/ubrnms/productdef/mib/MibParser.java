@@ -111,17 +111,22 @@ public class MibParser {
 
     // ── Regex patterns ────────────────────────────────────────────────────────
 
-    /** MODULE-IDENTITY declaration — used to find module name. */
+    /** MODULE-IDENTITY declaration — used to find module name.
+     *  MIB module names can contain hyphens (e.g. SENAO-MIB, IF-MIB), so
+     *  use [\\w-]+ to capture the full hyphenated identifier.
+     *  Use [ \\t]+ (not \\s+) to avoid matching across newlines — otherwise
+     *  "IMPORTS\n    MODULE-IDENTITY" in the IMPORTS clause would match "IMPORTS". */
     private static final Pattern MODULE_IDENTITY_PAT =
-            Pattern.compile("^(\\w+)\\s+MODULE-IDENTITY", Pattern.MULTILINE);
+            Pattern.compile("^([\\w][\\w-]*)[ \\t]+MODULE-IDENTITY", Pattern.MULTILINE);
 
     /** OBJECT-TYPE block open — captures object name. */
     private static final Pattern OBJECT_TYPE_PAT =
             Pattern.compile("^(\\w+)\\s+OBJECT-TYPE\\s*$", Pattern.MULTILINE);
 
-    /** OBJECT IDENTIFIER simple assignment: name OBJECT IDENTIFIER ::= { parent N } */
+    /** OBJECT IDENTIFIER simple assignment: name OBJECT IDENTIFIER ::= { parent N }
+     *  Name uses [\\w][\\w-]* to capture hyphenated MIB module names (e.g. SENAO-MIB, IF-MIB). */
     private static final Pattern OID_ASSIGNMENT_SIMPLE =
-            Pattern.compile("(\\w+)\\s+OBJECT\\s+IDENTIFIER\\s*::=\\s*\\{([^}]+)\\}", Pattern.DOTALL);
+            Pattern.compile("([\\w][\\w-]*)\\s+OBJECT\\s+IDENTIFIER\\s*::=\\s*\\{([^}]+)\\}", Pattern.DOTALL);
 
     /** Any ::= { ... } assignment (catches MODULE-IDENTITY, OBJECT-TYPE, etc.). */
     private static final Pattern ASSIGNMENT_PAT =
@@ -321,8 +326,11 @@ public class MibParser {
     private String extractModuleName(String content) {
         Matcher m = MODULE_IDENTITY_PAT.matcher(content);
         if (m.find()) return m.group(1);
-        // Fallback: first DEFINITIONS ::= BEGIN
-        Pattern def = Pattern.compile("(\\w+)\\s+DEFINITIONS\\s*::=\\s*BEGIN");
+        // Fallback: first DEFINITIONS ::= BEGIN.
+        // MIB module names are hyphenated identifiers (e.g. SENAO-MIB, IF-MIB).
+        // Using [\w][\w-]* captures the FULL name so we don't accidentally
+        // return just the last segment after a hyphen (e.g. "IMPORTS" from "SENAO-IMPORTS").
+        Pattern def = Pattern.compile("([\\w][\\w-]*)\\s+DEFINITIONS\\s*::=\\s*BEGIN");
         Matcher m2 = def.matcher(content);
         if (m2.find()) return m2.group(1);
         return "UNKNOWN-MIB";
@@ -338,9 +346,10 @@ public class MibParser {
         Map<String, String> oidMap = new LinkedHashMap<>(WELL_KNOWN);
 
         // Extract all name ::= { ... } assignments using broad pattern
-        // Pattern: word ... ::= { content }
+        // Pattern: word (with optional hyphens) ... ::= { content }
+        // Use [\\w][\\w-]* to capture hyphenated module names like SENAO-MIB, IF-MIB
         Pattern assignPat = Pattern.compile(
-                "(\\w+)\\s+(?:MODULE-IDENTITY|OBJECT-TYPE|OBJECT\\s+IDENTIFIER|NOTIFICATION-TYPE|" +
+                "([\\w][\\w-]*)\\s+(?:MODULE-IDENTITY|OBJECT-TYPE|OBJECT\\s+IDENTIFIER|NOTIFICATION-TYPE|" +
                 "MODULE-COMPLIANCE|OBJECT-GROUP|NOTIFICATION-GROUP|TEXTUAL-CONVENTION|" +
                 "OBJECT-IDENTITY|AGENT-CAPABILITIES|TRAP-TYPE)?[^:]*?::=\\s*\\{([^}]+)\\}",
                 Pattern.DOTALL
@@ -356,9 +365,10 @@ public class MibParser {
             if (parts != null) rawAssignments.put(name, parts);
         }
 
-        // General assignment scanner
+        // General assignment scanner — hyphenated names supported.
+        // Use [ \t]+ to avoid matching across newlines (prevents IMPORTS keyword spurious matches).
         Pattern genAssign = Pattern.compile(
-                "^(\\w+)\\s+(?:MODULE-IDENTITY|OBJECT\\s+IDENTIFIER)[^:]*::=\\s*\\{([^}]+)\\}",
+                "^([\\w][\\w-]*)[ \\t]+(?:MODULE-IDENTITY|OBJECT[ \\t]+IDENTIFIER)[^:]*::=\\s*\\{([^}]+)\\}",
                 Pattern.MULTILINE | Pattern.DOTALL);
         Matcher genMatcher = genAssign.matcher(content);
         while (genMatcher.find()) {
@@ -370,7 +380,7 @@ public class MibParser {
 
         // Also scan for OBJECT-TYPE ::= assignments to capture OID tree
         Pattern objTypePat = Pattern.compile(
-                "^(\\w+)\\s+OBJECT-TYPE.*?::=\\s*\\{([^}]+)\\}",
+                "^([\\w][\\w-]*)\\s+OBJECT-TYPE.*?::=\\s*\\{([^}]+)\\}",
                 Pattern.MULTILINE | Pattern.DOTALL);
         Matcher objMatcher = objTypePat.matcher(content);
         while (objMatcher.find()) {
@@ -497,6 +507,12 @@ public class MibParser {
                 }
             } else {
                 block.append(line).append("\n");
+                // Detect ::= BEFORE brace-tracking so that "::= { parent N }" on one
+                // line correctly closes the block (foundAssignment must be true when
+                // the closing '}' is encountered during the char loop below).
+                if (trimmed.contains("::=")) {
+                    foundAssignment = true;
+                }
                 // Track brace depth for the ::= { ... } part
                 for (char c : line.toCharArray()) {
                     if (c == '{') braceDepth++;
@@ -512,10 +528,6 @@ public class MibParser {
                             break;
                         }
                     }
-                }
-                // Detect ::= start
-                if (trimmed.contains("::=")) {
-                    foundAssignment = true;
                 }
             }
         }

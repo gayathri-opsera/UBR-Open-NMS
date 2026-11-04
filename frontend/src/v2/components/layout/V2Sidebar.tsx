@@ -61,6 +61,8 @@ const NAV_GROUPS: NavGroup[] = [
       { path: '/v2/framework',           label: 'Framework Ops',        icon: <FrameworkIcon /> },
       { path: '/v2/product-definitions', label: 'Product Definitions',  icon: <ProductDefIcon />, allowedRoles: ['Admin', 'Operator', 'descriptor_admin', 'descriptor_author'] as Role[] },
       { path: '/v2/descriptors',         label: 'Descriptor Registry',  icon: <DescriptorIcon />, allowedRoles: ['Admin', 'Operator', 'descriptor_admin', 'descriptor_author'] as Role[] },
+      { path: '/v2/node-view-designer',   label: 'Node View Designer',   icon: <NodeViewIcon />, allowedRoles: ['Admin', 'descriptor_admin'] as Role[] },
+      { path: '/v2/mib-builder',         label: 'Custom UI Builder',    icon: <BuilderIcon />, allowedRoles: ['Admin'] as Role[] },
       { path: '/v2/security-audit',      label: 'Security & Audit',     icon: <AuditIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
     ],
   },
@@ -284,6 +286,10 @@ function ProductDefIcon() { return <svg width="16" height="16" viewBox="0 0 16 1
 function DescriptorIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="1" width="9" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5 5h5M5 8h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><path d="M12 9l2 2-2 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M14 11H9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>; }
 /** Security & Audit icon — lock with checkmark */
 function AuditIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5 7V5a3 3 0 116 0v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M6.5 11l1.5 1.5 2-2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+/** Custom UI Builder — layout grid with widget block */
+function BuilderIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M1 6h14M6 6v9" stroke="currentColor" strokeWidth="1.3"/><rect x="8" y="8" width="5" height="3" rx="0.75" stroke="currentColor" strokeWidth="1.2"/></svg>; }
+/** Node View Designer — layers/sections icon */
+function NodeViewIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="2" width="14" height="4" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="1" y="8" width="9" height="3" rx="1" stroke="currentColor" strokeWidth="1.3"/><rect x="3" y="13" width="6" height="2" rx="0.75" stroke="currentColor" strokeWidth="1.2"/><path d="M12 9.5l2 2-2 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 
 function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   return collapsed

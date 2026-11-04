@@ -29,6 +29,13 @@ x-healthcheck-http: &healthcheck-http
 networks:
   nms-net:
     driver: bridge
+  # External network created by the ubropennms-original docker-compose project.
+  # Attach gateway, product-definition-service, and any other services that need
+  # to communicate with containers on that stack (mongo, redis, auth, alarm, etc.)
+  # when both stacks are running simultaneously on the same Docker host.
+  # This network is pre-existing — Docker Compose will NOT try to create it.
+  ubropennms-original_nms-net:
+    external: true
   # Dedicated SNMP test network with a fixed /24 subnet so the snmp-simulator
   # can be assigned the static IP 10.10.10.25, matching the test requirement.
   # Only snmp-simulator and discovery-service are attached to this network.
@@ -233,7 +240,11 @@ services:
       MAX_UPLOAD_SIZE: 10MB
     ports:
       - "8093:8093"
-    networks: [nms-net]
+    networks:
+      nms-net: {}
+      # Join the external network so this service can reach mongo/redis when both
+      # stacks (ubrnms + ubropennms-original) are running on the same Docker host.
+      ubropennms-original_nms-net: {}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8093/actuator/health"]
       <<: *healthcheck-http
@@ -744,7 +755,11 @@ services:
       PARAMETER_POLLER_URL: "http://parameter-poller:8084"
     ports:
       - "3100:3000"   # host 3100 → container 3000 (avoids conflict with aitutor-frontend)
-    networks: [nms-net]
+    networks:
+      nms-net: {}
+      # Join the external network so the gateway can reach mongo/redis/auth when both
+      # stacks (ubrnms + ubropennms-original) are running on the same Docker host.
+      ubropennms-original_nms-net: {}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
       <<: *healthcheck-http

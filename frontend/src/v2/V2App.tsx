@@ -48,6 +48,9 @@ const V2SecurityAuditPage = lazy(() => import('./pages/V2SecurityAuditPage'));
 const V2ProductDefinitionPage = lazy(() => import('./pages/V2ProductDefinitionPage'));
 // Descriptor Registry — 9-state lifecycle (Draft→Purged), maker-checker, delete guard, wireframe build
 const V2DescriptorPage = lazy(() => import('./pages/V2DescriptorPage'));
+const V2MibBuilderPage = lazy(() => import('./pages/V2MibBuilderPage'));
+// Pre-MIB Node View Designer — design sections/labels/index levels before MIB upload (PV-01→PV-12)
+const V2NodeViewDesignerPage = lazy(() => import('./pages/V2NodeViewDesignerPage'));
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
@@ -203,6 +206,23 @@ export function V2App() {
                   element={
                     <V2ProtectedRoute allowedRoles={['Admin', 'Operator', 'descriptor_admin', 'descriptor_author']}>
                       <V2DescriptorPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="mib-builder/*"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin']}>
+                      <V2MibBuilderPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                {/* Pre-MIB Node View Designer — design sections/labels/index levels before MIB upload */}
+                <Route
+                  path="node-view-designer"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin', 'descriptor_admin']}>
+                      <V2NodeViewDesignerPage />
                     </V2ProtectedRoute>
                   }
                 />

@@ -353,10 +353,15 @@ function buildWireframe(definition, { strict = false } = {}) {
         thresholds:      e.thresholds      || null,
         sensitive:       SENSITIVE_RE.test(`${e.parameterId} ${e.displayName || ''}`),
         uiVisibleTo:     e.uiVisibleTo     || null,   // kept for server-side role filtering at runtime
+        columns:         e.columns         || null,
+        confirmWrite:    e.confirmWrite    || false,
+        pollInterval:    e.pollIntervalSeconds || 60,
       };
     });
 
     totalParams += parameters.length;
+
+    const tableWithCols = parameters.find((p) => p.columns);
 
     // ── Derive UI hierarchy (sidebar structure) from groupId naming convention ──
     // groupId patterns (dot-separated): <page>.<parent>.<tab>
@@ -377,6 +382,7 @@ function buildWireframe(definition, { strict = false } = {}) {
       uiPage:   uiHierarchy.uiPage,
       uiParent: uiHierarchy.uiParent,
       uiTab:    uiHierarchy.uiTab,
+      ...(tableWithCols ? { columns: tableWithCols.columns } : {}),
     };
   });
 

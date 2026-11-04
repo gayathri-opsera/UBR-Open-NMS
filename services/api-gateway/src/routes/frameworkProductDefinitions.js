@@ -702,6 +702,16 @@ function splitBuffer(buf, sep) {
   });
 }
 
+// ── MIB parse endpoint ────────────────────────────────────────────────────────
+// Accepts a MIB file upload, parses it, and returns the parsed object list
+// + generated discovery XML. Must be registered BEFORE /:definitionId/* routes
+// so "parse-mib" is not mistakenly treated as a definitionId.
+router.post('/parse-mib',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'product-definitions.parse-mib'),
+  detectCredentials,
+  productDefinitionProxy({ parseReqBody: false }),
+);
+
 // Upload: SuperAdmin only — triggers validation and ingestion pipeline.
 // WO-005: detectCredentials scans the request body for credential-like content
 // and rejects the upload before it reaches the product-definition-service.

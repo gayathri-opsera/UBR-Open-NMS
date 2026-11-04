@@ -442,15 +442,36 @@ function MibUploadPanel({ onGeneratedXmlUploaded, uploading }: MibUploadPanelPro
               </table>
             </div>
 
-            {/* XML preview accordion */}
+            {/* XML preview accordion + export */}
             <div style={{ marginTop: 12 }}>
-              <button
-                onClick={() => setXmlPreviewOpen((o) => !o)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 12, fontWeight: 600, color: 'var(--vf-text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}
-              >
-                <span aria-hidden>{xmlPreviewOpen ? '▼' : '▶'}</span>
-                Preview generated XML ({parseResult.generatedXml.split('\n').length} lines)
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <button
+                  onClick={() => setXmlPreviewOpen((o) => !o)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 12, fontWeight: 600, color: 'var(--vf-text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}
+                >
+                  <span aria-hidden>{xmlPreviewOpen ? '▼' : '▶'}</span>
+                  Preview generated XML ({parseResult.generatedXml.split('\n').length} lines)
+                </button>
+                {/* ── Export / Download button ── */}
+                <button
+                  title="Download generated XML to your computer"
+                  onClick={() => {
+                    const filename = `${parseResult.moduleName ?? 'generated'}-descriptor.xml`;
+                    const blob = new Blob([parseResult.generatedXml], { type: 'application/xml' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = filename; a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  style={{
+                    fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 4,
+                    background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.4)',
+                    color: '#3b82f6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+                  }}
+                >
+                  ⬇ Export XML
+                </button>
+              </div>
               {xmlPreviewOpen && (
                 <pre style={{
                   marginTop: 8, padding: 12, borderRadius: 6, maxHeight: 240, overflowY: 'auto',
@@ -458,8 +479,7 @@ function MibUploadPanel({ onGeneratedXmlUploaded, uploading }: MibUploadPanelPro
                   fontSize: 10, fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-secondary)',
                   whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                 }}>
-                  {parseResult.generatedXml.slice(0, 4000)}
-                  {parseResult.generatedXml.length > 4000 && '\n… (truncated for preview)'}
+                  {parseResult.generatedXml}
                 </pre>
               )}
             </div>
@@ -469,26 +489,46 @@ function MibUploadPanel({ onGeneratedXmlUploaded, uploading }: MibUploadPanelPro
           <div style={{
             padding: '14px 16px', borderRadius: 8,
             background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.3)',
-            marginTop: 4,
+            marginTop: 8,
           }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#16a34a', marginBottom: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#16a34a', marginBottom: 4 }}>
               ✓ MIB parsed successfully
             </div>
-            <div style={{ fontSize: 11, color: 'var(--vf-text-secondary)', marginBottom: 12, lineHeight: 1.6 }}>
-              The generated XML uses correct data types and index classifications.
-              Click below to upload it into the standard Validate → Stage → Activate pipeline.
+            <div style={{ fontSize: 11, color: 'var(--vf-text-secondary)', marginBottom: 10, lineHeight: 1.6 }}>
+              <strong>Export XML</strong> to download the generated file, or <strong>Upload</strong> to push
+              it straight into the Validate → Stage → Activate pipeline for device discovery.
             </div>
-            <button
-              onClick={handleGenerateAndUpload}
-              disabled={uploading}
-              style={{
-                ...BTN_PRIMARY, width: '100%',
-                opacity: uploading ? 0.6 : 1,
-                cursor: uploading ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {uploading ? 'Uploading XML…' : '↑ Upload generated definition'}
-            </button>
+            {/* Two action buttons side-by-side */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                title="Download the generated XML to your computer"
+                onClick={() => {
+                  const filename = `${parseResult.moduleName ?? 'generated'}-descriptor.xml`;
+                  const blob = new Blob([parseResult.generatedXml], { type: 'application/xml' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = filename; a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                style={{
+                  ...BTN_SECONDARY, flex: 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                ⬇ Export XML
+              </button>
+              <button
+                onClick={handleGenerateAndUpload}
+                disabled={uploading}
+                style={{
+                  ...BTN_PRIMARY, flex: 1,
+                  opacity: uploading ? 0.6 : 1,
+                  cursor: uploading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {uploading ? 'Uploading…' : '↑ Upload & Validate'}
+              </button>
+            </div>
           </div>
         </div>
       )}

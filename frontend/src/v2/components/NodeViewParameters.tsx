@@ -38,6 +38,156 @@ import { Select }  from './common/Select';
 import { Spinner } from './common/Spinner';
 import { useToast } from './common/Toast';
 
+// ── Rich widgets (Screen 3 wireframe) ─────────────────────────────────────────
+
+function polarToCartesian(cx: number, cy: number, r: number, deg: number) {
+  const rad = ((deg - 90) * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function describeArc(cx: number, cy: number, r: number, startDeg: number, endDeg: number) {
+  const start = polarToCartesian(cx, cy, r, endDeg);
+  const end = polarToCartesian(cx, cy, r, startDeg);
+  const large = endDeg - startDeg <= 180 ? 0 : 1;
+  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${large} 0 ${end.x} ${end.y}`;
+}
+
+function GaugeWidget({
+  value, min = -80, max = 0, warn = -70, crit = -80, unit = '',
+}: {
+  value: number | null; min?: number; max?: number; warn?: number; crit?: number; unit?: string;
+}) {
+  const cx = 50; const cy = 52; const r = 38;
+  const startDeg = -90; const endDeg = 90;
+  const clamp = (n: number) => Math.min(max, Math.max(min, n));
+  const pct = value == null || !Number.isFinite(value) ? 0 : (clamp(value) - min) / (max - min || 1);
+  const valDeg = startDeg + pct * (endDeg - startDeg);
+  const track = describeArc(cx, cy, r, startDeg, endDeg);
+  const fill = describeArc(cx, cy, r, startDeg, valDeg);
+  const warnStart = startDeg + ((clamp(warn) - min) / (max - min || 1)) * (endDeg - startDeg);
+  const critStart = startDeg + ((clamp(crit) - min) / (max - min || 1)) * (endDeg - startDeg);
+  const display = value == null || !Number.isFinite(value) ? '—' : `${value}${unit ? ` ${unit}` : ''}`;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+      <svg width={100} height={64} viewBox="0 0 100 64" aria-hidden="true">
+        <path d={track} fill="none" stroke="var(--vf-border-subtle)" strokeWidth={8} strokeLinecap="round" />
+        {value != null && critStart < endDeg && (
+          <path d={describeArc(cx, cy, r, critStart, endDeg)} fill="none" stroke="var(--vf-danger)" strokeWidth={8} strokeLinecap="round" opacity={0.35} />
+        )}
+        {value != null && warnStart < critStart && (
+          <path d={describeArc(cx, cy, r, warnStart, critStart)} fill="none" stroke="var(--vf-warning)" strokeWidth={8} strokeLinecap="round" opacity={0.35} />
+        )}
+        {value != null && (
+          <path d={fill} fill="none" stroke="var(--vf-accent)" strokeWidth={8} strokeLinecap="round" />
+        )}
+      </svg>
+      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--vf-text-primary)', fontFamily: 'var(--vf-font-mono)' }}>{display}</span>
+    </div>
+  );
+}
+
+function ToggleWidget({
+  checked, onChange, readOnly,
+}: {
+  checked: boolean; onChange: (v: boolean) => void; readOnly?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={readOnly}
+      onClick={() => !readOnly && onChange(!checked)}
+      style={{
+        width: 44, height: 24, borderRadius: 999, border: 'none', padding: 2, cursor: readOnly ? 'default' : 'pointer',
+        background: checked ? 'var(--vf-accent)' : 'var(--vf-border-subtle)',
+        transition: 'background 0.15s', flexShrink: 0,
+      }}
+    >
+      <span style={{
+        display: 'block', width: 20, height: 20, borderRadius: '50%', background: '#fff',
+        transform: checked ? 'translateX(20px)' : 'translateX(0)', transition: 'transform 0.15s',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+      }} />
+    </button>
+  );
+}
+
+function SliderWidget({
+  value, min, max, unit, onChange, readOnly,
+}: {
+  value: number; min: number; max: number; unit?: string; onChange: (v: number) => void; readOnly?: boolean;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={value}
+        disabled={readOnly}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ flex: 1, accentColor: 'var(--vf-accent)' }}
+      />
+      <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-primary)', minWidth: 48, textAlign: 'right' }}>
+        {value}{unit ? ` ${unit}` : ''}
+      </span>
+    </div>
+  );
+}
+
+function StatusBadge({ value, label }: { value: string; label?: string }) {
+  const v = (value || '').toLowerCase();
+  const text = label || value || '—';
+  let bg = 'var(--vf-surface-raised, rgba(0,0,0,.06))';
+  let color = 'var(--vf-text-secondary)';
+  if (['up', '1', 'true', 'enabled', 'active', 'ok'].includes(v)) {
+    bg = 'var(--vf-success-subtle, rgba(34,197,94,.15))';
+    color = 'var(--vf-success, #16a34a)';
+  } else if (['down', '2', 'false', 'disabled', 'inactive', 'fail', 'failed'].includes(v)) {
+    bg = 'var(--vf-danger-subtle, rgba(239,68,68,.12))';
+    color = 'var(--vf-danger)';
+  }
+  return (
+    <span style={{
+      display: 'inline-block', padding: '3px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+      background: bg, color, textTransform: 'capitalize',
+    }}>
+      {text}
+    </span>
+  );
+}
+
+function DurationDisplay({ value }: { value: string | null }) {
+  const ticks = value != null && /^-?\d+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isFinite(ticks)) {
+    return <span style={{ fontSize: 13, color: 'var(--vf-text-muted)' }}>—</span>;
+  }
+  const totalSec = Math.floor(ticks / 100);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const parts = [];
+  if (d) parts.push(`${d}d`);
+  if (h || d) parts.push(`${h}h`);
+  parts.push(`${m}m`);
+  return (
+    <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-primary)' }}>
+      {parts.join(' ')}
+    </span>
+  );
+}
+
+function RateDisplay({ value, unit }: { value: string | null; unit?: string | null }) {
+  const display = value ?? '—';
+  return (
+    <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-primary)' }}>
+      {display}{value != null ? '/s' : ''}{unit && value != null ? ` ${unit}` : ''}
+    </span>
+  );
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 /** Parameters without a sub-group sit in an untitled leading card. */
@@ -76,6 +226,33 @@ const tdStyle: React.CSSProperties = {
 const NUMERIC_TYPES = new Set(['INTEGER', 'UINT', 'FLOAT', 'GAUGE', 'COUNTER', 'TIMETICKS']);
 function isNumericParam(p: WireframeParameter) {
   return NUMERIC_TYPES.has((p.dataType || '').toUpperCase());
+}
+
+function sectionPollBadge(group: WireframeGroup, hasWritable: boolean): string {
+  const sec = group.pollIntervalSeconds ?? 30;
+  if (hasWritable) return 'Read-write · changes sent as SNMP SET';
+  return `Read-only · polled every ${sec} s`;
+}
+
+function resolveWidgetKind(param: WireframeParameter, editable: boolean): string {
+  const dt = (param.dataType || '').toUpperCase();
+  const w = param.effectiveWidget;
+  if (dt === 'TIMETICKS' || dt === 'TIMETICK') return 'duration';
+  if (dt === 'COUNTER' || w === 'counter') return 'counter';
+  if (w === 'gauge' || dt === 'GAUGE' || dt === 'GAUGE32') return 'gauge';
+  if (w === 'toggle' || dt === 'BOOLEAN' || dt === 'TRUTHVALUE') return 'toggle';
+  if (w === 'slider' || (dt === 'INTEGER' && param.minValue != null && param.maxValue != null)) return 'slider';
+  const paramOptions = param.options ?? [];
+  if (paramOptions.length && (dt === 'ENUM' || w === 'dropdown')) {
+    return editable ? 'dropdown' : 'status_badge';
+  }
+  return 'textfield';
+}
+
+function truthy(v: string | null | undefined): boolean {
+  if (v == null || v === '') return false;
+  const s = v.toLowerCase();
+  return s === '1' || s === 'true' || s === 'enabled' || s === 'on';
 }
 
 // ── Sidebar structure helpers ─────────────────────────────────────────────────
@@ -201,7 +378,7 @@ function StatusBar({
   );
 }
 
-// ── one control (Select or Input) ─────────────────────────────────────────────
+// ── one control (rich widgets + Select / Input fallback) ─────────────────────
 
 interface ControlProps {
   id:        string;
@@ -214,20 +391,77 @@ interface ControlProps {
   error?:    string;
   label?:    string;
   hint?:     string;
+  display?:  string | null;
   onChange:  (v: string) => void;
 }
 
-function Control({ id, param, original, edited, editable, error, label, hint, onChange }: ControlProps) {
+function Control({ id, param, original, edited, editable, error, label, hint, display, onChange }: ControlProps) {
   const [reveal, setReveal] = useState(false);
   const current = edited !== undefined ? edited : (original ?? '');
   const changed = edited !== undefined && edited !== (original ?? '');
   const paramOptions = param.options ?? [];
-  const isEnum = paramOptions.length > 0 && ((param.dataType || '').toUpperCase() === 'ENUM' || param.effectiveWidget === 'dropdown');
   const mark = changed ? { boxShadow: '0 0 0 2px var(--vf-accent)', borderRadius: 'var(--vf-radius-md)' } : undefined;
+  const kind = resolveWidgetKind(param, editable);
+  const titleStyle = { fontSize: 'var(--vf-type-caption-size)', fontWeight: 600, color: 'var(--vf-text-secondary)', letterSpacing: '0.03em', marginBottom: 6 } as const;
 
-  if (isEnum) {
-    // The device may report a value the definition does not list — keep it selectable and
-    // visible instead of silently showing the first option.
+  const wrap = (node: React.ReactNode) => (
+    <div style={mark}>
+      {label && <div style={titleStyle}>{label}</div>}
+      {node}
+      {error && <div style={{ fontSize: 11, color: 'var(--vf-danger)', marginTop: 4 }}>{error}</div>}
+      {hint && !error && <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 4 }}>{hint}</div>}
+    </div>
+  );
+
+  if (kind === 'gauge') {
+    const num = current !== '' && /^-?\d+(\.\d+)?$/.test(current) ? Number(current) : null;
+    const lo = param.minValue ?? param.thresholds?.low ?? -80;
+    const hi = param.maxValue ?? param.thresholds?.high ?? 0;
+    const warn = param.thresholds?.high ?? lo + (hi - lo) * 0.35;
+    const crit = param.thresholds?.low ?? lo;
+    return wrap(<GaugeWidget value={num} min={lo} max={hi} warn={warn} crit={crit} unit={param.unit ?? ''} />);
+  }
+
+  if (kind === 'duration') {
+    return wrap(<DurationDisplay value={current || original} />);
+  }
+
+  if (kind === 'counter') {
+    return wrap(<RateDisplay value={current || original} unit={param.unit} />);
+  }
+
+  if (kind === 'status_badge') {
+    const opt = paramOptions.find((o) => o.value === current);
+    return wrap(<StatusBadge value={current} label={display ?? opt?.label ?? current} />);
+  }
+
+  if (kind === 'toggle') {
+    return wrap(
+      <ToggleWidget
+        checked={truthy(current)}
+        readOnly={!editable}
+        onChange={(on) => onChange(on ? '1' : '2')}
+      />,
+    );
+  }
+
+  if (kind === 'slider') {
+    const min = param.minValue ?? 0;
+    const max = param.maxValue ?? 100;
+    const num = current !== '' && /^-?\d+$/.test(current) ? Number(current) : min;
+    return wrap(
+      <SliderWidget
+        value={num}
+        min={min}
+        max={max}
+        unit={param.unit ?? undefined}
+        readOnly={!editable}
+        onChange={(n) => onChange(String(n))}
+      />,
+    );
+  }
+
+  if (kind === 'dropdown') {
     const known = paramOptions.some((o) => o.value === current);
     const options = [
       ...(!known && current !== '' ? [{ value: current, label: `${current} (current)` }] : []),
@@ -240,6 +474,12 @@ function Control({ id, param, original, edited, editable, error, label, hint, on
           disabled={!editable} error={error} hint={hint} onChange={(e) => onChange(e.target.value)}
         />
       </div>
+    );
+  }
+
+  if (!editable && param.effectiveWidget === 'readonly') {
+    return wrap(
+      <span style={{ fontSize: 13, color: 'var(--vf-text-primary)' }}>{(display ?? current) || '—'}</span>,
     );
   }
 
@@ -296,7 +536,7 @@ function ParameterField({ groupId, param, record, canEdit, edits, errors, onEdit
     const k = editKey(groupId, param.parameterId, '');
     return (
       <Control
-        id={baseId} param={param} label={title} original={inst.value} edited={edits[k]} editable={writableParam}
+        id={baseId} param={param} label={title} original={inst.value} display={inst.display} edited={edits[k]} editable={writableParam}
         error={errors[k]} hint={staleHint} onChange={(v) => onEdit(k, v, inst.value)}
       />
     );
@@ -319,13 +559,87 @@ function ParameterField({ groupId, param, record, canEdit, edits, errors, onEdit
                 #{inst.index}
               </span>
               <Control
-                id={`${baseId}-${inst.index}`} param={param} original={inst.value} edited={edits[k]}
+                id={`${baseId}-${inst.index}`} param={param} original={inst.value} display={inst.display} edited={edits[k]}
                 editable={writableParam} error={errors[k]} hint={staleHint} onChange={(v) => onEdit(k, v, inst.value)}
               />
             </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ── Section card (Screen 3) ───────────────────────────────────────────────────
+
+function SectionCard({
+  title, pollBadge, groupId, group, params, values, canEdit, edits, errors, onEdit,
+  editingAllowed, applying, pendingCount, onApply, onRevert,
+}: {
+  title: string;
+  pollBadge: string;
+  groupId: string;
+  group: WireframeGroup;
+  params: WireframeParameter[];
+  values: NodeViewValues;
+  canEdit: boolean;
+  edits: Record<string, string>;
+  errors: Record<string, string>;
+  onEdit: (key: string, value: string, original: string | null) => void;
+  editingAllowed: boolean;
+  applying: boolean;
+  pendingCount: number;
+  onApply: () => void;
+  onRevert: () => void;
+}) {
+  const sectionWritable = params.some((p) => !p.hidden && !p.readOnly && !!p.snmpOid);
+  return (
+    <div style={{
+      background: 'var(--vf-surface)',
+      border: '1px solid var(--vf-border-subtle)',
+      borderRadius: 8,
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 0,
+    }}>
+      <div style={{
+        padding: '12px 14px',
+        borderBottom: '1px solid var(--vf-border-subtle)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--vf-text-primary)' }}>{title || humanize(group.groupId)}</span>
+        <span style={{ fontSize: 11, color: 'var(--vf-text-muted)' }}>{pollBadge}</span>
+      </div>
+      <div style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start', flex: 1 }}>
+        {params.map((p) => (
+          <ParameterField
+            key={p.parameterId}
+            groupId={groupId}
+            param={p}
+            record={values[valueKey(groupId, p.parameterId)]}
+            canEdit={canEdit}
+            edits={edits}
+            errors={errors}
+            onEdit={onEdit}
+          />
+        ))}
+      </div>
+      {editingAllowed && sectionWritable && (
+        <div style={{
+          padding: '10px 14px',
+          borderTop: '1px solid var(--vf-border-subtle)',
+          display: 'flex',
+          justifyContent: 'flex-end',
+          gap: 8,
+        }}>
+          <Button variant="ghost" size="sm" onClick={onRevert} disabled={applying || pendingCount === 0}>Revert</Button>
+          <Button size="sm" onClick={onApply} disabled={applying || pendingCount === 0} loading={applying}>
+            {pendingCount > 0 ? `Apply (${pendingCount})` : 'Apply'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -362,6 +676,7 @@ export function NodeViewParameters({
   const [originals, setOriginals] = useState<Record<string, string | null>>({});
   const [errors, setErrors]     = useState<Record<string, string>>({});
   const [applying, setApplying] = useState(false);
+  const [applyingSection, setApplyingSection] = useState<string | null>(null);
   const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set(['Wireless', 'Network']));
 
   const groups = useMemo(() => wireframe.filter((g) => g.parameters.some((p) => !p.hidden)), [wireframe]);
@@ -395,15 +710,42 @@ export function NodeViewParameters({
   }, [activeGroup]);
 
   const groupHasWritable = !!activeGroup && activeGroup.parameters.some((p) => !p.hidden && !p.readOnly && !!p.snmpOid);
-  const pending = Object.entries(edits).filter(([k, v]) => v !== (originals[k] ?? ''));
   const editingAllowed = canEdit && deviceWritable;
+
+  const pendingForScope = (scopeGroupId: string, paramIds?: Set<string>) =>
+    Object.entries(edits).filter(([k, v]) => {
+      const [gid, pid] = k.split('::');
+      if (gid !== scopeGroupId) return false;
+      if (paramIds && !paramIds.has(pid)) return false;
+      return v !== (originals[k] ?? '');
+    });
 
   const onEdit = (key: string, value: string, original: string | null) => {
     setOriginals((o) => ({ ...o, [key]: original }));
     setEdits((e) => ({ ...e, [key]: value }));
     setErrors((er) => { if (!(key in er)) return er; const { [key]: _drop, ...rest } = er; return rest; });
   };
-  const reset = () => { setEdits({}); setOriginals({}); setErrors({}); };
+
+  const revertScope = (scopeGroupId: string, paramIds?: Set<string>) => {
+    setEdits((e) => Object.fromEntries(Object.entries(e).filter(([k]) => {
+      const [gid, pid] = k.split('::');
+      if (gid !== scopeGroupId) return true;
+      if (paramIds && !paramIds.has(pid)) return true;
+      return false;
+    })));
+    setOriginals((o) => Object.fromEntries(Object.entries(o).filter(([k]) => {
+      const [gid, pid] = k.split('::');
+      if (gid !== scopeGroupId) return true;
+      if (paramIds && !paramIds.has(pid)) return true;
+      return false;
+    })));
+    setErrors((er) => Object.fromEntries(Object.entries(er).filter(([k]) => {
+      const [gid, pid] = k.split('::');
+      if (gid !== scopeGroupId) return true;
+      if (paramIds && !paramIds.has(pid)) return true;
+      return false;
+    })));
+  };
 
   const paramFor = (key: string) => {
     const [groupId, parameterId, instance] = key.split('::');
@@ -411,7 +753,8 @@ export function NodeViewParameters({
     return param ? { groupId, param, instance: instance ?? '' } : null;
   };
 
-  async function apply() {
+  async function applyScope(scopeGroupId: string, sectionKey: string, paramIds?: Set<string>) {
+    const pending = pendingForScope(scopeGroupId, paramIds);
     const nextErrors: Record<string, string> = {};
     const changes: NodeViewChange[] = [];
     for (const [key, value] of pending) {
@@ -421,12 +764,13 @@ export function NodeViewParameters({
       if (msg) nextErrors[key] = msg;
       else changes.push({ groupId: hit.groupId, parameterId: hit.param.parameterId, instance: hit.instance, value });
     }
-    setErrors(nextErrors);
+    setErrors((prev) => ({ ...prev, ...nextErrors }));
     if (Object.keys(nextErrors).length || changes.length === 0) {
       if (Object.keys(nextErrors).length) addToast('Fix the highlighted fields before applying.', 'error');
       return;
     }
     setApplying(true);
+    setApplyingSection(sectionKey);
     try {
       const resp = await applyNodeViewChanges(deviceId, changes);
       if (resp.error && !resp.results) { addToast(resp.error.message, 'error'); return; }
@@ -443,6 +787,7 @@ export function NodeViewParameters({
       addToast(e instanceof Error ? e.message : 'Failed to apply changes.', 'error');
     } finally {
       setApplying(false);
+      setApplyingSection(null);
     }
   }
 
@@ -573,10 +918,10 @@ export function NodeViewParameters({
             {/* ── Header ── */}
             <thead>
               <tr style={{ background: 'var(--vf-surface-raised, #f8f9fa)' }}>
-                <th style={thStyle}>Index</th>
+                <th style={thStyle}>INDEX</th>
                 {tableParams.map((p) => (
                   <th key={p.parameterId} style={thStyle}>
-                    {p.displayName}
+                    {(p.displayName || p.parameterId).toUpperCase()}
                     {p.unit ? <span style={{ fontWeight: 400, color: 'var(--vf-text-muted)', marginLeft: 4 }}>({p.unit})</span> : null}
                   </th>
                 ))}
@@ -623,37 +968,98 @@ export function NodeViewParameters({
     );
   };
 
-  // ── Render parameter cards (shared between sidebar and flat modes) ───────────
-  const renderCards = () => {
-    if (isTableGroup) return renderTable();
+  const renderGroupPills = () => {
+    const pillGroups = siblingGroups.length > 1 ? siblingGroups : groups.length > 1 ? groups : [];
+    if (pillGroups.length <= 1) return null;
     return (
-    <>
-      {canEdit && !deviceWritable && groupHasWritable && (
-        <div style={{ padding: '8px 12px', marginBottom: 12, background: 'var(--vf-warning-subtle)', border: '1px solid var(--vf-warning)', borderRadius: 6, fontSize: 12, color: 'var(--vf-warning)' }}>
-          Read-only — no SNMP write community is configured for this device, so changes cannot be applied.
-        </div>
-      )}
-      {!canEdit && groupHasWritable && (
-        <div style={{ padding: '8px 12px', marginBottom: 12, background: 'var(--vf-warning-subtle)', border: '1px solid var(--vf-warning)', borderRadius: 6, fontSize: 12, color: 'var(--vf-warning)' }}>
-          Read-only mode — you do not have permission to modify device configuration.
-        </div>
-      )}
-      {cards.map((c) => (
-        <Card key={c.key} title={c.title || undefined} style={{ marginBottom: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
-            {c.params.map((p) => (
-              <ParameterField
-                key={p.parameterId} groupId={activeGroup!.groupId} param={p}
-                record={values[valueKey(activeGroup!.groupId, p.parameterId)]}
-                canEdit={editingAllowed} edits={edits} errors={errors} onEdit={onEdit}
-              />
-            ))}
-          </div>
-        </Card>
-      ))}
-    </>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        {pillGroups.map((g) => {
+          const active = g.groupId === activeGroup?.groupId;
+          return (
+            <button
+              key={g.groupId}
+              type="button"
+              onClick={() => setActiveGroupId(g.groupId)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 999,
+                border: `1px solid ${active ? 'var(--vf-accent)' : 'var(--vf-border-subtle)'}`,
+                background: active ? 'var(--vf-accent-subtle, rgba(59,130,246,.1))' : 'var(--vf-surface)',
+                color: active ? 'var(--vf-accent)' : 'var(--vf-text-secondary)',
+                fontSize: 12,
+                fontWeight: active ? 600 : 400,
+                cursor: 'pointer',
+              }}
+            >
+              {g.uiTab || g.label || humanize(g.groupId)}
+            </button>
+          );
+        })}
+      </div>
     );
   };
+
+  // ── Render parameter cards (shared between sidebar and flat modes) ───────────
+  const renderCards = () => {
+    if (!activeGroup) return null;
+    if (isTableGroup) {
+      return (
+        <div style={{ gridColumn: '1 / -1' }}>
+          {renderTable()}
+        </div>
+      );
+    }
+
+    const pollBadge = sectionPollBadge(activeGroup, groupHasWritable);
+
+    return (
+      <>
+        {canEdit && !deviceWritable && groupHasWritable && (
+          <div style={{ gridColumn: '1 / -1', padding: '8px 12px', marginBottom: 4, background: 'var(--vf-warning-subtle)', border: '1px solid var(--vf-warning)', borderRadius: 6, fontSize: 12, color: 'var(--vf-warning)' }}>
+            Read-only — no SNMP write community is configured for this device, so changes cannot be applied.
+          </div>
+        )}
+        {!canEdit && groupHasWritable && (
+          <div style={{ gridColumn: '1 / -1', padding: '8px 12px', marginBottom: 4, background: 'var(--vf-warning-subtle)', border: '1px solid var(--vf-warning)', borderRadius: 6, fontSize: 12, color: 'var(--vf-warning)' }}>
+            Read-only mode — you do not have permission to modify device configuration.
+          </div>
+        )}
+        {cards.map((c) => {
+          const paramIds = new Set(c.params.map((p) => p.parameterId));
+          const sectionKey = `${activeGroup.groupId}::${c.key}`;
+          const pendingCount = pendingForScope(activeGroup.groupId, paramIds).length;
+          const sectionWritable = c.params.some((p) => !p.hidden && !p.readOnly && !!p.snmpOid);
+          const badge = sectionPollBadge(activeGroup, sectionWritable);
+          return (
+            <SectionCard
+              key={c.key}
+              title={c.title || activeGroup.uiTab || activeGroup.label || humanize(activeGroup.groupId)}
+              pollBadge={badge || pollBadge}
+              groupId={activeGroup.groupId}
+              group={activeGroup}
+              params={c.params}
+              values={values}
+              canEdit={editingAllowed}
+              edits={edits}
+              errors={errors}
+              onEdit={onEdit}
+              editingAllowed={editingAllowed}
+              applying={applying && applyingSection === sectionKey}
+              pendingCount={pendingCount}
+              onApply={() => void applyScope(activeGroup.groupId, sectionKey, paramIds)}
+              onRevert={() => revertScope(activeGroup.groupId, paramIds)}
+            />
+          );
+        })}
+      </>
+    );
+  };
+
+  const renderMainGrid = () => (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+      {renderCards()}
+    </div>
+  );
 
   // ── Sidebar layout (uiPage/uiParent/uiTab hierarchy) ──────────────────────
   if (hasSidebar) {
@@ -724,47 +1130,8 @@ export function NodeViewParameters({
 
           {/* ── RIGHT CONTENT AREA ──────────────────────────────────── */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            {/* Tab row for siblings (Properties / DDRS/ATPC / DFS / DCS …) */}
-            {siblingGroups.length > 1 && (
-              <div style={{ display: 'flex', gap: 2, marginBottom: 16, borderBottom: '1px solid var(--vf-border-subtle)', overflowX: 'auto' }}>
-                {siblingGroups.map((g) => {
-                  const active = g.groupId === activeGroup?.groupId;
-                  return (
-                    <button
-                      key={g.groupId} onClick={() => setActiveGroupId(g.groupId)}
-                      style={{
-                        padding: '7px 16px', background: 'none', border: 'none',
-                        borderBottom: active ? '2px solid var(--vf-accent)' : '2px solid transparent',
-                        color: active ? 'var(--vf-accent)' : 'var(--vf-text-secondary)',
-                        fontFamily: 'var(--vf-font-sans)', fontSize: 13, fontWeight: active ? 600 : 400,
-                        cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {g.uiTab || g.label || humanize(g.groupId)}
-                    </button>
-                  );
-                })}
-                {editingAllowed && (
-                  <div style={{ marginLeft: 'auto', paddingBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {pending.length > 0 && <Button variant="ghost" size="sm" onClick={reset} disabled={applying}>Reset</Button>}
-                    <Button size="sm" onClick={() => void apply()} disabled={applying || pending.length === 0} loading={applying}>
-                      {pending.length > 0 ? `Apply (${pending.length})` : 'Apply'}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
-            {/* Apply button when only one tab */}
-            {siblingGroups.length <= 1 && editingAllowed && pending.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
-                <Button variant="ghost" size="sm" onClick={reset} disabled={applying}>Reset</Button>
-                <Button size="sm" onClick={() => void apply()} disabled={applying || pending.length === 0} loading={applying}>
-                  Apply ({pending.length})
-                </Button>
-              </div>
-            )}
-
-            {activeGroup ? renderCards() : (
+            {renderGroupPills()}
+            {activeGroup ? renderMainGrid() : (
               <div style={{ padding: 32, textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 13 }}>
                 Select a section from the left menu.
               </div>
@@ -785,32 +1152,8 @@ export function NodeViewParameters({
       {loading && Object.keys(values).length === 0 && (
         <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>
       )}
-      {groups.length > 0 && (
-        <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--vf-border-subtle)', overflowX: 'auto' }}>
-          {groups.map((g) => {
-            const active = g.groupId === activeGroup?.groupId;
-            return (
-              <button key={g.groupId} onClick={() => setActiveGroupId(g.groupId)}
-                style={{ padding: '8px 16px', background: 'none', border: 'none',
-                  borderBottom: active ? '2px solid var(--vf-accent)' : '2px solid transparent',
-                  color: active ? 'var(--vf-accent)' : 'var(--vf-text-secondary)',
-                  fontFamily: 'var(--vf-font-sans)', fontSize: 13, fontWeight: active ? 600 : 400,
-                  cursor: 'pointer', marginBottom: -1, whiteSpace: 'nowrap' }}>
-                {g.label || humanize(g.groupId)}
-              </button>
-            );
-          })}
-          {editingAllowed && (
-            <div style={{ marginLeft: 'auto', paddingBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
-              {pending.length > 0 && <Button variant="ghost" size="sm" onClick={reset} disabled={applying}>Reset</Button>}
-              <Button size="sm" onClick={() => void apply()} disabled={applying || pending.length === 0} loading={applying}>
-                {pending.length > 0 ? `Apply (${pending.length})` : 'Apply'}
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-      {activeGroup ? renderCards() : null}
+      {renderGroupPills()}
+      {activeGroup ? renderMainGrid() : null}
       {groups.length === 0 && !loading && (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 13 }}>
           No parameters defined in this definition.
