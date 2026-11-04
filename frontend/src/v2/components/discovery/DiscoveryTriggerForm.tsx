@@ -24,14 +24,8 @@ import type { SnmpProtocol, DiscoveryRunResponse } from '../../../api/discovery.
 import { listCredentials } from '../../../api/credentials.api';
 import type { CredentialSummary } from '../../../api/credentials.api';
 import { logger } from '../../utils/logger';
-import {
-  listAllUploadHistory,
-  getVersionSchema,
-} from '../../../api/productDefinitions.api';
-import type {
-  ProductDefinitionSchema,
-} from '../../../api/productDefinitions.api';
-import type { ProductDefinitionVersion } from '../../../api/productDefinitions.types';
+import { listDescriptors } from '../../../api/uiBuilder.api';
+import type { UiDescriptorSummary } from '../../../api/uiBuilder.api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -80,109 +74,69 @@ const PROTOCOL_OPTIONS = [
 /** Sentinel option value that means "enter community string manually". */
 const FALLBACK_OPTION = '__fallback__';
 
-// ── Group icon map for fingerprint panel ──────────────────────────────────────
-const GROUP_ICONS: Record<string, string> = {
-  cpu: '⚙️', memory: '💾', interface: '🔌', environment: '🌡️',
-  bgp: '🔗', spanning_tree: '🌳', wireless: '📶', radio: '📡',
-  network: '🌐', vlan: '🔀', qos: '⚡', management: '🛠',
-};
-
-function groupIcon(name: string): string {
-  return GROUP_ICONS[name.toLowerCase()] ?? '📋';
-}
-
-// ── Product-definition fingerprint context panel ───────────────────────────────
+// ── MIB Screen Builder preview panel ─────────────────────────────────────────
 /**
- * Displays the SNMP fingerprints and protocols from a selected product
- * definition version so operators know which device types will be
- * classified during this discovery run.
+ * Shows key metadata about a selected published MIB Builder screen so the
+ * operator knows what Node View layout discovered devices will get.
  */
-function ProductDefinitionContextPanel({ schema }: { schema: ProductDefinitionSchema }) {
+function MibScreenPreviewPanel({ descriptor }: { descriptor: UiDescriptorSummary }) {
   return (
     <div style={{
-      background: 'rgba(96,165,250,0.06)',
-      border: '1px solid rgba(96,165,250,0.2)',
+      background: 'rgba(34,197,94,0.06)',
+      border: '1px solid rgba(34,197,94,0.2)',
       borderRadius: 8,
       padding: '12px 14px',
       display: 'flex',
       flexDirection: 'column',
       gap: 10,
     }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 18 }}>🔍</span>
-        <div>
-          <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--vf-text-primary)' }}>
-            {schema.vendor} {schema.model}
-          </span>
-          {schema.productFamily && (
-            <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginLeft: 8 }}>
-              ({schema.productFamily})
-            </span>
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <span style={{ fontSize: 20, lineHeight: 1 }}>🖥️</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--vf-text-primary)' }}>
+            {descriptor.screenName}
+          </div>
+          {descriptor.deviceProfile && (
+            <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 2 }}>
+              {descriptor.deviceProfile}
+            </div>
           )}
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-          {schema.protocols.map((p) => (
-            <span key={p} style={{
-              fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-              letterSpacing: '0.06em', padding: '2px 6px', borderRadius: 4,
-              background: 'rgba(96,165,250,0.15)', color: '#60a5fa',
-            }}>{p}</span>
-          ))}
+        <span style={{
+          fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
+          background: 'rgba(22,163,74,0.15)', color: '#16a34a',
+          textTransform: 'uppercase', letterSpacing: '0.05em',
+        }}>✓ Published</span>
+      </div>
+
+      {/* Stats row */}
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        {descriptor.mibModule && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--vf-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>MIB Module</span>
+            <code style={{ fontSize: 11, color: '#60a5fa', fontFamily: 'var(--vf-font-mono)' }}>{descriptor.mibModule}</code>
+          </div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--vf-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sections</span>
+          <span style={{ fontSize: 12, color: 'var(--vf-text-primary)', fontWeight: 600 }}>{descriptor.sectionCount}</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--vf-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>MIB Objects</span>
+          <span style={{ fontSize: 12, color: 'var(--vf-text-primary)', fontWeight: 600 }}>{descriptor.objectCount}</span>
         </div>
       </div>
 
-      {/* Fingerprints */}
-      {schema.fingerprints.length > 0 && (
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-            letterSpacing: '0.05em', color: 'var(--vf-text-muted)', marginBottom: 6 }}>
-            SNMP Fingerprints — used to classify discovered devices
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {schema.fingerprints.map((fp, i) => (
-              <div key={i} style={{
-                background: 'var(--vf-surface)', borderRadius: 6,
-                padding: '6px 10px', fontSize: 11,
-                display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
-              }}>
-                <span style={{ color: 'var(--vf-text-muted)' }}>OID:</span>
-                <code style={{ color: '#60a5fa', fontFamily: 'var(--vf-font-mono)', fontSize: 11 }}>
-                  {fp.sysObjectId}
-                </code>
-                {fp.sysDescrPattern && (
-                  <>
-                    <span style={{ color: 'var(--vf-text-muted)' }}>Pattern:</span>
-                    <code style={{ color: 'var(--vf-text-secondary)', fontFamily: 'var(--vf-font-mono)', fontSize: 11 }}>
-                      {fp.sysDescrPattern}
-                    </code>
-                  </>
-                )}
-                {(fp.firmwareFrom || fp.firmwareTo) && (
-                  <span style={{ color: 'var(--vf-text-muted)', fontSize: 10 }}>
-                    FW: {fp.firmwareFrom ?? '*'}–{fp.firmwareTo ?? '*'}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Parameter groups summary */}
-      {schema.groups.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {schema.groups.map((g) => (
-            <span key={g.groupName} style={{
-              fontSize: 10, padding: '2px 7px', borderRadius: 10,
-              background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
-              color: 'var(--vf-text-secondary)',
-            }}>
-              {groupIcon(g.groupName)} {g.groupName} ({g.parameters.length})
-            </span>
-          ))}
-        </div>
-      )}
+      {/* Info callout */}
+      <div style={{
+        fontSize: 11, color: 'var(--vf-text-secondary)',
+        background: 'rgba(255,255,255,0.03)', borderRadius: 6,
+        padding: '6px 10px', borderLeft: '3px solid rgba(34,197,94,0.4)',
+      }}>
+        Discovered devices will use this Screen Builder layout as their Node View.
+        All {descriptor.objectCount} MIB objects from this screen will be polled via SNMP.
+      </div>
     </div>
   );
 }
@@ -246,51 +200,23 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
   const [credentials, setCredentials]         = useState<CredentialSummary[]>([]);
   const [credentialsLoading, setCredLoading]  = useState(true);
 
-  // ── Product definition context ────────────────────────────────────────────
-  // Allows operators to select an uploaded product definition so its SNMP
-  // fingerprints are shown as discovery context — the discovery service uses
-  // these OIDs to classify discovered devices against the chosen definition.
-  const [uploadedVersions, setUploadedVersions] = useState<ProductDefinitionVersion[]>([]);
-  const [selectedVersionKey, setSelectedVersionKey] = useState<string>('');
-  const [pdSchema, setPdSchema]   = useState<ProductDefinitionSchema | null>(null);
-  const [pdLoading, setPdLoading] = useState(false);
+  // ── Published MIB Screen Builder layouts ─────────────────────────────────
+  // Loaded on mount so the operator can pick which MIB screen to associate
+  // with devices discovered in this run. Devices are provisioned with
+  // productDefinitionId = descriptorId so their Node View shows the custom
+  // Screen Builder layout instead of a generic parameter panel.
+  const [publishedScreens, setPublishedScreens] = useState<UiDescriptorSummary[]>([]);
+  const [selectedDescriptorId, setSelectedDescriptorId] = useState<string>('');
+  const [screensLoading, setScreensLoading] = useState(true);
 
   useEffect(() => {
-    listAllUploadHistory()
-      .then(setUploadedVersions)
-      .catch(() => {/* non-fatal */});
+    listDescriptors()
+      .then((all) => setPublishedScreens(all.filter((d) => d.status === 'published')))
+      .catch(() => {/* non-fatal */})
+      .finally(() => setScreensLoading(false));
   }, []);
 
-  useEffect(() => {
-    if (!selectedVersionKey) { setPdSchema(null); return; }
-    const [definitionId, versionId] = selectedVersionKey.split('::');
-    if (!definitionId || !versionId) { setPdSchema(null); return; }
-    setPdLoading(true);
-    getVersionSchema(definitionId, versionId)
-      .then((schema) => {
-        setPdSchema(schema);
-        if (!schema) return;
-        // Auto-configure SNMP protocol from the definition's protocols list
-        // (vendor-independent: works for any uploaded definition)
-        if (schema.protocols.some((p) => /SNMP_V1/i.test(p)) && !schema.protocols.some((p) => /SNMP_V2C?/i.test(p))) {
-          setForm((prev) => ({ ...prev, protocol: 'SNMP_V1' }));
-        } else if (schema.protocols.some((p) => /SNMP/i.test(p))) {
-          setForm((prev) => ({ ...prev, protocol: 'SNMP_V2C' }));
-        }
-      })
-      .catch(() => setPdSchema(null))
-      .finally(() => setPdLoading(false));
-  }, [selectedVersionKey]);
-
-  // Build dropdown options for the product definition selector.
-  const pdOptions = [
-    { value: '', label: '— None (generic discovery) —' },
-    ...uploadedVersions.map((v) => ({
-      // Use versionId (UUID) not id (MongoDB ObjectId) — the API route expects the UUID
-      value: `${v.definitionId}::${v.versionId}`,
-      label: `${v.vendor ?? ''} ${v.model ?? v.name ?? ''} · v${v.registryVersion ?? v.versionId?.slice(-6)} [${v.lifecycleStatus}]`,
-    })),
-  ];
+  const selectedScreen = publishedScreens.find((s) => s.descriptorId === selectedDescriptorId) ?? null;
 
   useEffect(() => {
     listCredentials()
@@ -342,10 +268,6 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
       if (!isFormValid(form, currentErrors, usingFallback)) return;
 
       setSubmitting(true);
-      // Extract productDefinitionId from the selected version key (definitionId::versionId)
-      const selectedDefinitionId = selectedVersionKey
-        ? selectedVersionKey.split('::')[0] || undefined
-        : undefined;
 
       try {
         const response = await createDiscoveryRun({
@@ -357,8 +279,10 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
           ...(usingFallback
             ? { community: form.community.trim() }
             : { credentialId: form.credentialId }),
-          // Vendor-independent: tag all discovered devices with the selected definition
-          ...(selectedDefinitionId ? { productDefinitionId: selectedDefinitionId } : {}),
+          // Tag all discovered devices with the selected MIB screen's descriptorId.
+          // The gateway provisions devices with this as productDefinitionId so their
+          // Node View renders the published Screen Builder layout.
+          ...(selectedDescriptorId ? { productDefinitionId: selectedDescriptorId } : {}),
           // ICMP bypass is auto-detected by the gateway based on scope type:
           // hostname/host:port targets → SNMP-only (ICMP auto-bypassed)
           // IP/CIDR targets → full ICMP sweep + SNMP fingerprint (ICMP mandatory)
@@ -381,9 +305,7 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
         setSubmitting(false);
       }
     },
-    // selectedVersionKey MUST be in deps — without it handleSubmit closes over the initial
-    // empty string and productDefinitionId is never sent, breaking template-based filtering.
-    [form, usingFallback, credentials.length, onRunCreated, addToast, selectedVersionKey],
+    [form, usingFallback, credentials.length, onRunCreated, addToast, selectedDescriptorId],
   );
 
   // ── Build credential select options ─────────────────────────────────────────
@@ -405,52 +327,64 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
       noValidate
       style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 560 }}
     >
-      {/* ── Product Definition Selector ──────────────────────────────────────
-          Selecting a definition pre-loads its SNMP fingerprints so the
-          discovery engine knows which OIDs identify this device model.
-          This is optional — leaving it blank runs a generic discovery.   */}
-      {uploadedVersions.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.06)',
-          }}>
-            <span style={{ fontSize: 18 }}>📂</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--vf-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Product Definition Context
-            </span>
-          </div>
-          <div>
-            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--vf-text-secondary)', letterSpacing: '0.03em', display: 'block', marginBottom: 4 }}>
-              Device Template
-            </label>
-            <select
-              value={selectedVersionKey}
-              onChange={(e) => setSelectedVersionKey(e.target.value)}
-              style={{
-                width: '100%', appearance: 'none',
-                background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)',
-                borderRadius: 'var(--vf-radius-md)', color: 'var(--vf-text-primary)',
-                fontSize: 'var(--vf-type-body-size)', padding: '7px 10px',
-                fontFamily: 'var(--vf-font-sans)', cursor: 'pointer', outline: 'none',
-              }}
-            >
-              {pdOptions.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-            <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 3, display: 'block' }}>
-              Fingerprints from this definition will classify discovered devices
-            </span>
-          </div>
-          {pdLoading && (
-            <div style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>Loading definition schema…</div>
-          )}
-          {pdSchema && !pdLoading && (
-            <ProductDefinitionContextPanel schema={pdSchema} />
-          )}
+      {/* ── MIB Screen Builder Layout ─────────────────────────────────────────
+          Selecting a published MIB screen ties all discovered + provisioned
+          devices to that screen's Node View layout and SNMP OID poll list.
+          This replaces the old "Product Definition XML" selector.          */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.06)',
+        }}>
+          <span style={{ fontSize: 18 }}>🖥️</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--vf-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            MIB Screen Builder Layout
+          </span>
         </div>
-      )}
+        {screensLoading ? (
+          <div style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>Loading published screens…</div>
+        ) : (
+          <>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--vf-text-secondary)', letterSpacing: '0.03em', display: 'block', marginBottom: 4 }}>
+                MIB Parser / Screen
+              </label>
+              <select
+                value={selectedDescriptorId}
+                onChange={(e) => setSelectedDescriptorId(e.target.value)}
+                style={{
+                  width: '100%', appearance: 'none',
+                  background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)',
+                  borderRadius: 'var(--vf-radius-md)', color: 'var(--vf-text-primary)',
+                  fontSize: 'var(--vf-type-body-size)', padding: '7px 10px',
+                  fontFamily: 'var(--vf-font-sans)', cursor: 'pointer', outline: 'none',
+                }}
+              >
+                <option value="">— None (generic discovery) —</option>
+                {publishedScreens.map((s) => (
+                  <option key={s.descriptorId} value={s.descriptorId}>
+                    {s.screenName}
+                    {s.mibModule ? ` · ${s.mibModule}` : ''}
+                    {s.deviceProfile ? ` · ${s.deviceProfile}` : ''}
+                    {` (${s.sectionCount ?? 0} sections · ${s.objectCount ?? 0} objects)`}
+                  </option>
+                ))}
+              </select>
+              {publishedScreens.length === 0 && (
+                <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 4, display: 'block' }}>
+                  No published MIB screens yet — go to <strong>MIB Builder</strong> to create and publish one.
+                </span>
+              )}
+              {!selectedDescriptorId && publishedScreens.length > 0 && (
+                <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 3, display: 'block' }}>
+                  Provisioned devices will use the selected screen for their Node View layout
+                </span>
+              )}
+            </div>
+            {selectedScreen && <MibScreenPreviewPanel descriptor={selectedScreen} />}
+          </>
+        )}
+      </div>
 
       {/* Scope ─────────────────────────────────────────────────────────────── */}
       <ScopeInput

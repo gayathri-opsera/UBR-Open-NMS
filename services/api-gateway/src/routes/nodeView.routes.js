@@ -169,7 +169,22 @@ function definitionFingerprint(entries) {
  */
 async function resolveWireframe(redis, productDefinitionId) {
   const definition = await live.loadDefinition(productDefinitionId).catch(() => null);
-  if (!definition || !definition.entries?.length) return null;
+  if (!definition || !definition.entries?.length) {
+    // Fallback: productDefinitionId may be a UI-Builder descriptorId (not in the Java registry).
+    // In that case the wireframe was already built and persisted at publish time — use it as-is.
+    const cached = await getFromCache(redis, productDefinitionId);
+    if (cached?.wireframe?.groups?.length) {
+      return { doc: cached, definition: null };
+    }
+    const persisted = await NodeViewWireframe.findOne(
+      { productDefinitionId, status: 'ACTIVE' }, { __v: 0 },
+    ).lean();
+    if (persisted?.wireframe?.groups?.length) {
+      await setInCache(redis, productDefinitionId, persisted);
+      return { doc: persisted, definition: null };
+    }
+    return null;
+  }
   const fingerprint = definitionFingerprint(definition.entries);
 
   const isCurrent = (d) => d && d.schemaVersion === WIREFRAME_SCHEMA_VERSION

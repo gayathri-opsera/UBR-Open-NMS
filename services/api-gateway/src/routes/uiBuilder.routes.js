@@ -149,9 +149,12 @@ function descriptorToWireframe(descriptor) {
 }
 
 async function persistWireframeFromDescriptor(descriptor, redis) {
-  const productDefinitionId = descriptor.productDefinitionId;
+  // Use descriptorId as the wireframe key when no product definition XML is linked.
+  // This allows MIB Builder published screens to drive the Node View without
+  // requiring a separate product definition XML upload.
+  const productDefinitionId = descriptor.productDefinitionId || descriptor.descriptorId;
   if (!productDefinitionId) {
-    logger.info({ msg: 'ui-builder publish: no productDefinitionId; wireframe link skipped', descriptorId: descriptor.descriptorId });
+    logger.info({ msg: 'ui-builder publish: no productDefinitionId or descriptorId; wireframe link skipped' });
     return;
   }
 
