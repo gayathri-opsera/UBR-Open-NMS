@@ -435,6 +435,44 @@ services:
       retries: 5
       start_period: 5s
 
+  # ── EnGenius EOC655 Simulator (SENAO-MIB) — BTS on port 1165 ────────────────
+  # Serves all 602 OIDs from SENAO-MIB.mib / ENGENIUS-MIB.
+  # Enterprise: 1.3.6.1.4.1.14125.123  sysObjectID: 1.3.6.1.4.1.14125.123.2.2
+  # Upload SENAO-MIB.mib in MIB Builder → publish screen → discover this device.
+  #
+  # Quick test from host:
+  #   snmpget  -v2c -c public -p 1165 localhost 1.3.6.1.2.1.1.2.0
+  #   snmpwalk -v2c -c public -p 1165 localhost 1.3.6.1.4.1.14125.123
+  #
+  # Discovery scope in NMS:
+  #   host.docker.internal:1165   community: public
+  senao-bts-sim:
+    build:
+      context: test/snmpsim-senao
+      dockerfile: Dockerfile
+    container_name: nms-senao-bts
+    restart: unless-stopped
+    environment:
+      SNMP_PORT: "1165"
+      SNMP_COMMUNITY: "public"
+      DEVICE_MODE: "BTS"
+      DEVICE_NAME: "ENB-BTS-01"
+      DEVICE_IP: "192.168.100.50"
+      SSID: "UBR-EOC655-SECTOR1"
+    ports:
+      - "1165:1165/udp"
+    networks:
+      nms-net: {}
+      snmp-test-net:
+        ipv4_address: 10.10.10.29
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.sendto(b'\\x30\\x26\\x02\\x01\\x01\\x04\\x06public\\xa0\\x19\\x02\\x04\\x00\\x00\\x00\\x05\\x02\\x01\\x00\\x02\\x01\\x00\\x30\\x0b\\x30\\x09\\x06\\x05\\x2b\\x06\\x01\\x02\\x01\\x05\\x00', ('127.0.0.1',1165)); s.recv(256); exit(0)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
   discovery-service:
     build:
       context: .
