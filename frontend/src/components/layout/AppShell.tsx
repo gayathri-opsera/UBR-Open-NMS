@@ -278,11 +278,13 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
   });
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-base)' }}>
+    /* Outer shell: flex-row fills the viewport exactly */
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg-base)' }}>
 
       {/* ── Narrow icon sidebar ── */}
       <nav aria-label="Main navigation" style={{
-        position: 'fixed', left: 0, top: 0, bottom: 0, width: SIDEBAR_W,
+        width: SIDEBAR_W, flexShrink: 0,
+        height: '100vh',
         background: sidebarBg, display: 'flex', flexDirection: 'column',
         alignItems: 'center', zIndex: 100,
         boxShadow: '2px 0 6px rgba(0,0,0,0.20)',
@@ -323,9 +325,12 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
         </div>
       </nav>
 
+      {/* ── Right column: header + scrollable main ── */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+
       {/* ── Top header ── */}
       <header role="banner" style={{
-        position: 'fixed', left: SIDEBAR_W, top: 0, right: 0, height: HEADER_H,
+        height: HEADER_H, flexShrink: 0,
         background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-subtle)',
         display: 'flex', alignItems: 'center',
         padding: '0 20px 0 24px', zIndex: 99,
@@ -393,17 +398,21 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
       </header>
 
       {/* ── Main content area ── */}
+      {/* min-height:0 is REQUIRED: flex children default to min-height:auto which
+          prevents shrinking and kills overflow/scroll. Setting 0 lets flex shrink
+          the element to its container bound so overflow-y:auto actually fires. */}
       <main id="main-content" role="main" style={{
-        marginLeft: SIDEBAR_W,
-        marginTop: HEADER_H,
         flex: 1,
-        overflow: 'auto',
+        minHeight: 0,
+        overflowY: 'auto',
+        overflowX: 'hidden',
         padding: 24,
-        minHeight: `calc(100vh - ${HEADER_H}px)`,
         background: 'var(--bg-base)',
       }}>
         {children}
       </main>
+
+      </div>{/* end right column */}
 
       {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
     </div>

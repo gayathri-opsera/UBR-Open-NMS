@@ -68,6 +68,7 @@ html[data-theme="dark"] {
 html, body, #root {
   margin: 0; padding: 0;
   height: 100%; width: 100%;
+  overflow: hidden;
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   background: var(--bg-base);

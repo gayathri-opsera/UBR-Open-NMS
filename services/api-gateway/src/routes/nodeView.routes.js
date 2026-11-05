@@ -266,6 +266,29 @@ router.get(
 
       let productDefinitionId = await live.ensureDefinitionLink(device);
 
+      // ── MIB-Builder descriptor check ──────────────────────────────────────
+      // ensureDefinitionLink returns null when the device's productDefinitionId is a
+      // MIB-Builder descriptor UUID (not in the Java product registry) AND the Mongoose
+      // connection is not yet ready (early startup). In that case we validate by looking up
+      // the wireframe directly — if one exists and is ACTIVE the ID is valid; skip Java auto-link.
+      if (!productDefinitionId && device.productDefinitionId) {
+        try {
+          const mongoose = require('mongoose');
+          if (mongoose.connection.readyState === 1) {
+            const wf = await mongoose.connection.db.collection('node_view_wireframes').findOne(
+              { productDefinitionId: device.productDefinitionId, status: 'ACTIVE' },
+              { projection: { 'wireframe.groups': 1, _id: 0 } },
+            );
+            if (wf?.wireframe?.groups?.length) {
+              productDefinitionId = device.productDefinitionId;
+              logger.info({ msg: 'node-view: MIB-builder wireframe validated', deviceId, productDefinitionId });
+            }
+          }
+        } catch (wfErr) {
+          logger.warn({ msg: 'node-view: wireframe pre-check failed', deviceId, err: wfErr.message });
+        }
+      }
+
       // ── Auto-link: try to match by manufacturer/vendor if still unlinked ──
       if (!productDefinitionId) {
         try {

@@ -292,7 +292,22 @@ async function findDefinitionIdByVendor(vendor) {
  */
 async function resolveDefinitionId(candidates, vendor) {
   for (const id of candidates) {
-    if (id && await loadDefinition(id).catch(() => null)) return id;
+    if (!id) continue;
+    // Try Java product definition first (parameter registry exists for this id)
+    if (await loadDefinition(id).catch(() => null)) return id;
+    // Also check MongoDB node_view_wireframes — MIB Builder published descriptors use their
+    // descriptorId as productDefinitionId and persist an ACTIVE wireframe at publish time.
+    // Use the native MongoDB connection (same one liveParameters.js uses everywhere).
+    try {
+      const db = nmsDb();
+      if (db) {
+        const wf = await db.collection('node_view_wireframes').findOne(
+          { productDefinitionId: id, status: 'ACTIVE' },
+          { projection: { 'wireframe.groups': 1, _id: 0 } },
+        );
+        if (wf?.wireframe?.groups?.length) return id;
+      }
+    } catch { /* store unavailable — skip */ }
   }
   return findDefinitionIdByVendor(vendor);
 }
@@ -443,7 +458,16 @@ async function doRefresh(device) {
 
   await ensureDefinitionLink(device);
   base.productDefinitionId = device.productDefinitionId || null;
-  const definition = await loadDefinition(device.productDefinitionId).catch(() => null);
+  const definition = await loadEffectiveDefinition(device.productDefinitionId);
+  if (definition && definition.registryVersion === 'ui-builder') {
+    logger.info({
+      msg:                'live poll: using MIB-builder wireframe OIDs',
+      deviceId:           base._id,
+      productDefinitionId: device.productDefinitionId,
+      oidsCount:          definition.entries.length,
+    });
+  }
+
   if (!definition) {
     await col.updateOne({ _id: base._id }, { $set: { ...base, pollStatus: 'NOT_POLLED', pollError: 'no active product definition' } }, { upsert: true });
     return { pollStatus: 'NOT_POLLED' };
@@ -493,9 +517,56 @@ async function doRefresh(device) {
  * If no stored data exists yet, returns empty values (first background poll will populate).
  * @returns {Promise<{ http: number, body: object }>}
  */
+/**
+ * Load the effective definition for a device: Java product definition first,
+ * then MIB Builder wireframe synthetic definition as fallback.
+ * Returns null when neither source has entries for the device's productDefinitionId.
+ */
+async function loadEffectiveDefinition(productDefinitionId) {
+  const javaDefinition = await loadDefinition(productDefinitionId).catch(() => null);
+  if (javaDefinition) return javaDefinition;
+  if (!productDefinitionId) return null;
+  try {
+    const db = nmsDb();
+    if (!db) return null;
+    const wf = await db.collection('node_view_wireframes').findOne(
+      { productDefinitionId, status: 'ACTIVE' },
+      { projection: { 'wireframe.groups': 1, _id: 0 } },
+    );
+    if (!wf?.wireframe?.groups?.length) return null;
+    const synthEntries = [];
+    for (const g of wf.wireframe.groups) {
+      for (const p of (g.parameters || [])) {
+        if (p.snmpOid) {
+          synthEntries.push({
+            groupId:          g.groupId,
+            parameterId:      p.parameterId,
+            displayName:      p.displayName || p.parameterId,
+            snmpOid:          p.snmpOid,
+            dataType:         p.dataType || 'STRING',
+            groupDisplayOrder: g.displayOrder || 1,
+            displayOrder:     p.displayOrder || 0,
+            readOnly:         p.readOnly !== false,
+            enumValues:       p.enumValues || [],
+            unit:             p.unit || null,
+          });
+        }
+      }
+    }
+    if (!synthEntries.length) return null;
+    return {
+      productDefinitionId,
+      versionId:       `ui-builder-${productDefinitionId}`,
+      registryVersion: 'ui-builder',
+      vendor:          null,
+      entries:         synthEntries,
+    };
+  } catch { return null; }
+}
+
 async function getCachedOnly(device) {
   await ensureDefinitionLink(device);
-  const definition = await loadDefinition(device.productDefinitionId).catch(() => null);
+  const definition = await loadEffectiveDefinition(device.productDefinitionId);
   if (!definition) {
     return { http: 200, body: { status: 'NO_ACTIVE_FRAMEWORK', error: {
       code: 'NO_ACTIVE_FRAMEWORK', message: 'This device has no active Product Definition framework association.' } } };
@@ -513,7 +584,7 @@ async function getCachedOnly(device) {
  */
 async function getCurrent(device, { force = false } = {}) {
   await ensureDefinitionLink(device);
-  const definition = await loadDefinition(device.productDefinitionId).catch(() => null);
+  const definition = await loadEffectiveDefinition(device.productDefinitionId);
   if (!definition) {
     return { http: 200, body: { status: 'NO_ACTIVE_FRAMEWORK', error: {
       code: 'NO_ACTIVE_FRAMEWORK', message: 'This device has no active Product Definition framework association.' } } };
@@ -557,6 +628,6 @@ module.exports = {
   // pure
   normOid, walkRoots, mapVarbinds, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
   // io
-  loadDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, startScheduler, pollAll,
+  loadDefinition, loadEffectiveDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, startScheduler, pollAll,
   POLL_INTERVAL_SECONDS,
 };

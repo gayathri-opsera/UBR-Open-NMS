@@ -2056,6 +2056,7 @@ export default function V2DiscoveryPage() {
         display: 'flex', background: 'var(--vf-surface)',
         borderBottom: '1px solid rgba(77,158,255,0.1)',
         marginBottom: 24, marginLeft: -28, marginRight: -28, paddingLeft: 28,
+        position: 'sticky', top: -24, zIndex: 20,
       }}>
         <TabBtn id="provisioning"     active={tab === 'provisioning'}     count={stats.provisioning} onClick={setTab} />
         <TabBtn id="auth_failures"    active={tab === 'auth_failures'}    count={stats.authFails}    onClick={setTab} />

@@ -81,14 +81,9 @@ export function V2AppShell({ children }: { children: React.ReactNode }) {
             tabIndex={-1}
             style={{
               flex: 1,
-              /* Use flex column so child pages can use flex:1 to fill remaining height.
-                 overflow:hidden is intentional — each page manages its own scroll regions.
-                 Pages that want a full-page scrollbar should set overflowY:'auto' on their
-                 own top-level container. */
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
               minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
               background: 'var(--vf-canvas)',
               outline: 'none',
             }}

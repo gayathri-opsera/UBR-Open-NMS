@@ -390,6 +390,20 @@ public class MibParser {
             if (parts != null) rawAssignments.putIfAbsent(name, parts);
         }
 
+        // Scan for OBJECT-IDENTITY ::= assignments (SMIv2 macro used for subtree nodes).
+        // These define intermediate OID tree nodes (e.g. "wireless OBJECT-IDENTITY ::= { configuration 1 }").
+        // The macro uses STATUS / DESCRIPTION clauses before the ::= so we use .*? across lines.
+        Pattern objIdentityPat = Pattern.compile(
+                "^([\\w][\\w-]*)\\s+OBJECT-IDENTITY.*?::=\\s*\\{([^}]+)\\}",
+                Pattern.MULTILINE | Pattern.DOTALL);
+        Matcher objIdentityMatcher = objIdentityPat.matcher(content);
+        while (objIdentityMatcher.find()) {
+            String name = objIdentityMatcher.group(1);
+            String body = objIdentityMatcher.group(2).trim();
+            String[] parts = parseOidBody(body);
+            if (parts != null) rawAssignments.putIfAbsent(name, parts);
+        }
+
         // Iteratively resolve OIDs (multiple passes to handle forward refs)
         boolean changed = true;
         int iterations = 0;

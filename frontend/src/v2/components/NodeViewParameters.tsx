@@ -683,6 +683,17 @@ export function NodeViewParameters({
   const sidebar = useMemo(() => buildSidebar(groups), [groups]);
   const hasSidebar = sidebar.length > 0;
 
+  // ── MIB Builder descriptor mode detection ────────────────────────────────
+  // MIB Builder wireframes have registryVersion === 'ui-builder'.
+  // This is the primary, reliable signal — set explicitly at publish time.
+  // Fallback: if all groups share a non-standard uiPage (not in the standard
+  // device-UI pages: Wireless / Network / Management / Monitor) also use preview layout.
+  const isMibDescriptorMode = useMemo(() => {
+    if (registryVersion === 'ui-builder') return true;
+    if (groups.length === 0) return false;
+    return groups.every((g) => g.uiPage && !PAGE_ORDER.includes(g.uiPage));
+  }, [groups, registryVersion]);
+
   // Active group — defaults to first group
   const activeGroup = groups.find((g) => g.groupId === activeGroupId) ?? groups[0];
 
@@ -1060,6 +1071,159 @@ export function NodeViewParameters({
       {renderCards()}
     </div>
   );
+
+  // ── MIB Builder descriptor render (Preview-style stacked sections) ────────
+  //
+  // Mirrors the PreviewScreen layout from V2MibBuilderPage:
+  //   • Screen name as <h1>
+  //   • Each group as a section card (border-radius card, top border header)
+  //   • 2-column grid of parameters inside each card
+  //   • Each parameter: uppercase label → OID below in mono → live value widget
+  //   • Apply / Revert per writable section (same as PreviewScreen)
+  //
+  if (isMibDescriptorMode) {
+    // Screen name = the first group's uiPage (which was set to descriptor.screenName at publish time)
+    const screenName = groups[0]?.uiPage || productDefinitionId;
+
+    const renderMibParam = (g: WireframeGroup, p: WireframeParameter) => {
+      const record = values[valueKey(g.groupId, p.parameterId)];
+      const instances = instancesOf(record);
+      const writableParam = editingAllowed && !p.readOnly && !!p.snmpOid;
+      const title = p.unit ? `${p.displayName || p.parameterId} (${p.unit})` : (p.displayName || p.parameterId);
+      const baseId = `nv-${g.groupId}-${p.parameterId}`;
+
+      return (
+        <div key={p.parameterId}>
+          {/* Field label — uppercase, small, like PreviewScreen */}
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--vf-text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            {title}
+          </div>
+          {/* OID below label — monospace like PreviewScreen */}
+          {p.snmpOid && (
+            <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', fontFamily: 'var(--vf-font-mono)', marginBottom: 6, opacity: 0.7 }}>
+              {p.snmpOid}
+            </div>
+          )}
+          {/* Live value */}
+          {instances.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--vf-text-muted)', fontStyle: 'italic' }}>
+              {record?.readStatus === 'NO_SUCH_OBJECT' ? 'Not reported by device'
+                : record?.readStatus === 'UNREACHABLE' ? 'Device unreachable'
+                : 'No value yet'}
+            </span>
+          ) : instances.length === 1 && instances[0].index === '' ? (
+            <Control
+              id={baseId} param={p} original={instances[0].value} display={instances[0].display}
+              edited={edits[editKey(g.groupId, p.parameterId, '')]} editable={writableParam}
+              error={errors[editKey(g.groupId, p.parameterId, '')]}
+              onChange={(v) => onEdit(editKey(g.groupId, p.parameterId, ''), v, instances[0].value)}
+            />
+          ) : (
+            /* Multi-instance: show as a compact table (Index | Unit | Value) like Preview */
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  {['Index', p.unit || 'Unit', 'Value'].map((h) => (
+                    <th key={h} style={{ padding: '4px 8px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--vf-text-muted)', borderBottom: '1px solid var(--vf-border-subtle)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {instances.map((inst) => {
+                  const k = editKey(g.groupId, p.parameterId, inst.index);
+                  const displayVal = edits[k] ?? inst.display ?? inst.value ?? '—';
+                  return (
+                    <tr key={inst.index}>
+                      <td style={{ padding: '4px 8px', borderBottom: '1px solid var(--vf-border-subtle)', fontFamily: 'var(--vf-font-mono)', fontSize: 11, color: 'var(--vf-text-secondary)' }}>{inst.index || '1'}</td>
+                      <td style={{ padding: '4px 8px', borderBottom: '1px solid var(--vf-border-subtle)', fontSize: 11, color: 'var(--vf-text-muted)' }}>{p.unit || '—'}</td>
+                      <td style={{ padding: '4px 8px', borderBottom: '1px solid var(--vf-border-subtle)', fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-primary)' }}>
+                        {writableParam ? (
+                          <input
+                            type="text" value={edits[k] ?? inst.value ?? ''} style={{ background: 'transparent', border: 'none', borderBottom: '1px solid var(--vf-accent)', color: 'inherit', fontFamily: 'inherit', fontSize: 'inherit', width: '100%', outline: 'none' }}
+                            onChange={(e) => onEdit(k, e.target.value, inst.value)}
+                          />
+                        ) : displayVal}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      );
+    };
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
+        <StatusBar
+          deviceStatus={deviceStatus} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
+          collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing} onRefresh={onRefresh}
+        />
+        {loading && Object.keys(values).length === 0 && <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>}
+
+        {/* Screen name */}
+        <h1 style={{ fontSize: 22, fontWeight: 800, margin: '0 0 20px', color: 'var(--vf-text-primary)' }}>
+          {screenName}
+        </h1>
+
+        {groups.map((g) => {
+          const visibleParams = g.parameters.filter((p) => !p.hidden);
+          const hasWritable = visibleParams.some((p) => !p.readOnly && !!p.snmpOid);
+          const sectionPending = pendingForScope(g.groupId);
+          const isWritable = editingAllowed && hasWritable;
+          return (
+            <div
+              key={g.groupId}
+              style={{
+                background: 'var(--vf-surface)',
+                border: '1px solid var(--vf-border-subtle)',
+                borderRadius: 10,
+                marginBottom: 16,
+                overflow: 'hidden',
+              }}
+            >
+              {/* Section header */}
+              <div style={{
+                padding: '14px 20px',
+                borderBottom: '1px solid var(--vf-border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--vf-text-primary)' }}>
+                    {g.uiTab || g.label || humanize(g.groupId)}
+                  </h2>
+                  <div style={{ fontSize: 11, color: 'var(--vf-text-muted)', marginTop: 3 }}>
+                    {isWritable ? 'Read-write objects — changes are sent as one SNMP SET' : `Read-only · polled every ${g.pollIntervalSeconds ?? 60} s`}
+                  </div>
+                </div>
+                {isWritable && (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Button variant="ghost" size="sm" onClick={() => revertScope(g.groupId)} disabled={applying || sectionPending.length === 0}>Revert</Button>
+                    <Button size="sm" onClick={() => void applyScope(g.groupId, g.groupId)} disabled={applying || sectionPending.length === 0} loading={applying && applyingSection === g.groupId}>
+                      Apply (SNMP SET)
+                    </Button>
+                  </div>
+                )}
+              </div>
+              {/* 2-column parameter grid */}
+              <div style={{ padding: 20, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                {visibleParams.map((p) => renderMibParam(g, p))}
+              </div>
+            </div>
+          );
+        })}
+
+        {groups.length === 0 && !loading && (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 13 }}>
+            No parameters defined in this descriptor.
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // ── Sidebar layout (uiPage/uiParent/uiTab hierarchy) ──────────────────────
   if (hasSidebar) {
