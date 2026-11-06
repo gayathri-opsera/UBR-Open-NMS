@@ -44,6 +44,8 @@ export interface WireframeGroup {
   label:               string;
   displayOrder:        number;
   pollIntervalSeconds: number;
+  /** Real-time refresh in seconds set by the Builder author on a read-only section; null/absent = off. */
+  liveRefreshSeconds?: number | null;
   subGroups:           string[];
   parameters:          WireframeParameter[];
   /** Sidebar hierarchy — mirrors real device left-nav structure */

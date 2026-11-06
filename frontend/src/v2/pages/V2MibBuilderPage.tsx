@@ -49,6 +49,7 @@ interface UiDescriptorSection {
   columns: 1 | 2;
   fullWidth?: boolean;
   pollInterval?: number;
+  liveRefreshSeconds?: number;
   writeMode?: 'apply-button' | 'direct' | 'read-only';
   fields: UiDescriptorField[];
   order: number;
@@ -416,6 +417,26 @@ function enumMapFor(obj: MibObjectSummary, prev?: Record<string, string>): Recor
   const labels = obj.isEnum && obj.enumValues ? { ...obj.enumValues } : {};
   if (prev && prev['columns'] !== undefined) labels['columns'] = prev['columns'];
   return Object.keys(labels).length ? labels : undefined;
+}
+
+/** Live-refresh choices for a section (seconds; 0 = off). */
+const LIVE_OPTIONS = [0, 2, 5, 10, 30] as const;
+
+/** Counter / gauge style names that are worth refreshing in real time. */
+const LIVE_NAME = /(Packets|Bytes|Errors|Dropped|Drop|Throughput|Tput|PPS|RSSI|SNR|Signal|Noise|Utility|Interference|Rate$|Latency|Usage|Util|OBSS|Capacity|IncomingB|KPI|Uptime|Temperature|TimeLeft|Retries|RTX|Sinr|Timeout|Overflow|Beacons|Counter)/i;
+
+/** A section can be live only if every field in it is read-only (a live read must never sit beside editable values). */
+function sectionCanBeLive(sec: UiDescriptorSection): boolean {
+  const bound = sec.fields.filter((f) => f.elementType === 'field-label' || f.elementType === 'table-block');
+  return bound.length > 0 && bound.every((f) => f.access !== 'read-write');
+}
+
+/** Suggested live interval for a section: 2 s for per-link stats, 5 s for other counters, 0 when nothing in it changes. */
+function suggestLiveRefresh(sec: UiDescriptorSection): number {
+  if (!sectionCanBeLive(sec)) return 0;
+  const names = sec.fields.map((f) => f.mibObject ?? '').filter(Boolean);
+  if (!names.some((n) => LIVE_NAME.test(n))) return 0;
+  return names.some((n) => /^assoc/i.test(n)) ? 2 : 5;
 }
 
 function MibLibraryScreen({
@@ -2564,6 +2585,40 @@ function ScreenBuilderScreen({
                       />
                       <span style={{ fontSize: 9, color: 'var(--vf-text-muted)' }}>s</span>
                     </div>
+
+                    {/* Live refresh — real-time updates of this whole section in Node View */}
+                    {(() => {
+                      const canLive = sectionCanBeLive(sec);
+                      const live = canLive ? (sec.liveRefreshSeconds ?? 0) : 0;
+                      const suggested = suggestLiveRefresh(sec);
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                          <select
+                            value={live}
+                            disabled={!canLive}
+                            onChange={(e) => patchSection(sec.sectionId, { liveRefreshSeconds: Number(e.target.value) })}
+                            title={canLive
+                              ? 'Live refresh: how often Node View re-reads this section in real time. Off = normal 30–60 s refresh.'
+                              : 'Live refresh is only available for sections where every field is read-only.'}
+                            style={{ fontSize: 9, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--vf-border-subtle)', background: live > 0 ? 'var(--vf-accent-subtle)' : 'var(--vf-elevated)', color: live > 0 ? 'var(--vf-accent)' : 'var(--vf-text-secondary)', opacity: canLive ? 1 : 0.5 }}
+                          >
+                            {LIVE_OPTIONS.map((n) => (
+                              <option key={n} value={n}>{n === 0 ? 'Live: off' : `Live: ${n}s`}</option>
+                            ))}
+                          </select>
+                          {canLive && live === 0 && suggested > 0 && (
+                            <button
+                              type="button"
+                              title={`This section holds counters/measurements — suggested live refresh: every ${suggested}s`}
+                              onClick={() => patchSection(sec.sectionId, { liveRefreshSeconds: suggested })}
+                              style={{ fontSize: 9, padding: '2px 5px', borderRadius: 4, border: '1px dashed var(--vf-accent)', background: 'transparent', color: 'var(--vf-accent)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            >
+                              ⚡ {suggested}s?
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Write mode */}
                     <select

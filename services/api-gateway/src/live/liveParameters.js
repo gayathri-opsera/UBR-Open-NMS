@@ -594,21 +594,65 @@ async function doRefresh(device) {
  * Only groups declared on the Monitor page are allowed (read-only statistics, never configuration).
  * @returns {Promise<{ pollStatus: string, collectedAt: string, groups: object[], error?: string }>}
  */
+/**
+ * Exact instance OIDs for a live read, taken from the row indexes of the last full poll — so a live refresh is a
+ * handful of GETs instead of a walk of the whole table (a walk over a radio table takes 7+ s on these agents).
+ * Returns null when the last poll does not cover every entry (first read, new field, stale data): the caller walks.
+ * New table rows only appear after the next full poll (≤ 60 s) — fine for counters and measurements.
+ */
+function liveGetTargets(entries, storedDoc, now = Date.now(), maxAgeMs = 120_000) {
+  if (!storedDoc || !Array.isArray(storedDoc.values) || !storedDoc.collectedAt) return null;
+  if (now - new Date(storedDoc.collectedAt).getTime() > maxAgeMs) return null;
+  const byKey = new Map(storedDoc.values.map((v) => [`${v.groupId}::${v.parameterId}`, v.instances || []]));
+  const oids = [];
+  for (const e of entries) {
+    const base = normOid(e.snmpOid);
+    if (!base) continue;
+    const inst = byKey.get(`${e.groupId}::${e.parameterId}`);
+    if (!inst || !inst.length) return null;                 // never read before (or nothing came back): need the walk
+    for (const i of inst) oids.push(i.index === '' || i.index == null ? `${base}.0` : `${base}.${i.index}`);
+  }
+  return oids.length ? Array.from(new Set(oids)) : null;
+}
+
+/**
+ * May this entry be read by the real-time (monitor-live) path? Either it is on the Monitor page of an uploaded
+ * definition, or it belongs to a MIB Builder section the author turned "Live" on — and is read-only. Configuration
+ * is never read live, whatever the section says.
+ */
+function isLiveEntry(definition, e) {
+  if (!e) return false;
+  if (e.uiPage === 'Monitor') return true;
+  return !!definition && definition.registryVersion === 'ui-builder' && Number(e.liveRefreshSeconds) > 0 && e.readOnly !== false;
+}
+
 async function pollMonitorGroups(device, groupIds) {
   await ensureDefinitionLink(device);
-  const definition = await loadDefinition(device.productDefinitionId).catch(() => null);
+  const definition = await loadEffectiveDefinition(device.productDefinitionId).catch(() => null);
   if (!definition) return { pollStatus: 'NOT_POLLED', collectedAt: new Date().toISOString(), groups: [], error: 'no active product definition' };
   const wanted = new Set(groupIds);
-  const own = definition.entries.filter((e) => wanted.has(e.groupId) && e.uiPage === 'Monitor');
+  const own = definition.entries.filter((e) => wanted.has(e.groupId) && isLiveEntry(definition, e));
   if (!own.length || !device.snmpCommunity) return { pollStatus: device.snmpCommunity ? 'NOT_POLLED' : 'NO_CREDENTIALS', collectedAt: new Date().toISOString(), groups: [] };
   const entries = rebaseEntries(own, device.sysObjectID);
   const oids = entries.map((e) => normOid(e.snmpOid)).filter(Boolean);
   const { host, port } = splitHostPort(device);
   const now = new Date();
   try {
-    const varbinds = [];
-    for (const rootOid of walkRoots(oids)) {
-      varbinds.push(...await walkSubtree({ host, port, community: device.snmpCommunity, rootOid, timeoutMs: 2000, retries: 1, overallTimeoutMs: 8000 }));
+    let varbinds = null;
+    // Fast path: GET the exact instances known from the last full poll.
+    const col = valuesCol();
+    const stored = col ? await col.findOne({ _id: String(device._id) }, { projection: { values: 1, collectedAt: 1 } }).catch(() => null) : null;
+    const targets = liveGetTargets(entries, stored);
+    if (targets) {
+      const got = await getOids({ host, port, community: device.snmpCommunity, oids: targets, timeoutMs: 2000, retries: 1 }).catch(() => []);
+      // Only trust it if every requested instance answered; a gap means the table changed — walk instead.
+      if (got.length >= targets.length) varbinds = got;
+    }
+    if (!varbinds) {
+      varbinds = [];
+      for (const rootOid of walkRoots(oids)) {
+        varbinds.push(...await walkSubtree({ host, port, community: device.snmpCommunity, rootOid, timeoutMs: 2000, retries: 1, overallTimeoutMs: 8000 }));
+      }
     }
     const mapped = applyFirmwareQuirks(entries, await mapWithGetFallback(entries, varbinds, { host, port, community: device.snmpCommunity, timeoutMs: 2000, retries: 1 }), device);
     await overlayWeb(entries, mapped, device, host, { withConfig: false });
@@ -739,6 +783,7 @@ async function loadEffectiveDefinition(productDefinitionId) {
             readOnly:         p.readOnly !== false,
             enumValues:       p.enumValues || [],
             unit:             p.unit || null,
+            liveRefreshSeconds: g.liveRefreshSeconds || 0,   // section-level real-time setting from the Builder
           });
         }
       }
@@ -816,7 +861,7 @@ function startScheduler() {
 
 module.exports = {
   // pure
-  normOid, walkRoots, mapVarbinds, scalarGetTargets, mergeScalarGets, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
+  normOid, walkRoots, mapVarbinds, scalarGetTargets, mergeScalarGets, isLiveEntry, liveGetTargets, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
   // io
   loadDefinition, loadEffectiveDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, updateDeviceFields, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, syncWithProbe, pollMonitorGroups, startScheduler, pollAll,
   POLL_INTERVAL_SECONDS,

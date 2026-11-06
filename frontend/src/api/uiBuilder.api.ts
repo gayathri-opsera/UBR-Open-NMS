@@ -30,6 +30,8 @@ export interface UiDescriptorSection {
   columns: 1 | 2;
   fullWidth?: boolean;
   pollInterval?: number;
+  /** Real-time refresh in Node View, seconds (0/absent = off). Only honoured for read-only sections. */
+  liveRefreshSeconds?: number;
   writeMode?: 'apply-button' | 'direct' | 'read-only';
   fields: UiDescriptorField[];
   order: number;

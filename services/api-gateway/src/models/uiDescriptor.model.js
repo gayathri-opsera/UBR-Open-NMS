@@ -31,6 +31,8 @@ const SectionSchema = new mongoose.Schema({
   columns:       { type: Number, default: 2, enum: [1, 2] },  // 1 or 2 column layout
   fullWidth:     { type: Boolean, default: false },  // true for table blocks
   pollInterval:  { type: Number, default: 30 },
+  /** Real-time refresh of this section in Node View, in seconds (0 = off). Read-only sections only. */
+  liveRefreshSeconds: { type: Number, default: 0 },
   writeMode:     { type: String, enum: ['apply-button', 'direct', 'read-only'], default: 'read-only' },
   fields:        [FieldSchema],
   order:         Number,

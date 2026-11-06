@@ -46,6 +46,8 @@ const GroupSpecSchema = new mongoose.Schema({
   label:               { type: String, required: true },
   displayOrder:        { type: Number, default: 0 },
   pollIntervalSeconds: { type: Number, default: 60 },
+  // Real-time refresh of this group in Node View (seconds). Null/absent = off. Set from a MIB Builder section.
+  liveRefreshSeconds:  { type: Number, default: null },
   subGroups:           { type: [String], default: [] },
   parameters:          { type: [ParameterSpecSchema], default: [] },
   // Sidebar hierarchy — mirrors the real device web UI left-nav structure

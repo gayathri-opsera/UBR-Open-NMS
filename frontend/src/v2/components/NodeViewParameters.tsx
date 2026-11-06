@@ -733,27 +733,53 @@ export function NodeViewParameters({
   const [liveStatsAt, setLiveStatsAt] = useState<string | null>(null);
   const monitorGroupId = activeGroup?.uiPage === 'Monitor' ? activeGroup.groupId : '';
   const monitorEveryMs = /link/i.test(activeGroup?.uiTab ?? '') ? 2000 : 5000;
+
+  // Real-time targets, grouped by interval so one request serves every section that shares a rate:
+  //  • the active Monitor tab of an uploaded definition (2 s on "Link" tabs, otherwise 5 s), and
+  //  • in a MIB Builder screen, every section its author marked "Live" (liveRefreshSeconds).
+  const liveTargets = useMemo(() => {
+    const byMs = new Map<number, string[]>();
+    const add = (ms: number, id: string) => byMs.set(ms, [...(byMs.get(ms) ?? []), id]);
+    if (monitorGroupId) add(monitorEveryMs, monitorGroupId);
+    if (isMibDescriptorMode) {
+      for (const g of groups) {
+        const s = g.liveRefreshSeconds;
+        if (s && s >= 2) add(Math.round(s) * 1000, g.groupId);
+      }
+    }
+    return Array.from(byMs.entries()).map(([ms, ids]) => ({ ms, ids: ids.slice(0, 6) }));
+  }, [monitorGroupId, monitorEveryMs, isMibDescriptorMode, groups]);
+  const liveKey = liveTargets.map((t) => `${t.ms}:${t.ids.join('+')}`).join('|');
+
   useEffect(() => {
     setLiveOverlay({});
     setLiveStatsAt(null);
-    if (!monitorGroupId) return;
+    if (!liveTargets.length) return;
     let stopped = false;
-    let busy = false;
     const ctl = new AbortController();
-    const tick = async () => {
-      if (busy || document.hidden) return;   // no polling from a background tab
-      busy = true;
-      try {
-        const r = await fetchMonitorLive(deviceId, [monitorGroupId], ctl.signal);
-        if (stopped || !r) return;
-        if (r.pollStatus === 'OK') { setLiveOverlay(r.values); setLiveStatsAt(r.collectedAt); }
-      } catch { /* keep the last reading */ }
-      finally { busy = false; }
-    };
-    void tick();
-    const timer = setInterval(() => { void tick(); }, monitorEveryMs);
-    return () => { stopped = true; ctl.abort(); clearInterval(timer); };
-  }, [deviceId, monitorGroupId, monitorEveryMs]);
+    const timers: ReturnType<typeof setInterval>[] = [];
+    for (const target of liveTargets) {
+      let busy = false;
+      const tick = async () => {
+        if (busy || document.hidden) return;   // no polling from a background tab, never overlap requests
+        busy = true;
+        try {
+          const r = await fetchMonitorLive(deviceId, target.ids, ctl.signal);
+          if (stopped || !r) return;
+          if (r.pollStatus === 'OK') {
+            setLiveOverlay((prev) => ({ ...prev, ...r.values }));
+            setLiveStatsAt(r.collectedAt);
+          }
+        } catch { /* keep the last reading */ }
+        finally { busy = false; }
+      };
+      void tick();
+      timers.push(setInterval(() => { void tick(); }, target.ms));
+    }
+    return () => { stopped = true; ctl.abort(); timers.forEach(clearInterval); };
+    // liveKey captures the targets; listing liveTargets itself would restart the timers on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceId, liveKey]);
   const values = useMemo(() => ({ ...cachedValues, ...liveOverlay }), [cachedValues, liveOverlay]);
 
   const cards = useMemo(() => {

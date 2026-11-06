@@ -99,6 +99,21 @@ function enumMapToValues(enumMap) {
   return enumEntries(enumMap).map(([value, label]) => `${label}(${value})`);
 }
 
+/** Live-refresh bounds (seconds). Below 2 s a lab agent cannot keep up; above 300 s the normal poll is enough. */
+const LIVE_MIN_S = 2;
+const LIVE_MAX_S = 300;
+
+/**
+ * Real-time refresh interval for a section, or null when off. Honoured only for sections whose fields are ALL
+ * read-only, so a live read can never run alongside values someone is editing.
+ */
+function liveRefreshFor(section, parameters) {
+  const n = Number(section && section.liveRefreshSeconds);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (!parameters.length || parameters.some((p) => !p.readOnly)) return null;
+  return Math.min(LIVE_MAX_S, Math.max(LIVE_MIN_S, Math.round(n)));
+}
+
 /**
  * Convert a published UI descriptor into a Node View wireframe document.
  */
@@ -144,6 +159,7 @@ function descriptorToWireframe(descriptor) {
         label:               section.title || groupId,
         displayOrder:        gi + 1,
         pollIntervalSeconds: section.pollInterval ?? 60,
+        liveRefreshSeconds:  liveRefreshFor(section, parameters),
         subGroups:           [],
         parameters,
         uiPage:              descriptor.screenName || 'UI Builder',
@@ -365,4 +381,5 @@ router.get('/descriptors/:id/xml', async (req, res) => {
 });
 
 module.exports = router;
-module.exports.descriptorToWireframe = descriptorToWireframe;   // exposed for unit tests
+module.exports.descriptorToWireframe = descriptorToWireframe;
+module.exports.liveRefreshFor = liveRefreshFor;   // exposed for unit tests
