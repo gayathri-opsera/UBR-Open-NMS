@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  UBR-655 Wireless Backhaul Unit - Device Descriptor v3.0.0  (schema urn:nms:descriptor:2.0)
+  UBR-655 Wireless Backhaul Unit - Device Descriptor v3.0.2  (schema urn:nms:descriptor:2.0)
   Vendor MIB    : EnGenius / SENAO  ENGENIUS-MIB   enterprise .1.3.6.1.4.1.52619   (SENAO-MIB.mib)
   Reference unit: UBR655 firmware 1.0.0.149 at 10.0.150.88 (EOC655)
   Source sheet  : Configurations_GUI 3.xlsx  (parameter list, labels, defaults)
+
+  v3.0.2   Wireless Stats groups gain the device's Interface-page counters (PPS, beacons, auth/assoc counters,
+           channel / OBSS utilisation): SENAO-MIB wirelessStatsEntry columns 10-27, 34, 35, 38, 39, checked against the
+           device's own page on a UBR655 fw 1.0.0.161. Pointers only - no values or defaults are stored here.
+  v3.0.1   DDRS / DCS table instances corrected (2 = Radio 1, 3 = Radio 2).
 
   Replaces the v2.0.0 demo descriptor, which used the placeholder enterprise .99999.
 
@@ -1500,6 +1505,208 @@
         <readOnly>true</readOnly>
         <displayOrder>13</displayOrder>
       </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.tx_pps</parameterId>
+        <displayName>Tx PPS</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.34.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>pps</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>14</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.rx_pps</parameterId>
+        <displayName>Rx PPS</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.35.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>pps</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>15</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.mgmt_tx_packets</parameterId>
+        <displayName>Management Tx Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.10.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>16</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.mgmt_rx_packets</parameterId>
+        <displayName>Management Rx Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.11.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>17</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.tx_beacons</parameterId>
+        <displayName>Beacons Transmitted</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.12.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>18</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.rx_beacons</parameterId>
+        <displayName>Beacons Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.13.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>19</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.auth_req_received</parameterId>
+        <displayName>Authentication Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.15.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>20</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.auth_req_sent</parameterId>
+        <displayName>Authentication Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.14.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>21</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.auth_confirms</parameterId>
+        <displayName>Authentication Confirms</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.16.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>22</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.auth_rejects</parameterId>
+        <displayName>Authentication Rejects</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.17.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>23</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.deauth_req_sent</parameterId>
+        <displayName>Deauthentication Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.18.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>24</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.deauth_req_received</parameterId>
+        <displayName>Deauthentication Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.19.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>25</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.auth_result_last</parameterId>
+        <displayName>Authentication Result Last</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.20.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>26</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.assoc_req_received</parameterId>
+        <displayName>Association Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.22.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>27</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.assoc_req_sent</parameterId>
+        <displayName>Association Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.21.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>28</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.assoc_rejects</parameterId>
+        <displayName>Association Rejects</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.24.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>29</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.assoc_confirms</parameterId>
+        <displayName>Association Confirms</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.23.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>30</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.disassoc_req_received</parameterId>
+        <displayName>Disassociation Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.26.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>31</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.disassoc_req_sent</parameterId>
+        <displayName>Disassociation Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.25.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>32</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.assoc_result_last</parameterId>
+        <displayName>Association Result Last</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.27.2</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>33</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.channel_utilisation</parameterId>
+        <displayName>Channel Utilisation (Combined)</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.38.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>%</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>34</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio1.wireless_stats.obss_utilisation</parameterId>
+        <displayName>OBSS Utilisation</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.39.2</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>%</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>35</displayOrder>
+      </parameter>
     </group>
     <!-- assocTable rows for Radio 1: one value per associated station (index = station) -->
     <group id="radio1.link_stats" displayName="Radio 1 - Link Stats" displayOrder="2"
@@ -1696,6 +1903,208 @@
         <readOnly>true</readOnly>
         <displayOrder>13</displayOrder>
       </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.tx_pps</parameterId>
+        <displayName>Tx PPS</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.34.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>pps</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>14</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.rx_pps</parameterId>
+        <displayName>Rx PPS</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.35.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>pps</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>15</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.mgmt_tx_packets</parameterId>
+        <displayName>Management Tx Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.10.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>16</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.mgmt_rx_packets</parameterId>
+        <displayName>Management Rx Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.11.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>17</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.tx_beacons</parameterId>
+        <displayName>Beacons Transmitted</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.12.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>18</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.rx_beacons</parameterId>
+        <displayName>Beacons Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.13.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>19</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.auth_req_received</parameterId>
+        <displayName>Authentication Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.15.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>20</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.auth_req_sent</parameterId>
+        <displayName>Authentication Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.14.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>21</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.auth_confirms</parameterId>
+        <displayName>Authentication Confirms</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.16.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>22</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.auth_rejects</parameterId>
+        <displayName>Authentication Rejects</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.17.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>23</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.deauth_req_sent</parameterId>
+        <displayName>Deauthentication Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.18.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>24</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.deauth_req_received</parameterId>
+        <displayName>Deauthentication Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.19.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>25</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.auth_result_last</parameterId>
+        <displayName>Authentication Result Last</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.20.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>26</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.assoc_req_received</parameterId>
+        <displayName>Association Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.22.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>27</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.assoc_req_sent</parameterId>
+        <displayName>Association Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.21.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>28</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.assoc_rejects</parameterId>
+        <displayName>Association Rejects</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.24.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>29</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.assoc_confirms</parameterId>
+        <displayName>Association Confirms</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.23.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>30</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.disassoc_req_received</parameterId>
+        <displayName>Disassociation Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.26.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>31</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.disassoc_req_sent</parameterId>
+        <displayName>Disassociation Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.25.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>32</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.assoc_result_last</parameterId>
+        <displayName>Association Result Last</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.27.3</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>33</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.channel_utilisation</parameterId>
+        <displayName>Channel Utilisation (Combined)</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.38.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>%</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>34</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio2.wireless_stats.obss_utilisation</parameterId>
+        <displayName>OBSS Utilisation</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.39.3</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>%</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>35</displayOrder>
+      </parameter>
     </group>
     <!-- assocTable rows for Radio 2: one value per associated station (index = station) -->
     <group id="radio2.link_stats" displayName="Radio 2 - Link Stats" displayOrder="4"
@@ -1891,6 +2300,208 @@
         <uiWidget>readonly</uiWidget>
         <readOnly>true</readOnly>
         <displayOrder>13</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.tx_pps</parameterId>
+        <displayName>Tx PPS</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.34.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>pps</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>14</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.rx_pps</parameterId>
+        <displayName>Rx PPS</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.35.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>pps</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>15</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.mgmt_tx_packets</parameterId>
+        <displayName>Management Tx Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.10.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>16</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.mgmt_rx_packets</parameterId>
+        <displayName>Management Rx Packets</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.11.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>17</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.tx_beacons</parameterId>
+        <displayName>Beacons Transmitted</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.12.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>18</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.rx_beacons</parameterId>
+        <displayName>Beacons Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.13.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>19</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.auth_req_received</parameterId>
+        <displayName>Authentication Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.15.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>20</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.auth_req_sent</parameterId>
+        <displayName>Authentication Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.14.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>21</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.auth_confirms</parameterId>
+        <displayName>Authentication Confirms</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.16.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>22</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.auth_rejects</parameterId>
+        <displayName>Authentication Rejects</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.17.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>23</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.deauth_req_sent</parameterId>
+        <displayName>Deauthentication Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.18.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>24</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.deauth_req_received</parameterId>
+        <displayName>Deauthentication Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.19.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>25</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.auth_result_last</parameterId>
+        <displayName>Authentication Result Last</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.20.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>26</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.assoc_req_received</parameterId>
+        <displayName>Association Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.22.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>27</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.assoc_req_sent</parameterId>
+        <displayName>Association Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.21.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>28</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.assoc_rejects</parameterId>
+        <displayName>Association Rejects</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.24.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>29</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.assoc_confirms</parameterId>
+        <displayName>Association Confirms</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.23.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>30</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.disassoc_req_received</parameterId>
+        <displayName>Disassociation Requests Received</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.26.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>31</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.disassoc_req_sent</parameterId>
+        <displayName>Disassociation Requests Sent</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.25.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>32</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.assoc_result_last</parameterId>
+        <displayName>Association Result Last</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.27.1</snmpOid>
+        <dataType>STRING</dataType>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>33</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.channel_utilisation</parameterId>
+        <displayName>Channel Utilisation (Combined)</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.38.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>%</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>34</displayOrder>
+      </parameter>
+      <parameter>
+        <parameterId>monitor.radio24.wireless_stats.obss_utilisation</parameterId>
+        <displayName>OBSS Utilisation</displayName>
+        <snmpOid>.1.3.6.1.4.1.52619.1.3.1.1.39.1</snmpOid>
+        <dataType>INTEGER</dataType>
+        <units>%</units>
+        <uiWidget>readonly</uiWidget>
+        <readOnly>true</readOnly>
+        <displayOrder>35</displayOrder>
       </parameter>
     </group>
     <!-- assocTable rows for 2.4 GHz Radio: one value per associated station (index = station) -->

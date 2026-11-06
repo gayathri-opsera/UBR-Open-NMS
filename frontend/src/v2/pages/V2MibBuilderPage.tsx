@@ -38,6 +38,8 @@ interface UiDescriptorField {
   writeMode?: 'apply-button' | 'direct';
   helpText?: string;
   confirmWrite?: boolean;
+  /** value → label for enum fields ('1' → 'enable'); a table block also keeps its `columns` setting here. */
+  enumMap?: Record<string, string>;
   order: number;
 }
 
@@ -398,11 +400,22 @@ function autoGenerateSections(objects: MibObjectSummary[]): UiDescriptorSection[
       syntax: obj.nmsDataType,
       access: normalizeAccess(obj.access),
       widget: suggestWidget(obj),
+      enumMap: enumMapFor(obj),
       order: sec.fields.length,
     };
     sec.fields.push(field);
   }
   return ordered;
+}
+
+/**
+ * enumMap for a field bound to a MIB object: the real labels ('1' → 'enable'). Table blocks also keep a
+ * `columns` entry in the same map, so any existing one is carried over.
+ */
+function enumMapFor(obj: MibObjectSummary, prev?: Record<string, string>): Record<string, string> | undefined {
+  const labels = obj.isEnum && obj.enumValues ? { ...obj.enumValues } : {};
+  if (prev && prev['columns'] !== undefined) labels['columns'] = prev['columns'];
+  return Object.keys(labels).length ? labels : undefined;
 }
 
 function MibLibraryScreen({
@@ -475,6 +488,7 @@ function MibLibraryScreen({
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['root']));
   const inputRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const tableScrollRef = useRef<HTMLDivElement>(null);
 
   /** Names of MIB objects the user has removed from the table. */
   const [deletedNames, setDeletedNames] = useState<Set<string>>(new Set());
@@ -520,7 +534,16 @@ function MibLibraryScreen({
   useEffect(() => {
     if (treeFocusName) {
       const row = rowRefs.current.get(treeFocusName);
-      row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      const box = tableScrollRef.current;
+      if (row && box) {
+        // Scroll ONLY the table's own container. scrollIntoView() would also scroll every
+        // ancestor (the app shell), dragging the MIB tree away while the user is picking fields.
+        const rowTop = row.offsetTop;
+        const rowBottom = rowTop + row.offsetHeight;
+        const headH = box.querySelector('thead')?.getBoundingClientRect().height ?? 0;
+        if (rowTop - headH < box.scrollTop) box.scrollTo({ top: rowTop - headH, behavior: 'smooth' });
+        else if (rowBottom > box.scrollTop + box.clientHeight) box.scrollTo({ top: rowBottom - box.clientHeight, behavior: 'smooth' });
+      }
     }
   }, [treeFocusName, filteredObjects]);
 
@@ -839,7 +862,7 @@ function MibLibraryScreen({
   }
 
   return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flex: 1, height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* Left panel */}
       <aside
         style={{
@@ -1301,7 +1324,7 @@ function MibLibraryScreen({
       </aside>
 
       {/* Main */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, padding: 16 }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, overflow: 'hidden', padding: 16 }}>
         {/* ── Draft-restored banner (req G-05) — only when data came from a saved draft, not a fresh upload ── */}
         {existingDescriptor?.descriptorId && parseResult && parseSource === 'restored' && (
           <div
@@ -1483,6 +1506,8 @@ function MibLibraryScreen({
                 style={{
                   width: '30%',
                   minWidth: 180,
+                  flexShrink: 0,
+                  minHeight: 0,
                   border: '1px solid var(--vf-border-subtle)',
                   borderRadius: 8,
                   overflow: 'auto',
@@ -1495,8 +1520,11 @@ function MibLibraryScreen({
               </div>
 
               <div
+                ref={tableScrollRef}
                 style={{
                   flex: 1,
+                  minWidth: 0,
+                  position: 'relative',
                   border: '1px solid var(--vf-border-subtle)',
                   borderRadius: 8,
                   overflow: 'auto',
@@ -1976,6 +2004,7 @@ function ScreenBuilderScreen({
               units: (obj as MibObjectSummary & { units?: string }).units,
               access: normalizeAccess(obj.access),
               widget: suggestWidget(obj),
+              enumMap: enumMapFor(obj, f.enumMap),
               label: f.label === 'New field' || f.label === 'Table' ? obj.name : f.label,
               minValue: obj.nmsDataType.toLowerCase().includes('int') ? 0 : undefined,
               maxValue: obj.nmsDataType.toLowerCase().includes('int') ? 100 : undefined,
@@ -2005,6 +2034,7 @@ function ScreenBuilderScreen({
       syntax: obj.nmsDataType,
       access: normalizeAccess(obj.access),
       widget: suggestWidget(obj),
+      enumMap: enumMapFor(obj),
       order: 999,
     };
 

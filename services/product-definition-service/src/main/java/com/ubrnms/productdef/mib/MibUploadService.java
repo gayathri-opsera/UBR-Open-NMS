@@ -129,6 +129,16 @@ public class MibUploadService {
                     o.put("subSection", obj.getSubSection());
                     o.put("isEnum",     "ENUM".equals(obj.getNmsDataType()));
                     o.put("enumValueCount", obj.getEnumValues().size());
+                    if (!obj.getEnumValues().isEmpty()) {
+                        // MibObject keys look like "enable(1)" -> "1". Send value -> label ("1" -> "enable")
+                        // so the UI Builder can bind real labels to the field (enumMap) instead of a bare number.
+                        Map<String, String> labels = new LinkedHashMap<>();
+                        obj.getEnumValues().forEach((k, v) -> {
+                            int paren = k.lastIndexOf('(');
+                            labels.put(v, paren > 0 ? k.substring(0, paren).trim() : k);
+                        });
+                        o.put("enumValues", labels);
+                    }
                     if (obj.getDescription() != null && !obj.getDescription().isBlank()) {
                         o.put("description", obj.getDescription());
                     }

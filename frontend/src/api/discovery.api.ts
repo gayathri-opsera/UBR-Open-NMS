@@ -89,6 +89,9 @@ export interface SnmpDiscoveryRunRequest {
    * Replaced by credentialId once the credential store is built (WO-027).
    */
   community?: string;
+  /** Optional one-off device web login (not stored): lets discovery read the role from firmware whose SNMP agent hides it. */
+  webUsername?: string;
+  webPassword?: string;
   /** Per-host SNMP GET timeout in seconds (default: 5). */
   timeoutSeconds?: number;
   /** Number of SNMP retries on timeout (default: 2). Auth failures are never retried). */
@@ -214,6 +217,8 @@ export interface DiscoveryResult {
   deviceRole?: UbrDeviceType;
   /** Where deviceRole came from, e.g. "snmp .1.3.6.1.4.1.52619.1.1.1.1.1.2=1". */
   deviceRoleSource?: string;
+  /** Why the role is missing and how to get it (e.g. the agent returned a placeholder). */
+  deviceRoleNote?: string;
   /** Device-reported GPS latitude in decimal degrees. Absent when not reported. */
   latitude?: number;
   /** Device-reported GPS longitude in decimal degrees. Absent when not reported. */

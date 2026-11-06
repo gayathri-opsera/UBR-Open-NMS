@@ -21,14 +21,14 @@
  */
 
 import type React from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type {
   NodeViewChange, NodeViewChangeResult, NodeViewValues, ParameterValueRecord,
   WireframeGroup, WireframeParameter,
 } from '../../api/nodeView.types';
 import { valueKey } from '../../api/nodeView.types';
-import { applyNodeViewChanges } from '../../api/nodeView.api';
+import { applyNodeViewChanges, fetchMonitorLive, type LiveStatus } from '../../api/nodeView.api';
 
 import { Badge }   from './common/Badge';
 import { Button }  from './common/Button';
@@ -348,9 +348,9 @@ function validate(param: WireframeParameter, value: string): string | null {
 // ── status strip ──────────────────────────────────────────────────────────────
 
 function StatusBar({
-  deviceStatus, productDefinitionId, registryVersion, collectedAt, pollStatus, loading, refreshing, onRefresh,
+  liveStatus, statsAt, productDefinitionId, registryVersion, collectedAt, pollStatus, loading, refreshing, onRefresh,
 }: {
-  deviceStatus: string; productDefinitionId: string; registryVersion: string;
+  liveStatus: LiveStatus | null; statsAt?: string | null; productDefinitionId: string; registryVersion: string;
   collectedAt?: string | null; pollStatus?: string; loading: boolean; refreshing: boolean; onRefresh: () => void;
 }) {
   const pollOk = pollStatus === 'OK';
@@ -360,11 +360,23 @@ function StatusBar({
       display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', padding: '8px 14px',
       background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)', borderRadius: 8, marginBottom: 16,
     }}>
-      <span style={strip}>Status: <strong style={{ color: 'var(--vf-text-primary)' }}>{deviceStatus || '—'}</strong></span>
+      <span style={strip}>
+        Status: {liveStatus
+          ? <Badge variant={liveStatus.state === 'ONLINE' ? 'success' : 'danger'} dot>{liveStatus.state}</Badge>
+          : <strong style={{ color: 'var(--vf-text-primary)' }}>Checking…</strong>}
+        {liveStatus && (
+          <span> · {liveStatus.rttMs != null ? `${liveStatus.rttMs} ms` : 'no reply'} · checked {new Date(liveStatus.checkedAt).toLocaleTimeString()}</span>
+        )}
+      </span>
       <span style={{ ...strip, fontFamily: 'var(--vf-font-mono)' }}>def: {productDefinitionId}{registryVersion ? ` · rv${registryVersion}` : ''}</span>
       <span style={strip}>
         Last polled: <strong style={{ color: 'var(--vf-text-primary)' }}>{collectedAt ? new Date(collectedAt).toLocaleString() : '—'}</strong>
       </span>
+      {statsAt && (
+        <span style={strip}>
+          Live statistics: <strong style={{ color: 'var(--vf-text-primary)' }}>{new Date(statsAt).toLocaleTimeString()}</strong>
+        </span>
+      )}
       {pollStatus && (
         <span style={strip}>
           Poll: <Badge variant={pollOk ? 'success' : pollStatus === 'NOT_POLLED' ? 'default' : 'danger'}>{pollStatus}</Badge>
@@ -522,10 +534,18 @@ function ParameterField({ groupId, param, record, canEdit, edits, errors, onEdit
 
   // No value from the device: say why, never fake one.
   if (instances.length === 0) {
-    const why = record?.readStatus === 'UNMAPPED' ? 'No OID in the definition'
-      : record?.readStatus === 'NO_SUCH_OBJECT' ? 'Not reported by the device'
+    const why = record?.readStatus === 'UNMAPPED' ? 'Not exposed over SNMP (no OID in the definition)'
+      : record?.readStatus === 'NO_SUCH_OBJECT' ? 'Not exposed over SNMP (the device does not serve this OID)'
+      : record?.readStatus === 'PLACEHOLDER' ? `Not exposed over SNMP — the device's SNMP agent returned a placeholder${record.failureReason ? ` (${record.failureReason.replace(/^.*\(|\)$/g, '')})` : ''}; the real value is only in its web UI`
       : record?.readStatus === 'UNREACHABLE' ? 'Device unreachable' : 'No value yet';
     return <Input id={baseId} label={title} value="" placeholder="—" disabled hint={why} readOnly />;
+  }
+
+  // Read from the device's own web UI (its SNMP agent cannot serve this value): show it, never offer to SNMP-write it.
+  if (record?.source && instances.length === 1 && instances[0].index === '') {
+    const hint = record.source === 'standard-mib'
+      ? 'Read from the standard MIB (the vendor value is a placeholder)' : 'Read from the device web UI';
+    return <Input id={baseId} label={title} value={instances[0].display ?? ''} placeholder="—" disabled readOnly hint={hint} />;
   }
 
   const stale = record && (record.freshnessState === 'STALE' || record.freshnessState === 'FAILED');
@@ -653,7 +673,7 @@ interface Props {
   loading:             boolean;
   refreshing:          boolean;
   onRefresh:           () => void;
-  deviceStatus:        string;
+  liveStatus:          LiveStatus | null;
   productDefinitionId: string;
   registryVersion:     string;
   collectedAt?:        string | null;
@@ -667,7 +687,7 @@ interface Props {
 // ── main ──────────────────────────────────────────────────────────────────────
 
 export function NodeViewParameters({
-  deviceId, wireframe, values, loading, refreshing, onRefresh, deviceStatus,
+  deviceId, wireframe, values: cachedValues, loading, refreshing, onRefresh, liveStatus,
   productDefinitionId, registryVersion, collectedAt, pollStatus, canEdit, deviceWritable,
 }: Props) {
   const { addToast } = useToast();
@@ -704,6 +724,37 @@ export function NodeViewParameters({
       (g) => g.uiPage === activeGroup.uiPage && g.uiParent === activeGroup.uiParent,
     );
   }, [activeGroup, groups]);
+
+  // Real-time statistics. The device's own statistics pages re-read their counters while open
+  // (Interface/Wireless Stats every 5 s, Link Stats every 1 s); do the same for the visible Monitor tab —
+  // a read of just that tab's OIDs, laid over the cached values. Configuration tabs are not polled
+  // (the device loads them once too).
+  const [liveOverlay, setLiveOverlay] = useState<NodeViewValues>({});
+  const [liveStatsAt, setLiveStatsAt] = useState<string | null>(null);
+  const monitorGroupId = activeGroup?.uiPage === 'Monitor' ? activeGroup.groupId : '';
+  const monitorEveryMs = /link/i.test(activeGroup?.uiTab ?? '') ? 2000 : 5000;
+  useEffect(() => {
+    setLiveOverlay({});
+    setLiveStatsAt(null);
+    if (!monitorGroupId) return;
+    let stopped = false;
+    let busy = false;
+    const ctl = new AbortController();
+    const tick = async () => {
+      if (busy || document.hidden) return;   // no polling from a background tab
+      busy = true;
+      try {
+        const r = await fetchMonitorLive(deviceId, [monitorGroupId], ctl.signal);
+        if (stopped || !r) return;
+        if (r.pollStatus === 'OK') { setLiveOverlay(r.values); setLiveStatsAt(r.collectedAt); }
+      } catch { /* keep the last reading */ }
+      finally { busy = false; }
+    };
+    void tick();
+    const timer = setInterval(() => { void tick(); }, monitorEveryMs);
+    return () => { stopped = true; ctl.abort(); clearInterval(timer); };
+  }, [deviceId, monitorGroupId, monitorEveryMs]);
+  const values = useMemo(() => ({ ...cachedValues, ...liveOverlay }), [cachedValues, liveOverlay]);
 
   const cards = useMemo(() => {
     if (!activeGroup) return [] as Array<{ key: string; title: string; params: WireframeParameter[] }>;
@@ -1157,7 +1208,7 @@ export function NodeViewParameters({
     return (
       <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
         <StatusBar
-          deviceStatus={deviceStatus} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
+          liveStatus={liveStatus} statsAt={liveStatsAt} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
           collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing} onRefresh={onRefresh}
         />
         {loading && Object.keys(values).length === 0 && <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>}
@@ -1230,7 +1281,7 @@ export function NodeViewParameters({
     return (
       <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
         <StatusBar
-          deviceStatus={deviceStatus} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
+          liveStatus={liveStatus} statsAt={liveStatsAt} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
           collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing} onRefresh={onRefresh}
         />
         {loading && Object.keys(values).length === 0 && (
@@ -1310,7 +1361,7 @@ export function NodeViewParameters({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
       <StatusBar
-        deviceStatus={deviceStatus} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
+        liveStatus={liveStatus} statsAt={liveStatsAt} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
         collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing} onRefresh={onRefresh}
       />
       {loading && Object.keys(values).length === 0 && (

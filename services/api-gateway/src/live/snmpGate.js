@@ -34,7 +34,10 @@ function runExclusive(host, port, fn) {
   return run;
 }
 
+/** True while an operation is queued or running on this device (the agent is already busy with us). */
+function isBusy(host, port) { return tails.has(`${host}:${port || 161}`); }
+
 /** Number of devices with an operation queued or running (diagnostics / tests). */
 function activeDevices() { return tails.size; }
 
-module.exports = { runExclusive, activeDevices };
+module.exports = { runExclusive, activeDevices, isBusy };

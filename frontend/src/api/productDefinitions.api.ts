@@ -650,6 +650,8 @@ export interface MibObjectSummary {
   subSection: string;
   isEnum: boolean;
   enumValueCount: number;
+  /** value → label, e.g. { '0': 'disable', '1': 'enable' }; present only for enum objects. */
+  enumValues?: Record<string, string>;
   description?: string;
   units?: string;
 }

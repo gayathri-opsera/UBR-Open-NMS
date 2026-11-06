@@ -114,14 +114,87 @@ function isConfigGuiXml(text) {
   );
 }
 
+const numOrNull = (v) => { const n = Number(v); return v !== '' && v != null && Number.isFinite(n) ? n : null; };
+
+/** value of an XML attribute in a tag's attribute string, or '' */
+function xmlAttr(attrs, name) {
+  const m = new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i').exec(attrs || '');
+  return m ? m[1] : '';
+}
+
+/**
+ * <InstanceMaps> — how a table column is split into components (radios, ports) without the OIDs carrying it.
+ *
+ *   <InstanceMap id="radio" ui="parent">
+ *     <Row index="1" component="radio24" label="2.4 GHz Radio"/> …
+ *   </InstanceMap>
+ *
+ * A parameter in a section (or marked itself) with instances="radio" is expanded into one parameter per row:
+ * OID = column OID + "." + row index (+ the map's suffix), group = "<component>.<section>". `ui="parent"` makes the
+ * row label the sidebar parent (Wireless / Radio 1 / Properties); `ui="tab"` makes it the tab (Network / VLAN / Radio 1).
+ */
+function parseInstanceMaps(text) {
+  const maps = {};
+  const re = /<InstanceMap\b([^>]*)>([\s\S]*?)<\/InstanceMap>/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const id = xmlAttr(m[1], 'id');
+    if (!id) continue;
+    const rows = [];
+    const rowRe = /<Row\b([^>]*?)\/?>/gi;
+    let r;
+    while ((r = rowRe.exec(m[2])) !== null) {
+      const index = xmlAttr(r[1], 'index');
+      const component = xmlAttr(r[1], 'component');
+      if (index && component) rows.push({ index, component, label: xmlAttr(r[1], 'label') || component, ifName: xmlAttr(r[1], 'ifName') });
+    }
+    maps[id] = { id, suffix: xmlAttr(m[1], 'suffix'), ui: (xmlAttr(m[1], 'ui') || 'parent').toLowerCase(), rows };
+  }
+  return maps;
+}
+
+/** <Identity> — vendor / model / how devices are recognised (optional; otherwise derived from the OIDs). */
+function parseConfigGuiIdentity(text) {
+  const idM = /<Identity\b[^>]*>([\s\S]*?)<\/Identity>/i.exec(text);
+  if (!idM) return null;
+  const body = idM[1];
+  const tag = (t) => { const x = new RegExp(`<${t}[^>]*>([\\s\\S]*?)</${t}>`, 'i').exec(body); return x ? x[1].trim() : ''; };
+  const matchRules = [];
+  const mRe = /<Match\b([^>]*?)\/?>/gi;
+  let mm;
+  while ((mm = mRe.exec(body)) !== null) {
+    const value = xmlAttr(mm[1], 'value');
+    if (value) matchRules.push({ priority: matchRules.length + 1, field: xmlAttr(mm[1], 'field') || 'sysObjectId', op: xmlAttr(mm[1], 'op') || 'prefix', value });
+  }
+  const variants = [...body.matchAll(/<Variant[^>]*>([\s\S]*?)<\/Variant>/gi)].map((v) => v[1].trim()).filter(Boolean);
+  return {
+    definitionId: tag('DefinitionId') || null,
+    deviceType: tag('DeviceType') || null,
+    vendor: tag('Vendor') || null, model: tag('Model') || null, productFamily: tag('Family') || null,
+    variants, matchRules,
+  };
+}
+
+/** Widgets the Node View wireframe understands (live/wireframeBuilder.js VALID_WIDGETS). */
+function wireframeWidget(widget, readOnly, isSecret) {
+  if (readOnly) return 'readonly';
+  const w = String(widget || '').toLowerCase();
+  if (w === 'dropdown') return 'dropdown';
+  if (w === 'checkbox') return 'toggle';
+  if (isSecret || w === 'password') return 'textfield';
+  return 'textfield';
+}
+
 /**
  * Parse Configurations GUI XML → array of group objects.
- * The file has multiple root elements (Wireless, Network, Monitor) which is technically
- * invalid XML, so we use regex rather than a DOM parser.
+ * The original client file has several root elements (Wireless, Network, Monitor), which is technically invalid
+ * XML, so a text parser is used rather than a DOM parser; a wrapped single-root file parses the same way.
  */
 function parseConfigGuiXml(text) {
   const MODULE_SECTION = { wireless: 'config', network: 'config', monitor: 'monitor' };
   const groups = [];
+  const maps = parseInstanceMaps(text);
+  const snake = (t) => t.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().replace(/[^a-z0-9_]/g, '_');
 
   // Match top-level module blocks
   const moduleRe = /<(Wireless|Network|Monitor)\b[^>]*>([\s\S]*?)<\/\1>/gi;
@@ -140,20 +213,25 @@ function parseConfigGuiXml(text) {
       const secBody  = secM[3];
       if (!secBody.includes('<parameter')) continue;
 
-      const labelM      = secAttrs.match(/label=["']([^"']*)["']/i);
-      const sectionLabel = labelM ? labelM[1] : secTag;
+      const sectionLabel = xmlAttr(secAttrs, 'label') || secTag;
       const groupId     = `${moduleName.toLowerCase()}-${secTag.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+      const secMapId    = xmlAttr(secAttrs, 'instances');
+      const secUi = {
+        uiPage:   xmlAttr(secAttrs, 'uiPage')   || null,
+        uiParent: xmlAttr(secAttrs, 'uiParent') || null,
+        uiTab:    xmlAttr(secAttrs, 'uiTab')    || null,
+      };
 
       const parameters = [];
-      let order = 0;
+      let order = 1;   // 0 means "unordered" to the layout, so the first parameter must not be 0
       const paramRe = /<parameter\b([^>]*)>([\s\S]*?)<\/parameter>/gi;
       let paramM;
       while ((paramM = paramRe.exec(secBody)) !== null) {
         const pAttrs   = paramM[1];
         const pContent = paramM[2];
 
-        const nameAttr = (pAttrs.match(/name=["']([^"']*)["']/i) || [])[1] || '';
-        const idAttr   = (pAttrs.match(/id=["']([^"']*)["']/i)   || [])[1] || '';
+        const nameAttr = xmlAttr(pAttrs, 'name');
+        const idAttr   = xmlAttr(pAttrs, 'id');
 
         function pText(tag) {
           const m2 = pContent.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i'));
@@ -195,29 +273,68 @@ function parseConfigGuiXml(text) {
           groupId,
           snmpOid:      oid || null,
           dataType:     effectiveDataType,
-          uiWidget:     effectiveWidget,
+          uiWidget:     wireframeWidget(effectiveWidget, readOnly, isSecret),
           readOnly,
           defaultValue: defVal || null,
           enumValues:   enumVals,
-          minValue:     null, maxValue: null,
+          minValue:     numOrNull(pText('min')), maxValue: numOrNull(pText('max')),
           displayOrder: order++,
           isSecret,
-          units:        null,
+          units:        pText('units') || null,
         };
+        // <fallback source="ip.address"/> — a standard-MIB source for when the vendor OID answers with a placeholder
+        const fbM = /<fallback\b([^>]*?)\/?>/i.exec(pContent);
+        if (fbM && xmlAttr(fbM[1], 'source')) param.fallback = { source: xmlAttr(fbM[1], 'source'), ...(xmlAttr(fbM[1], 'ifName') ? { ifName: xmlAttr(fbM[1], 'ifName') } : {}) };
         if (sectionType === 'monitor') {
           param.pollIntervalSec = 60;
           param.normalRange     = null;
           param.section         = 'monitor';
         }
+        const unique = !parameters.some((q) => q.parameterId === param.parameterId);
+        if (!unique) { logger.warn({ msg: 'ConfigGui XML: duplicate parameter id skipped', groupId, id: param.parameterId }); continue; }
+        param._map = xmlAttr(pAttrs, 'instances') || secMapId;
         parameters.push(param);
       }
 
-      if (parameters.length > 0) {
+      // Split table-column parameters into one group per component (radio / port) using the declared instance map.
+      const expanded = new Map();           // groupId → group
+      const plain = [];
+      for (const p of parameters) {
+        const map = p._map ? maps[p._map] : null;
+        delete p._map;
+        if (!map || !map.rows.length) { plain.push(p); continue; }
+        for (const row of map.rows) {
+          const gid = `${row.component}.${snake(secTag)}`;
+          if (!expanded.has(gid)) {
+            const tabUi = map.ui === 'tab';
+            expanded.set(gid, {
+              groupId: gid,
+              displayName: `${row.label} / ${sectionLabel}`,
+              uiPage:   secUi.uiPage || moduleName,
+              uiParent: tabUi ? (secUi.uiParent || sectionLabel) : row.label,
+              uiTab:    tabUi ? row.label : (secUi.uiTab || sectionLabel),
+              parameters: [],
+              section: sectionType,
+            });
+          }
+          const g = expanded.get(gid);
+          g.parameters.push({
+            ...p, groupId: gid, displayOrder: g.parameters.length + 1,
+            parameterId: `${gid}.${p.parameterId}`,            // unique across radios (radio1.properties.ssid)
+            snmpOid: p.snmpOid ? `${p.snmpOid}.${row.index}${map.suffix || ''}` : null,
+            ...(p.fallback ? { fallback: { ...p.fallback, ...(p.fallback.ifName === '{ifName}' ? { ifName: row.ifName } : {}) } } : {}),
+          });
+        }
+      }
+      for (const g of expanded.values()) groups.push({ ...g, displayOrder: groups.length });
+
+      if (plain.length > 0) {
         groups.push({
           groupId,
           displayName: `${moduleName} / ${sectionLabel}`,
           displayOrder: groups.length,
-          parameters,
+          ...(secUi.uiPage || secUi.uiParent || secUi.uiTab ? { uiPage: secUi.uiPage || moduleName, uiParent: secUi.uiParent || sectionLabel, uiTab: secUi.uiTab || sectionLabel } : {}),
+          parameters: plain,
           section: sectionType,
         });
       }
@@ -314,7 +431,7 @@ function parseConfigGuiXlsx(buffer) {
 }
 
 /** Build a canonical descriptor shape from Configurations GUI groups */
-function buildConfigGuiDescriptor(groups, filename) {
+function buildConfigGuiDescriptor(groups, filename, declaredIdentity = null) {
   const allOids  = groups.flatMap((g) => g.parameters.map((p) => p.snmpOid || '')).join(' ');
   const ent      = detectEnterpriseFromText(allOids);
   const vendor   = ent?.vendor || 'Unknown';
@@ -333,12 +450,13 @@ function buildConfigGuiDescriptor(groups, filename) {
     isNmsFormat:  false,
     sourceFormat: 'config-gui',
     identity: {
-      vendor,
-      productFamily: vendor,
-      model,
-      variants: [],
+      vendor:        (declaredIdentity && declaredIdentity.vendor)        || vendor,
+      productFamily: (declaredIdentity && declaredIdentity.productFamily) || vendor,
+      ...(declaredIdentity && declaredIdentity.deviceType ? { deviceType: declaredIdentity.deviceType } : {}),
+      model:         (declaredIdentity && declaredIdentity.model)         || model,
+      variants:      (declaredIdentity && declaredIdentity.variants) || [],
       firmwareRange: '–',
-      matchRules,
+      matchRules:    (declaredIdentity && declaredIdentity.matchRules && declaredIdentity.matchRules.length) ? declaredIdentity.matchRules : matchRules,
     },
     capabilities: {
       protocols: [{ type: 'snmp', version: 'v2c', defaultPort: 161 }],
@@ -412,7 +530,7 @@ function parseUpload(buf, filename = '') {
       const groups = parseConfigGuiXml(text);
       if (groups.length > 0) {
         logger.info({ msg: 'Detected Configurations GUI XML format', groups: groups.length });
-        return buildConfigGuiDescriptor(groups, filename);
+        return buildConfigGuiDescriptor(groups, filename, parseConfigGuiIdentity(text));
       }
     } catch (xmlErr) {
       logger.warn({ msg: 'ConfigGui XML parse failed', err: xmlErr.message });
@@ -656,8 +774,16 @@ router.post('/', requireDescriptorAction('upload'), upload.single('file'), async
     if (!productDefinitionId && req.file) {
       try {
         const snippet = req.file.buffer.toString('utf8', 0, Math.min(req.file.buffer.length, 8192));
+        // A file that declares its own <Identity> names the product itself (vendor-independent); the built-in
+        // enterprise-number table is only the fallback for files that say nothing.
+        const declared = /<DeviceDefinition\b/.test(snippet) ? parseConfigGuiIdentity(req.file.buffer.toString('utf8')) : null;
+        const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
         const ent = detectEnterpriseFromText(snippet);
-        if (ent) {
+        if (declared && declared.definitionId) {
+          productDefinitionId = declared.definitionId;
+        } else if (declared && declared.vendor && declared.model) {
+          productDefinitionId = `${slug(declared.vendor)}.${slug(declared.model)}`;
+        } else if (ent) {
           const vendorSlug = ent.vendor.toLowerCase().replace(/[^a-z0-9]+/g, '-');
           const modelSlug  = ent.model.toLowerCase().replace(/[^a-z0-9]+/g, '-');
           productDefinitionId = `${vendorSlug}.${modelSlug}`;
@@ -1063,6 +1189,7 @@ router.post('/:id/versions/:v/activate', requireDescriptorAction('activate'), as
           versionId:           String(doc._id),
           vendor:              doc.identity?.vendor || null,
           model:               doc.identity?.model  || null,
+          lifecycleStatus:     'ACTIVE',   // a re-activation after a deprecate must not stay DEPRECATED
           updatedAt:           now,
         }, $setOnInsert: { createdAt: now } },
         { upsert: true },
@@ -1084,6 +1211,7 @@ router.post('/:id/versions/:v/activate', requireDescriptorAction('activate'), as
             displayName:   p.displayName || p.label || p.name || p.parameterId || p.id,
             groupId:       p.groupId || g.groupId,
             subGroup:      p.subGroup || null,
+            fallback:      p.fallback || null,
             dataType:      p.dataType || 'STRING',
             snmpOid:       p.snmpOid ? `.${p.snmpOid.replace(/^\./, '')}` : (p.oid ? `.${p.oid.replace(/^\./, '')}` : null),
             uiWidget:      p.uiWidget || p.widget || null,
@@ -1123,6 +1251,7 @@ router.post('/:id/versions/:v/activate', requireDescriptorAction('activate'), as
           vendor:              doc.identity?.vendor        || null,
           model:               doc.identity?.model         || null,
           productFamily:       doc.identity?.productFamily || doc.identity?.vendor || null,
+          deviceType:          doc.identity?.deviceType || null,
           firmwareFrom:        (doc.identity?.firmwareRange || '').split('–')[0]?.trim() || null,
           firmwareTo:          (doc.identity?.firmwareRange || '').split('–')[1]?.trim() || null,
           supportedProtocols:  (doc.capabilities?.protocols || []).map((p) =>
@@ -1191,6 +1320,19 @@ router.post('/:id/versions/:v/activate', requireDescriptorAction('activate'), as
         { upsert: true },
       );
     }
+
+    // One definition has ONE active version: activating this one supersedes any other Active version of the same
+    // product (they used to stay "Active" side by side, while Discovery — which follows the single active pointer —
+    // showed only one).
+    const others = await DescriptorVersion.find({ productDefinitionId: doc.productDefinitionId, state: 'Active', _id: { $ne: doc._id } });
+    for (const o of others) {
+      o.state = 'Deprecated';
+      o.deprecatedAt = new Date();
+      o.isDefault = false;
+      o.addLifecycleEvent('Deprecated', a, `Superseded by ${doc.version}`, o.dependencySummary());
+      await o.save();
+    }
+    if (others.length) logger.info({ msg: 'descriptor: superseded previous active version(s)', productDefinitionId: doc.productDefinitionId, superseded: others.map((o) => o.version), by: doc.version, correlationId });
 
     await doc.save();
 
@@ -1267,9 +1409,17 @@ router.post('/:id/versions/:v/deprecate', requireDescriptorAction('deprecate'), 
       const pdb = mongoose.connection.readyState === 1
         ? mongoose.connection.client.db(PDEF_DB) : null;
       if (pdb) {
+        const when = new Date();
+        // Only when THIS version is the one the pointer names: deprecating an older version must not mark the current
+        // active version as deprecated.
         await pdb.collection('product_definition_active_versions').updateOne(
-          { productDefinitionId: doc.productDefinitionId },
-          { $set: { lifecycleStatus: 'DEPRECATED', updatedAt: new Date() } },
+          { productDefinitionId: doc.productDefinitionId, $or: [{ activeVersionId: String(doc._id) }, { versionId: String(doc._id) }] },
+          { $set: { lifecycleStatus: 'DEPRECATED', updatedAt: when } },
+        );
+        // The Discovery template list reads product_definition_versions: keep it in step (only this version's record)
+        await pdb.collection('product_definition_versions').updateOne(
+          { definitionId: doc.productDefinitionId, versionId: String(doc._id) },
+          { $set: { lifecycleStatus: 'DEPRECATED', updatedAt: when } },
         );
       }
     } catch (e) {
@@ -1586,3 +1736,4 @@ router.post('/:id/versions/:v/migrate', requireDescriptorAction('migrate'), asyn
 
 module.exports = router;
 module.exports.parseUpload = parseUpload;
+module.exports.__declaredIdentity = parseConfigGuiIdentity;

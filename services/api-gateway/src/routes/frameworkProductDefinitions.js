@@ -957,8 +957,22 @@ async function historyWithRegistryDecorator(proxyRes, proxyResData, userReq, use
       knownIds.add(d.productDefinitionId);
     }
 
-    if (missingIds.length === 0 && extras.length === 0) return proxyResData;
-    logger.info({ msg: 'history: injected normalizedMetadata + registry extras', patched: missingIds.length, extras: extras.length });
+    // ── Status of the version Discovery offers = the status the lifecycle actions last recorded ───────────
+    // (active_versions is updated by activate / deprecate / retire; a copy that drifted must not show [ACTIVE])
+    let statusFixed = 0;
+    const avDocs = await pdb.collection('product_definition_active_versions')
+      .find({}).project({ productDefinitionId: 1, versionId: 1, activeVersionId: 1, lifecycleStatus: 1 }).toArray();
+    const avMap = new Map(avDocs.map((a) => [a.productDefinitionId, a]));
+    for (const item of javaItems) {
+      const a = avMap.get(item.definitionId || item.productDefinitionId);
+      if (!a || !a.lifecycleStatus) continue;
+      const vid = a.versionId || a.activeVersionId;
+      if (vid && item.versionId && String(item.versionId) !== String(vid)) continue;
+      if (item.lifecycleStatus !== a.lifecycleStatus) { item.lifecycleStatus = a.lifecycleStatus; statusFixed += 1; }
+    }
+
+    if (missingIds.length === 0 && extras.length === 0 && statusFixed === 0) return proxyResData;
+    logger.info({ msg: 'history: injected normalizedMetadata + registry extras', patched: missingIds.length, extras: extras.length, statusFixed });
     return JSON.stringify([...javaItems, ...extras]);
   } catch (e) {
     logger.warn({ msg: 'history: registry supplement error', err: e.message });

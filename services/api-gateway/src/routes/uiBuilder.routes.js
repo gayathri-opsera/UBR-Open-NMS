@@ -84,9 +84,19 @@ function validateBoundOids(descriptor) {
   return missing;
 }
 
-function enumMapToOptions(enumMap) {
+/** Only real enum entries: a table block keeps its `columns` setting in the same map. */
+function enumEntries(enumMap) {
   if (!enumMap || typeof enumMap !== 'object') return [];
-  return Object.entries(enumMap).map(([value, label]) => ({ value, label: String(label) }));
+  return Object.entries(enumMap).filter(([value]) => value !== 'columns');
+}
+
+function enumMapToOptions(enumMap) {
+  return enumEntries(enumMap).map(([value, label]) => ({ value, label: String(label) }));
+}
+
+/** "enable(1)" style strings — the form the live reader (resolveDisplay) turns a raw 1 into "enable(1)". */
+function enumMapToValues(enumMap) {
+  return enumEntries(enumMap).map(([value, label]) => `${label}(${value})`);
 }
 
 /**
@@ -102,7 +112,7 @@ function descriptorToWireframe(descriptor) {
         .map((f, pi) => ({
           parameterId:     f.mibObject || f.fieldId,
           displayName:     f.label || f.mibObject || f.fieldId,
-          dataType:        'STRING',
+          dataType:        enumEntries(f.enumMap).length ? 'ENUM' : 'STRING',
           unit:            f.units || null,
           uiWidget:        f.widget || null,
           effectiveWidget: f.widget || (f.elementType === 'table-block' ? 'data-table' : 'textfield'),
@@ -111,7 +121,7 @@ function descriptorToWireframe(descriptor) {
           hidden:          false,
           displayOrder:    pi + 1,
           subGroup:        null,
-          enumValues:      f.enumMap ? Object.keys(f.enumMap) : [],
+          enumValues:      enumMapToValues(f.enumMap),
           options:         enumMapToOptions(f.enumMap),
           minValue:        f.minValue ?? null,
           maxValue:        f.maxValue ?? null,
@@ -355,3 +365,4 @@ router.get('/descriptors/:id/xml', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.descriptorToWireframe = descriptorToWireframe;   // exposed for unit tests

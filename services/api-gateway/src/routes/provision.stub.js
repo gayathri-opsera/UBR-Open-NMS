@@ -147,7 +147,7 @@ async function resolveSnmpCredential(col, host, ip, priv) {
   const prior = await col.findOne({ ipAddress: ip, snmpCommunity: { $nin: [null, ''] } }, { projection });
   // The credential the discovery run just used successfully — held server-side for this run only —
   // is the freshest; it wins over whatever an older record at this IP carries.
-  if (priv && priv.community) return { community: priv.community, port: priv.port || port, prior };
+  if (priv && priv.community) return { community: priv.community, port: priv.port || port, prior, webCredentials: priv.webCredentials || null };
   if (prior) return { community: prior.snmpCommunity, port: prior.snmpPort || port, prior };
   if (host.credentialId) {
     try {
@@ -307,6 +307,7 @@ async function provisionOne(host, col, ctx = {}) {
       model:            resolvedModel,
       productDefinitionId: productDefinitionId || null,
       ...(snmp.community ? { snmpPort: snmp.port, snmpCommunity: snmp.community } : {}),
+      ...(snmp.webCredentials ? { webCredentials: snmp.webCredentials } : {}),
       // Provisioned via discovery → ONLINE immediately for admin-initiated provision.
       status:           'ONLINE',
       ipAddress:        ip,

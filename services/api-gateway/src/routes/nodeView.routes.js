@@ -30,6 +30,10 @@ const express    = require('express');
 const { v4: uuidv4 } = require('uuid');
 const logger     = require('../utils/logger');
 const live       = require('../live/liveParameters');
+const { probeDevice } = require('../live/snmpWalk');
+const { encrypt: encryptSecret } = require('../utils/aesEncrypt');
+const { isBusy } = require('../live/snmpGate');
+const lastProbe = new Map();   // 'host:port' → { at, result } — one liveness probe per device per few seconds
 const { getCachedOnly } = live;
 const crypto     = require('crypto');
 const { planChange } = require('../live/parameterWrite');
@@ -227,6 +231,118 @@ async function resolveWireframe(redis, productDefinitionId) {
 }
 
 // ── GET /api/node-view/:deviceId ──────────────────────────────────────────────
+/** groups[].parameters[] → { 'groupId::parameterId': record } — the shape the Node View binds to. */
+function flattenValues(inner) {
+  const map = {};
+  for (const g of (inner && inner.groups) || []) {
+    for (const p of (g.parameters || [])) {
+      map[`${g.groupId}::${p.parameterId}`] = {
+        value:          p.value         ?? null,
+        display:        p.display       ?? null,
+        freshnessState: p.freshnessState,
+        readStatus:     p.readStatus,
+        collectedAt:    p.collectedAt   ?? null,
+        isTable:        p.isTable       || false,
+        instances:      p.instances     || [],
+        unit:           p.unit          || null,
+        failureReason:  p.failureReason || null,
+        ...(p.source ? { source: p.source } : {}),
+      };
+    }
+  }
+  return map;
+}
+
+/**
+ * Real-time statistics: fresh SNMP read of the requested Monitor groups only (?groups=a,b).
+ * Mirrors the device's own statistics pages, which re-read their counters every 1–5 s.
+ */
+router.get(
+  '/:deviceId/monitor-live',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'node-view.monitor-live'),
+  async (req, res) => {
+    try {
+      const device = await live.findDevice(req.params.deviceId);
+      if (!device) return res.status(404).json({ status: 'error', error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found.' } });
+      const groups = String(req.query.groups || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 6);
+      const r = await live.pollMonitorGroups(device, groups);
+      res.set('Cache-Control', 'no-store');
+      return res.json({ status: 'ok', data: { pollStatus: r.pollStatus, collectedAt: r.collectedAt, values: flattenValues({ groups: r.groups }), ...(r.error ? { error: r.error } : {}) } });
+    } catch (e) {
+      return res.status(500).json({ status: 'error', error: { code: 'MONITOR_POLL_FAILED', message: e.message } });
+    }
+  },
+);
+
+/**
+ * Per-device web login for firmware whose SNMP agent cannot serve its configuration (see live/webSource.js).
+ *   PUT    { username, password }  store it (password AES-256-GCM encrypted on the device record)
+ *   GET                            { configured, username }   (the password is never returned)
+ *   DELETE                         remove it
+ */
+router.put(
+  '/:deviceId/web-credentials',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'node-view.web-credentials.set'),
+  async (req, res) => {
+    const { username, password } = req.body || {};
+    if (!username || !password) return res.status(400).json({ status: 'error', error: { code: 'MISSING_FIELD', message: 'username and password are required' } });
+    const device = await live.findDevice(req.params.deviceId);
+    if (!device) return res.status(404).json({ status: 'error', error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found.' } });
+    const ok = await live.updateDeviceFields(req.params.deviceId, { webCredentials: { username: String(username), password: encryptSecret(String(password)) } });
+    logger.info({ msg: 'node-view: device web credential stored', deviceId: req.params.deviceId, username: String(username), by: req.user?.username });
+    return res.json({ status: ok ? 'ok' : 'error', data: { configured: ok, username: String(username) } });
+  },
+);
+router.get(
+  '/:deviceId/web-credentials',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'node-view.web-credentials.get'),
+  async (req, res) => {
+    const device = await live.findDevice(req.params.deviceId);
+    if (!device) return res.status(404).json({ status: 'error', error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found.' } });
+    const w = device.webCredentials;
+    return res.json({ status: 'ok', data: { configured: !!(w && w.username && w.password), username: (w && w.username) || null } });
+  },
+);
+router.delete(
+  '/:deviceId/web-credentials',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.SuperAdmin, 'node-view.web-credentials.delete'),
+  async (req, res) => {
+    const ok = await live.updateDeviceFields(req.params.deviceId, {}, { webCredentials: '' });
+    return res.json({ status: ok ? 'ok' : 'error', data: { configured: false } });
+  },
+);
+
+/**
+ * Real-time reachability: one SNMP GET against the device, nothing cached.
+ */
+router.get(
+  '/:deviceId/live-status',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'node-view.live-status'),
+  async (req, res) => {
+    try {
+      const device = await live.findDevice(req.params.deviceId);
+      if (!device) return res.status(404).json({ status: 'error', error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found.' } });
+      const { host, port } = live.splitHostPort(device);
+      // The radios' agents are small and single-threaded: never add a second request while a walk is running on
+      // this device. The answer then comes from the last probe (or the poll that is running proves it is up).
+      const key = `${host}:${port}`;
+      const last = lastProbe.get(key);
+      let r;
+      if (isBusy(host, port) && last && Date.now() - last.at < 60_000) r = last.result;
+      else if (last && Date.now() - last.at < 4_000) r = last.result;            // coalesce several open pages
+      else { r = await probeDevice({ host, port, community: device.snmpCommunity || 'public' }); lastProbe.set(key, { at: Date.now(), result: r }); }
+      const stored = await live.syncWithProbe(device, r.online).catch(() => ({ pollStatus: null, collectedAt: null }));
+      res.set('Cache-Control', 'no-store');
+      return res.json({ status: 'ok', data: {
+        state: r.online ? 'ONLINE' : 'OFFLINE', rttMs: r.rttMs, uptime: r.uptime, checkedAt: new Date().toISOString(),
+        pollStatus: stored.pollStatus, collectedAt: stored.collectedAt,
+      } });
+    } catch (e) {
+      return res.status(500).json({ status: 'error', error: { code: 'PROBE_FAILED', message: e.message } });
+    }
+  },
+);
+
 /**
  * Combined Node View endpoint.
  *
@@ -419,24 +535,7 @@ router.get(
       // NOTE: getCachedOnly() / getCurrent() return { body: { status, data: { groups, pollStatus, collectedAt } } }
       //       so we must unwrap the `.data` envelope before accessing `groups`.
       const valuesInner = valuesData?.data ?? valuesData ?? {};
-      const valuesMap = {};
-      if (valuesInner.groups) {
-        for (const g of valuesInner.groups) {
-          for (const p of (g.parameters || [])) {
-            valuesMap[`${g.groupId}::${p.parameterId}`] = {
-              value:          p.value         ?? null,
-              display:        p.display       ?? null,
-              freshnessState: p.freshnessState,
-              readStatus:     p.readStatus,
-              collectedAt:    p.collectedAt   ?? null,
-              isTable:        p.isTable       || false,
-              instances:      p.instances     || [],
-              unit:           p.unit          || null,
-              failureReason:  p.failureReason || null,
-            };
-          }
-        }
-      }
+      const valuesMap = flattenValues(valuesInner);
 
       return res.json({
         status: 'ok',

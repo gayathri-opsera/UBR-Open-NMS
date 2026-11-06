@@ -39,6 +39,7 @@ export type ParameterReadStatus =
   | 'TIMEOUT'
   | 'UNMAPPED'
   | 'NO_SUCH_OBJECT'
+  | 'PLACEHOLDER'
   | 'ADAPTER_ERROR'
   | 'REGISTRY_STALE'
   | 'UNKNOWN';

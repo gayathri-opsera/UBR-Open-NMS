@@ -54,6 +54,9 @@ interface FormState {
    * SECURITY: never logged; sent HTTPS-only.
    */
   community: string;
+  /** Optional one-off device web login (not stored) — lets discovery read the role from firmware whose SNMP agent hides it. */
+  webUsername: string;
+  webPassword: string;
   timeoutSeconds: string;
   retries: string;
 }
@@ -148,6 +151,8 @@ function buildInitialState(initialScope?: string): FormState {
     protocol:       'SNMP_V2C',
     credentialId:   '',
     community:      'public',
+    webUsername:    '',
+    webPassword:    '',
     timeoutSeconds: '5',
     retries:        '2',
   };
@@ -277,7 +282,11 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
           retries:        parseInt(form.retries, 10),
           // Prefer stored credential; fall back to direct community string.
           ...(usingFallback
-            ? { community: form.community.trim() }
+            ? {
+                community: form.community.trim(),
+                ...(form.webUsername.trim() && form.webPassword
+                  ? { webUsername: form.webUsername.trim(), webPassword: form.webPassword } : {}),
+              }
             : { credentialId: form.credentialId }),
           // Tag all discovered devices with the selected MIB screen's descriptorId.
           // The gateway provisions devices with this as productDefinitionId so their
@@ -418,6 +427,31 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
           fullWidth
         />
       ) : null}
+
+      {/* Optional device web login for a direct community run (stored credentials carry their own) */}
+      {!credentialsLoading && usingFallback && (
+        <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+          <input
+            aria-label="Device web username (optional)"
+            placeholder="Device web username (optional)"
+            autoComplete="off"
+            value={form.webUsername}
+            onChange={handleField('webUsername')}
+            disabled={submitting}
+            style={{ flex: 1, background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)', borderRadius: 'var(--vf-radius-md)', color: 'var(--vf-text-primary)', padding: '7px 10px' }}
+          />
+          <input
+            aria-label="Device web password (optional)"
+            placeholder="Device web password (optional)"
+            type="password"
+            autoComplete="new-password"
+            value={form.webPassword}
+            onChange={handleField('webPassword')}
+            disabled={submitting}
+            style={{ flex: 1, background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)', borderRadius: 'var(--vf-radius-md)', color: 'var(--vf-text-primary)', padding: '7px 10px' }}
+          />
+        </div>
+      )}
 
       {/* Fallback community string — shown when no credentials or user chose direct entry */}
       {!credentialsLoading && usingFallback && (

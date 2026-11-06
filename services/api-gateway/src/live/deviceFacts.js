@@ -32,6 +32,10 @@ const IPA  = '.1.3.6.1.2.1.4.20.1';
 const VENDOR_FACT_PROFILES = [
   {
     enterprise: '.1.3.6.1.4.1.52619', // EOC Networks (UBR series)
+    // These radios' snmpd is small: after discovery read their whole interface / extended-interface tables the lab
+    // units lost interfaces and processes (ifNumber 25 → 2). Light mode reads the system scalars and the small
+    // address table only; DISCOVERY_FULL_FACTS=true restores the full interface inventory.
+    lightFacts: true,
     facts: {
       serialNumber:     '.1.3.6.1.4.1.52619.1.2.3.1.0',
       firmwareVersion:  '.1.3.6.1.4.1.52619.1.2.2.4.0',
@@ -150,7 +154,8 @@ async function collectDeviceFacts({ host, port = 161, community, managementIp, s
   const varbinds = [];
   const opts = { host, port, community, timeoutMs: 3000, retries: 3, overallTimeoutMs: 24000 };
   try {
-    for (const root of [`${SYS}`, IFT, IFX, IPA]) {
+    const light = !!(profile && profile.lightFacts) && process.env.DISCOVERY_FULL_FACTS !== 'true';
+    for (const root of (light ? [`${SYS}`, IPA] : [`${SYS}`, IFT, IFX, IPA])) {
       varbinds.push(...await walkSubtree({ ...opts, rootOid: root }).catch(() => []));
     }
     // vendor scalars: walk each one's parent so the .0 instance is returned
@@ -184,4 +189,5 @@ function inventoryFields(facts, now = new Date()) {
   return out;
 }
 
-module.exports = { collectDeviceFacts, parseFacts, formatMac, networkIdFor, inventoryFields, INVENTORY_FIELDS, VENDOR_FACT_PROFILES };
+module.exports = {
+  collectDeviceFacts, parseFacts, formatMac, networkIdFor, inventoryFields, INVENTORY_FIELDS, VENDOR_FACT_PROFILES };

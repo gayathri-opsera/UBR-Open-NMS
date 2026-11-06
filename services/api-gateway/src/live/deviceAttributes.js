@@ -32,6 +32,12 @@ const ATTRIBUTE_PROFILES = [
     enterprisePrefix: '.1.3.6.1.4.1.52619',
     roleOID: '.1.3.6.1.4.1.52619.1.1.1.1.1.2',
     roleValues: { 1: 'BTS', 2: 'CPE' },
+    // Used only when the role column answers with a placeholder: the link table never does. wirelessStatsRemotePartners
+    // (rows 2, 3 = the two backhaul radios) counts associated stations; assocIP lists the peer addresses.
+    topology: {
+      partnersOID: '.1.3.6.1.4.1.52619.1.3.1.1.3', partnerRows: [2, 3],
+      assocIpOID:  '.1.3.6.1.4.1.52619.1.3.3.1.4',
+    },
   },
 ];
 
@@ -172,7 +178,41 @@ async function readRole(reader, roleOid, roleValues) {
  * @returns {Promise<{ role: string, roleSource: string, latitude: number|null,
  *                     longitude: number|null, locationSource: string }>}
  */
-async function fetchDeviceAttributes({ host, port = 161, community, sysObjectID, sysLocation, io }) {
+/**
+ * Role from the link topology, for agents that hide the radio-mode column. A CPE has exactly one uplink and a BTS
+ * serves one or more stations, so:
+ *   2+ associated stations                       → BTS
+ *   1 station whose peer itself serves 2+        → CPE (linked to that BTS)
+ *   anything else (e.g. a lone 1:1 link)         → unknown — never guessed
+ * Single small GETs on the unit and on its peer; the result is labelled "inferred" so it is never mistaken for a role
+ * the device reported.
+ */
+async function inferRoleFromLink({ host, port = 161, community, sysObjectID, io }) {
+  const profile = matchAttributeProfile(sysObjectID);
+  const t = profile && profile.topology;
+  if (!t) return null;
+  const getFor = (h) => (io && io.getFor ? io.getFor(h) : snmpGetOids({ host: h, port, community }));
+  const partnersOf = async (h) => {
+    const oids = t.partnerRows.map((r) => rebaseOid(`${t.partnersOID}.${r}`, sysObjectID));
+    const got = await getFor(h)(oids);
+    const counts = oids.map((o) => parseInt(got[withDot(o)], 10)).filter((n) => Number.isFinite(n) && n >= 0);
+    return counts.length ? counts.reduce((a, b) => a + b, 0) : null;
+  };
+  const mine = await partnersOf(host).catch(() => null);
+  if (mine == null) return null;
+  if (mine >= 2) return { role: 'BTS', source: `inferred from the link table (${mine} associated stations)` };
+  if (mine !== 1) return null;
+  // one uplink: ask who it is (a narrow vendor walk, ≤ a few rows) and whether that peer serves several stations
+  const reader = io && io.walk ? io.walk : (rootOid) => walkSubtree({ host, port, community, rootOid, timeoutMs: 2500, retries: 2, overallTimeoutMs: 8000 });
+  const rows = await reader(rebaseOid(t.assocIpOID, sysObjectID)).catch(() => []);
+  const peer = (rows.find((r) => /^\d+\.\d+\.\d+\.\d+$/.test(String(r.value))) || {}).value;
+  if (!peer) return null;
+  const theirs = await partnersOf(peer).catch(() => null);
+  return theirs != null && theirs >= 2
+    ? { role: 'CPE', source: `inferred from the link table (single uplink to ${peer}, which serves ${theirs} stations)` } : null;
+}
+
+async function fetchDeviceAttributes({ host, port = 161, community, sysObjectID, sysLocation, io, webCredentials }) {
   const attrs = { role: '', roleSource: '', latitude: null, longitude: null, locationSource: '' };
   const reader = io || {
     get:  snmpGetOids({ host, port, community }),
@@ -199,6 +239,18 @@ async function fetchDeviceAttributes({ host, port = 161, community, sysObjectID,
     }
   }
 
+  // Some firmware answers the role column with placeholders ("-NA-") while the device's own UI states it.
+  // With a web login on the credential profile, ask the device the way an operator would.
+  if (!attrs.role && webCredentials && webCredentials.user && webCredentials.pass) {
+    const role = await require('./webSource').fetchRole(host, webCredentials);
+    if (role) { attrs.role = role; attrs.roleSource = 'device web UI'; }
+  }
+
+  if (!attrs.role) {
+    const inferred = await inferRoleFromLink({ host, port, community, sysObjectID, io }).catch(() => null);
+    if (inferred) { attrs.role = inferred.role; attrs.roleSource = inferred.source; }
+  }
+
   if (attrs.latitude == null) {
     const loc = parseLocationCoordinates(sysLocation);
     if (loc) { attrs.latitude = loc.latitude; attrs.longitude = loc.longitude; attrs.locationSource = 'sysLocation'; }
@@ -207,6 +259,6 @@ async function fetchDeviceAttributes({ host, port = 161, community, sysObjectID,
 }
 
 module.exports = {
-  fetchDeviceAttributes, matchAttributeProfile, normaliseRole,
+  fetchDeviceAttributes, inferRoleFromLink, matchAttributeProfile, normaliseRole,
   parseCoordinate, parseLocationCoordinates, readFirstInstance, readRole, ATTRIBUTE_PROFILES,
 };

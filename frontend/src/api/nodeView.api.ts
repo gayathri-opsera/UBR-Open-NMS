@@ -12,7 +12,7 @@
 
 import { apiClient } from './client';
 import type {
-  NodeViewApplyResponse, NodeViewChange, NodeViewResponse, WireframeOnlyResponse,
+  NodeViewApplyResponse, NodeViewChange, NodeViewResponse, NodeViewValues, WireframeOnlyResponse,
 } from './nodeView.types';
 
 const BASE = '/node-view';
@@ -29,6 +29,28 @@ export async function fetchNodeView(
   const url = `${BASE}/${encodeURIComponent(deviceId)}${refresh ? '?refresh=1' : ''}`;
   const res = await apiClient.get<NodeViewResponse>(url, { signal });
   return res.data;
+}
+
+// ── fetchLiveStatus ───────────────────────────────────────────────────────────
+export interface LiveStatus { state: 'ONLINE' | 'OFFLINE'; rttMs: number | null; uptime: string | null; checkedAt: string;
+  /** Stored poll outcome / time, so the page can tell when the Node View data has changed. */
+  pollStatus?: string | null; collectedAt?: string | null }
+
+/** One real-time SNMP probe of the device (never cached). */
+export async function fetchLiveStatus(deviceId: string, signal?: AbortSignal): Promise<LiveStatus | null> {
+  const res = await apiClient.get<{ status: string; data?: LiveStatus }>(
+    `${BASE}/${encodeURIComponent(deviceId)}/live-status`, { signal });
+  return res.data.status === 'ok' && res.data.data ? res.data.data : null;
+}
+
+// ── fetchMonitorLive ──────────────────────────────────────────────────────────
+export interface MonitorLive { pollStatus: string; collectedAt: string; values: NodeViewValues; error?: string }
+
+/** Fresh SNMP read of the given Monitor groups only (real-time statistics). */
+export async function fetchMonitorLive(deviceId: string, groupIds: string[], signal?: AbortSignal): Promise<MonitorLive | null> {
+  const res = await apiClient.get<{ status: string; data?: MonitorLive }>(
+    `${BASE}/${encodeURIComponent(deviceId)}/monitor-live?groups=${encodeURIComponent(groupIds.join(','))}`, { signal });
+  return res.data.status === 'ok' && res.data.data ? res.data.data : null;
 }
 
 // ── fetchWireframe ────────────────────────────────────────────────────────────

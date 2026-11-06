@@ -37,6 +37,7 @@ const deviceAttributes = require('../live/deviceAttributes');
 const runStore       = require('../live/discoveryRunStore');
 const { canonicalOid } = require('../live/oidAliases');
 const { runExclusive } = require('../live/snmpGate');
+const { encrypt: encryptSecret, decrypt: decryptSecret } = require('../utils/aesEncrypt');
 const router     = express.Router();
 
 // ── Product-definition service URL (for fingerprint registry lookups) ─────────
@@ -509,7 +510,10 @@ async function classifyByOid(sysObjectID) {
       return {
         vendor:              bestEntry.vendor  || 'Unknown',
         model:               bestEntry.model   || 'SNMP Device',
-        genericDeviceType:   bestEntry.deviceType || bestEntry.genericDeviceType || 'SWITCH',
+        // A matched definition that declares no device type must not become a "switch": use the known family for this
+        // enterprise (legacy map), else say so.
+        genericDeviceType:   bestEntry.deviceType || bestEntry.genericDeviceType
+                             || ((legacyClassByOid(oid).vendor !== 'Unknown') ? legacyClassByOid(oid).genericDeviceType : 'UNKNOWN'),
         productDefinitionId: bestEntry.productDefinitionId || null,
         // GPS from the uploaded Product Definition (set during registry build if definition had <location>)
         defaultLatitude:     bestEntry.defaultLatitude  != null ? parseFloat(bestEntry.defaultLatitude)  : null,
@@ -520,7 +524,11 @@ async function classifyByOid(sysObjectID) {
     console.warn('[discovery-stub] OID registry lookup failed, falling back to hardcoded map:', regErr.message);
   }
 
-  // ── Layer 2: hardcoded legacy map (fallback for known vendors without a PD) ─
+  return legacyClassByOid(oid);
+}
+
+/** Layer 2: hardcoded legacy map (fallback for known vendors without a product definition). `oid` is canonical, no leading dot. */
+function legacyClassByOid(oid) {
   // Match the enterprise OID itself as well as anything beneath it — some devices
   // (e.g. EOC 10.0.150.88) report the bare enterprise OID 1.3.6.1.4.1.52619.
   const under = (prefix) => oid === prefix || oid.startsWith(prefix + '.');
@@ -542,6 +550,7 @@ async function classifyByOid(sysObjectID) {
   if (under('1.3.6.1.4.1.8886.1.655'))  return { vendor: 'SENAO / UBR Networks', model: 'UBR-655', genericDeviceType: 'RADIO', productDefinitionId: 'ubr-networks.ubr-650' };
   return { vendor: 'Unknown', model: 'SNMP Device', genericDeviceType: 'SWITCH' };
 }
+
 
 // ── MongoDB helpers ────────────────────────────────────────────────────────────
 
@@ -610,6 +619,8 @@ router.get('/credentials', async (req, res) => {
       name:           d.name || 'Unnamed',
       version:        d.version || 'SNMP_V2C',
       communityMasked: d.community ? d.community.slice(0, 2) + '****' : undefined,
+      hasWebLogin:    !!(d.webUsername && d.webPassword),
+      webUsername:    d.webUsername || undefined,
       createdAt:      d.createdAt,
     })));
   } catch (e) {
@@ -620,7 +631,7 @@ router.get('/credentials', async (req, res) => {
 
 // ── POST /credentials — create a new SNMP credential ─────────────────────────
 router.post('/credentials', async (req, res) => {
-  const { name, version = 'SNMP_V2C', community, authKey, privKey, authProtocol, privProtocol } = req.body || {};
+  const { name, version = 'SNMP_V2C', community, authKey, privKey, authProtocol, privProtocol, webUsername, webPassword } = req.body || {};
   if (!name) return res.status(400).json({ code: 'BAD_REQUEST', message: 'name is required' });
   if ((version === 'SNMP_V1' || version === 'SNMP_V2C') && !community) {
     return res.status(400).json({ code: 'BAD_REQUEST', message: 'community is required for SNMPv1/v2c' });
@@ -631,6 +642,8 @@ router.post('/credentials', async (req, res) => {
       name, version, community: community || null,
       authKey: authKey || null, privKey: privKey || null,
       authProtocol: authProtocol || null, privProtocol: privProtocol || null,
+      // Optional device web login (for firmware whose SNMP agent cannot report role / configuration): AES-encrypted
+      ...(webUsername && webPassword ? { webUsername: String(webUsername), webPassword: encryptSecret(String(webPassword)) } : {}),
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     const result = await col.insertOne(doc);
@@ -862,11 +875,16 @@ router.post('/runs', async (req, res, next) => {
   // ── Resolve community string from credentialId if provided ────────────────
   // credentialId takes priority; fall back to direct community string input.
   let community = bodyCommunity;
+  let webCredentials = null;   // { user, pass } — only when the credential profile carries a device web login
+  if (body.webUsername && body.webPassword) webCredentials = { user: String(body.webUsername), pass: String(body.webPassword) };   // one-off, not stored
   if (credentialId) {
     try {
       const credCol = await getCredentialCol();
       const { ObjectId } = require('mongoose').mongo;
       const cred = await credCol.findOne({ _id: new ObjectId(credentialId) });
+      if (cred && cred.webUsername && cred.webPassword) {
+        try { webCredentials = { user: cred.webUsername, pass: decryptSecret(cred.webPassword) }; } catch { /* unreadable → none */ }
+      }
       if (cred && cred.community) {
         community = cred.community;
         console.log(`[discovery-stub] Resolved credentialId ${credentialId} → community=[masked]`);
@@ -891,6 +909,19 @@ router.post('/runs', async (req, res, next) => {
     if (val.includes('/')) return { ...e, type: 'CIDR', cidr: val };
     return { ...e, type: 'SINGLE_IP', ip: val };
   }) : [];
+
+  // Reject malformed addresses up front instead of "discovering" nothing: "10.0.150.10008" is not an IPv4 address.
+  const looksIpv4 = (v) => /^\d{1,3}(\.\d{1,3}){3}$/.test(v);
+  const octetsOk = (v) => v.split('.').every((o) => Number(o) >= 0 && Number(o) <= 255);
+  for (const e of normalisedScope) {
+    const raw = e.type === 'CIDR' ? String(e.cidr || '').split('/')[0] : (e.type === 'SINGLE_IP' ? String(e.ip || '').split(':')[0] : '');
+    if (raw && /^[\d.]+$/.test(raw) && (!looksIpv4(raw) || !octetsOk(raw))) {
+      return res.status(400).json({ code: 'INVALID_SCOPE', message: `"${e.cidr || e.ip}" is not a valid IPv4 address — each part must be between 0 and 255 (did you mean 10.0.150.108?)`.replace(' (did you mean 10.0.150.108?)', '') });
+    }
+    if (e.type === 'CIDR' && /\/(\d+)$/.test(String(e.cidr)) && Number(/\/(\d+)$/.exec(String(e.cidr))[1]) > 32) {
+      return res.status(400).json({ code: 'INVALID_SCOPE', message: `"${e.cidr}" has an invalid prefix length (0–32)` });
+    }
+  }
 
   // Detect hostname-style scope entries (host.docker.internal, explicit :port, or non-CIDR hostnames)
   const hasHostname = normalisedScope.some((e) =>
@@ -1038,10 +1069,17 @@ router.post('/runs', async (req, res, next) => {
       // (read-only). Discovery only REPORTS: nothing is written to the inventory until an
       // admin provisions the device, so a device is never "already provisioned" before that click.
       const displayIp = port !== 161 ? `${host}:${port}` : host;
+      let hostWeb = webCredentials;
+      if (!hostWeb && !syntheticImmediate) {
+        try {   // a web login already stored on the inventory record at this address
+          const prior = await (await getDevicesCol()).findOne({ ipAddress: displayIp, 'webCredentials.password': { $exists: true } });
+          if (prior && prior.webCredentials) hostWeb = { user: prior.webCredentials.username, pass: decryptSecret(prior.webCredentials.password) };
+        } catch { /* none */ }
+      }
       const attrsPromise = syntheticImmediate
         ? Promise.resolve(null)   // demo simulator ports have no real agent to ask
         : Promise.race([
-            deviceAttributes.fetchDeviceAttributes({ host, port, community, sysObjectID: mib.sysObjectID, sysLocation: mib.sysLocation }),
+            deviceAttributes.fetchDeviceAttributes({ host, port, community, sysObjectID: mib.sysObjectID, sysLocation: mib.sysLocation, webCredentials: hostWeb }),
             new Promise((resolve) => setTimeout(() => resolve(null), 20000)),
           ]).catch(() => null);
       // Facts are read AFTER the role: the device takes one request at a time (snmpGate.js), and the
@@ -1152,7 +1190,7 @@ router.post('/runs', async (req, res, next) => {
       }
 
       // What Provision needs but the browser must never see (SNMP credential, collected facts).
-      runStore.put(runId, displayIp, { community, port, inventory, serial, productDefinitionId: defId || null });
+      runStore.put(runId, displayIp, { community, port, inventory, serial, productDefinitionId: defId || null, ...(hostWeb ? { webCredentials: { username: hostWeb.user, password: encryptSecret(hostWeb.pass) } } : {}) });
 
       // displayIp is already computed above (before provisioning) — reuse it here.
       // serialNumber MUST be included so inventoryDeviceMap.get(result.serialNumber)
@@ -1183,7 +1221,10 @@ router.post('/runs', async (req, res, next) => {
         defaultLongitude: pdLon,
         // Device-reported role / GPS (same fields the Java discovery service returns) — the
         // Provision modal pre-selects the type and coordinates from these.
-        ...(attrs.role ? { deviceRole: attrs.role, deviceRoleSource: attrs.roleSource } : {}),
+        ...(attrs.role ? { deviceRole: attrs.role, deviceRoleSource: attrs.roleSource }
+          : { deviceRoleNote: hostWeb
+              ? "The device's SNMP agent did not report its role and its web UI could not be read."
+              : "The device's SNMP agent did not report its role (placeholder answer). Add a device web login to the credential to read it from the device." }),
         ...(attrs.latitude != null ? { latitude: attrs.latitude, longitude: attrs.longitude, locationSource: attrs.locationSource } : {}),
         // Inventory state at discovery time: true only for a device an admin already provisioned.
         provisioned:       !!managed,

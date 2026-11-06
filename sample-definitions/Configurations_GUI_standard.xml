@@ -1,0 +1,915 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Configurations GUI definition - standard format (single root, well-formed).
+  Version notes: 3.1.4 parameters are numbered from 1 (the first field of a group, e.g. Radio status, no longer sorts last);
+  3.1.3 standard-MIB fallbacks (IP, mask, gateway, MTU); 3.1.2 declared <DeviceType>; 3.1.1 Ethernet speed enum.
+
+  Same <parameter> blocks as the client file "Configurations_GUI 3.xml"; every <oid> is the table COLUMN OID, as
+  in the MIB.  Nothing here contains device values or per-radio OIDs:
+
+    <Identity>      the product (DefinitionId, vendor, model) and how a device is recognised (sysObjectID prefix)
+    <InstanceMaps>  how a table's row index maps to a component.  A section (or a parameter) with
+                    instances="radio" is expanded by the NMS into one group per row: OID = column OID + "." + row
+                    (+ the map's suffix), shown as Wireless / Radio 1 / Properties.
+    sections without instances="..." are read as they are (scalars, e.g. IP configuration).
+    <fallback source="..."/> names a STANDARD-MIB source (IP-MIB / IF-MIB) used only when the vendor OID answers with a
+                    placeholder: ip.address, ip.netmask, ip.gateway, mgmt.mtu — single GETs only, never a table walk.
+
+  Row numbers verified on UBR655 units (fw 1.0.0.161): wirelessTable / wirelessStatsTable 1 = 2.4 GHz, 2 = Radio 1,
+  3 = Radio 2; link-profile (DDRS/ATPC, index radio.1) and DCS tables 2 = Radio 1, 3 = Radio 2; VLAN 1 / 2 = Radio 1 / 2;
+  Ethernet 1 / 2 = eth0 / eth1; assocTable rows are radio.station.
+-->
+<DeviceDefinition schema="nms-config-gui/1">
+
+  <Identity>
+    <DefinitionId>eoc-ubr655</DefinitionId>
+    <Vendor>EOC</Vendor>
+    <Family>UBR 650/655 Series</Family>
+    <Model>UBR655</Model>
+    <DeviceType>RADIO</DeviceType>
+    <Variant>UBR655</Variant>
+    <Variant>EOC655</Variant>
+    <Match field="sysObjectId" op="prefix" value=".1.3.6.1.4.1.52619"/>
+  </Identity>
+
+  <InstanceMaps>
+    <InstanceMap id="radio" ui="parent">
+      <Row index="1" component="radio24" label="2.4 GHz Radio"/>
+      <Row index="2" component="radio1"  label="Radio 1"/>
+      <Row index="3" component="radio2"  label="Radio 2"/>
+    </InstanceMap>
+    <InstanceMap id="linkprofile" suffix=".1" ui="parent">
+      <Row index="2" component="radio1" label="Radio 1"/>
+      <Row index="3" component="radio2" label="Radio 2"/>
+    </InstanceMap>
+    <InstanceMap id="dcs" ui="parent">
+      <Row index="2" component="radio1" label="Radio 1"/>
+      <Row index="3" component="radio2" label="Radio 2"/>
+    </InstanceMap>
+    <InstanceMap id="vlan" ui="tab">
+      <Row index="1" component="radio1" label="Radio 1"/>
+      <Row index="2" component="radio2" label="Radio 2"/>
+    </InstanceMap>
+    <InstanceMap id="ethernet" ui="tab">
+      <Row index="1" component="eth0" label="eth0"/>
+      <Row index="2" component="eth1" label="eth1"/>
+    </InstanceMap>
+    <InstanceMap id="assoc" ui="parent">
+      <Row index="1" component="radio24" label="2.4 GHz Radio"/>
+      <Row index="2" component="radio1"  label="Radio 1"/>
+      <Row index="3" component="radio2"  label="Radio 2"/>
+    </InstanceMap>
+  </InstanceMaps>
+
+  <Wireless>
+    <Properties instances="radio">
+      <parameter name="Radio status" id="radioStatus">
+        <value>Enable / Disable</value>
+        <default>Enable(0)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.33</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Enable(0)</choice>
+          <choice>Disable(1)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="LinkType" id="linktype">
+        <value>PTP / PTMP</value>
+        <default>PTMP(3)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.35</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>PTP(1)</choice>
+          <choice>PTMP(3)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Radio Mode" id="radioMode">
+        <value>BTS(ap) / CPE(sta)</value>
+        <default>A60(BTS), A61(CPE)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.2</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>BTS(ap)</choice>
+          <choice>CPE(sta)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="SSID" id="ssid">
+        <value>string</value>
+        <default>UBR650</default>
+        <dataType>string</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.3</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="Bandwidth" id="bandwidth">
+        <value>HT20 / HT40+ / HT80 / HT160(HT160) based on countries</value>
+        <default>HT80(HT80)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.7</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>HT20(HT20)</choice>
+          <choice>HT40+(HT40+)</choice>
+          <choice>HT80(HT80)</choice>
+          <choice>HT160(HT160) based on countries</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Country" id="country">
+        <value>US-Non DFS / US-5GHz ALL / Europe / Canada / 5 Ghz</value>
+        <default>5GHz(5019)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.4</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>US-Non DFS(5011)</choice>
+          <choice>US-5GHz ALL(5012)</choice>
+          <choice>Europe(276)</choice>
+          <choice>Canada(124)</choice>
+          <choice>5 Ghz(5019)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Configured channel" id="configuredChannel">
+        <value>channel list based on country(36,37,...)</value>
+        <default>36(5180 Mhz)</default>
+        <dataType>string</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.9</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="Encryption" id="encryption">
+        <value>AES-256(psk2+ccmp-256) / None</value>
+        <default>AES-256</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.16</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>AES-256(psk2+ccmp-256)</choice>
+          <choice>None(none)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Key" id="key">
+        <value>string</value>
+        <default>ubr@1234</default>
+        <dataType>string</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.17</oid>
+        <readOnly>false</readOnly>
+        <min>8</min>
+        <max>63</max>
+      </parameter>
+      <parameter name="Maximum Sus" id="maximumSus">
+        <value>1 - 32</value>
+        <default>16</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.37</oid>
+        <readOnly>false</readOnly>
+        <min>1</min>
+        <max>32</max>
+      </parameter>
+      <parameter name="OFDMA" id="ofdma">
+        <value>Enable / Disable</value>
+        <default>Disable(0)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Enable(1)</choice>
+          <choice>Disable(0)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="DL/UL Ratio" id="dlUlRatio">
+        <value>Auto / 50/50 / 60/40 / 70/30 / 75/25 / 80/20</value>
+        <default>75/25(75)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.57</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Auto(0)</choice>
+          <choice>50/50(50)</choice>
+          <choice>60/40(60)</choice>
+          <choice>70/30(70)</choice>
+          <choice>75/25(75)</choice>
+          <choice>80/20(80)</choice>
+        </enumValues>
+      </parameter>
+    </Properties>
+    <DDRS instances="linkprofile">
+      <parameter name="DDRS Status" id="ddrsStatus">
+        <value>Enable / Disable</value>
+        <default>Enable(1)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.3</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Enable(1)</choice>
+          <choice>Disable(0)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Spatial Stream ( DDRS Status is enabled )" id="spatialStreamDdrsStatusIsEnabled">
+        <value>Single / Dual / Auto</value>
+        <default>Auto(3)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.4</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Single(1)</choice>
+          <choice>Dual(2)</choice>
+          <choice>Auto(3)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Max. Data Rate - Single Stream" id="maxDataRateSingleStream">
+        <value>MCS0 – MCS 11(0-11)</value>
+        <default>MCS11(143 Mbps)(11)</default>
+        <dataType>string</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.17</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="Max. Data Rate - Dual Stream" id="maxDataRateDualStream">
+        <value>MCS 12 – MCS 23(12-23)</value>
+        <default>MCS23(286 Mbps)</default>
+        <dataType>string</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.18</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="Min. Modulation Index ( Spatial stream is single/Dual)" id="minModulationIndexSpatialStreamIsSingleDual">
+        <value>MCS 0 – MCS 11 / MCS 12 – MCS 23</value>
+        <default>MCS0(8Mbps)/MCS(12Mbps)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.5</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>MCS 0 – MCS 11(0-11)</choice>
+          <choice>MCS 12 – MCS 23(12-23)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Max. Modulation Index ( spatial stream is single/Dual)" id="maxModulationIndexSpatialStreamIsSingleDual">
+        <value>MCS 0 – MCS 11 / MCS 12 – MCS 23</value>
+        <default>MCS11(143 Mbps)/MCS(23Mbps)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.6</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>MCS 0 – MCS 11(0-11)</choice>
+          <choice>MCS 12 – MCS 23(12-23)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Spatial Stream ( DDRS Status is Disabled )" id="spatialStreamDdrsStatusIsDisabled">
+        <value>Single / Dual</value>
+        <default>Single(1)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.4</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Single(1)</choice>
+          <choice>Dual(2)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Modulation Index" id="modulationIndex">
+        <value>MCS0 – MCS 11 / MCS 12- MCS 23</value>
+        <default>MCS 3 ( 34 Mbps)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.9</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>MCS0 – MCS 11(0-11)</choice>
+          <choice>MCS 12- MCS 23(12-23)</choice>
+        </enumValues>
+      </parameter>
+    </DDRS>
+    <ATPC instances="linkprofile">
+      <parameter name="ATPC Status" id="atpcStatus">
+        <value>Disable / Enable</value>
+        <default>Disable(0)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.11</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Disable(0)</choice>
+          <choice>Enable(1)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Transmit Power" id="transmitPower">
+        <value>0 - 26</value>
+        <default>26</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.2.1.12</oid>
+        <readOnly>false</readOnly>
+        <min>0</min>
+        <max>26</max>
+      </parameter>
+      <parameter name="Connectorized Antenna Gain" id="connectorizedAntennaGain">
+        <value>0 - 30</value>
+        <default>23</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <readOnly>false</readOnly>
+        <min>0</min>
+        <max>30</max>
+      </parameter>
+      <parameter instances="radio" name="Maximum EIRP" id="maximumEirp">
+        <value>0 - 100</value>
+        <default>0</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.1.1.30</oid>
+        <readOnly>false</readOnly>
+        <min>0</min>
+        <max>100</max>
+      </parameter>
+    </ATPC>
+    <DCS instances="dcs">
+      <parameter name="DCS Status" id="dcsStatus">
+        <value>Enable / Disable</value>
+        <default>Disable(0)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.3.1.2</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Enable(1)</choice>
+          <choice>Disable(0)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="RTX Threshold" id="rtxThreshold">
+        <value>0 - 100</value>
+        <default>25</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.3.1.3</oid>
+        <readOnly>false</readOnly>
+        <min>0</min>
+        <max>100</max>
+      </parameter>
+      <parameter name="Background Scan" id="backgroundScan">
+        <value>Enable / Disable</value>
+        <default>Disable(0)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.1.3.1.11</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Enable(1)</choice>
+          <choice>Disable(0)</choice>
+        </enumValues>
+      </parameter>
+    </DCS>
+  </Wireless>
+  <Network>
+    <IPConfiguration label="IP Configuration" uiParent="IP Configuration" uiTab="IPv4">
+      <parameter name="Address Type" id="addressType">
+        <value>Static / Dynamic- IPv4(dhcp) / Dynamic – Ipv6(dhcpv6)</value>
+        <default>Static</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.1.0</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Static(static)</choice>
+          <choice>Dynamic- IPv4(dhcp)</choice>
+          <choice>Dynamic – Ipv6(dhcpv6)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="IP Address" id="ipAddress">
+        <value>IPv4Address</value>
+        <default>192.168.1.1</default>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.2.0</oid>
+        <readOnly>false</readOnly>
+            <fallback source="ip.address"/>
+    </parameter>
+      <parameter name="Subnet Mask" id="subnetMask">
+        <value>IPv4Address</value>
+        <default>255.255.255.0</default>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.3.0</oid>
+        <readOnly>false</readOnly>
+            <fallback source="ip.netmask"/>
+    </parameter>
+      <parameter name="Gateway" id="gateway">
+        <value>IPv4Address</value>
+        <default>192.168.1.1</default>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.4.0</oid>
+        <readOnly>false</readOnly>
+            <fallback source="ip.gateway"/>
+    </parameter>
+      <parameter name="IPv6 Address" id="ipv6Address">
+        <value>IPv6 address</value>
+        <dataType>ipv6</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.15.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="IPv6 Gateway" id="ipv6Gateway">
+        <value>IPv6 address</value>
+        <dataType>ipv6</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.2.17.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+    </IPConfiguration>
+    <VLAN instances="vlan">
+      <parameter name="Mgmt VLAN ID" id="mgmtVlanId">
+        <value>1 - 4094</value>
+        <default>1</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.11</oid>
+        <readOnly>false</readOnly>
+        <min>1</min>
+        <max>4094</max>
+      </parameter>
+      <parameter name="Mode" id="mode">
+        <value>Transparent / Access(1)Trunk / Q-in-Q</value>
+        <default>Transparent(0)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.3</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Transparent(0)</choice>
+          <choice>Access(1)Trunk(2)</choice>
+          <choice>Q-in-Q(3)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Trunk Option" id="trunkOption">
+        <value>List(1), ALL(2)</value>
+        <default>List(1)</default>
+        <dataType>string</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.5</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="Trunk VLAN ID" id="trunkVlanId">
+        <value>1 - 4094</value>
+        <default>Empty</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.6</oid>
+        <readOnly>false</readOnly>
+        <min>1</min>
+        <max>4094</max>
+      </parameter>
+      <parameter name="CVLAN Priority" id="cvlanPriority">
+        <value>0 - 7</value>
+        <default>0</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.16</oid>
+        <readOnly>false</readOnly>
+        <min>0</min>
+        <max>7</max>
+      </parameter>
+      <parameter name="CVLAN ID" id="cvlanId">
+        <value>1 - 4094</value>
+        <default>101</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.17</oid>
+        <readOnly>false</readOnly>
+        <min>1</min>
+        <max>4094</max>
+      </parameter>
+      <parameter name="CVLAN EtherType" id="cvlanEthertype">
+        <value>0x8100(0x0081) / 0x88a8(0xa888)</value>
+        <default>0x8100(0x0081)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.15</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>0x8100(0x0081)</choice>
+          <choice>0x88a8(0xa888)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="SVLAN Priority" id="svlanPriority">
+        <value>0 - 7</value>
+        <default>0</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.14</oid>
+        <readOnly>false</readOnly>
+        <min>0</min>
+        <max>7</max>
+      </parameter>
+      <parameter name="SVLAN ID" id="svlanId">
+        <value>1 - 4094</value>
+        <default>100</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.8</oid>
+        <readOnly>false</readOnly>
+        <min>1</min>
+        <max>4094</max>
+      </parameter>
+      <parameter name="SVLAN EtherType" id="svlanEthertype">
+        <value>0x8100(0x0081) / 0x88a8(0xa888)</value>
+        <default>0x8100(0x0081)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.4.18.1.9</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>0x8100(0x0081)</choice>
+          <choice>0x88a8(0xa888)</choice>
+        </enumValues>
+      </parameter>
+    </VLAN>
+    <Ethernet instances="ethernet" uiParent="Ethernet">
+      <parameter name="Speed / Duplex" id="speedDuplex">
+        <value>Auto Negotiation / 100-Full / 1000-Full / 2500-Full</value>
+        <default>Auto Negotiation(0)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.5.6.1.2</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Auto Negotiation(0)</choice>
+          <choice>100-Full(4)</choice>
+          <choice>1000-Full(5)</choice>
+          <choice>2500-Full(7)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="MTU" id="mtu">
+        <value>1500 - 9000</value>
+        <default>1500</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.5.6.1.4</oid>
+        <readOnly>false</readOnly>
+        <min>1500</min>
+        <max>9000</max>
+            <fallback source="mgmt.mtu"/>
+    </parameter>
+    </Ethernet>
+    <DHCP uiParent="DHCP" uiTab="DHCP Settings">
+      <parameter name="DHCP Server" id="dhcpServer">
+        <value>Enable / Disable</value>
+        <default>Disable(1)</default>
+        <dataType>enum</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.1.0</oid>
+        <readOnly>false</readOnly>
+        <enumValues>
+          <choice>Enable(0)</choice>
+          <choice>Disable(1)</choice>
+        </enumValues>
+      </parameter>
+      <parameter name="Start IP Address" id="startIpAddress">
+        <value>IP Address</value>
+        <default>192.168.1.100</default>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.2.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="End IP Address" id="endIpAddress">
+        <value>IP Address</value>
+        <default>192.168.1.150</default>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.3.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="Lease Time" id="leaseTime">
+        <value>120 - 86400</value>
+        <default>43200</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.4.0</oid>
+        <readOnly>false</readOnly>
+        <min>120</min>
+        <max>86400</max>
+      </parameter>
+    </DHCP>
+    <DHCP24 label="DHCP(2.4)" uiParent="DHCP" uiTab="2.4 GHz">
+      <parameter name="IP Address" id="dhcp24IpAddress">
+        <value>IP Address</value>
+        <default>169.254.254.1</default>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.1.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="Subnet Mask" id="dhcp24SubnetMask">
+        <value>IP Address</value>
+        <default>255.255.255.0</default>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.2.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="DHCP Server(Pool Configuration)" id="dhcpServerPoolConfiguration">
+        <value>Enable/Disable</value>
+        <default>Enable</default>
+        <dataType>string</dataType>
+        <uiWidget>dropdown</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.3.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="Start IP Address" id="dhcp24StartIpAddress">
+        <value>IP Address</value>
+        <default>169.254.254.100</default>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.4.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="End IP Address" id="dhcp24EndIpAddress">
+        <value>IP Address</value>
+        <default>169.254.254.102</default>
+        <dataType>ipv4</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.5.0</oid>
+        <readOnly>false</readOnly>
+      </parameter>
+      <parameter name="Lease Time" id="dhcp24LeaseTime">
+        <value>120 - 86400</value>
+        <default>300</default>
+        <dataType>uint</dataType>
+        <uiWidget>textfield</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.1.6.5.6.0</oid>
+        <readOnly>false</readOnly>
+        <min>120</min>
+        <max>86400</max>
+      </parameter>
+    </DHCP24>
+  </Network>
+  <Monitor>
+    <LinkStats label="Link Stats" instances="assoc">
+      <parameter name="Radio Index" id="radioIndex">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.3.1.1</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="MAC Address" id="macAddress">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.3.1.3</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="IP Address" id="ipAddress">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.3.1.4</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Uptime" id="uptime">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.3.1.52</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="CustomerName" id="customername">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.3.1.29</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Local SNR A1" id="localSnrA1">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.3.1.13</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Local SNR A2" id="localSnrA2">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.3.1.14</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Remote SNR A1" id="remoteSnrA1">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.3.1.15</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Remote SNR A2" id="remoteSnrA2">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.3.1.16</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+    </LinkStats>
+    <WirelessStats label="Wireless Stats" instances="radio">
+      <parameter name="Total Tx packets" id="totalTxPackets">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.4</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Total Rx packets" id="totalRxPackets">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.5</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Tx Broadcast Packets" id="txBroadcastPackets">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.32</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Rx Broadcast Packets" id="rxBroadcastPackets">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.33</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Tx MultiCast Packets" id="txMulticastPackets">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.6</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Rx MultiCast Packets" id="rxMulticastPackets">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.7</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Tx Unicast Packets" id="txUnicastPackets">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.8</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Rx Unicast Packets" id="rxUnicastPackets">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.9</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Tx Throughput" id="txThroughput">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.30</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Rx Throughput" id="rxThroughput">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.31</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="CRC Errors" id="crcErrors">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.28</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Frame Errors" id="frameErrors">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.29</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="RTX Percent" id="rtxPercent">
+        <dataType>string</dataType>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.37</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Tx PPS" id="txPps">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.34</oid>
+        <units>pps</units>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Rx PPS" id="rxPps">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.35</oid>
+        <units>pps</units>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Management Tx Packets" id="mgmtTxPackets">
+        <dataType>string</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.10</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Management Rx Packets" id="mgmtRxPackets">
+        <dataType>string</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.11</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Beacons Transmitted" id="txBeacons">
+        <dataType>string</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.12</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Beacons Received" id="rxBeacons">
+        <dataType>string</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.13</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Authentication Requests Received" id="authReqReceived">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.15</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Authentication Requests Sent" id="authReqSent">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.14</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Authentication Confirms" id="authConfirms">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.16</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Authentication Rejects" id="authRejects">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.17</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Deauthentication Requests Sent" id="deauthReqSent">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.18</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Deauthentication Requests Received" id="deauthReqReceived">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.19</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Authentication Result Last" id="authResultLast">
+        <dataType>string</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.20</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Association Requests Received" id="assocReqReceived">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.22</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Association Requests Sent" id="assocReqSent">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.21</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Association Rejects" id="assocRejects">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.24</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Association Confirms" id="assocConfirms">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.23</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Disassociation Requests Received" id="disassocReqReceived">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.26</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Disassociation Requests Sent" id="disassocReqSent">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.25</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Association Result Last" id="assocResultLast">
+        <dataType>string</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.27</oid>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="Channel Utilisation (Combined)" id="channelUtilisation">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.38</oid>
+        <units>%</units>
+        <readOnly>true</readOnly>
+      </parameter>
+      <parameter name="OBSS Utilisation" id="obssUtilisation">
+        <dataType>integer</dataType>
+        <uiWidget>readonly</uiWidget>
+        <oid>.1.3.6.1.4.1.52619.1.3.1.1.39</oid>
+        <units>%</units>
+        <readOnly>true</readOnly>
+      </parameter>
+    </WirelessStats>
+  </Monitor>
+
+</DeviceDefinition>

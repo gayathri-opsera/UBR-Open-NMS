@@ -25,7 +25,7 @@ import type { AdaptiveUiTemplateData } from '../../api/framework-panels.types';
 import { NodeViewParameters } from '../components/NodeViewParameters';
 import type { ParameterCurrentValue, ParameterCurrentValueData } from '../../api/framework-parameters.types';
 // ── New wireframe architecture ─────────────────────────────────────────────────
-import { fetchNodeView } from '../../api/nodeView.api';
+import { fetchNodeView, fetchLiveStatus, type LiveStatus } from '../../api/nodeView.api';
 import type { NodeViewData } from '../../api/nodeView.types';
 
 const TABS = [
@@ -191,6 +191,34 @@ export default function V2DeviceDetailPage() {
     if (tab !== 'summary' || !devId) return;
     const timer = setInterval(() => { void loadNodeView(false, true); }, 30000);
     return () => clearInterval(timer);
+  }, [tab, devId, loadNodeView]);
+
+  // Real-time status: probe the device itself every 5 s while the Node View tab is visible.
+  const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
+  useEffect(() => {
+    if (tab !== 'summary' || !devId) return;
+    setLiveStatus(null);
+    let stopped = false;
+    const ctl = new AbortController();
+    let seen: string | null = null;
+    let busy = false;
+    const probe = async () => {
+      if (busy || document.hidden) return;   // no polling from a background tab
+      busy = true;
+      try {
+        const r = await fetchLiveStatus(devId, ctl.signal);
+        if (stopped || !r) return;
+        setLiveStatus(r);
+        // The stored poll changed (device went away / came back / new poll finished) → reload values now.
+        const sig = `${r.pollStatus ?? ''}|${r.collectedAt ?? ''}`;
+        if (seen !== null && seen !== sig) void loadNodeView(false, true);
+        seen = sig;
+      } catch { /* keep the last reading until the next probe */ }
+      finally { busy = false; }
+    };
+    void probe();
+    const timer = setInterval(() => { void probe(); }, 5000);
+    return () => { stopped = true; ctl.abort(); clearInterval(timer); };
   }, [tab, devId, loadNodeView]);
 
   const handleFrameworkWrite = useCallback(async (parameterId: string, value: string) => {
@@ -426,7 +454,7 @@ export default function V2DeviceDetailPage() {
                   loading={nvLoading}
                   refreshing={nvRefreshing}
                   onRefresh={() => void loadNodeView(true)}
-                  deviceStatus={device.status}
+                  liveStatus={liveStatus}
                   productDefinitionId={nvData.wireframe.productDefinitionId ?? ''}
                   registryVersion={nvData.wireframe.registryVersion}
                   collectedAt={nvData.collectedAt}

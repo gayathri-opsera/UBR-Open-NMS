@@ -51,6 +51,9 @@ interface CredentialFormState {
   authKey: string;
   privProtocol: SNMPv3PrivacyProtocol;
   privKey: string;
+  // optional device web login
+  webUsername: string;
+  webPassword: string;
 }
 
 const INITIAL_FORM: CredentialFormState = {
@@ -64,6 +67,8 @@ const INITIAL_FORM: CredentialFormState = {
   authKey:       '',
   privProtocol:  'AES',
   privKey:       '',
+  webUsername:   '',
+  webPassword:   '',
 };
 
 // ── Options ───────────────────────────────────────────────────────────────────
@@ -115,6 +120,7 @@ function buildRequest(form: CredentialFormState): CreateCredentialRequest {
     name: form.name.trim(),
     description: form.description.trim() || undefined,
     version: form.version,
+    ...webLogin(form),
   };
 
   if (form.version === 'V3') {
@@ -134,6 +140,13 @@ function buildRequest(form: CredentialFormState): CreateCredentialRequest {
   }
 
   return { ...base, community: form.community };
+}
+
+/** The optional device web login (sent only when both parts are filled). */
+function webLogin(form: CredentialFormState): Partial<CreateCredentialRequest> {
+  return form.webUsername.trim() && form.webPassword
+    ? { webUsername: form.webUsername.trim(), webPassword: form.webPassword }
+    : {};
 }
 
 /** Validate the form and return error messages (empty = valid). */
@@ -258,6 +271,25 @@ function CredentialFormModal({
             disabled={submitting}
           />
         )}
+
+        {/* optional device web login */}
+        <Input
+          label="Device web username (optional)"
+          autoComplete="off"
+          value={form.webUsername}
+          onChange={field('webUsername')}
+          placeholder="only for firmware whose SNMP agent hides role / settings"
+          disabled={submitting}
+        />
+        <Input
+          label="Device web password (optional)"
+          type="password"
+          autoComplete="new-password"
+          value={form.webPassword}
+          onChange={field('webPassword')}
+          placeholder="stored encrypted, never shown again"
+          disabled={submitting}
+        />
 
         {/* v3: security name */}
         {form.version === 'V3' && (
@@ -658,6 +690,8 @@ export function CredentialManager() {
             community:     '',
             authKey:       '',
             privKey:       '',
+            webUsername:   editTarget.webUsername ?? '',
+            webPassword:   '',
           }}
           submitting={submitting}
           onSubmit={handleUpdate}

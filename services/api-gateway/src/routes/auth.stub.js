@@ -93,6 +93,7 @@ router.post('/login', async (req, res) => {
     const user = await db.collection('users').findOne({ username: username.trim() });
 
     if (!user) {
+      logger.warn({ msg: '[auth-stub] login failed', reason: 'USER_NOT_FOUND', username: String(username), usernameLength: String(username).length });
       return res.status(401).json({ code: 'INVALID_CREDENTIALS', message: 'Invalid username or password' });
     }
 
@@ -114,6 +115,7 @@ router.post('/login', async (req, res) => {
         { _id: user._id },
         { $inc: { failedAttempts: 1 }, $set: { updatedAt: new Date() } },
       );
+      logger.warn({ msg: '[auth-stub] login failed', reason: 'BAD_PASSWORD', username: user.username, passwordLength: String(password).length });
       return res.status(401).json({ code: 'INVALID_CREDENTIALS', message: 'Invalid username or password' });
     }
 

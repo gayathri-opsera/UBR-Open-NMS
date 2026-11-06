@@ -53,6 +53,15 @@ describe('ubr655-descriptor.xml', () => {
     expect(entries.filter((e) => e.snmpOid).every((e) => e.snmpOid.startsWith('.1.3.6.1.4.1.52619.1.'))).toBe(true);
   });
 
+  it('adds the Interface-page counters to each radio\'s Wireless Stats (v3.0.2) as pointers only', () => {
+    expect(param('monitor.radio1.wireless_stats.tx_pps').snmpOid).toBe('.1.3.6.1.4.1.52619.1.3.1.1.34.2');
+    expect(param('monitor.radio24.wireless_stats.rx_pps').snmpOid).toBe('.1.3.6.1.4.1.52619.1.3.1.1.35.1');
+    expect(param('monitor.radio2.wireless_stats.channel_utilisation').snmpOid).toBe('.1.3.6.1.4.1.52619.1.3.1.1.38.3');
+    const stats = entries.filter((e) => /^radio(1|2|24)\.wireless_stats$/.test(e.groupId));
+    expect(stats.length).toBe(3 * (13 + 22));
+    expect(stats.every((e) => e.defaultValue == null || e.defaultValue === '')).toBe(true);
+  });
+
   it('keeps OIDs unique per parameter and flags only OFDMA as unmapped', () => {
     const oids = entries.filter((e) => e.snmpOid).map((e) => e.snmpOid);
     expect(new Set(oids).size).toBe(oids.length);

@@ -73,6 +73,9 @@ export interface ParameterValueRecord {
   instances:      Array<{ index: string; value: string; display: string }>;
   unit:           string | null;
   failureReason:  string | null;
+  /** Where a value came from when the vendor OID could not supply it: 'standard-mib' (IP-MIB / IF-MIB over SNMP, no device
+   *  credentials) or 'web' (the device web UI, with a stored login). Both are shown read-only. */
+  source?:        'web' | 'standard-mib';
 }
 
 /** Live value records keyed `${groupId}::${parameterId}` (parameter ids repeat across groups). */

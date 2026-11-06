@@ -29,6 +29,9 @@ export interface CredentialSummary {
   version: SNMPVersion;
   /** Masked indication only — the actual community is never returned. */
   communityMasked?: string;
+  /** True when a device web login is stored on this credential (the password is never returned). */
+  hasWebLogin?: boolean;
+  webUsername?: string;
   securityLevel?: SNMPv3SecurityLevel;
   authProtocol?: SNMPv3AuthProtocol;
   privProtocol?: SNMPv3PrivacyProtocol;
@@ -58,6 +61,10 @@ export interface CreateCredentialRequest {
   privProtocol?: SNMPv3PrivacyProtocol;
   /** SNMPv3 privacy key. Required when securityLevel is AUTH_PRIV. */
   privKey?: string;
+  /** Optional device web login (both or neither): lets discovery read the role, and the Node View the settings, from
+   *  firmware whose SNMP agent only answers with placeholders. Stored encrypted; never returned. */
+  webUsername?: string;
+  webPassword?: string;
 }
 
 /**

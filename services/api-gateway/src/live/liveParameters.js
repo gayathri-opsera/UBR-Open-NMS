@@ -20,8 +20,15 @@
  */
 
 const mongoose = require('mongoose');
-const { walkSubtree, isUnreachable } = require('./snmpWalk');
+const { walkSubtree, getOids, isUnreachable } = require('./snmpWalk');
 const { rebaseEntries } = require('./oidAliases');
+const { applyFirmwareQuirks } = require('./firmwareQuirks');
+const webSource = require('./webSource');
+const standardMib = require('./standardMib');
+const deviceAttributes = require('./deviceAttributes');
+const { aliasOfDevice } = require('./oidAliases');
+
+const RADIO_NUM = { radio24: 0, radio1: 1, radio2: 2 };
 const logger = require('../utils/logger');
 const { deduplicateIds } = require('./wireframeBuilder');
 
@@ -108,6 +115,48 @@ function mapVarbinds(entries, varbinds) {
   return result;
 }
 
+/**
+ * Entries the walk produced nothing for, as the instance OIDs to read with a plain GET (`<oid>.0`).
+ * A walk can miss a value the device does hold (agents whose GETNEXT/GETBULK skips or loops — see
+ * snmpWalk.getOids); a GET of the scalar instance still works there. For a table column `.0` is simply
+ * "no such instance" and is dropped, so asking is harmless. Entries that already have a value are never
+ * re-read, and nothing is returned for entries without an OID.
+ */
+function scalarGetTargets(entries, mapped) {
+  const out = new Set();
+  for (const e of entries || []) {
+    const oid = normOid(e.snmpOid);
+    if (!oid) continue;
+    const have = mapped.get(`${e.groupId}::${e.parameterId}`);
+    if (have && have.length) continue;
+    out.add(`${oid}.0`);
+  }
+  return Array.from(out);
+}
+
+/** Fill-only merge of GET varbinds into the walk result: a value the walk found is never overwritten. */
+function mergeScalarGets(entries, mapped, varbinds) {
+  if (!varbinds || !varbinds.length) return mapped;
+  for (const [key, instances] of mapVarbinds(entries, varbinds)) {
+    const have = mapped.get(key);
+    if (!have || !have.length) mapped.set(key, instances);
+  }
+  return mapped;
+}
+
+/**
+ * Walk result → values, then a GET for whatever the walk missed. Never throws: the GET step is best effort.
+ */
+async function mapWithGetFallback(entries, varbinds, { host, port, community, timeoutMs, retries }) {
+  const mapped = mapVarbinds(entries, varbinds);
+  const targets = scalarGetTargets(entries, mapped);
+  if (targets.length) {
+    const got = await getOids({ host, port, community, oids: targets, timeoutMs, retries }).catch(() => []);
+    mergeScalarGets(entries, mapped, got);
+  }
+  return mapped;
+}
+
 /** Resolve an enum label from the raw SNMP value using the definition's "Label(n)" values. */
 function resolveDisplay(entry, raw) {
   if (raw == null || raw === '') return raw;
@@ -185,14 +234,18 @@ function buildCurrentResponse({ device, definition, doc, now = new Date() }) {
       const key = `${e.groupId}::${e.parameterId}`;
       const hasOid = !!normOid(e.snmpOid);
       const sv = stored.get(key);
-      const instances = ((sv && sv.instances) || []).map((i) => ({
-        index: i.index, value: i.raw, display: resolveDisplay(e, i.raw),
+      const storedInst = (sv && sv.instances) || [];
+      const placeholderRaw = storedInst.length && storedInst.every((i) => i.placeholder) ? storedInst[0].raw : null;
+      const fromOther = storedInst.find((i) => i.web || i.src);
+      const instances = storedInst.filter((i) => !i.placeholder).map((i) => ({
+        index: i.index, value: i.raw, display: i.display !== undefined ? i.display : resolveDisplay(e, i.raw),
       }));
       instances.sort((a, b) => a.index.localeCompare(b.index, undefined, { numeric: true }));
 
       let readStatus;
-      if (!hasOid) readStatus = 'UNMAPPED';
-      else if (instances.length) readStatus = 'SUCCESS';
+      if (instances.length) readStatus = 'SUCCESS';          // a value from the device wins, even without an OID (OFDMA)
+      else if (!hasOid) readStatus = 'UNMAPPED';
+      else if (placeholderRaw !== null) readStatus = 'PLACEHOLDER';
       else if (collectedAt && pollStatus === 'OK') readStatus = 'NO_SUCH_OBJECT';
       else if (pollStatus === 'UNREACHABLE') readStatus = 'UNREACHABLE';
       else readStatus = 'UNKNOWN';
@@ -214,9 +267,11 @@ function buildCurrentResponse({ device, definition, doc, now = new Date() }) {
         instances,
         freshnessState,
         readStatus,
+        ...(fromOther ? { source: fromOther.src || 'web' } : {}),
         collectedAt: collectedAt ? collectedAt.toISOString() : null,
         lastSuccessAt: instances.length && collectedAt ? collectedAt.toISOString() : null,
         ...(readStatus === 'UNMAPPED' ? { failureReason: 'no OID in product definition' } : {}),
+        ...(readStatus === 'PLACEHOLDER' ? { failureReason: `device agent returned a placeholder (${placeholderRaw})` } : {}),
         ...(readStatus === 'UNREACHABLE' && doc && doc.pollError ? { failureReason: doc.pollError } : {}),
         pollIntervalSeconds: POLL_INTERVAL_SECONDS,
         registryVersion: definition.registryVersion,
@@ -331,6 +386,25 @@ async function ensureDefinitionLink(device) {
     device.productDefinitionId = id;
   }
   return id || null;
+}
+
+/** Set / clear fields on the device record (whichever store holds it). */
+async function updateDeviceFields(deviceId, set = {}, unset = {}) {
+  const c = client();
+  if (!c) return false;
+  for (const dbName of ['ubrnms_inventory', 'ubrnms']) {
+    try {
+      const col = c.db(dbName).collection('devices');
+      const doc = await col.findOne({ $or: [{ _id: deviceId }, { serialNumber: deviceId }, { deviceId }, { ipAddress: deviceId }] }, { projection: { _id: 1 } });
+      if (!doc) continue;
+      const upd = {};
+      if (Object.keys(set).length) upd.$set = { ...set, updatedAt: new Date() };
+      if (Object.keys(unset).length) upd.$unset = unset;
+      await col.updateOne({ _id: doc._id }, upd);
+      return true;
+    } catch { /* store missing */ }
+  }
+  return false;
 }
 
 async function findDevice(deviceId) {
@@ -490,7 +564,9 @@ async function doRefresh(device) {
       // lost request would flag a healthy device UNREACHABLE until the next cycle.
       varbinds.push(...await walkSubtree({ host, port, community: device.snmpCommunity, rootOid, retries: 3 }));
     }
-    const mapped = mapVarbinds(entries, varbinds);
+    const mapped = applyFirmwareQuirks(entries, await mapWithGetFallback(entries, varbinds, { host, port, community: device.snmpCommunity }), device);
+    await overlayWeb(entries, mapped, device, host, { withConfig: true });
+    await refreshDeviceType(device, host, port).catch(() => {});
     const values = Array.from(mapped.entries()).map(([k, instances]) => {
       const [groupId, parameterId] = k.split('::');
       return { groupId, parameterId, instances };
@@ -509,6 +585,120 @@ async function doRefresh(device) {
     logger.warn({ msg: 'live parameter poll failed', deviceId: base._id, host, port, pollStatus, err: err.message });
     return { pollStatus, error: err.message };
   }
+}
+
+/**
+ * Read-through poll of selected Monitor groups only — what the device's own statistics pages do
+ * (they re-read their counters every 1–5 s while open). One small walk of just those OIDs; nothing
+ * is stored, so the 60 s scheduler stays the only writer of device_parameter_values.
+ * Only groups declared on the Monitor page are allowed (read-only statistics, never configuration).
+ * @returns {Promise<{ pollStatus: string, collectedAt: string, groups: object[], error?: string }>}
+ */
+async function pollMonitorGroups(device, groupIds) {
+  await ensureDefinitionLink(device);
+  const definition = await loadDefinition(device.productDefinitionId).catch(() => null);
+  if (!definition) return { pollStatus: 'NOT_POLLED', collectedAt: new Date().toISOString(), groups: [], error: 'no active product definition' };
+  const wanted = new Set(groupIds);
+  const own = definition.entries.filter((e) => wanted.has(e.groupId) && e.uiPage === 'Monitor');
+  if (!own.length || !device.snmpCommunity) return { pollStatus: device.snmpCommunity ? 'NOT_POLLED' : 'NO_CREDENTIALS', collectedAt: new Date().toISOString(), groups: [] };
+  const entries = rebaseEntries(own, device.sysObjectID);
+  const oids = entries.map((e) => normOid(e.snmpOid)).filter(Boolean);
+  const { host, port } = splitHostPort(device);
+  const now = new Date();
+  try {
+    const varbinds = [];
+    for (const rootOid of walkRoots(oids)) {
+      varbinds.push(...await walkSubtree({ host, port, community: device.snmpCommunity, rootOid, timeoutMs: 2000, retries: 1, overallTimeoutMs: 8000 }));
+    }
+    const mapped = applyFirmwareQuirks(entries, await mapWithGetFallback(entries, varbinds, { host, port, community: device.snmpCommunity, timeoutMs: 2000, retries: 1 }), device);
+    await overlayWeb(entries, mapped, device, host, { withConfig: false });
+    const values = Array.from(mapped.entries()).map(([k, instances]) => {
+      const [groupId, parameterId] = k.split('::');
+      return { groupId, parameterId, instances };
+    });
+    const body = buildCurrentResponse({
+      device, definition: { ...definition, entries: own },
+      doc: { pollStatus: 'OK', collectedAt: now, values }, now,
+    });
+    return { pollStatus: 'OK', collectedAt: now.toISOString(), groups: body.data.groups };
+  } catch (err) {
+    return { pollStatus: isUnreachable(err) ? 'UNREACHABLE' : 'ERROR', collectedAt: now.toISOString(), groups: [], error: err.message };
+  }
+}
+
+/**
+ * Second source for firmware whose SNMP agent cannot answer (firmwareQuirks.js): what the device's own web UI shows,
+ * through the device's stored web login (devices.webCredentials). Fill-only — an SNMP value is never overwritten —
+ * and only for the re-rooted firmware it was checked against. No stored login → nothing happens.
+ */
+async function overlayWeb(entries, mapped, device, host, { withConfig }) {
+  // Standard MIBs first (no device credentials, vendor-independent), then — only if the device has a stored login — its web UI.
+  const { port } = splitHostPort(device);
+  await standardMib.overlay(entries, mapped, { host, port, community: device.snmpCommunity }).catch(() => {});
+  if (!webSource.credentialsFor(device) || !aliasOfDevice(device && device.sysObjectID)) return;
+  const radios = [...new Set(entries.map((e) => RADIO_NUM[String(e.groupId).split('.')[0]]).filter((n) => n !== undefined))];
+  const snap = await webSource.snapshot(device, host, { radios, withConfig });
+  if (snap) {
+    webSource.overlay(entries, mapped, snap);
+    const role = snap.config && snap.config.role;
+    if (role && device.deviceType !== role) {   // e.g. a BTS discovered as "SWITCH" while its agent hid the role
+      await updateDeviceFields(String(device._id), { deviceType: role, genericDeviceType: role }).catch(() => {});
+      device.deviceType = role;
+    }
+  }
+}
+
+const typeChecked = new Map();   // deviceId → ms of the last attempt
+const GENERIC_TYPES = new Set(['', 'RADIO', 'SWITCH', 'UNKNOWN', 'GENERIC']);
+
+/**
+ * A device provisioned before its role could be inferred keeps a generic type ("RADIO") forever. While its type is generic,
+ * look at the link table again (a few single GETs, at most every 10 minutes) and correct the inventory record.
+ */
+async function refreshDeviceType(device, host, port) {
+  const cur = String(device.deviceType || '').toUpperCase();
+  if (!GENERIC_TYPES.has(cur) || !device.snmpCommunity) return;
+  const id = String(device._id);
+  if (Date.now() - (typeChecked.get(id) || 0) < 10 * 60_000) return;
+  typeChecked.set(id, Date.now());
+  const inferred = await deviceAttributes.inferRoleFromLink({ host, port, community: device.snmpCommunity, sysObjectID: device.sysObjectID }).catch(() => null);
+  if (inferred && inferred.role && inferred.role !== cur) {
+    await updateDeviceFields(id, { deviceType: inferred.role, genericDeviceType: inferred.role }).catch(() => {});
+    device.deviceType = inferred.role;
+    logger.info({ msg: 'device type corrected from the link table', deviceId: id, from: cur || 'none', to: inferred.role, source: inferred.source });
+  }
+}
+
+const probeFailures = new Map(); // deviceId → consecutive failed liveness probes
+
+/**
+ * Keep the stored poll status in step with the real-time liveness probe, so the Node View
+ * does not wait for the 60 s cycle to notice that a device went away or came back.
+ *  - 2 consecutive failed probes while stored status is OK → mark UNREACHABLE now
+ *  - a successful probe while stored status is not OK      → re-poll in the background
+ * @returns {Promise<{ pollStatus: string, collectedAt: Date|null }>} the stored state afterwards
+ */
+async function syncWithProbe(device, online) {
+  const col = valuesCol();
+  if (!col) return { pollStatus: 'NOT_POLLED', collectedAt: null };
+  const id = String(device._id);
+  let doc = await col.findOne({ _id: id }, { projection: { pollStatus: 1, collectedAt: 1 } });
+  if (online) {
+    probeFailures.delete(id);
+    if (doc && doc.pollStatus && doc.pollStatus !== 'OK' && doc.pollStatus !== 'NOT_POLLED' && !inflight.has(id)) {
+      logger.info({ msg: 'live probe: device answering again — re-polling', deviceId: id, was: doc.pollStatus });
+      refreshDevice(device).catch(() => {});
+    }
+  } else {
+    const n = (probeFailures.get(id) || 0) + 1;
+    probeFailures.set(id, n);
+    if (n >= 2 && doc && doc.pollStatus === 'OK') {
+      await col.updateOne({ _id: id }, { $set: { pollStatus: 'UNREACHABLE', pollError: 'device stopped answering SNMP (liveness probe)', lastAttemptAt: new Date() } });
+      logger.info({ msg: 'live probe: device stopped answering — poll status set UNREACHABLE', deviceId: id });
+      doc = { ...doc, pollStatus: 'UNREACHABLE' };
+    }
+  }
+  return { pollStatus: (doc && doc.pollStatus) || 'NOT_POLLED', collectedAt: (doc && doc.collectedAt) || null };
 }
 
 /**
@@ -626,8 +816,8 @@ function startScheduler() {
 
 module.exports = {
   // pure
-  normOid, walkRoots, mapVarbinds, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
+  normOid, walkRoots, mapVarbinds, scalarGetTargets, mergeScalarGets, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
   // io
-  loadDefinition, loadEffectiveDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, startScheduler, pollAll,
+  loadDefinition, loadEffectiveDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, updateDeviceFields, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, syncWithProbe, pollMonitorGroups, startScheduler, pollAll,
   POLL_INTERVAL_SECONDS,
 };
