@@ -66,6 +66,12 @@ const NAV_GROUPS: NavGroup[] = [
       { path: '/v2/security-audit',      label: 'Security & Audit',     icon: <AuditIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
     ],
   },
+  {
+    label: 'Help',
+    items: [
+      { path: '/v2/docs', label: 'Documentation', icon: <BookIcon /> },
+    ],
+  },
 ];
 
 function normalizeRole(role: string): string {
@@ -290,6 +296,15 @@ function AuditIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fi
 function BuilderIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M1 6h14M6 6v9" stroke="currentColor" strokeWidth="1.3"/><rect x="8" y="8" width="5" height="3" rx="0.75" stroke="currentColor" strokeWidth="1.2"/></svg>; }
 /** Node View Designer — layers/sections icon */
 function NodeViewIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="2" width="14" height="4" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="1" y="8" width="9" height="3" rx="1" stroke="currentColor" strokeWidth="1.3"/><rect x="3" y="13" width="6" height="2" rx="0.75" stroke="currentColor" strokeWidth="1.2"/><path d="M12 9.5l2 2-2 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+
+function BookIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  );
+}
 
 function CollapseIcon({ collapsed }: { collapsed: boolean }) {
   return collapsed

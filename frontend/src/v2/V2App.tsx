@@ -51,6 +51,8 @@ const V2DescriptorPage = lazy(() => import('./pages/V2DescriptorPage'));
 const V2MibBuilderPage = lazy(() => import('./pages/V2MibBuilderPage'));
 // Pre-MIB Node View Designer — design sections/labels/index levels before MIB upload (PV-01→PV-12)
 const V2NodeViewDesignerPage = lazy(() => import('./pages/V2NodeViewDesignerPage'));
+// In-app documentation — search, PDF export, full page coverage
+const V2DocsPage = lazy(() => import('./pages/V2DocsPage'));
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
@@ -226,6 +228,8 @@ export function V2App() {
                     </V2ProtectedRoute>
                   }
                 />
+                {/* In-app documentation — /v2/docs/:slug? */}
+                <Route path="docs/:slug?" element={<V2DocsPage />} />
                 <Route path="*" element={<V2NotFoundPage />} />
               </Routes>
             </Suspense>
