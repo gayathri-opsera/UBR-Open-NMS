@@ -407,7 +407,7 @@ textarea:focus {
 }
 
 /* ── Sidebar brand text glow ─────────────────────────────────────────────────── */
-.vf-root aside span[style*="UBR NMS"] {
+.vf-root aside span[style*="NMS"] {
   text-shadow: 0 0 20px rgba(77,158,255,0.5);
 }
 

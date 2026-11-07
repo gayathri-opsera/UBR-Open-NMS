@@ -50,7 +50,7 @@ const STATUSES = ['ONLINE','ONLINE','ONLINE','ONLINE','ONLINE','ONLINE','ONLINE'
 const FW_VERSIONS = ['v2.3.0','v2.3.0','v2.3.0','v2.2.0','v2.1.0','v3.4.1','v3.5.0'];
 
 async function main() {
-  console.log('\n📡  UBR NMS — Expanded Device Seed (120 devices)');
+  console.log('\n📡  NMS — Expanded Device Seed (120 devices)');
   const client = new MongoClient(BASE_URL);
   await client.connect();
   const db = client.db('ubr_nms');

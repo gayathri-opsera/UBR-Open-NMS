@@ -124,7 +124,7 @@ export function V2Sidebar({ collapsed, onToggle }: V2SidebarProps) {
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
           }}>
-            UBR NMS
+            NMS
           </span>
         )}
         <button

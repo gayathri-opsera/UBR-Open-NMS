@@ -1439,7 +1439,7 @@ export default function V2ProductDefinitionPage() {
     setTemplateMenuOpen(false);
     downloadBlob(
       `<?xml version="1.0" encoding="UTF-8"?>
-<!-- UBR NMS Product Definition — XML format (schema: urn:nms:productdef:1.0) -->
+<!-- NMS Product Definition — XML format (schema: urn:nms:productdef:1.0) -->
 <productDefinition xmlns="urn:nms:productdef:1.0">
 
   <identity>

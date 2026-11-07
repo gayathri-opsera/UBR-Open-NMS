@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * UBR NMS — API Reference Auto-Sync
+ * NMS — API Reference Auto-Sync
  *
  * Reads all api-specs/*.yaml files and rewrites
  * frontend/src/data/docs/reference/index.ts API_REFERENCE_PAGE content.
@@ -87,7 +87,7 @@ function generateMarkdown(specs) {
   const today = new Date().toISOString().split('T')[0];
   let md = `# API Reference
 
-REST API documentation for UBR NMS microservices, auto-generated from \`api-specs/*.yaml\`.
+REST API documentation for NMS microservices, auto-generated from \`api-specs/*.yaml\`.
 
 > **Dev base URL:** \`http://localhost:3100/api/v1\`
 > **Auth:** All endpoints require \`Authorization: Bearer <JWT>\`

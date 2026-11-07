@@ -404,7 +404,7 @@ export default function V2ProfilePage() {
                     </div>
                   </div>
                   <Alert type="info">
-                    After scanning, look for <strong>UBR-NMS:{user?.username}</strong> in your app with a 6-digit code that refreshes every 30 seconds.
+                    After scanning, look for <strong>NMS:{user?.username}</strong> in your app with a 6-digit code that refreshes every 30 seconds.
                   </Alert>
                 </div>
               </div>
@@ -423,7 +423,7 @@ export default function V2ProfilePage() {
             <>
               <SectionTitle>Enter the 6-Digit Code</SectionTitle>
               <SectionSub>
-                Open your authenticator app and enter the current code for <strong>UBR-NMS:{user?.username}</strong>.
+                Open your authenticator app and enter the current code for <strong>NMS:{user?.username}</strong>.
                 The code refreshes every 30 seconds.
               </SectionSub>
 

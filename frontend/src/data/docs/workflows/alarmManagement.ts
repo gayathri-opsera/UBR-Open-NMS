@@ -39,7 +39,7 @@ NEW ──► ACKNOWLEDGED ──► CLEARED
 
 ## Alarm Correlation
 
-UBR NMS uses a **60-second sliding window** to deduplicate noisy alarms. If the same device fires the same alarm code with the same severity within 60 seconds, only one entry is created. The \`eventCount\` field shows how many raw events were merged.
+NMS uses a **60-second sliding window** to deduplicate noisy alarms. If the same device fires the same alarm code with the same severity within 60 seconds, only one entry is created. The \`eventCount\` field shows how many raw events were merged.
 
 ## Working with Alarms
 
@@ -87,7 +87,7 @@ Click **Export** (top right) to download the filtered alarm list as CSV. For sch
     {
       question: 'Why did an alarm disappear without me clearing it?',
       answer:
-        'UBR NMS auto-clears alarms when it receives the corresponding SNMP clear trap from the device. This is normal SNMP trap-pair behaviour (e.g. linkDown / linkUp).',
+        'NMS auto-clears alarms when it receives the corresponding SNMP clear trap from the device. This is normal SNMP trap-pair behaviour (e.g. linkDown / linkUp).',
     },
     {
       question: 'How do I get notified of CRITICAL alarms by email or SMS?',

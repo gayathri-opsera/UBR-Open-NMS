@@ -109,7 +109,7 @@ const VERSION = '1.0.0';
 // ══════════════════════════════════════════════════════════════════════════════
 async function runTests() {
   console.log('═'.repeat(64));
-  console.log('  UBR NMS — Descriptor Registry End-to-End Test');
+  console.log('  NMS — Descriptor Registry End-to-End Test');
   console.log(`  Gateway: ${GW}`);
   console.log(`  Product: ${PROD_ID}  v${VERSION}`);
   console.log('═'.repeat(64));

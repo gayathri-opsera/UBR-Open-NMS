@@ -1,5 +1,5 @@
 /**
- * UBR Open NMS — Comprehensive Seed Script
+ * NMS — Comprehensive Seed Script
  * ─────────────────────────────────────────
  * Seeds all MongoDB collections with realistic data so every UI feature
  * can be tested immediately after docker compose up.
@@ -1066,7 +1066,7 @@ async function seedTopology(db, reset) {
 async function main() {
   const client = new MongoClient(MONGO_URL);
 
-  console.log('\n🌱  UBR Open NMS — Seed Script');
+  console.log('\n🌱  NMS — Seed Script');
   console.log(`   MongoDB : ${MONGO_URL}`);
   console.log(`   Mode    : ${RESET ? 'RESET + seed' : 'skip if exists'}\n`);
 

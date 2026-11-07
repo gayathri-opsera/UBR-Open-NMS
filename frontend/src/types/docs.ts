@@ -1,4 +1,4 @@
-// ── UBR NMS Documentation Types ──────────────────────────────────────────────
+// ── NMS Documentation Types ──────────────────────────────────────────────
 
 export type DocPersona =
   | 'Admin'

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * UBR NMS Documentation Validator
+ * NMS Documentation Validator
  *
  * Usage (from repo root):
  *   node scripts/docs/validate-docs.mjs
@@ -93,7 +93,7 @@ const WARNINGS = [];
 const pages = extractPages(ROOT);
 const allSlugs = new Set(pages.map(p => p.slug));
 
-console.log('\n📚 UBR NMS Documentation Validator');
+console.log('\n📚 NMS Documentation Validator');
 console.log('═'.repeat(50));
 
 // 1. Required fields

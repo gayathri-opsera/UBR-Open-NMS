@@ -157,7 +157,7 @@ function CredentialsStep() {
     <Card>
       <Logo />
       <h1 style={{ color: '#1b3270', marginBottom: 4, fontSize: 22, fontWeight: 700, textAlign: 'center' }}>
-        UBR NMS
+        NMS
       </h1>
       <p style={{ color: '#718096', marginBottom: 28, fontSize: 13, textAlign: 'center' }}>
         Network Management System
@@ -266,7 +266,7 @@ function MfaStep() {
       </h1>
       <p style={{ color: '#718096', marginBottom: 8, fontSize: 13, textAlign: 'center', lineHeight: 1.5 }}>
         Open your authenticator app and enter the<br/>
-        6-digit code for <strong style={{ color: '#1b3270' }}>UBR-NMS</strong>
+        6-digit code for <strong style={{ color: '#1b3270' }}>NMS</strong>
       </p>
 
       {/* Countdown */}
@@ -325,7 +325,7 @@ function MfaStep() {
         borderRadius: 8, fontSize: 12, color: '#4a5568', lineHeight: 1.6,
       }}>
         <strong style={{ color: '#1b3270' }}>Using Google Authenticator or Authy?</strong><br/>
-        Find the <em>UBR-NMS</em> entry in your app and enter the current 6-digit code.
+        Find the <em>NMS</em> entry in your app and enter the current 6-digit code.
         Codes refresh every 30 seconds.
       </div>
     </Card>

@@ -9,7 +9,7 @@ export const REFERENCE_SECTION: DocSection = {
       slug: 'glossary',
       title: 'Glossary',
       description:
-        'Definitions for all UBR NMS, telecom, and SNMP terminology used throughout the platform.',
+        'Definitions for all NMS, telecom, and SNMP terminology used throughout the platform.',
       readTime: 8,
       lastUpdated: '2026-11-06',
       content: `# Glossary
@@ -17,7 +17,7 @@ export const REFERENCE_SECTION: DocSection = {
 ## Network Management Terms
 
 **BTS — Base Transceiver Station**
-A fixed radio transceiver that communicates with mobile devices. Managed by UBR NMS for Airtel's wireless network.
+A fixed radio transceiver that communicates with mobile devices. Managed by NMS for Airtel's wireless network.
 
 **CPE — Customer Premises Equipment**
 Devices installed at a customer site: routers, modems, IDUs. Managed via TR-069 / CWMP.
@@ -45,13 +45,13 @@ Target response times: CRITICAL = 15 min, MAJOR = 1 hr, MINOR = 4 hr.
 ## SNMP Terms
 
 **SNMP — Simple Network Management Protocol**
-The primary protocol used by UBR NMS to monitor and control network devices. UDP-based, port 161 (queries) and 162 (traps).
+The primary protocol used by NMS to monitor and control network devices. UDP-based, port 161 (queries) and 162 (traps).
 
 **OID — Object Identifier**
 A dotted-decimal address identifying a specific managed object in the SNMP MIB tree. Example: \`1.3.6.1.2.1.1.1.0\` = sysDescr.
 
 **MIB — Management Information Base**
-A structured text file (SMIv2 format) that defines the OIDs a device supports, their data types, and descriptions. UBR NMS parses MIBs in the Custom UI Builder.
+A structured text file (SMIv2 format) that defines the OIDs a device supports, their data types, and descriptions. NMS parses MIBs in the Custom UI Builder.
 
 **sysDescr** (OID: \`1.3.6.1.2.1.1.1.0\`)
 The device system description string. Used for device identification and auto-matching to Product Definitions.
@@ -60,13 +60,13 @@ The device system description string. Used for device identification and auto-ma
 The vendor-assigned unique OID prefix for this device type. Used to auto-link MIB Builder descriptors.
 
 **SNMP Trap**
-An unsolicited notification sent from the device to UBR NMS when an event occurs (e.g. link down). UBR NMS listens for traps on UDP port 162.
+An unsolicited notification sent from the device to NMS when an event occurs (e.g. link down). NMS listens for traps on UDP port 162.
 
 **SNMP GET**
-A query from UBR NMS to the device requesting the current value of an OID.
+A query from NMS to the device requesting the current value of an OID.
 
 **SNMP SET**
-A command from UBR NMS to the device to change the value of a writable OID. Used by Node View Apply (SNMP SET) button.
+A command from NMS to the device to change the value of a writable OID. Used by Node View Apply (SNMP SET) button.
 
 **SNMP Walk**
 Traverses an OID subtree, fetching all values. Available in the Troubleshoot page.
@@ -79,10 +79,10 @@ The SNMPv1/v2c shared "password" — a plain-text string sent with every SNMP re
 
 ---
 
-## UBR NMS Specific Terms
+## NMS Specific Terms
 
 **Product Definition**
-An XML or JSON file that defines how UBR NMS manages a specific device type — polling schedule, KPI mappings, alarm rules, and config templates.
+An XML or JSON file that defines how NMS manages a specific device type — polling schedule, KPI mappings, alarm rules, and config templates.
 
 **MIB Builder Descriptor**
 A UI-designed screen definition (stored in \`node_view_wireframes\`) that determines what SNMP parameters are shown in the Node View and how they are displayed.
@@ -103,13 +103,13 @@ The tab on Device Detail that shows real-time SNMP parameters for a device. Rend
 A dual-approval workflow for descriptor publishing: one user creates/submits (maker), a different user approves/publishes (checker). Prevents single-user errors in production.
 
 **mTLS — Mutual TLS**
-Device authentication where both the UBR NMS server and the device present certificates. Used for auto-registration in the Onboarding flow.
+Device authentication where both the NMS server and the device present certificates. Used for auto-registration in the Onboarding flow.
 
 **SSE — Server-Sent Events**
-A one-directional HTTP streaming mechanism used by UBR NMS to push real-time alarm updates to the browser. The Alarms page stays live without polling.
+A one-directional HTTP streaming mechanism used by NMS to push real-time alarm updates to the browser. The Alarms page stays live without polling.
 
 **Vite**
-The build tool used for the UBR NMS frontend. Content-hashed JS/CSS bundles ensure the browser always loads the latest version after a deployment.
+The build tool used for the NMS frontend. Content-hashed JS/CSS bundles ensure the browser always loads the latest version after a deployment.
 
 ---
 
@@ -134,13 +134,13 @@ The build tool used for the UBR NMS frontend. Content-hashed JS/CSS bundles ensu
       slug: 'api-reference',
       title: 'API Reference',
       description:
-        'REST API documentation for all UBR NMS microservices. 10 of ~28 services have published OpenAPI 3.0 specs.',
+        'REST API documentation for all NMS microservices. 10 of ~28 services have published OpenAPI 3.0 specs.',
       readTime: 15,
       lastUpdated: '2026-11-06',
       autoGenerated: true,
       content: `# API Reference
 
-REST API documentation for UBR NMS microservices.
+REST API documentation for NMS microservices.
 
 > **Dev base URL:** \`http://localhost:3100/api/v1\`
 > **Auth:** All endpoints require \`Authorization: Bearer <JWT>\`
@@ -303,14 +303,14 @@ Async report generation, status polling, and download.
       slug: 'architecture',
       title: 'Architecture',
       description:
-        'UBR NMS system architecture — microservices, data flows, Kafka topics, MongoDB collections, and deployment topology.',
+        'NMS system architecture — microservices, data flows, Kafka topics, MongoDB collections, and deployment topology.',
       readTime: 10,
       lastUpdated: '2026-11-06',
       content: `# Architecture
 
 ## System Overview
 
-UBR NMS is a cloud-native microservices platform deployed on Kubernetes. All services communicate through the **api-gateway** (the single entry point for the browser) and an internal **Kafka message bus** for async events.
+NMS is a cloud-native microservices platform deployed on Kubernetes. All services communicate through the **api-gateway** (the single entry point for the browser) and an internal **Kafka message bus** for async events.
 
 ## Microservices
 
@@ -418,7 +418,7 @@ Kubernetes Cluster
     {
       slug: 'release-notes',
       title: 'Release Notes',
-      description: 'Version history and changelog for UBR NMS.',
+      description: 'Version history and changelog for NMS.',
       readTime: 5,
       lastUpdated: '2026-11-06',
       content: `# Release Notes

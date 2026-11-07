@@ -14,7 +14,7 @@ The KPI page (\`/v2/kpi\`) provides aggregated performance metrics across your d
 
 ## Polling and Rollup Tiers
 
-UBR NMS collects SNMP metrics on a 4-tier schedule:
+NMS collects SNMP metrics on a 4-tier schedule:
 
 | Tier | Frequency | Used for |
 |------|-----------|---------|

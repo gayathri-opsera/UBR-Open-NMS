@@ -7,16 +7,16 @@ export const GETTING_STARTED_SECTION: DocSection = {
   pages: [
     {
       slug: 'introduction',
-      title: 'What is UBR NMS?',
+      title: 'What is NMS?',
       description:
-        'An overview of the UBR Open Network Management System — a cloud-native FCAPS platform for Airtel telecom infrastructure.',
+        'An overview of the NMS — a cloud-native FCAPS platform for Airtel telecom infrastructure.',
       readTime: 6,
       appRoute: '/v2/dashboard',
       personas: ['All'],
       lastUpdated: '2026-11-06',
-      content: `# What is UBR NMS?
+      content: `# What is NMS?
 
-**UBR Open Network Management System** is a cloud-native FCAPS platform for managing wireless telecommunications infrastructure — BTS (Base Transceiver Stations), CPE (Customer Premises Equipment), and IDU (Indoor Units) — across Airtel's network.
+**NMS** is a cloud-native FCAPS platform for managing wireless telecommunications infrastructure — BTS (Base Transceiver Stations), CPE (Customer Premises Equipment), and IDU (Indoor Units) — across Airtel's network.
 
 ## Core Capabilities
 
@@ -60,7 +60,7 @@ The left sidebar organises all features by category:
 
 ## Technical Architecture
 
-UBR NMS is built as polyglot microservices deployed on Kubernetes:
+NMS is built as polyglot microservices deployed on Kubernetes:
 
 \`\`\`
 Browser (React 19 + Vite)
@@ -81,17 +81,17 @@ api-gateway (Node.js / Express)   ← primary backend
 `,
       faqs: [
         {
-          question: 'What SNMP versions does UBR NMS support?',
+          question: 'What SNMP versions does NMS support?',
           answer:
             'SNMP v1, v2c, and v3 (with USM authentication and AES-128 privacy). v3 is recommended for production — configure it in the device credentials section under Admin.',
         },
         {
-          question: 'How many devices can UBR NMS manage?',
+          question: 'How many devices can NMS manage?',
           answer:
             'The reference architecture handles 10,000+ devices per cluster. SNMP polling uses a distributed worker pool, Kafka buffers trap events, and ScyllaDB stores KPI time-series at scale.',
         },
         {
-          question: 'Is UBR NMS multi-tenant?',
+          question: 'Is NMS multi-tenant?',
           answer:
             'Yes. Devices are assigned to Org Hierarchy nodes. Role-based access control (RBAC) ensures operators only see devices in their circle. Admin users see everything.',
         },
@@ -113,7 +113,7 @@ You will be monitoring live alarms and device health in under 10 minutes.
 
 ## Step 1 — Log In
 
-Navigate to your UBR NMS URL and log in with your credentials. You will land on the **Dashboard** at \`/v2/dashboard\`.
+Navigate to your NMS URL and log in with your credentials. You will land on the **Dashboard** at \`/v2/dashboard\`.
 
 ## Step 2 — Check Live Alarms
 
@@ -196,7 +196,7 @@ Go to **Admin → Users**. Add users, assign roles (Admin / Operator / Viewer / 
     {
       slug: 'quick-start-discovery',
       title: 'Quick Start: Discover Your First Device',
-      description: 'Discover and onboard a new device into UBR NMS using subnet scanning and mTLS auto-registration.',
+      description: 'Discover and onboard a new device into NMS using subnet scanning and mTLS auto-registration.',
       readTime: 4,
       appRoute: '/v2/discovery',
       personas: ['Admin', 'Operator'],
@@ -228,7 +228,7 @@ If you know the IP address:
 
 ## Method C — mTLS Auto-Registration
 
-For devices that support the UBR NMS agent:
+For devices that support the NMS agent:
 1. Install the UBR agent on the device (see your hardware vendor documentation)
 2. The agent presents an mTLS certificate to the registration endpoint
 3. The device auto-appears in Inventory with status **PENDING_APPROVAL**

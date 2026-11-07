@@ -24,7 +24,7 @@ async function exportToPdf(page: DocPage, el: HTMLElement): Promise<void> {
     posY += pageH;
     if (posY < imgH) pdf.addPage();
   }
-  pdf.save(`UBR-NMS-${page.slug}.pdf`);
+  pdf.save(`NMS-${page.slug}.pdf`);
 }
 
 // ── Markdown → safe HTML (for off-screen rendering in full playbook export) ───
@@ -115,7 +115,7 @@ async function exportPlaybookToPdf(
       <h1 style="font-size:40px;font-weight:900;margin:0 0 16px;line-height:1.1;color:#fff">Documentation<br/>Playbook</h1>
       <div style="width:60px;height:4px;background:#6366f1;border-radius:2px;margin:16px auto"></div>
       <p style="font-size:16px;color:#c7d2fe;margin:16px 0 0;max-width:480px;line-height:1.6">Complete product documentation for the Airtel Telecom FCAPS platform — ${allEntries.length} pages covering all features, APIs, and administration guides.</p>
-      <div style="margin-top:48px;font-size:13px;color:#818cf8">Generated ${new Date().toLocaleDateString('en-IN', { dateStyle: 'long' })} · UBR NMS v2.0</div>
+      <div style="margin-top:48px;font-size:13px;color:#818cf8">Generated ${new Date().toLocaleDateString('en-IN', { dateStyle: 'long' })} · NMS v2.0</div>
     </div>`;
   await new Promise((r) => setTimeout(r, 80));
   {
@@ -184,7 +184,7 @@ async function exportPlaybookToPdf(
         ${page.description ? `<div style="background:#f5f3ff;border-left:4px solid #6366f1;padding:10px 14px;border-radius:0 6px 6px 0;font-size:13px;color:#4c1d95;margin-bottom:20px;line-height:1.6">${page.description}</div>` : ''}
         <div style="font-size:14px;line-height:1.75;color:#374151">${mdToHtml(page.content)}</div>
         ${faqsHtml}
-        <div style="margin-top:24px;padding-top:10px;border-top:1px solid #f3f4f6;font-size:10px;color:#d1d5db;text-align:right">UBR NMS Documentation · ${page.slug}</div>
+        <div style="margin-top:24px;padding-top:10px;border-top:1px solid #f3f4f6;font-size:10px;color:#d1d5db;text-align:right">NMS Documentation · ${page.slug}</div>
       </div>`;
 
     await new Promise((r) => setTimeout(r, 60));
@@ -203,7 +203,7 @@ async function exportPlaybookToPdf(
   }
 
   document.body.removeChild(container);
-  pdf.save('UBR-NMS-Documentation-Playbook.pdf');
+  pdf.save('NMS-Documentation-Playbook.pdf');
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

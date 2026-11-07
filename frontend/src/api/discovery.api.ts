@@ -588,7 +588,7 @@ export async function listDiscoveryRuns(
 // ── Provisioning: convert discovered hosts into managed inventory devices ─────
 
 /**
- * All supported device types in UBR NMS.
+ * All supported device types in NMS.
  * Extensible — any new type from a Product Definition is accepted as-is.
  */
 export type NmsDeviceType =

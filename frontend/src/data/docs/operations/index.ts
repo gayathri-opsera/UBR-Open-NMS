@@ -15,7 +15,7 @@ export const OPERATIONS_SECTION: DocSection = {
       lastUpdated: '2026-11-06',
       content: `# Discovery
 
-The Discovery page (\`/v2/discovery\`) scans your network for devices that can be managed by UBR NMS.
+The Discovery page (\`/v2/discovery\`) scans your network for devices that can be managed by NMS.
 
 ## Scan Methods
 
@@ -62,7 +62,7 @@ Go to **Discovery → Audit** to see a full history of all scans: who ran them, 
       faqs: [
         {
           question: 'The scan returned no results even though devices are reachable — why?',
-          answer: 'Check that (1) the SNMP credential profile is correct for those devices, (2) the UBR NMS server\'s IP is in the SNMP allowed-hosts list on the device (community ACL), and (3) UDP port 161 is not blocked by a firewall between UBR NMS and the target subnet.',
+          answer: 'Check that (1) the SNMP credential profile is correct for those devices, (2) the NMS server\'s IP is in the SNMP allowed-hosts list on the device (community ACL), and (3) UDP port 161 is not blocked by a firewall between NMS and the target subnet.',
         },
       ],
     },
@@ -214,7 +214,7 @@ The Troubleshoot page (\`/v2/troubleshoot\`) gives NOC operators live diagnostic
 ## Available Tools
 
 ### ICMP Ping
-Sends N pings from the UBR NMS server to the target device. Shows min/avg/max RTT and packet loss percentage.
+Sends N pings from the NMS server to the target device. Shows min/avg/max RTT and packet loss percentage.
 
 ### SNMP Walk
 Walks any OID subtree and displays the result as a table with OID, type, and value. Useful for verifying SNMP connectivity and exploring device MIBs.
@@ -223,7 +223,7 @@ Walks any OID subtree and displays the result as a table with OID, type, and val
 Fetches the value of a specific OID. Enter the full OID (e.g. \`1.3.6.1.2.1.1.1.0\`) or the MIB name (\`sysDescr.0\`).
 
 ### Traceroute
-Shows the network path from the UBR NMS server to the device. Useful for diagnosing routing issues.
+Shows the network path from the NMS server to the device. Useful for diagnosing routing issues.
 
 ### Port Probe
 TCP connect to a specified port. Checks if NETCONF (830), SSH (22), TR-069 (7547), or any custom port is reachable.

@@ -29,7 +29,7 @@ const IDS = {
 };
 
 async function main() {
-  console.log('\n🌱  UBR Open NMS — K8s Seed Script');
+  console.log('\n🌱  NMS — K8s Seed Script');
   console.log(`   MongoDB : ${BASE_URL}`);
   console.log(`   Mode    : ${RESET ? 'RESET + seed' : 'skip if exists'}\n`);
 

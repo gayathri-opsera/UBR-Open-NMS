@@ -17,7 +17,7 @@ export const FRAMEWORK_SECTION: DocSection = {
       lastUpdated: '2026-11-06',
       content: `# Product Definitions
 
-Product Definitions (\`/v2/product-definitions\`) define how UBR NMS understands a device type — what OIDs to poll, how to map values, what KPI metrics to compute, and what config templates apply.
+Product Definitions (\`/v2/product-definitions\`) define how NMS understands a device type — what OIDs to poll, how to map values, what KPI metrics to compute, and what config templates apply.
 
 > **Role required:** Admin, descriptor_admin, or descriptor_author
 
@@ -315,7 +315,7 @@ A notification rule consists of:
 
 ## Email Notifications
 
-Emails include: device name, alarm severity, alarm code, description, and a direct link to the alarm in UBR NMS.
+Emails include: device name, alarm severity, alarm code, description, and a direct link to the alarm in NMS.
 
 Configure your SMTP server in **Admin → System Settings → Email**.
 
@@ -350,7 +350,7 @@ Click **Test** on any rule to send a sample notification immediately (without wa
       lastUpdated: '2026-11-06',
       content: `# Security & Audit
 
-The Security & Audit page (\`/v2/security-audit\`) is the control centre for UBR NMS security settings.
+The Security & Audit page (\`/v2/security-audit\`) is the control centre for NMS security settings.
 
 ## Zero-Trust Controls
 
@@ -386,7 +386,7 @@ Credentials can be tested against a device IP directly from the vault (runs a sy
 
 ## System Audit Log
 
-Every user action in UBR NMS is logged with:
+Every user action in NMS is logged with:
 - Timestamp (UTC)
 - User (username + role)
 - Action (login, alarm acknowledge, config push, descriptor publish, etc.)
@@ -434,7 +434,7 @@ Configure global system behaviour:
 
 Configure third-party integrations:
 - **LDAP / Active Directory** — user authentication delegation
-- **Syslog** — forward all UBR NMS audit events to your enterprise syslog
+- **Syslog** — forward all NMS audit events to your enterprise syslog
 - **SNMP Trap Forwarding** — re-forward raw traps to a secondary NMS
 - **ServiceNow / Jira** — auto-create incidents from CRITICAL alarms
 

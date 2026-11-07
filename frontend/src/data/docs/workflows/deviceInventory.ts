@@ -10,7 +10,7 @@ export const DEVICE_INVENTORY_PAGE: DocPage = {
   lastUpdated: '2026-11-06',
   content: `# Device Inventory
 
-The Inventory page (\`/v2/devices\`) is the central registry of all managed network devices in UBR NMS.
+The Inventory page (\`/v2/devices\`) is the central registry of all managed network devices in NMS.
 
 ## Device States
 

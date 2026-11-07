@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# UBR Open NMS — Database Seed Runner
+# NMS — Database Seed Runner
 # Usage:
 #   ./scripts/seed.sh          # seed (skip if already exists)
 #   ./scripts/seed.sh --reset  # drop all NMS collections then re-seed
