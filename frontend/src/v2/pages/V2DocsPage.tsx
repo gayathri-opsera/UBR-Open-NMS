@@ -6,7 +6,7 @@ import Fuse from 'fuse.js';
 import { DOC_SECTIONS, findPage, buildSearchIndex } from '../../data/docs/index';
 import type { DocPage, DocSection } from '../../types/docs';
 
-// ── Lazy PDF export (only loaded when user clicks Export) ─────────────────────
+// ── Single-page PDF export ────────────────────────────────────────────────────
 async function exportToPdf(page: DocPage, el: HTMLElement): Promise<void> {
   const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
     import('jspdf'),
@@ -25,6 +25,185 @@ async function exportToPdf(page: DocPage, el: HTMLElement): Promise<void> {
     if (posY < imgH) pdf.addPage();
   }
   pdf.save(`UBR-NMS-${page.slug}.pdf`);
+}
+
+// ── Markdown → safe HTML (for off-screen rendering in full playbook export) ───
+function mdToHtml(md: string): string {
+  return md
+    // fenced code blocks
+    .replace(/```[\w]*\n([\s\S]*?)```/g, '<pre style="background:#f4f4f8;padding:12px 14px;border-radius:6px;font-size:12px;overflow-x:auto;font-family:monospace;white-space:pre;margin:12px 0;border-left:3px solid #6366f1"><code>$1</code></pre>')
+    // headings
+    .replace(/^#{4}\s+(.+)$/gm, '<h4 style="font-size:14px;font-weight:700;margin:16px 0 6px;color:#1e1b4b">$1</h4>')
+    .replace(/^#{3}\s+(.+)$/gm, '<h3 style="font-size:16px;font-weight:700;margin:20px 0 8px;color:#1e1b4b">$1</h3>')
+    .replace(/^#{2}\s+(.+)$/gm, '<h2 style="font-size:18px;font-weight:700;margin:28px 0 10px;color:#1e1b4b;border-bottom:1px solid #e5e7eb;padding-bottom:4px">$1</h2>')
+    .replace(/^#{1}\s+(.+)$/gm, '<h1 style="font-size:22px;font-weight:800;margin:0 0 16px;color:#111827;border-bottom:2px solid #6366f1;padding-bottom:8px">$1</h1>')
+    // blockquotes
+    .replace(/^>\s+(.+)$/gm, '<blockquote style="border-left:4px solid #f59e0b;background:#fffbeb;padding:10px 14px;margin:12px 0;border-radius:0 6px 6px 0;font-size:13px;color:#78350f">$1</blockquote>')
+    // bold
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong style="font-weight:700">$1</strong>')
+    // inline code
+    .replace(/`([^`\n]+)`/g, '<code style="background:#f1f5f9;padding:2px 5px;border-radius:3px;font-size:0.88em;font-family:monospace;color:#4f46e5">$1</code>')
+    // tables
+    .replace(/(\|.+\|\n)((?:\|[-:| ]+\|\n))((?:\|.+\|\n?)*)/g, (_match, header, _sep, body) => {
+      const headerCells = header.split('|').filter((_: string, i: number, a: string[]) => i > 0 && i < a.length - 1)
+        .map((c: string) => `<th style="padding:8px 12px;text-align:left;background:#f8f9ff;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7280;border-bottom:2px solid #e5e7eb">${c.trim()}</th>`)
+        .join('');
+      const bodyRows = body.trim().split('\n').map((row: string) =>
+        `<tr>${row.split('|').filter((_: string, i: number, a: string[]) => i > 0 && i < a.length - 1)
+          .map((c: string) => `<td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;vertical-align:top">${c.trim()}</td>`)
+          .join('')}</tr>`
+      ).join('');
+      return `<div style="overflow-x:auto;margin:14px 0;border-radius:8px;border:1px solid #e5e7eb"><table style="width:100%;border-collapse:collapse"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+    })
+    // unordered lists
+    .replace(/^[ ]*[-*]\s+(.+)$/gm, '<li style="margin-bottom:4px;line-height:1.6">$1</li>')
+    // ordered lists
+    .replace(/^\d+\.\s+(.+)$/gm, '<li style="margin-bottom:4px;line-height:1.6">$1</li>')
+    // wrap consecutive <li> in <ul>
+    .replace(/(<li[^>]*>[\s\S]*?<\/li>\n?)+/g, (m) => `<ul style="padding-left:20px;margin:8px 0">${m}</ul>`)
+    // horizontal rule
+    .replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0"/>')
+    // paragraphs (double newlines)
+    .replace(/\n\n([^<\n][^\n]+)/g, '<p style="margin:0 0 14px;line-height:1.75">$1</p>')
+    // remaining single newlines inside text
+    .replace(/([^>])\n([^<\n])/g, '$1<br/>$2');
+}
+
+// ── Full playbook export (all sections → one PDF) ─────────────────────────────
+async function exportPlaybookToPdf(
+  sections: typeof DOC_SECTIONS,
+  onProgress: (current: number, total: number, label: string) => void,
+): Promise<void> {
+  const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+    import('jspdf'),
+    import('html2canvas'),
+  ]);
+
+  // Collect all pages with section context
+  const allEntries: Array<{ page: DocPage; sectionTitle: string; sectionIcon: string }> = [];
+  for (const section of sections) {
+    for (const page of section.pages) {
+      allEntries.push({ page, sectionTitle: section.title, sectionIcon: section.icon });
+      if (page.subpages) {
+        page.subpages.forEach((sp) => allEntries.push({ page: sp, sectionTitle: section.title, sectionIcon: section.icon }));
+      }
+    }
+  }
+
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const PW = pdf.internal.pageSize.getWidth();
+  const PH = pdf.internal.pageSize.getHeight();
+
+  // Off-screen render container (794px ≈ A4 width at 96dpi)
+  const container = document.createElement('div');
+  container.style.cssText = [
+    'position:fixed', 'left:-9999px', 'top:0',
+    'width:794px', 'min-height:1px',
+    'background:#ffffff', 'color:#111827',
+    'font-family:system-ui,-apple-system,sans-serif',
+    'font-size:14px', 'line-height:1.65',
+    'padding:40px 48px', 'box-sizing:border-box',
+  ].join(';');
+  document.body.appendChild(container);
+
+  // ── Page 1: Cover ──────────────────────────────────────────────────────────
+  onProgress(0, allEntries.length + 2, 'Cover page');
+  container.innerHTML = `
+    <div style="display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:1050px;text-align:center;background:linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#1e1b4b 100%);color:#fff;padding:60px;box-sizing:border-box;border-radius:0">
+      <div style="font-size:48px;margin-bottom:16px">📡</div>
+      <div style="font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#a5b4fc;margin-bottom:12px">UBR OPEN NETWORK MANAGEMENT SYSTEM</div>
+      <h1 style="font-size:40px;font-weight:900;margin:0 0 16px;line-height:1.1;color:#fff">Documentation<br/>Playbook</h1>
+      <div style="width:60px;height:4px;background:#6366f1;border-radius:2px;margin:16px auto"></div>
+      <p style="font-size:16px;color:#c7d2fe;margin:16px 0 0;max-width:480px;line-height:1.6">Complete product documentation for the Airtel Telecom FCAPS platform — ${allEntries.length} pages covering all features, APIs, and administration guides.</p>
+      <div style="margin-top:48px;font-size:13px;color:#818cf8">Generated ${new Date().toLocaleDateString('en-IN', { dateStyle: 'long' })} · UBR NMS v2.0</div>
+    </div>`;
+  await new Promise((r) => setTimeout(r, 80));
+  {
+    const cvs = await html2canvas(container, { scale: 1.5, useCORS: true, backgroundColor: '#1e1b4b' });
+    const imgH = (cvs.height * PW) / cvs.width;
+    pdf.addImage(cvs.toDataURL('image/png'), 'PNG', 0, 0, PW, imgH);
+  }
+
+  // ── Page 2: Table of Contents ──────────────────────────────────────────────
+  onProgress(1, allEntries.length + 2, 'Table of Contents');
+  pdf.addPage();
+
+  let tocHtml = `<h1 style="font-size:24px;font-weight:800;margin:0 0 24px;color:#1e1b4b;border-bottom:3px solid #6366f1;padding-bottom:10px">📋 Table of Contents</h1>`;
+  let currentSection = '';
+  allEntries.forEach(({ page, sectionTitle, sectionIcon }, idx) => {
+    if (sectionTitle !== currentSection) {
+      currentSection = sectionTitle;
+      tocHtml += `<div style="margin-top:16px;margin-bottom:4px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#6b7280">${sectionIcon} ${sectionTitle}</div>`;
+    }
+    tocHtml += `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0 3px 12px;border-bottom:1px dotted #e5e7eb;font-size:13px">
+      <span style="color:#374151">${page.title}</span>
+      <span style="color:#9ca3af;font-size:11px;white-space:nowrap;margin-left:8px">p.${idx + 3}</span>
+    </div>`;
+  });
+
+  container.innerHTML = `<div style="background:#fff;padding:40px 48px">${tocHtml}</div>`;
+  await new Promise((r) => setTimeout(r, 80));
+  {
+    const cvs = await html2canvas(container, { scale: 1.5, useCORS: true, backgroundColor: '#ffffff' });
+    const imgData = cvs.toDataURL('image/png');
+    const imgH = (cvs.height * PW) / cvs.width;
+    let posY = 0;
+    while (posY < imgH) {
+      if (posY > 0) { pdf.addPage(); }
+      pdf.addImage(imgData, 'PNG', 0, -posY, PW, imgH);
+      posY += PH;
+    }
+  }
+
+  // ── All doc pages ──────────────────────────────────────────────────────────
+  for (let i = 0; i < allEntries.length; i++) {
+    const { page, sectionTitle, sectionIcon } = allEntries[i];
+    onProgress(i + 2, allEntries.length + 2, page.title);
+
+    const personas = page.personas?.join(', ') ?? 'All';
+    const faqsHtml = page.faqs && page.faqs.length > 0
+      ? `<div style="margin-top:32px;border-top:2px solid #e5e7eb;padding-top:20px">
+           <h2 style="font-size:16px;font-weight:700;margin:0 0 12px;color:#1e1b4b">❓ Frequently Asked Questions</h2>
+           ${page.faqs.map((f) => `
+             <div style="margin-bottom:14px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
+               <div style="background:#f9fafb;padding:10px 14px;font-weight:600;font-size:13px;color:#374151">${f.question}</div>
+               <div style="padding:10px 14px;font-size:13px;color:#4b5563;line-height:1.6">${mdToHtml(f.answer)}</div>
+             </div>`).join('')}
+         </div>`
+      : '';
+
+    container.innerHTML = `
+      <div style="background:#fff;padding:36px 44px">
+        <div style="font-size:9px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#9ca3af;margin-bottom:6px">${sectionIcon} ${sectionTitle}</div>
+        <h1 style="font-size:24px;font-weight:900;margin:0 0 10px;color:#1e1b4b;line-height:1.2">${page.title}</h1>
+        <div style="display:flex;gap:16px;font-size:11px;color:#9ca3af;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #e5e7eb">
+          <span>📖 ${page.readTime} min read</span>
+          <span>👥 ${personas}</span>
+          <span>🕐 Updated ${new Date(page.lastUpdated).toLocaleDateString('en-IN', { dateStyle: 'medium' })}</span>
+        </div>
+        ${page.description ? `<div style="background:#f5f3ff;border-left:4px solid #6366f1;padding:10px 14px;border-radius:0 6px 6px 0;font-size:13px;color:#4c1d95;margin-bottom:20px;line-height:1.6">${page.description}</div>` : ''}
+        <div style="font-size:14px;line-height:1.75;color:#374151">${mdToHtml(page.content)}</div>
+        ${faqsHtml}
+        <div style="margin-top:24px;padding-top:10px;border-top:1px solid #f3f4f6;font-size:10px;color:#d1d5db;text-align:right">UBR NMS Documentation · ${page.slug}</div>
+      </div>`;
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    const cvs = await html2canvas(container, { scale: 1.5, useCORS: true, backgroundColor: '#ffffff' });
+    const imgData = cvs.toDataURL('image/png');
+    const imgH = (cvs.height * PW) / cvs.width;
+
+    pdf.addPage();
+    let posY = 0;
+    while (posY < imgH) {
+      pdf.addImage(imgData, 'PNG', 0, -posY, PW, imgH);
+      posY += PH;
+      if (posY < imgH) pdf.addPage();
+    }
+  }
+
+  document.body.removeChild(container);
+  pdf.save('UBR-NMS-Documentation-Playbook.pdf');
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -235,6 +414,8 @@ export default function V2DocsPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
+  const [exportProgress, setExportProgress] = useState<{ current: number; total: number; label: string } | null>(null);
   const [openFaqs, setOpenFaqs] = useState<Set<number>>(new Set());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return window.innerWidth < 768; } catch { return false; }
@@ -292,6 +473,23 @@ export default function V2DocsPage() {
     }
   }, [page]);
 
+  const handleExportAll = useCallback(async () => {
+    if (exportingAll) return;
+    setExportingAll(true);
+    setExportProgress({ current: 0, total: 1, label: 'Preparing…' });
+    try {
+      await exportPlaybookToPdf(DOC_SECTIONS, (current, total, label) => {
+        setExportProgress({ current, total, label });
+      });
+    } catch (err) {
+      console.error('Full playbook export failed:', err);
+      alert('Playbook export failed. Please try again.');
+    } finally {
+      setExportingAll(false);
+      setExportProgress(null);
+    }
+  }, [exportingAll]);
+
   const toggleFaq = (i: number) =>
     setOpenFaqs((prev) => {
       const n = new Set(prev);
@@ -309,8 +507,83 @@ export default function V2DocsPage() {
         overflow: 'hidden',
         background: 'var(--vf-canvas)',
         fontFamily: 'var(--vf-font-sans, system-ui, sans-serif)',
+        position: 'relative',
       }}
     >
+      {/* ── Full Playbook Export Progress Overlay ────────────────────────── */}
+      {exportingAll && exportProgress && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(0,0,0,0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--vf-elevated, #1a1a2e)',
+              border: '1px solid var(--vf-border-subtle)',
+              borderRadius: 16,
+              padding: '36px 48px',
+              textAlign: 'center',
+              minWidth: 360,
+              boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div style={{ fontSize: 40, marginBottom: 16 }}>📄</div>
+            <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 800, color: 'var(--vf-text-primary)' }}>
+              Exporting Playbook
+            </h3>
+            <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--vf-text-muted)' }}>
+              Rendering page {exportProgress.current} of {exportProgress.total}
+            </p>
+
+            {/* Progress bar */}
+            <div
+              style={{
+                width: '100%',
+                height: 8,
+                background: 'var(--vf-border-subtle)',
+                borderRadius: 99,
+                overflow: 'hidden',
+                marginBottom: 12,
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${Math.round((exportProgress.current / exportProgress.total) * 100)}%`,
+                  background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                  borderRadius: 99,
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+
+            <p
+              style={{
+                margin: 0,
+                fontSize: 12,
+                color: 'var(--vf-text-muted)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: 300,
+              }}
+            >
+              {exportProgress.label}
+            </p>
+            <p style={{ margin: '12px 0 0', fontSize: 11, color: 'var(--vf-text-muted)', opacity: 0.6 }}>
+              Do not close this tab — this may take 30–60 seconds
+            </p>
+          </div>
+        </div>
+      )}
       {/* ── LEFT SIDEBAR ──────────────────────────────────────────────────── */}
       <aside
         style={{
@@ -444,11 +717,37 @@ export default function V2DocsPage() {
                 </div>
               </div>
 
-              {/* Export PDF button */}
-              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              {/* Export buttons */}
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+                {/* Single page PDF */}
                 <button
                   onClick={() => void handleExport()}
-                  disabled={exporting}
+                  disabled={exporting || exportingAll}
+                  title="Export this page as PDF"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'var(--vf-surface)',
+                    color: 'var(--vf-text-primary)',
+                    border: '1px solid var(--vf-border-default)',
+                    borderRadius: 7,
+                    padding: '9px 14px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: (exporting || exportingAll) ? 'not-allowed' : 'pointer',
+                    opacity: (exporting || exportingAll) ? 0.5 : 1,
+                    transition: 'opacity 0.15s',
+                  }}
+                >
+                  {exporting ? '⏳' : '📄'} {exporting ? 'Exporting…' : 'This Page'}
+                </button>
+
+                {/* Full playbook PDF */}
+                <button
+                  onClick={() => void handleExportAll()}
+                  disabled={exporting || exportingAll}
+                  title="Export entire documentation as one PDF"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -460,12 +759,13 @@ export default function V2DocsPage() {
                     padding: '9px 16px',
                     fontSize: 13,
                     fontWeight: 600,
-                    cursor: exporting ? 'not-allowed' : 'pointer',
-                    opacity: exporting ? 0.6 : 1,
+                    cursor: (exporting || exportingAll) ? 'not-allowed' : 'pointer',
+                    opacity: (exporting || exportingAll) ? 0.5 : 1,
                     transition: 'opacity 0.15s',
+                    boxShadow: '0 2px 8px rgba(99,102,241,0.35)',
                   }}
                 >
-                  {exporting ? '⏳' : '📄'} {exporting ? 'Exporting…' : 'Export PDF'}
+                  {exportingAll ? '⏳' : '📥'} {exportingAll ? 'Building…' : 'Export Full Playbook'}
                 </button>
               </div>
             </div>
