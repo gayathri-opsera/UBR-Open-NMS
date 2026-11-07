@@ -190,6 +190,15 @@ html[data-theme="dark"] {
   --vf-radius-lg:   12px;
   --vf-radius-full: 9999px;
 
+  /* ── Interactive / Hover / Code tokens (dark) ───────────────────────────── */
+  --vf-hover:             rgba(255,255,255,0.07);  /* generic hover bg         */
+  --vf-hover-accent:      rgba(77,158,255,0.12);   /* accent-tinted hover      */
+  --vf-code-bg:           rgba(0,0,0,0.30);        /* inline + block code bg   */
+  --vf-code-text:         #93c5fd;                 /* inline code text         */
+  --vf-accent-light:      #93c5fd;                 /* lighter accent (badges)  */
+  --vf-th-bg:             rgba(255,255,255,0.05);  /* table header bg          */
+  --vf-blockquote-bg:     rgba(255,165,0,0.07);    /* blockquote fill          */
+
   /* ── Transition Tokens ───────────────────────────────────────────────────── */
   --vf-transition-fast:   150ms ease;
   --vf-transition-normal: 250ms ease;
@@ -302,6 +311,15 @@ html[data-theme="light"] {
   /* ── Scrollbar ───────────────────────────────────────────────────────────── */
   --vf-scrollbar-track: #f1f5f9;
   --vf-scrollbar-thumb: #cbd5e1;
+
+  /* ── Interactive / Hover / Code tokens (light) ──────────────────────────── */
+  --vf-hover:             rgba(79,70,229,0.06);    /* subtle indigo hover      */
+  --vf-hover-accent:      rgba(79,70,229,0.10);    /* accent-tinted hover      */
+  --vf-code-bg:           #f1f5f9;                 /* inline + block code bg   */
+  --vf-code-text:         #4f46e5;                 /* inline code text (indigo)*/
+  --vf-accent-light:      #4f46e5;                 /* lighter accent = accent  */
+  --vf-th-bg:             #f8f9ff;                 /* table header bg          */
+  --vf-blockquote-bg:     #fffbeb;                 /* blockquote fill          */
 
   /* ── Focus Ring ──────────────────────────────────────────────────────────── */
   --vf-focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px #4f46e5;
@@ -483,3 +501,180 @@ html[data-theme="light"] .vf-surface,
 html[data-theme="light"] [class*="card"] {
   color: #0a0f1e;
 }
+
+/* ── Light mode — docs page content area ─────────────────────────────────── */
+
+/* Docs page inner sidebar must be white */
+html[data-theme="light"] .docs-sidebar {
+  background: #ffffff !important;
+  border-right: 1px solid #e2e8f0 !important;
+}
+html[data-theme="light"] .docs-sidebar button {
+  color: #374151 !important;
+}
+html[data-theme="light"] .docs-sidebar input[type="search"] {
+  background: #f9fafb !important;
+  border-color: #d1d5db !important;
+  color: #0a0f1e !important;
+}
+
+/* Docs main content area */
+html[data-theme="light"] .docs-content {
+  color: #0a0f1e;
+}
+html[data-theme="light"] .docs-content pre,
+html[data-theme="light"] .docs-content pre code {
+  background: #f1f5f9 !important;
+  color: #1e293b !important;
+  border: 1px solid #e2e8f0 !important;
+}
+html[data-theme="light"] .docs-content code {
+  background: #f1f5f9 !important;
+  color: #4f46e5 !important;
+}
+html[data-theme="light"] .docs-content blockquote {
+  background: #fffbeb !important;
+  color: #78350f !important;
+}
+html[data-theme="light"] .docs-content table th {
+  background: #f8f9ff !important;
+  color: #374151 !important;
+}
+html[data-theme="light"] .docs-content table td {
+  color: #1e293b !important;
+}
+html[data-theme="light"] .docs-content table {
+  border-color: #e2e8f0 !important;
+}
+
+/* ── Light mode — search dropdown ───────────────────────────────────────────*/
+html[data-theme="light"] .docs-search-results {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.12) !important;
+}
+html[data-theme="light"] .docs-search-results button {
+  color: #0a0f1e !important;
+  border-bottom-color: #f1f5f9 !important;
+}
+html[data-theme="light"] .docs-search-results button:hover {
+  background: #f5f7ff !important;
+}
+
+/* ── Light mode — progress overlay ──────────────────────────────────────────*/
+html[data-theme="light"] .docs-export-overlay {
+  background: rgba(15,23,42,0.6) !important;
+}
+html[data-theme="light"] .docs-export-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #0a0f1e !important;
+}
+
+/* ── Light mode — MIB Builder left panel ───────────────────────────────────*/
+html[data-theme="light"] .mib-left-panel {
+  background: #ffffff !important;
+  border-right-color: #e2e8f0 !important;
+}
+
+/* ── Light mode — generic inline rgba(0,0,0,...) overrides via element type  */
+/* These handle the most common dark-mode fallback patterns                   */
+html[data-theme="light"] main input,
+html[data-theme="light"] main textarea,
+html[data-theme="light"] main select {
+  background: #f9fafb !important;
+  color: #0a0f1e !important;
+  border-color: #d1d5db !important;
+}
+
+/* Page headers and stat cards that use dark bg tokens */
+html[data-theme="light"] [data-bg="elevated"] {
+  background: #ffffff !important;
+  color: #0a0f1e !important;
+}
+
+/* Button text in accent buttons should always be white in both themes */
+html[data-theme="light"] button[data-variant="accent"] {
+  color: #ffffff !important;
+}
+
+/* Table striping and row hover — ensure readable in light */
+html[data-theme="light"] tbody tr:hover {
+  background: #f5f7ff !important;
+}
+
+/* Modal / dialog backdrops */
+html[data-theme="light"] [role="dialog"],
+html[data-theme="light"] .vf-modal {
+  background: #ffffff !important;
+  color: #0a0f1e !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 20px 60px rgba(15,23,42,0.18) !important;
+}
+
+/* Tooltip and popover panels */
+html[data-theme="light"] [role="tooltip"],
+html[data-theme="light"] .vf-tooltip,
+html[data-theme="light"] .vf-popover {
+  background: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+/* Badge chips — ensure text remains visible */
+html[data-theme="light"] .vf-badge {
+  color: inherit;
+}
+
+/* ── Light mode — node view / parameter panels ──────────────────────────────*/
+html[data-theme="light"] .node-view-section-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+html[data-theme="light"] .node-view-section-header {
+  color: #0a0f1e !important;
+}
+html[data-theme="light"] .node-view-label {
+  color: #475569 !important;
+}
+html[data-theme="light"] .node-view-value {
+  color: #0a0f1e !important;
+}
+
+/* ── Light mode — topology SVG labels ───────────────────────────────────── */
+html[data-theme="light"] .vf-topology text,
+html[data-theme="light"] .vf-topology tspan {
+  fill: #1e293b !important;
+}
+
+/* ── Light mode — KPI chart axis / labels ───────────────────────────────── */
+html[data-theme="light"] .recharts-reference-line text {
+  fill: #374155 !important;
+}
+
+/* ── Light mode — notification / toast ─────────────────────────────────────*/
+html[data-theme="light"] .vf-toast {
+  background: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+/* ── Light mode — config diff viewer ──────────────────────────────────────*/
+html[data-theme="light"] .diff-added {
+  background: #f0fdf4 !important;
+  color: #166534 !important;
+}
+html[data-theme="light"] .diff-removed {
+  background: #fef2f2 !important;
+  color: #991b1b !important;
+}
+
+/* ── Light mode — discovery / audit tables ─────────────────────────────────*/
+html[data-theme="light"] .vf-table-row:nth-child(even) {
+  background: #f9fafb !important;
+}
+
+/* ── Light mode — framework / descriptor status badges ─────────────────────*/
+html[data-theme="light"] .status-draft     { background: #f1f5f9 !important; color: #475569 !important; }
+html[data-theme="light"] .status-published { background: #f0fdf4 !important; color: #166534 !important; }
+html[data-theme="light"] .status-approved  { background: #eff6ff !important; color: #1d4ed8 !important; }
+html[data-theme="light"] .status-rejected  { background: #fef2f2 !important; color: #991b1b !important; }
+html[data-theme="light"] .status-deprecated{ background: #fff7ed !important; color: #9a3412 !important; }

@@ -252,9 +252,9 @@ function SearchBox({ value, onChange, results, onSelect }: SearchBoxProps) {
           padding: '8px 10px',
           borderRadius: 6,
           fontSize: 13,
-          background: 'var(--vf-input-bg, #1e1e2e)',
+          background: 'var(--vf-input-bg)',
           border: '1px solid var(--vf-border-default, rgba(255,255,255,0.12))',
-          color: 'var(--vf-text-primary, #e2e8f0)',
+          color: 'var(--vf-text-primary)',
           outline: 'none',
           boxSizing: 'border-box',
         }}
@@ -268,10 +268,10 @@ function SearchBox({ value, onChange, results, onSelect }: SearchBoxProps) {
             right: 0,
             zIndex: 200,
             marginTop: 4,
-            background: 'var(--vf-elevated, #1a1a2e)',
+            background: 'var(--vf-elevated)',
             border: '1px solid var(--vf-border-subtle, rgba(255,255,255,0.08))',
             borderRadius: 8,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            boxShadow: 'var(--vf-shadow-high)',
             overflow: 'hidden',
             maxHeight: 320,
             overflowY: 'auto',
@@ -293,10 +293,10 @@ function SearchBox({ value, onChange, results, onSelect }: SearchBoxProps) {
                 cursor: 'pointer',
                 gap: 2,
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--vf-hover, rgba(255,255,255,0.05))')}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--vf-hover)')}
               onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
             >
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--vf-text-primary, #e2e8f0)' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--vf-text-primary)' }}>
                 {item.title}
               </span>
               <span style={{ fontSize: 11, color: 'var(--vf-text-muted, #64748b)' }}>
@@ -370,7 +370,7 @@ function SidebarNav({ sections, activeSlug, collapsed, onNavigate }: SidebarNavP
                 justifyContent: collapsed ? 'center' : 'flex-start',
                 background:
                   page.slug === activeSlug
-                    ? 'var(--vf-hover, rgba(99,102,241,0.12))'
+                    ? 'var(--vf-hover-accent)'
                     : 'none',
                 border: 'none',
                 borderLeft:
@@ -382,14 +382,14 @@ function SidebarNav({ sections, activeSlug, collapsed, onNavigate }: SidebarNavP
                 color:
                   page.slug === activeSlug
                     ? 'var(--vf-accent, #6366f1)'
-                    : 'var(--vf-text-primary, #e2e8f0)',
+                    : 'var(--vf-text-primary)',
                 fontWeight: page.slug === activeSlug ? 600 : 400,
                 lineHeight: 1.4,
                 transition: 'background 0.15s, color 0.15s',
               }}
               onMouseEnter={(e) => {
                 if (page.slug !== activeSlug)
-                  e.currentTarget.style.background = 'var(--vf-hover, rgba(255,255,255,0.04))';
+                  e.currentTarget.style.background = 'var(--vf-hover)';
               }}
               onMouseLeave={(e) => {
                 if (page.slug !== activeSlug)
@@ -513,11 +513,12 @@ export default function V2DocsPage() {
       {/* ── Full Playbook Export Progress Overlay ────────────────────────── */}
       {exportingAll && exportProgress && (
         <div
+          className="docs-export-overlay"
           style={{
             position: 'fixed',
             inset: 0,
             zIndex: 9999,
-            background: 'rgba(0,0,0,0.75)',
+            background: 'var(--vf-overlay, rgba(0,0,0,0.75))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -525,14 +526,15 @@ export default function V2DocsPage() {
           }}
         >
           <div
+            className="docs-export-card"
             style={{
-              background: 'var(--vf-elevated, #1a1a2e)',
+              background: 'var(--vf-elevated)',
               border: '1px solid var(--vf-border-subtle)',
               borderRadius: 16,
               padding: '36px 48px',
               textAlign: 'center',
               minWidth: 360,
-              boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+              boxShadow: 'var(--vf-shadow-high)',
             }}
           >
             <div style={{ fontSize: 40, marginBottom: 16 }}>📄</div>
@@ -586,6 +588,7 @@ export default function V2DocsPage() {
       )}
       {/* ── LEFT SIDEBAR ──────────────────────────────────────────────────── */}
       <aside
+        className="docs-sidebar"
         style={{
           width: sidebarW,
           flexShrink: 0,
@@ -774,7 +777,7 @@ export default function V2DocsPage() {
             {page.description && (
               <div
                 style={{
-                  background: 'var(--vf-hover, rgba(99,102,241,0.08))',
+                  background: 'var(--vf-hover-accent)',
                   borderLeft: '4px solid var(--vf-accent, #6366f1)',
                   borderRadius: '0 8px 8px 0',
                   padding: '12px 16px',
@@ -791,13 +794,13 @@ export default function V2DocsPage() {
             {/* Markdown body — this div is captured for PDF export */}
             <div
               ref={printRef}
+              className="docs-content"
               style={{
                 fontSize: 15,
                 lineHeight: 1.75,
                 color: 'var(--vf-text-primary)',
                 maxWidth: 820,
               }}
-              className="docs-content"
             >
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
@@ -817,17 +820,17 @@ export default function V2DocsPage() {
                   code: ({ children, className }) => {
                     const isBlock = className?.startsWith('language-');
                     return isBlock ? (
-                      <code style={{ display: 'block', background: 'var(--vf-elevated, rgba(0,0,0,0.3))', borderRadius: 8, padding: '14px 16px', fontSize: 13, fontFamily: 'var(--vf-font-mono, monospace)', overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre' }}>
+                      <code style={{ display: 'block', background: 'var(--vf-code-bg)', color: 'var(--vf-text-primary)', border: '1px solid var(--vf-border-subtle)', borderRadius: 8, padding: '14px 16px', fontSize: 13, fontFamily: 'var(--vf-font-mono, monospace)', overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre' }}>
                         {children}
                       </code>
                     ) : (
-                      <code style={{ background: 'var(--vf-elevated, rgba(0,0,0,0.25))', borderRadius: 4, padding: '2px 6px', fontSize: '0.88em', fontFamily: 'var(--vf-font-mono, monospace)', color: 'var(--vf-accent-light, #a5b4fc)' }}>
+                      <code style={{ background: 'var(--vf-code-bg)', borderRadius: 4, padding: '2px 6px', fontSize: '0.88em', fontFamily: 'var(--vf-font-mono, monospace)', color: 'var(--vf-code-text)' }}>
                         {children}
                       </code>
                     );
                   },
                   pre: ({ children }) => (
-                    <pre style={{ margin: '0 0 20px', borderRadius: 8, overflow: 'auto', background: 'var(--vf-elevated, rgba(0,0,0,0.3))' }}>
+                    <pre style={{ margin: '0 0 20px', borderRadius: 8, overflow: 'auto', background: 'var(--vf-code-bg)', border: '1px solid var(--vf-border-subtle)' }}>
                       {children}
                     </pre>
                   ),
@@ -839,17 +842,17 @@ export default function V2DocsPage() {
                     </div>
                   ),
                   th: ({ children }) => (
-                    <th style={{ padding: '10px 14px', textAlign: 'left', background: 'var(--vf-hover, rgba(255,255,255,0.05))', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--vf-text-muted)', borderBottom: '1px solid var(--vf-border-subtle)' }}>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', background: 'var(--vf-th-bg)', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--vf-text-muted)', borderBottom: '1px solid var(--vf-border-subtle)' }}>
                       {children}
                     </th>
                   ),
                   td: ({ children }) => (
-                    <td style={{ padding: '10px 14px', borderBottom: '1px solid var(--vf-border-subtle)', verticalAlign: 'top', lineHeight: 1.5 }}>
+                    <td style={{ padding: '10px 14px', borderBottom: '1px solid var(--vf-border-subtle)', verticalAlign: 'top', lineHeight: 1.5, color: 'var(--vf-text-primary)' }}>
                       {children}
                     </td>
                   ),
                   blockquote: ({ children }) => (
-                    <blockquote style={{ margin: '0 0 20px', padding: '12px 16px', background: 'var(--vf-hover, rgba(255,165,0,0.07))', borderLeft: '4px solid #f59e0b', borderRadius: '0 8px 8px 0', fontSize: 14, color: 'var(--vf-text-secondary)' }}>
+                    <blockquote style={{ margin: '0 0 20px', padding: '12px 16px', background: 'var(--vf-blockquote-bg)', borderLeft: '4px solid var(--vf-warning)', borderRadius: '0 8px 8px 0', fontSize: 14, color: 'var(--vf-text-secondary)' }}>
                       {children}
                     </blockquote>
                   ),
@@ -913,7 +916,7 @@ export default function V2DocsPage() {
                           alignItems: 'center',
                           width: '100%',
                           padding: '14px 18px',
-                          background: openFaqs.has(i) ? 'var(--vf-hover, rgba(99,102,241,0.08))' : 'var(--vf-surface)',
+                          background: openFaqs.has(i) ? 'var(--vf-hover-accent)' : 'var(--vf-surface)',
                           border: 'none',
                           cursor: 'pointer',
                           textAlign: 'left',
