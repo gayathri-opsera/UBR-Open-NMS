@@ -121,9 +121,9 @@ const SEV_COLOR: Record<string, string> = {
   WARNING: '#60a5fa', CLEAR: '#22c55e', INDETERMINATE: '#94a3b8',
 };
 const TOOLTIP_STYLE = {
-  background: '#112240', border: '1px solid rgba(77,158,255,0.2)',
-  borderRadius: 8, color: '#e2e8f0', fontSize: 12,
-  boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+  background: 'var(--vf-elevated)', border: '1px solid var(--vf-border-default)',
+  borderRadius: 8, color: 'var(--vf-text-primary)', fontSize: 12,
+  boxShadow: 'var(--vf-shadow-high)',
 };
 // Mode backgrounds — legacy BTS/CPE/IDU get their original colours; dynamic types get a hash-derived gradient
 const LEGACY_MODE_BG: Record<string, string> = {
@@ -444,7 +444,7 @@ export default function V2DashboardPage() {
         acc += pct;
         return seg;
       }).join(', ')})`
-    : '#1e293b';
+    : 'var(--vf-border-subtle)';
   const donutLegend = donutSegments.map((s) => ({
     ...s, pct: totalFiltered > 0 ? Math.round((s.count / totalFiltered) * 100) : 0,
   }));
@@ -639,15 +639,15 @@ export default function V2DashboardPage() {
               key={card.label}
               onClick={() => navigate(card.href)}
               style={{
-                textAlign: 'left', cursor: 'pointer', background: '#111827',
-                border: '1px solid #1e293b', borderTop: `3px solid ${card.color}`,
+                textAlign: 'left', cursor: 'pointer', background: 'var(--vf-surface)',
+                border: '1px solid var(--vf-border-default)', borderTop: `3px solid ${card.color}`,
                 borderRadius: 8, padding: 16,
                 transition: 'transform 0.12s, box-shadow 0.12s',
               }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = `0 4px 16px ${card.color}22`; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = ''; (e.currentTarget as HTMLButtonElement).style.boxShadow = ''; }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#94a3b8' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--vf-text-muted)' }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: card.color, display: 'inline-block' }} />
                 {card.label}
               </div>
@@ -662,13 +662,13 @@ export default function V2DashboardPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
           {/* Device Status donut chart */}
-          <div style={{ background: '#111827', border: '1px solid #1e293b', borderTop: '3px solid #3b82f6', borderRadius: 8, padding: 20 }}>
+          <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-default)', borderTop: '3px solid #3b82f6', borderRadius: 8, padding: 20 }}>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2, color: 'var(--vf-text-primary)' }}>Device Status</div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>All Devices · {totalDevices} total</div>
+            <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 16 }}>All Devices · {totalDevices} total</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
               {/* Donut ring using conic-gradient */}
               <div style={{ width: 160, height: 160, flexShrink: 0, borderRadius: '50%', background: donutGradient, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ width: 90, height: 90, borderRadius: '50%', background: '#111827', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                <div style={{ width: 90, height: 90, borderRadius: '50%', background: 'var(--vf-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
                   <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e', lineHeight: 1 }}>{onlinePct}%</div>
                   <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>online</div>
                 </div>
@@ -680,19 +680,19 @@ export default function V2DashboardPage() {
                     onClick={() => navigate(`/v2/devices?status=${l.label.toUpperCase()}`)}>
                     <span style={{ width: 10, height: 10, borderRadius: '50%', background: l.color, display: 'inline-block', flexShrink: 0 }} />
                     <span style={{ color: 'var(--vf-text-secondary)' }}>{l.label}</span>
-                    <span style={{ color: '#64748b', marginLeft: 2 }}>{l.pct}%</span>
+                    <span style={{ color: 'var(--vf-text-muted)', marginLeft: 2 }}>{l.pct}%</span>
                     <span style={{ color: l.color, fontWeight: 700, marginLeft: 2 }}>({l.count})</span>
                   </div>
                 ))}
-                {totalFiltered === 0 && <div style={{ color: '#64748b', fontSize: 13 }}>No devices discovered yet.</div>}
+                {totalFiltered === 0 && <div style={{ color: 'var(--vf-text-muted)', fontSize: 13 }}>No devices discovered yet.</div>}
               </div>
             </div>
           </div>
 
           {/* Device Types grid */}
-          <div style={{ background: '#111827', border: '1px solid #1e293b', borderTop: '3px solid #a78bfa', borderRadius: 8, padding: 20 }}>
+          <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-default)', borderTop: '3px solid #a78bfa', borderRadius: 8, padding: 20 }}>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2, color: 'var(--vf-text-primary)' }}>Device Types</div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>Click a type to view its devices</div>
+            <div style={{ fontSize: 12, color: 'var(--vf-text-muted)', marginBottom: 16 }}>Click a type to view its devices</div>
             {deviceTypeCards.length === 0 ? (
               <div style={{ fontSize: 13, color: '#64748b' }}>No devices discovered yet.</div>
             ) : (
@@ -702,16 +702,16 @@ export default function V2DashboardPage() {
                     key={t.type}
                     onClick={() => navigate(devicesListUrlForType(t.type))}
                     style={{
-                      background: '#0d1326', border: '1px solid #1e293b', borderRadius: 6,
+                      background: 'var(--vf-canvas)', border: '1px solid var(--vf-border-subtle)', borderRadius: 6,
                       padding: '14px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center',
                       textAlign: 'center', gap: 6, cursor: 'pointer',
                       transition: 'background 0.12s, border-color 0.12s',
                     }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#1e293b'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#3b82f6'; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#0d1326'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#1e293b'; }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--vf-hover-accent)'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#3b82f6'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--vf-canvas)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--vf-border-subtle)'; }}
                   >
                     <span
-                      style={{ width: 22, height: 22, color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      style={{ width: 22, height: 22, color: 'var(--vf-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       dangerouslySetInnerHTML={{ __html: deviceTypeIcon(t.type) }}
                     />
                     <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1 }}>
@@ -1273,7 +1273,7 @@ export default function V2DashboardPage() {
         </div>}
 
         {/* ── NEEDS ATTENTION — always visible, below any expanded widgets ─── */}
-        <div style={{ background: '#111827', border: '1px solid #1e293b', borderTop: '3px solid #ef4444', borderRadius: 8, padding: 20 }}>
+        <div style={{ background: 'var(--vf-surface)', border: '1px solid var(--vf-border-default)', borderTop: '3px solid #ef4444', borderRadius: 8, padding: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--vf-text-primary)' }}>Needs Attention</div>
             <button
@@ -1283,7 +1283,7 @@ export default function V2DashboardPage() {
             </button>
           </div>
           {attentionDevices.length === 0 ? (
-            <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+            <p style={{ fontSize: 13, color: 'var(--vf-text-muted)', margin: 0 }}>
               <span style={{ color: '#22c55e', marginRight: 6 }}>●</span>All devices online.
             </p>
           ) : (
@@ -1293,7 +1293,7 @@ export default function V2DashboardPage() {
                 onClick={() => navigate(`/v2/devices/${d.id}`)}
                 style={{
                   display: 'flex', width: '100%', alignItems: 'center', gap: 10, padding: '9px 0',
-                  borderBottom: '1px solid #1e293b', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+                  borderBottom: '1px solid var(--vf-border-subtle)', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
                 }}
                 onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(96,165,250,0.04)'; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}

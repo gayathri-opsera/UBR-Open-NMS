@@ -1,39 +1,89 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 
-type Theme = 'dark' | 'light';
+/** User-chosen preference — 'system' means follow OS */
+type ThemeMode = 'light' | 'dark' | 'system';
+
+/** Resolved theme actually applied to the document */
+type Theme = 'light' | 'dark';
 
 interface ThemeContextValue {
+  /** The user's stored preference (light / dark / system) */
+  mode: ThemeMode;
+  /** The resolved theme currently applied (light / dark) */
   theme: Theme;
-  toggleTheme: () => void;
+  setMode: (mode: ThemeMode) => void;
+  /** Convenience — true when resolved theme is dark */
   isDark: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: 'dark',
-  toggleTheme: () => {},
-  isDark: true,
+  mode: 'light',
+  theme: 'light',
+  setMode: () => {},
+  isDark: false,
 });
 
+function getSystemTheme(): Theme {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
+function resolveTheme(mode: ThemeMode): Theme {
+  if (mode === 'system') return getSystemTheme();
+  return mode;
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }): React.ReactElement {
-  const [theme, setTheme] = useState<Theme>(() => {
+  const [mode, setModeState] = useState<ThemeMode>(() => {
     try {
-      return (localStorage.getItem('nms_theme') as Theme) ?? 'dark';
+      const stored = localStorage.getItem('nms_theme_mode') as ThemeMode | null;
+      // Migrate legacy 'dark'/'light' string stored under old key
+      const legacy = localStorage.getItem('nms_theme') as Theme | null;
+      if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+      if (legacy === 'dark') return 'dark';
+      // Default: light
+      return 'light';
     } catch {
-      return 'dark';
+      return 'light';
     }
   });
 
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    try { localStorage.setItem('nms_theme', theme); } catch { /* ignore */ }
-  }, [theme]);
+  const [resolvedTheme, setResolvedTheme] = useState<Theme>(() => resolveTheme(mode));
 
-  const toggleTheme = useCallback(() => {
-    setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+  // Apply resolved theme to <html> element
+  useEffect(() => {
+    const resolved = resolveTheme(mode);
+    setResolvedTheme(resolved);
+    document.documentElement.setAttribute('data-theme', resolved);
+    try {
+      localStorage.setItem('nms_theme_mode', mode);
+    } catch { /* ignore */ }
+  }, [mode]);
+
+  // Listen for OS theme changes when mode is 'system'
+  useEffect(() => {
+    if (mode !== 'system') return;
+
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => {
+      const resolved: Theme = e.matches ? 'dark' : 'light';
+      setResolvedTheme(resolved);
+      document.documentElement.setAttribute('data-theme', resolved);
+    };
+
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, [mode]);
+
+  const setMode = useCallback((next: ThemeMode) => {
+    setModeState(next);
   }, []);
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, isDark: theme === 'dark' }}>
+    <ThemeContext.Provider value={{ mode, theme: resolvedTheme, setMode, isDark: resolvedTheme === 'dark' }}>
       {children}
     </ThemeContext.Provider>
   );

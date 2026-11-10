@@ -3,6 +3,33 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useTheme } from '../../../contexts/ThemeContext';
 
+// ── Theme icons ──────────────────────────────────────────────────────────────
+function SunIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+      <path d="M7.5 1.5v1M13.5 7.5h-1M7.5 13.5v-1M1.5 7.5h1M11.7 3.3l-.7.7M4 11l-.7.7M11.7 11.7l-.7-.7M4 4l-.7-.7"
+        stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <circle cx="7.5" cy="7.5" r="2.5" stroke="currentColor" strokeWidth="1.3"/>
+    </svg>
+  );
+}
+function MoonIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+      <path d="M12 8.5A5 5 0 016.5 3 5.5 5.5 0 1012 8.5z"
+        stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function MonitorIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+      <rect x="1" y="2" width="13" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+      <path d="M5 14h5M7.5 11v3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 function buildBreadcrumbs(pathname: string): { label: string; path: string }[] {
   const labelMap: Record<string, string> = {
     v2: 'V2', dashboard: 'Dashboard', devices: 'Devices', alarms: 'Alarms',
@@ -26,7 +53,7 @@ function buildBreadcrumbs(pathname: string): { label: string; path: string }[] {
 
 export function V2Header() {
   const { user, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { mode: themeMode, setMode: setThemeMode } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -125,29 +152,6 @@ export function V2Header() {
 
       {/* Right controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        {/* Theme toggle */}
-        <button
-          onClick={toggleTheme}
-          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-          style={{
-            background: 'transparent',
-            border: '1px solid var(--vf-border-default)',
-            borderRadius: 'var(--vf-radius-sm)',
-            color: 'var(--vf-text-secondary)',
-            cursor: 'pointer',
-            padding: 6,
-            display: 'flex',
-            alignItems: 'center',
-            transition: `color var(--vf-transition-fast), border-color var(--vf-transition-fast)`,
-          }}
-        >
-          {theme === 'dark'
-            ? <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M7.5 1.5v1M13.5 7.5h-1M7.5 13.5v-1M1.5 7.5h1M11.7 3.3l-.7.7M4 11l-.7.7M11.7 11.7l-.7-.7M4 4l-.7-.7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="7.5" cy="7.5" r="2.5" stroke="currentColor" strokeWidth="1.3"/></svg>
-            : <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M12 8.5A5 5 0 016.5 3 5.5 5.5 0 1012 8.5z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          }
-        </button>
-
         {/* Notifications badge */}
         <button
           aria-label="View notifications"
@@ -231,6 +235,54 @@ export function V2Header() {
                 zIndex: 200,
               }}
             >
+              {/* Theme switcher — 3-way segmented control */}
+              <div
+                style={{
+                  padding: '8px 10px',
+                  borderBottom: '1px solid var(--vf-border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                {(
+                  [
+                    { mode: 'light',  Icon: SunIcon,     label: 'Light theme'  },
+                    { mode: 'dark',   Icon: MoonIcon,    label: 'Dark theme'   },
+                    { mode: 'system', Icon: MonitorIcon, label: 'System theme' },
+                  ] as const
+                ).map(({ mode, Icon, label }) => {
+                  const active = themeMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      aria-label={label}
+                      title={label}
+                      onClick={() => setThemeMode(mode)}
+                      style={{
+                        flex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '5px 0',
+                        border: active
+                          ? '1px solid var(--vf-accent)'
+                          : '1px solid var(--vf-border-default)',
+                        borderRadius: 'var(--vf-radius-sm)',
+                        background: active ? 'var(--vf-accent-subtle)' : 'transparent',
+                        color: active ? 'var(--vf-accent)' : 'var(--vf-text-muted)',
+                        cursor: 'pointer',
+                        transition: 'background 120ms, color 120ms, border-color 120ms',
+                        fontFamily: 'var(--vf-font-sans)',
+                      }}
+                    >
+                      <Icon />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* User info */}
               <div
                 style={{
                   padding: '10px 14px 8px',

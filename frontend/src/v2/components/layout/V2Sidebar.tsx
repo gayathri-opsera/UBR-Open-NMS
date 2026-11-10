@@ -31,39 +31,28 @@ const NAV_GROUPS: NavGroup[] = [
       { path: '/v2/devices',    label: 'Inventory',  icon: <ServerIcon /> },
       { path: '/v2/alarms',     label: 'Alarms',     icon: <BellIcon /> },
       { path: '/v2/topology',   label: 'Topology',   icon: <TopologyIcon /> },
-      { path: '/v2/kpi',        label: 'KPI',        icon: <ChartIcon /> },
-      { path: '/v2/groups',     label: 'Device Groups', icon: <GroupIcon /> },
+      // Device Groups and KPI removed
     ],
   },
   {
     label: 'Operations',
     items: [
-      { path: '/v2/config',       label: 'Config',       icon: <CogIcon />,    allowedRoles: ['Admin', 'Operator'] as Role[] },
-      { path: '/v2/troubleshoot', label: 'Troubleshoot', icon: <WrenchIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
-      { path: '/v2/reports',      label: 'Reports',      icon: <ReportIcon /> },
-      { path: '/v2/release-validation', label: 'Release Validation', icon: <ValidationIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
-      { path: '/v2/compliance',   label: 'Compliance',   icon: <ShieldIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
-      { path: '/v2/discovery',    label: 'Discovery',    icon: <DiscoveryIcon /> },
-      { path: '/v2/onboarding',   label: 'Onboarding',   icon: <OnboardIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
+      { path: '/v2/discovery', label: 'Discovery', icon: <DiscoveryIcon /> },
+      // Config, Troubleshoot, Reports, Release Validation, Compliance, Onboarding hidden
     ],
   },
   {
     label: 'Admin',
     items: [
-      { path: '/v2/hierarchy',    label: 'Org / Hierarchy', icon: <OrgIcon />,   allowedRoles: ['Admin', 'Operator'] as Role[] },
-      { path: '/v2/notifications',label: 'Notifications',   icon: <NotifIcon />, allowedRoles: ['Admin'] as Role[] },
-      { path: '/v2/admin',        label: 'Admin',            icon: <AdminIcon />, allowedRoles: ['Admin'] as Role[] },
+      { path: '/v2/admin', label: 'Admin', icon: <AdminIcon />, allowedRoles: ['Admin'] as Role[] },
+      // Org / Hierarchy and Notifications hidden
     ],
   },
   {
     label: 'Framework',
     items: [
-      { path: '/v2/framework',           label: 'Framework Ops',        icon: <FrameworkIcon /> },
-      { path: '/v2/product-definitions', label: 'Product Definitions',  icon: <ProductDefIcon />, allowedRoles: ['Admin', 'Operator', 'descriptor_admin', 'descriptor_author'] as Role[] },
-      { path: '/v2/descriptors',         label: 'Descriptor Registry',  icon: <DescriptorIcon />, allowedRoles: ['Admin', 'Operator', 'descriptor_admin', 'descriptor_author'] as Role[] },
-      { path: '/v2/node-view-designer',   label: 'Node View Designer',   icon: <NodeViewIcon />, allowedRoles: ['Admin', 'descriptor_admin'] as Role[] },
-      { path: '/v2/mib-builder',         label: 'Custom UI Builder',    icon: <BuilderIcon />, allowedRoles: ['Admin'] as Role[] },
-      { path: '/v2/security-audit',      label: 'Security & Audit',     icon: <AuditIcon />, allowedRoles: ['Admin', 'Operator'] as Role[] },
+      { path: '/v2/mib-builder', label: 'Custom UI Builder', icon: <BuilderIcon />, allowedRoles: ['Admin'] as Role[] },
+      // Framework Ops, Product Definitions, Descriptor Registry, Node View Designer, Security & Audit hidden
     ],
   },
   {

@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { V2AppShell } from './components/layout/V2AppShell';
 import { LoadingState } from './components/common/States';
@@ -63,9 +63,11 @@ interface V2ProtectedRouteProps {
 
 function V2ProtectedRoute({ children, allowedRoles }: V2ProtectedRouteProps) {
   const { isAuthenticated, isLoading, user } = useAuth();
+  const location = useLocation();
 
   if (isLoading) return <LoadingState fullPage label="Authenticating…" />;
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  // Pass current location as state so LoginPage can redirect back after login
+  if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: location }} />;
 
   if (allowedRoles && user) {
     const normalize = (r: string) => r.charAt(0).toUpperCase() + r.slice(1).toLowerCase();

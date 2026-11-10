@@ -230,7 +230,8 @@ function HdrBtn({ icon, title, onClick, badge }: { icon: React.ReactElement; tit
 // ── Main AppShell ──────────────────────────────────────────────────────────────
 export function AppShell({ children }: { children: React.ReactNode }): React.ReactElement {
   const { user, logout } = useAuth();
-  const { isDark, toggleTheme } = useTheme();
+  const { isDark, mode: themeMode, setMode: setThemeMode } = useTheme();
+  const toggleTheme = () => setThemeMode(themeMode === 'dark' ? 'light' : 'dark');
   const navigate = useNavigate();
   const location = useLocation();
   const [showChangePw, setShowChangePw] = useState(false);

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 // ── Inline styles reused across steps ────────────────────────────────────────
@@ -122,9 +122,6 @@ function Card({ children }: { children: React.ReactNode }) {
 // ── Step 1: Username + Password ───────────────────────────────────────────────
 function CredentialsStep() {
   const { login } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const from = (location.state as { from?: Location })?.from?.pathname ?? '/v2/dashboard';
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -137,9 +134,9 @@ function CredentialsStep() {
     setLoading(true);
     try {
       await login(username, password);
-      // If MFA is NOT required, login() sets the user → navigate
-      // If MFA IS required, mfaChallenge is set → parent switches to OTP step automatically
-      navigate(from, { replace: true });
+      // Navigation is handled by LoginPage once isAuthenticated commits in React state.
+      // Do NOT call navigate() here — that causes a React 18 batching race where
+      // V2ProtectedRoute sees isAuthenticated=false and redirects back to /login.
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { error?: { message?: string }; message?: string } }; message?: string };
       setError(
@@ -212,9 +209,6 @@ function CredentialsStep() {
 // ── Step 2: OTP Input ─────────────────────────────────────────────────────────
 function MfaStep() {
   const { mfaChallenge, completeMfaChallenge, cancelMfaChallenge } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const from = (location.state as { from?: Location })?.from?.pathname ?? '/v2/dashboard';
 
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
@@ -229,7 +223,7 @@ function MfaStep() {
     setLoading(true);
     try {
       await completeMfaChallenge(code);
-      navigate(from, { replace: true });
+      // Navigation handled by LoginPage once isAuthenticated commits — no navigate() here.
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { error?: { message?: string } } }; message?: string };
       setError(
@@ -334,6 +328,24 @@ function MfaStep() {
 
 // ── Main export — switches between Step 1 and Step 2 ─────────────────────────
 export function LoginPage(): React.ReactElement {
-  const { mfaChallenge } = useAuth();
+  const { mfaChallenge, isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
+  // Where to send the user after a successful login (defaults to V2 dashboard).
+  // V2ProtectedRoute passes the blocked location via router state so deep links work.
+  const from =
+    (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ??
+    '/v2/dashboard';
+
+  // ── Auth-state-driven redirect ────────────────────────────────────────────
+  // Navigating imperatively right after login() fires setUser() causes a React 18
+  // batching race: navigate() triggers a re-render BEFORE setUser() commits, so
+  // V2ProtectedRoute sees isAuthenticated=false and kicks the user back to /login.
+  //
+  // Fix: render <Navigate> here instead — this component only renders once
+  // isAuthenticated is *committed* in React state, eliminating the race.
+  if (!isLoading && isAuthenticated) {
+    return <Navigate to={from} replace />;
+  }
+
   return mfaChallenge ? <MfaStep /> : <CredentialsStep />;
 }

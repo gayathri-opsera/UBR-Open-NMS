@@ -951,12 +951,12 @@ function MibLibraryScreen({
           onKeyDown={(e) => e.key === 'Enter' && inputRef.current?.click()}
           onClick={() => inputRef.current?.click()}
           style={{
-            border: '2px dashed var(--vf-border-subtle)',
+            border: '2px dashed var(--vf-border-default)',
             borderRadius: 8,
             padding: '18px 12px',
             textAlign: 'center',
             cursor: parsing ? 'wait' : 'pointer',
-            background: 'var(--vf-elevated)',
+            background: 'var(--vf-canvas)',
             marginBottom: 14,
           }}
         >
@@ -993,8 +993,8 @@ function MibLibraryScreen({
             boxSizing: 'border-box',
             padding: '8px 10px',
             borderRadius: 6,
-            border: `1px solid ${!screenNameInput.trim() && parseResult ? 'var(--vf-danger)' : 'var(--vf-border-subtle)'}`,
-            background: 'var(--vf-elevated)',
+            border: `1px solid ${!screenNameInput.trim() && parseResult ? 'var(--vf-danger)' : 'var(--vf-border-default)'}`,
+            background: 'var(--vf-input-bg)',
             color: 'var(--vf-text-primary)',
             fontSize: 13,
             marginBottom: screenNameInput.trim() ? 12 : 4,
@@ -1016,8 +1016,8 @@ function MibLibraryScreen({
             boxSizing: 'border-box',
             padding: '8px 10px',
             borderRadius: 6,
-            border: '1px solid var(--vf-border-subtle)',
-            background: 'var(--vf-elevated)',
+            border: '1px solid var(--vf-border-default)',
+            background: 'var(--vf-input-bg)',
             color: 'var(--vf-text-primary)',
             fontSize: 13,
             marginBottom: 16,
@@ -1031,26 +1031,47 @@ function MibLibraryScreen({
               {modules.map((mod) => {
                 const badge =
                   mod.status === 'parsed'
-                    ? { text: 'Parsed', color: 'var(--vf-success)' }
+                    ? { text: 'Parsed', bg: 'rgba(22,163,74,0.12)', color: '#16a34a' }
                     : mod.status === 'resolved'
-                      ? { text: 'Resolved', color: '#2563eb' }
-                      : { text: 'Missing import', color: 'var(--vf-danger)' };
+                      ? { text: 'Resolved', bg: 'rgba(37,99,235,0.10)', color: '#2563eb' }
+                      : { text: 'Missing import', bg: 'rgba(220,38,38,0.10)', color: '#dc2626' };
                 return (
                   <li
                     key={mod.name}
                     style={{
-                      fontSize: 11,
-                      padding: '6px 0',
-                      borderBottom: '1px solid var(--vf-border-subtle)',
+                      fontSize: 12,
+                      padding: '5px 8px',
+                      marginBottom: 4,
+                      borderRadius: 6,
+                      background: 'var(--vf-canvas)',
+                      border: '1px solid var(--vf-border-subtle)',
                       display: 'flex',
+                      alignItems: 'center',
                       justifyContent: 'space-between',
                       gap: 8,
                     }}
                   >
-                    <span style={{ fontFamily: 'var(--vf-font-mono)', color: 'var(--vf-text-primary)' }}>
-                      {mod.name}
+                    <span style={{
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontWeight: 500,
+                      color: 'var(--vf-text-secondary)',
+                    }}>
+                      {mod.name || '(unknown)'}
                     </span>
-                    <span style={{ color: badge.color, fontWeight: 700, whiteSpace: 'nowrap' }}>{badge.text}</span>
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      background: badge.bg,
+                      color: badge.color,
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}>{badge.text}</span>
                   </li>
                 );
               })}
@@ -1089,8 +1110,8 @@ function MibLibraryScreen({
                       style={{
                         padding: '7px 10px',
                         borderRadius: 6,
-                        border: `1px solid ${isActive ? 'var(--vf-accent)' : 'var(--vf-border-subtle)'}`,
-                        background: isActive ? 'rgba(37,99,235,0.06)' : 'var(--vf-elevated)',
+                        border: `1px solid ${isActive ? 'var(--vf-accent)' : 'var(--vf-border-default)'}`,
+                        background: isActive ? 'var(--vf-accent-subtle)' : 'var(--vf-canvas)',
                         display: 'flex', flexDirection: 'column', gap: 3,
                       }}
                     >
@@ -1165,8 +1186,8 @@ function MibLibraryScreen({
                     style={{
                       padding: '10px 12px',
                       borderRadius: 8,
-                      border: `1px solid ${isActive ? 'var(--vf-accent)' : 'var(--vf-border-subtle)'}`,
-                      background: isActive ? 'var(--vf-accent-subtle)' : 'var(--vf-elevated)',
+                      border: `1px solid ${isActive ? 'var(--vf-accent)' : 'var(--vf-border-default)'}`,
+                      background: isActive ? 'var(--vf-accent-subtle)' : 'var(--vf-canvas)',
                     }}
                   >
                     {/* ── Name row — either plain label or inline rename input ── */}
@@ -3319,7 +3340,8 @@ function XmlCodePanel({ xml }: { xml: string }) {
         lineHeight: 1.5,
         fontFamily: 'var(--vf-font-mono)',
         whiteSpace: 'pre-wrap',
-        color: '#a5f3fc',
+        color: 'var(--vf-code-text)',
+        background: 'var(--vf-code-bg)',
       }}
     >
       {xml}
@@ -3389,12 +3411,12 @@ function WidgetRulesScreen({ descriptor }: { descriptor: UiDescriptorDraft | nul
         </ul>
       </div>
 
-      {/* Right panel — dark code viewer (intentional dark bg for code readability) */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: '#0f172a' }}>
+      {/* Right panel — code viewer */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--vf-canvas)' }}>
         <div
           style={{
             padding: '10px 16px',
-            borderBottom: '1px solid #334155',
+            borderBottom: '1px solid var(--vf-border-default)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -3402,13 +3424,13 @@ function WidgetRulesScreen({ descriptor }: { descriptor: UiDescriptorDraft | nul
           }}
         >
           <div>
-            <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 14 }}>Generated UI descriptor</div>
-            <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 2 }}>
+            <div style={{ color: 'var(--vf-text-primary)', fontWeight: 700, fontSize: 14 }}>Generated UI descriptor</div>
+            <div style={{ color: 'var(--vf-text-muted)', fontSize: 11, marginTop: 2 }}>
               Saved with the device profile; NMS renderer and backend poller both read this.
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-            <span style={{ color: '#94a3b8', fontSize: 10, fontFamily: 'var(--vf-font-mono)' }}>{fileName}</span>
+            <span style={{ color: 'var(--vf-text-muted)', fontSize: 10, fontFamily: 'var(--vf-font-mono)' }}>{fileName}</span>
             {/* ⬇ Export XML */}
             <button
               type="button"

@@ -30,15 +30,7 @@ import type { NodeViewData } from '../../api/nodeView.types';
 
 const TABS = [
   { id: 'summary',   label: 'Node View' },
-  { id: 'framework', label: 'Parameters' },
-  { id: 'wireless',  label: 'Wireless' },
-  { id: 'network',   label: 'Network' },
-  { id: 'ethernet',  label: 'Ethernet' },
-  { id: 'qos',       label: 'QoS' },
-  { id: 'vlan',      label: 'VLAN' },
-  { id: 'gps',       label: 'GPS' },
-  { id: 'birth',     label: 'Birth Cert' },
-  { id: 'tags',      label: 'Tags' },
+  // Parameters, Wireless, Network, Ethernet, QoS, VLAN, GPS, Birth Cert, Tags hidden
   { id: 'logs',      label: 'Logs' },
   { id: 'history',   label: 'Config History' },
 ];
