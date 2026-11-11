@@ -451,7 +451,7 @@ async function provisionOne(host, col, ctx = {}) {
     const provStatus    = isReprovision ? 'Re-provisioning' : 'Type assigned';
     doc.statusHistory   = [
       { status: 'Discovered',   reason: 'Device found by SNMP discovery',                 changedBy: 'system',  timestamp: doc.createdAt },
-      { status: provStatus,     reason: `Model: ${resolvedModel}, Role: ${deviceType}`,    changedBy: req?.user?.userId || 'admin', timestamp: new Date() },
+      { status: provStatus,     reason: `Model: ${resolvedModel}, Role: ${deviceType}`,    changedBy: ctx.actorId || 'system', timestamp: new Date() },
       { status: 'Provisioning', reason: 'Configuration being applied',                     changedBy: 'system',  timestamp: new Date() },
     ];
 
@@ -466,7 +466,7 @@ async function provisionOne(host, col, ctx = {}) {
     if (productDefinitionId) live.refreshDevice(doc).catch(() => {});
 
     // ── Finalize status to Provisioned + audit log entry (DT-08, DT-10) ──────
-    await appendStatusHistory(col, serialNumber, 'Provisioned', 'Device configuration applied successfully', req?.user?.userId || 'admin').catch(() => {});
+    await appendStatusHistory(col, serialNumber, 'Provisioned', 'Device configuration applied successfully', ctx.actorId || 'system').catch(() => {});
     const prevDoc = await col.findOne({ _id: serialNumber });
     if (prevDoc?.deviceType && prevDoc.deviceType !== deviceType) {
       // Type changed — write audit entry
@@ -479,7 +479,7 @@ async function provisionOne(host, col, ctx = {}) {
         newModel:  resolvedModel,
         newRole:   deviceType,
         combinationId: doc.deviceTypeCombinationId || null,
-        changedBy: req?.user?.userId || 'admin',
+        changedBy: ctx.actorId || 'system',
         reason:    'Re-provisioned via discovery',
       }).catch(() => {});
     } else if (!prevDoc) {
@@ -493,7 +493,7 @@ async function provisionOne(host, col, ctx = {}) {
         newModel:  resolvedModel,
         newRole:   deviceType,
         combinationId: doc.deviceTypeCombinationId || null,
-        changedBy: req?.user?.userId || 'admin',
+        changedBy: ctx.actorId || 'system',
         reason:    'Initial provision',
       }).catch(() => {});
     }
@@ -543,7 +543,8 @@ function createProvisionHandler(_config) {
     }
 
     // Provision all hosts, collecting individual results (partial failure is allowed).
-    const results = await Promise.all(hosts.map((h) => provisionOne(h, col, { runId, priv: runStore.get(runId, h.ip) })));
+    const actorId = req.user?.userId || req.user?.id || 'system';
+    const results = await Promise.all(hosts.map((h) => provisionOne(h, col, { runId, priv: runStore.get(runId, h.ip), actorId })));
 
     const provisioned = results.filter((r) => r.status === 'provisioned').length;
     const failed      = results.filter((r) => r.status === 'failed').length;
