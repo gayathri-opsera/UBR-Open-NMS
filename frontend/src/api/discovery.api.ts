@@ -824,6 +824,16 @@ export async function unignoreDiscoveredHost(ip: string): Promise<void> {
  * @param input Comma-separated string.
  * @returns Array of scope entries; empty if input is blank.
  */
+const OCTET_PATTERN_RE = /^(\*|\d{1,3}|\d{1,3}-\d{1,3})$/;
+/** True for wildcard / octet-range / full-range IPv4 expressions (not plain IPs or CIDRs). */
+export function isWildcardPattern(v: string): boolean {
+  if (!v || v.includes('/') || /^\d+(\.\d+){3}$/.test(v)) return false;
+  if (/^\d+(\.\d+){3}\s*-\s*\d+(\.\d+){3}$/.test(v)) return true;
+  const parts = v.split('.');
+  return parts.length <= 4 && parts.every((p) => OCTET_PATTERN_RE.test(p)) &&
+    parts.some((p) => p === '*' || p.includes('-'));
+}
+
 export function parseScopeInput(input: string): ScopeEntry[] {
   const entries: ScopeEntry[] = [];
   const parts = input.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
@@ -832,9 +842,13 @@ export function parseScopeInput(input: string): ScopeEntry[] {
     if (part.includes('/')) {
       // CIDR notation
       entries.push({ type: 'CIDR', value: part });
-    } else if (/^\d+\.\d+\.\d+\.\d+-\d+\.\d+\.\d+\.\d+$/.test(part)) {
-      // IP range (e.g. 10.0.0.1-10.0.0.50) — backend normalises to CIDR
+    } else if (/^\d+\.\d+\.\d+\.\d+\s*-\s*\d+\.\d+\.\d+\.\d+$/.test(part)) {
+      // Full IP range (e.g. 10.0.0.1-10.0.0.50) — gateway expands to host IPs
       entries.push({ type: 'CIDR', value: part, label: `range:${part}` });
+    } else if (isWildcardPattern(part)) {
+      // Wildcard / range (10.0.150.*, 10.0.*.*, 10.0.150.1-50, 10.0.0.1-10.0.0.50) —
+      // the gateway expands these into individual host IPs.
+      entries.push({ type: 'IP', value: part, label: `pattern:${part}` });
     } else if (/^\d+\.\d+\.\d+\.\d+$/.test(part)) {
       // Single IPv4 address
       entries.push({ type: 'IP', value: part });

@@ -26,6 +26,7 @@
  *   - Provisions matched devices into MongoDB as real discovered inventory
  */
 
+const { isPattern: isScopePattern, expandPattern: expandScopePattern } = require('../utils/scopePattern');
 const liveParameters = require('../live/liveParameters');
 const deviceFacts    = require('../live/deviceFacts');
 const express    = require('express');
@@ -909,6 +910,30 @@ router.post('/runs', async (req, res, next) => {
     if (val.includes('/')) return { ...e, type: 'CIDR', cidr: val };
     return { ...e, type: 'SINGLE_IP', ip: val };
   }) : [];
+
+  // Expand wildcard / octet-range / full-range scope entries (10.0.150.*, 10.0.*.*, 10.0.150.1-50,
+  // 10.0.150.1-10.0.150.50) into concrete SINGLE_IP targets — they are not hostnames or CIDRs.
+  {
+    const expanded = [];
+    const seenIps = new Set();
+    for (const e of normalisedScope) {
+      const raw = String(e.ip || e.hostname || e.cidr || e.value || '').trim();
+      if (e.type !== 'CIDR' || !raw.includes('/')) {
+        if (isScopePattern(raw)) {
+          let ips;
+          try { ips = expandScopePattern(raw); }
+          catch (err) { return res.status(400).json({ code: 'INVALID_SCOPE', message: err.message }); }
+          for (const ip of ips) {
+            if (!seenIps.has(ip)) { seenIps.add(ip); expanded.push({ type: 'SINGLE_IP', ip, label: e.label }); }
+          }
+          continue;
+        }
+      }
+      expanded.push(e);
+    }
+    normalisedScope.length = 0;
+    normalisedScope.push(...expanded);
+  }
 
   // Reject malformed addresses up front instead of "discovering" nothing: "10.0.150.10008" is not an IPv4 address.
   const looksIpv4 = (v) => /^\d{1,3}(\.\d{1,3}){3}$/.test(v);

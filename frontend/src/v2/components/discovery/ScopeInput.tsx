@@ -16,14 +16,22 @@ import { useState, useCallback, useRef, useId } from 'react';
 
 function isOctet(s: string): boolean {
   if (s === '*') return true;                       // wildcard octet
+  const range = /^(\d{1,3})-(\d{1,3})$/.exec(s);  // octet range 100-120
+  if (range) return +range[1] <= 255 && +range[2] <= 255 && +range[1] <= +range[2];
   const n = parseInt(s, 10);
   return s !== '' && !isNaN(n) && n >= 0 && n <= 255 && String(n) === s;
 }
 
 function isValidIPv4OrWildcard(ip: string): boolean {
   const parts = ip.split('.');
-  if (parts.length !== 4) return false;
-  return parts.every(isOctet);
+  if (parts.length === 4) return parts.every(isOctet);
+  // short wildcard form: 10.*  /  10.0.*
+  return parts.length >= 1 && parts.length < 4 && parts[parts.length - 1] === '*' && parts.every(isOctet);
+}
+
+/** Plain (non-wildcard, non-range) dotted quad. */
+function isPlainIPv4(ip: string): boolean {
+  return /^\d+(\.\d+){3}$/.test(ip) && isValidIPv4OrWildcard(ip);
 }
 
 function ipToNumber(ip: string): number {
@@ -44,20 +52,20 @@ function validateToken(token: string): string | null {
     return null;
   }
 
-  // IP range: 10.0.0.1-10.0.0.50
-  if (t.includes('-') && !t.includes('*')) {
-    const [start, end] = t.split('-');
-    if (!isValidIPv4OrWildcard(start) || !isValidIPv4OrWildcard(end))
+  // Full IP range: 10.0.0.1-10.0.0.50 (both ends plain IPv4)
+  const full = /^(\d+(?:\.\d+){3})\s*-\s*(\d+(?:\.\d+){3})$/.exec(t);
+  if (full) {
+    if (!isPlainIPv4(full[1]) || !isPlainIPv4(full[2]))
       return `"${t}" — invalid range (e.g. 10.0.0.1-10.0.0.50)`;
-    if (ipToNumber(start) > ipToNumber(end))
+    if (ipToNumber(full[1]) > ipToNumber(full[2]))
       return `"${t}" — start IP must be ≤ end IP`;
     return null;
   }
 
-  // Wildcard IP: 10.10.10.*, 192.168.*.*
-  if (t.includes('*')) {
+  // Wildcard / octet range: 10.10.10.*, 192.168.*.*, 10.0.*, 10.0.150.100-120
+  if (t.includes('*') || (t.includes('-') && /^[\d.*-]+$/.test(t))) {
     if (isValidIPv4OrWildcard(t)) return null;
-    return `"${t}" — invalid wildcard (e.g. 10.10.10.*, 192.168.*.*)`;
+    return `"${t}" — invalid wildcard (e.g. 10.10.10.*, 192.168.*.*, 10.0.150.100-120)`;
   }
 
   // Plain IPv4

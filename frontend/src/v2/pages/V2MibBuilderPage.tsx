@@ -889,10 +889,11 @@ function MibLibraryScreen({
     <div style={{ display: 'flex', flex: 1, height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* Left panel */}
       <aside
+        className="mib-left-panel"
         style={{
           width: 280,
           flexShrink: 0,
-          borderRight: '1px solid var(--vf-border-subtle)',
+          borderRight: '1px solid var(--vf-border-default)',
           padding: 16,
           overflowY: 'auto',
           background: 'var(--vf-surface)',
@@ -1036,7 +1037,7 @@ function MibLibraryScreen({
                   mod.status === 'parsed'
                     ? { text: 'Parsed', bg: 'rgba(22,163,74,0.12)', color: '#16a34a' }
                     : mod.status === 'resolved'
-                      ? { text: 'Resolved', bg: 'rgba(37,99,235,0.10)', color: '#2563eb' }
+                      ? { text: 'Resolved', bg: 'var(--vf-accent-subtle)', color: 'var(--vf-accent)' }
                       : { text: 'Missing import', bg: 'rgba(220,38,38,0.10)', color: '#dc2626' };
                 return (
                   <li
@@ -1122,7 +1123,7 @@ function MibLibraryScreen({
                         {/* Status dot */}
                         <span style={{
                           width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                          background: v.status === 'published' ? '#16a34a' : '#60a5fa',
+                          background: v.status === 'published' ? '#16a34a' : 'var(--vf-accent)',
                         }} />
                         <span style={{
                           fontSize: 11, fontWeight: 600, flex: 1,
@@ -1151,8 +1152,8 @@ function MibLibraryScreen({
                       <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', display: 'flex', gap: 8, paddingLeft: 13 }}>
                         <span style={{
                           fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
-                          background: v.status === 'published' ? 'rgba(22,163,74,0.12)' : 'rgba(96,165,250,0.12)',
-                          color: v.status === 'published' ? '#15803d' : '#3b82f6',
+                          background: v.status === 'published' ? 'rgba(22,163,74,0.12)' : 'var(--vf-accent-subtle)',
+                          color: v.status === 'published' ? '#15803d' : 'var(--vf-accent)',
                           textTransform: 'uppercase',
                         }}>{v.status}</span>
                         <span>{v.objectCount} obj</span>
@@ -1284,7 +1285,7 @@ function MibLibraryScreen({
                             fontWeight: 700,
                             padding: '2px 6px',
                             borderRadius: 999,
-                            background: d.status === 'published' ? 'rgba(34,197,94,0.15)' : 'rgba(96,165,250,0.12)',
+                            background: d.status === 'published' ? 'rgba(34,197,94,0.15)' : 'var(--vf-accent-subtle)',
                             color: d.status === 'published' ? 'var(--vf-success)' : 'var(--vf-accent)',
                             textTransform: 'uppercase',
                           }}
@@ -1378,8 +1379,8 @@ function MibLibraryScreen({
               alignItems: 'center',
               gap: 10,
               padding: '8px 14px',
-              background: 'rgba(37,99,235,0.08)',
-              border: '1px solid rgba(37,99,235,0.2)',
+              background: 'var(--vf-accent-subtle)',
+              border: '1px solid var(--vf-border-default)',
               borderRadius: 8,
               marginBottom: 12,
               fontSize: 12,
@@ -1683,7 +1684,7 @@ function MibLibraryScreen({
                                 fontWeight: 700,
                                 background:
                                   access === 'read-write'
-                                    ? 'rgba(37,99,235,0.12)'
+                                    ? 'var(--vf-accent-subtle)'
                                     : 'rgba(100,116,139,0.1)',
                                 color:
                                   access === 'read-write' ? '#1d4ed8' : '#64748b',
@@ -2548,7 +2549,7 @@ function ScreenBuilderScreen({
                       : 'var(--vf-border-subtle)'
                     }`,
                     background: isDropTarget ? 'var(--vf-accent-subtle)'
-                      : activeSectionId === sec.sectionId ? 'rgba(96,165,250,0.06)'
+                      : activeSectionId === sec.sectionId ? 'var(--vf-accent-subtle)'
                       : 'var(--vf-elevated)',
                     transition: 'border-color 0.1s, background 0.1s',
                     overflow: 'hidden',
@@ -2795,7 +2796,7 @@ function ScreenBuilderScreen({
                               padding: '10px 12px',
                               borderRadius: 6,
                               border: `2px solid ${isSel ? 'var(--vf-accent)' : isDragTarget ? 'var(--vf-accent)' : 'var(--vf-border-subtle)'}`,
-                              background: isSel ? 'var(--vf-accent-subtle)' : isDragTarget ? 'rgba(96,165,250,0.07)' : 'var(--vf-canvas)',
+                              background: isSel ? 'var(--vf-accent-subtle)' : isDragTarget ? 'var(--vf-accent-subtle)' : 'var(--vf-canvas)',
                               cursor: 'grab',
                               opacity: draggingField?.fieldId === f.fieldId ? 0.4 : 1,
                               outline: isDragTarget && dropTargetField?.position === 'before' ? '2px solid var(--vf-accent)' : 'none',
@@ -3240,7 +3241,7 @@ function PreviewScreen({
           { label: 'Fields',      value: bindable.length,  color: 'var(--vf-text-primary)' },
           { label: 'Bound',       value: bound.length,     color: '#16a34a' },
           { label: 'Unbound',     value: unbound.length,   color: unbound.length > 0 ? '#dc2626' : '#94a3b8' },
-          { label: 'Read-write',  value: readWrite.length, color: '#2563eb' },
+          { label: 'Read-write',  value: readWrite.length, color: 'var(--vf-accent)' },
           { label: 'Read-only',   value: bindable.length - readWrite.length, color: '#64748b' },
         ].map(({ label, value, color }) => (
           <div
@@ -3481,7 +3482,7 @@ function WidgetRulesScreen({ descriptor }: { descriptor: UiDescriptorDraft | nul
               type="button"
               onClick={() => downloadXml(liveXml.trim() || SAMPLE_UI_XML, fileName)}
               style={{
-                background: '#1e40af',
+                background: 'var(--vf-accent)',
                 color: '#fff',
                 border: 'none',
                 borderRadius: 6,

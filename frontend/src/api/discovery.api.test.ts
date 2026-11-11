@@ -51,6 +51,15 @@ describe('parseScopeInput', () => {
     ]);
   });
 
+  it.each(['10.0.150.*', '10.0.*.*', '10.0.*', '10.0.150.100-120', '10.0.140-150.*'])(
+    'parses wildcard %s as IP type (never as a hostname)', (w) => {
+      expect(parseScopeInput(w)).toEqual([{ type: 'IP', value: w, label: `pattern:${w}` }]);
+    });
+
+  it('keeps hostnames with dashes as SEED', () => {
+    expect(parseScopeInput('my-host.lab')).toEqual([{ type: 'SEED', value: 'my-host.lab' }]);
+  });
+
   it('parses a hostname as SEED type', () => {
     const result = parseScopeInput('router.example.com');
     expect(result).toEqual([{ type: 'SEED', value: 'router.example.com' }]);

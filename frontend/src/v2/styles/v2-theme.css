@@ -573,8 +573,19 @@ html[data-theme="light"] .docs-export-card {
 
 /* ── Light mode — MIB Builder left panel ───────────────────────────────────*/
 html[data-theme="light"] .mib-left-panel {
-  background: #ffffff !important;
-  border-right-color: #e2e8f0 !important;
+  background: var(--vf-surface) !important;
+  border-right-color: var(--vf-border-default) !important;
+  box-shadow: var(--vf-shadow-low);
+}
+/* Dashed upload drop-zone + inputs inside the MIB panel match dashboard cards */
+html[data-theme="light"] .mib-left-panel [role="button"] {
+  background: var(--vf-canvas) !important;
+  border-color: var(--vf-border-default) !important;
+}
+html[data-theme="light"] .mib-left-panel input[type="text"],
+html[data-theme="light"] .mib-left-panel input:not([type]) {
+  background: var(--vf-surface) !important;
+  border-color: var(--vf-border-default) !important;
 }
 
 /* ── Light mode — generic inline rgba(0,0,0,...) overrides via element type  */
