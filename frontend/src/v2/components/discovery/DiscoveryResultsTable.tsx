@@ -186,12 +186,14 @@ function isEffectivelyReachable(r: DiscoveryResult): boolean {
 }
 
 /**
- * True when the device can be provisioned — i.e. SNMP interrogation actually
- * returned data.  This is the authoritative gate for the Provision button.
- * ICMP status is irrelevant here: a device is provisionable iff we have SNMP data.
+ * True when the device can be provisioned — i.e. SNMP interrogation returned
+ * at least some data ('success' or 'partial').
+ * 'partial' means the device responded to SNMP but not all OIDs were reachable —
+ * enough data exists to create an inventory record.
+ * Only block on hard failures: timeout, auth_failed, not_attempted.
  */
 function canProvision(r: DiscoveryResult): boolean {
-  return r.snmpStatus === 'success';
+  return r.snmpStatus === 'success' || r.snmpStatus === 'partial';
 }
 
 /**
@@ -497,7 +499,7 @@ function DeviceCard({
                 onClick={() => onProvision(r)}
                 style={{ width: '100%', fontWeight: 700 }}
                 disabled={!canProvision(r)}
-                title={!canProvision(r) ? 'SNMP must succeed to re-provision (no device data available)' : 'Add this device back to managed inventory'}
+                title={!canProvision(r) ? 'SNMP did not respond — cannot re-provision without device data' : 'Add this device back to managed inventory'}
               >
                 🔄 Re-provision Device
               </Button>
@@ -514,7 +516,7 @@ function DeviceCard({
                 onClick={() => onProvision(r)}
                 style={{ width: '100%', fontWeight: 700 }}
                 disabled={!canProvision(r)}
-                title={!canProvision(r) ? 'SNMP must succeed to provision (no device data available)' : 'Provision this device into managed inventory'}
+                title={!canProvision(r) ? 'SNMP did not respond — cannot provision without device data' : 'Provision this device into managed inventory'}
               >
                 🔧 Provision Device
               </Button>
@@ -748,9 +750,10 @@ export function DiscoveryResultsTable({
     header: 'Actions',
     width: 220,
     render: (row) => {
-      const invDev         = inventoryDeviceMap?.get(row.ip);
-      const sessionProvisioned = provisionedIPs?.has(row.ip);
-      const isProvisioned  = Boolean(invDev) || sessionProvisioned;
+      const invDev              = inventoryDeviceMap?.get(row.ip);
+      const sessionProvisioned  = provisionedIPs?.has(row.ip);
+      const isProvisioned       = Boolean(invDev) || sessionProvisioned;
+      const isDeprovisioned     = !isProvisioned && (deprovisionedIPs?.has(row.ip) || !!row.deprovisionedFlag);
 
       // Nav helpers — navigate without a hard-reload.
       const goInventory = (e: React.MouseEvent) => {
@@ -813,12 +816,30 @@ export function DiscoveryResultsTable({
                 </button>
               )}
             </div>
+          ) : isDeprovisioned ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 600 }}>⬇️ Deprovisioned</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); onProvision?.(row); }}
+                disabled={!canProvision(row)}
+                title={canProvision(row) ? 'Add this device back to managed inventory' : 'SNMP did not respond — cannot re-provision without device data'}
+                style={{
+                  fontSize: 11, padding: '3px 10px', borderRadius: 5,
+                  background: canProvision(row) ? 'var(--vf-accent)' : 'var(--vf-surface-raised)',
+                  color: canProvision(row) ? '#fff' : 'var(--vf-text-muted)',
+                  border: 'none', cursor: canProvision(row) ? 'pointer' : 'default',
+                  fontWeight: 700, opacity: !canProvision(row) ? 0.5 : 1,
+                }}
+              >
+                🔄 Re-provision
+              </button>
+            </div>
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onProvision?.(row); }}
               disabled={!canProvision(row)}
               title={!canProvision(row)
-                ? 'SNMP must succeed to provision (no device data available)'
+                ? 'SNMP did not respond — cannot provision without device data'
                 : 'Add this device to managed inventory'}
               style={{
                 fontSize: 11, padding: '3px 10px', borderRadius: 5,
@@ -995,7 +1016,7 @@ export function DiscoveryResultsTable({
                   onDeprovision={onDeprovision}
                   onNavigate={navigate}
                   deprovisioning={deprovisioningIPs?.has(r.ip)}
-                  deprovisioned={deprovisionedIPs?.has(r.ip)}
+                  deprovisioned={deprovisionedIPs?.has(r.ip) || !!r.deprovisionedFlag}
                   onIgnore={onIgnore}
                   onUnignore={onUnignore}
                 />

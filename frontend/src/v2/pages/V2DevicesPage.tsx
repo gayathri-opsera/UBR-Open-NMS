@@ -12,6 +12,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchDevices, createDevice, updateDevice, deleteDevice, downloadDeviceExport,
 } from '../../api/devices.api';
+import { fetchDeviceAuditLog, listCombinations, type DeviceTypeAuditEntry, type DeviceTypeCombination } from '../../api/deviceTypeCombinations.api';
 import type { Device, DeviceFilter, DeviceType, DeviceStatus } from '../../api/devices.types';
 import { AdvancedTable, type ColumnDef } from '../components/common/AdvancedTable';
 import { Badge } from '../components/common/Badge';
@@ -84,7 +85,7 @@ interface DeviceFormData {
 
 const BLANK_FORM: DeviceFormData = {
   serialNumber: '', deviceType: 'BTS', status: 'PROVISIONING',
-  ipAddress: '', macAddress: '', model: 'A60', manufacturer: 'Senao',
+  ipAddress: '', macAddress: '', model: '', manufacturer: '',
   firmwareVersion: '', latitude: '', longitude: '',
 };
 
@@ -102,7 +103,16 @@ function DeviceFormModal({
   const [saving, setSaving]       = useState(false);
   // IDU: which CPE to copy coordinates from
   const [linkedCpeId, setLinkedCpeId] = useState('');
+  // Combinations loaded from API
+  const [combinations, setCombinations] = useState<DeviceTypeCombination[]>([]);
   const { addToast } = useToast();
+
+  // Load all device type combinations once when modal opens
+  useEffect(() => {
+    if (open) {
+      listCombinations().then(setCombinations).catch(() => setCombinations([]));
+    }
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -114,7 +124,7 @@ function DeviceFormModal({
         ipAddress:    initial.ipAddress ?? '',
         macAddress:   initial.macAddress ?? '',
         model:        initial.model ?? 'A60',
-        manufacturer: initial.manufacturer ?? 'Senao',
+        manufacturer: initial.manufacturer ?? '',
         firmwareVersion: initial.firmwareVersion ?? '',
         latitude:     String(initial.latitude ?? ''),
         longitude:    String(initial.longitude ?? ''),
@@ -126,9 +136,10 @@ function DeviceFormModal({
     const val = e.target.value;
     setForm((f) => {
       const updated = { ...f, [k]: val };
-      // Auto-derive model from device type — BTS→A60, CPE→A61, IDU→IDU
+      // Auto-derive model from device type — prefer loaded combination, fallback to legacy map
       if (k === 'deviceType') {
-        updated.model = TYPE_MODEL_MAP[val] ?? val;
+        const combo = combinations.find((c) => c.role === val || c.model === val);
+        updated.model = combo?.model ?? TYPE_MODEL_MAP[val] ?? val;
         setLinkedCpeId(''); // reset CPE link when type changes
       }
       return updated;
@@ -244,9 +255,30 @@ function DeviceFormModal({
           <div>
             <FL>Device Type *</FL>
             <select value={form.deviceType} onChange={set('deviceType')} style={FIELD}>
-              <option value="BTS">BTS — Model A60</option>
-              <option value="CPE">CPE — Model A61</option>
-              <option value="IDU">IDU — Model IDU</option>
+              {combinations.length > 0 ? (() => {
+                // Group combinations by model for <optgroup> sections
+                const groups = combinations.reduce<Record<string, DeviceTypeCombination[]>>((acc, c) => {
+                  if (!acc[c.model]) acc[c.model] = [];
+                  acc[c.model].push(c);
+                  return acc;
+                }, {});
+                return Object.entries(groups).map(([model, combos]) => (
+                  <optgroup key={model} label={model}>
+                    {combos.map((c) => (
+                      <option key={c.id} value={c.role}>
+                        {c.role}{c.description ? ` — ${c.description}` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ));
+              })() : (
+                // Fallback to legacy options while loading
+                <>
+                  <option value="BTS">BTS — Model A60</option>
+                  <option value="CPE">CPE — Model A61</option>
+                  <option value="IDU">IDU — Model IDU</option>
+                </>
+              )}
             </select>
           </div>
           <div>
@@ -277,7 +309,7 @@ function DeviceFormModal({
           </div>
           <div>
             <FL>Manufacturer</FL>
-            <input value={form.manufacturer} onChange={set('manufacturer')} placeholder="Senao" style={FIELD} />
+            <input value={form.manufacturer} onChange={set('manufacturer')} placeholder="e.g. Vendor name" style={FIELD} />
           </div>
           <div>
             <FL>Firmware Version</FL>
@@ -511,6 +543,52 @@ function GpsMapPicker({ lat, lng, onPick }: {
 }
 
 
+// ── DT-09: Type Change Diff Modal ────────────────────────────────────────────
+const TYPE_EMOJI: Record<string, string> = {
+  BTS:'📡',CPE:'🏠',IDU:'🔌',RADIO:'📻',SWITCH:'🔄',ROUTER:'🌐',
+  GATEWAY:'🚪',FIREWALL:'🔥',AP:'📶',OLT:'💡',ONU:'📦',SERVER:'🖥️',UNKNOWN:'❓',
+};
+function typeEmoji(t: string) { return TYPE_EMOJI[t?.toUpperCase()] ?? '🔧'; }
+
+function TypeChangeDiffModal({ pending, onConfirm, onCancel }: {
+  pending: { form: { deviceType: string }; oldType: string; newType: string; deviceSerial?: string } | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  if (!pending) return null;
+  return (
+    <Modal open={!!pending} onClose={onCancel} title="Confirm Device Type Change">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 380 }}>
+        <p style={{ fontSize: 13, color: 'var(--vf-text-secondary)', margin: 0 }}>
+          You are about to change the device type for <strong style={{ fontFamily: 'var(--vf-font-mono)' }}>{pending.deviceSerial}</strong>.
+          The matching configuration and Node View will be re-applied automatically.
+        </p>
+        {/* Diff */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--vf-surface-raised)', borderRadius: 8, border: '1px solid var(--vf-border-default)' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 24 }}>{typeEmoji(pending.oldType)}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#ef4444', marginTop: 4 }}>{pending.oldType}</div>
+            <div style={{ fontSize: 10, color: 'var(--vf-text-muted)' }}>Current</div>
+          </div>
+          <div style={{ fontSize: 20, color: 'var(--vf-text-muted)', flex: 1, textAlign: 'center' }}>→</div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 24 }}>{typeEmoji(pending.newType)}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#22c55e', marginTop: 4 }}>{pending.newType}</div>
+            <div style={{ fontSize: 10, color: 'var(--vf-text-muted)' }}>New</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: '#f59e0b', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 6, padding: '8px 12px' }}>
+          ⚠ This change will be logged in the device type audit trail and cannot be undone without changing it back.
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant="primary" onClick={onConfirm}>Confirm change</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Delete Confirmation ───────────────────────────────────────────────────────
 function DeleteConfirmModal({ device, onClose, onDelete }: { device: Device | null; onClose: () => void; onDelete: () => Promise<void> }) {
   const [deleting, setDeleting] = useState(false);
@@ -561,9 +639,11 @@ export default function V2DevicesPage() {
   const [gpsRadius, setGpsRadius]   = useState('1');
 
   // CRUD state
-  const [showAddModal, setShowAddModal]   = useState(false);
-  const [editDevice, setEditDevice]       = useState<Device | null>(null);
-  const [deleteDevice_, setDeleteDevice_] = useState<Device | null>(null);
+  const [showAddModal,       setShowAddModal]       = useState(false);
+  const [editDevice,         setEditDevice]         = useState<Device | null>(null);
+  const [deleteDevice_,      setDeleteDevice_]      = useState<Device | null>(null);
+  // DT-09: type-change confirmation
+  const [typeChangePending,  setTypeChangePending]  = useState<{ form: DeviceFormData; oldType: string; newType: string; deviceId: string; deviceSerial: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -604,8 +684,23 @@ export default function V2DevicesPage() {
 
   const handleEdit = async (form: DeviceFormData) => {
     if (!editDevice) return;
+    // DT-09: If device type changed, show confirmation diff before applying
+    const oldType = (editDevice.genericDeviceType || editDevice.deviceType || '') as string;
+    const newType = form.deviceType as string;
+    if (oldType && newType && oldType !== newType) {
+      // Capture key NOW — editDevice will be cleared when the edit modal closes
+      const key = editDevice.serialNumber || editDevice.id;
+      setTypeChangePending({ form, oldType, newType, deviceId: key, deviceSerial: editDevice.serialNumber ?? editDevice.id });
+      return;
+    }
+    await applyEdit(form, editDevice.serialNumber || editDevice.id);
+  };
+
+  const applyEdit = async (form: DeviceFormData, deviceKey?: string) => {
+    const key = deviceKey ?? (editDevice?.serialNumber || editDevice?.id);
+    if (!key) return;
     try {
-      const updated = await updateDevice(editDevice.id, {
+      const updated = await updateDevice(key, {
         serialNumber:    form.serialNumber,
         deviceType:      form.deviceType,
         status:          form.status,
@@ -617,8 +712,13 @@ export default function V2DevicesPage() {
         latitude:        form.latitude ? parseFloat(form.latitude) : undefined,
         longitude:       form.longitude ? parseFloat(form.longitude) : undefined,
       });
-      setDevices((prev) => prev.map((d) => d.id === editDevice.id ? updated : d));
+      // Optimistic update — immediately reflect the change in the table
+      setDevices((prev) => prev.map((d) => (d.serialNumber || d.id) === key ? updated : d));
       addToast(`Device ${updated.serialNumber} updated`, 'success');
+      setEditDevice(null);
+      setTypeChangePending(null);
+      // Full re-fetch to ensure all derived fields (genericDeviceType sync, counts) are fresh
+      load();
     } catch (e) {
       logger.error('Update device failed', e);
       addToast('Failed to update device', 'error');
@@ -629,13 +729,22 @@ export default function V2DevicesPage() {
   const handleDelete = async () => {
     if (!deleteDevice_) return;
     try {
-      await deleteDevice(deleteDevice_.id);
+      // Prefer serialNumber over MongoDB _id — the backend routes by serialNumber
+      const deviceKey = deleteDevice_.serialNumber || deleteDevice_.id;
+      await deleteDevice(deviceKey);
       setDevices((prev) => prev.filter((d) => d.id !== deleteDevice_.id));
       addToast(`Device ${deleteDevice_.serialNumber} removed`, 'success');
       setDeleteDevice_(null);
-    } catch (e) {
-      logger.error('Delete device failed', e);
-      addToast('Failed to delete device', 'error');
+    } catch (e: unknown) {
+      // 404 means already removed — treat as success
+      if (e && typeof e === 'object' && 'response' in e && (e as { response?: { status?: number } }).response?.status === 404) {
+        setDevices((prev) => prev.filter((d) => d.id !== deleteDevice_.id));
+        addToast(`Device ${deleteDevice_.serialNumber} was already removed`, 'info');
+        setDeleteDevice_(null);
+      } else {
+        logger.error('Delete device failed', e);
+        addToast('Failed to delete device', 'error');
+      }
     }
   };
 
@@ -645,12 +754,12 @@ export default function V2DevicesPage() {
       key: 'serialNumber', header: 'Serial', sortable: true,
       render: (d) => (
         <span style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 12, color: 'var(--vf-accent)', cursor: 'pointer' }}
-          onClick={(e) => { e.stopPropagation(); navigate(`/v2/devices/${d.id}`); }}>
+          onClick={(e) => { e.stopPropagation(); navigate(`/v2/devices/${encodeURIComponent(d.serialNumber || d.id)}`); }}>
           {d.serialNumber}
         </span>
       ),
     },
-    { key: 'deviceType', header: 'Type', sortable: true, render: (d) => <Badge variant="default">{d.genericDeviceType || d.deviceType}</Badge>, width: 80 },
+    { key: 'deviceType', header: 'Type', sortable: true, render: (d) => <Badge variant="default">{d.deviceType || d.genericDeviceType}</Badge>, width: 80 },
     {
       key: 'status', header: 'Status', sortable: true,
       render: (d) => <Badge variant={statusVariant(d.status)} dot>{d.status}</Badge>, width: 120,
@@ -691,7 +800,7 @@ export default function V2DevicesPage() {
       render: (d: Device) => (
         <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
           <button
-            onClick={() => navigate(`/v2/devices/${d.id}`)}
+            onClick={() => navigate(`/v2/devices/${encodeURIComponent(d.serialNumber || d.id)}`)}
             style={{ background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', color: '#60a5fa', padding: '3px 10px', borderRadius: 5, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
             Node View
           </button>
@@ -721,7 +830,7 @@ export default function V2DevicesPage() {
 
   // Dynamic device type breakdown — counts all distinct types including vendor-defined ones
   const deviceTypeCounts = devices.reduce<Record<string, { total: number; online: number }>>((acc, d) => {
-    const t = d.genericDeviceType || d.deviceType || 'Unknown';
+    const t = d.deviceType || d.genericDeviceType || 'Unknown';
     if (!acc[t]) acc[t] = { total: 0, online: 0 };
     acc[t].total++;
     if (d.status === 'ONLINE') acc[t].online++;
@@ -878,7 +987,7 @@ export default function V2DevicesPage() {
         columns={columns}
         data={tableData}
         rowKey={(d) => d.id}
-        onRowClick={(d) => navigate(`/v2/devices/${d.id}`)}
+        onRowClick={(d) => navigate(`/v2/devices/${encodeURIComponent(d.serialNumber || d.id)}`)}
         loading={loading}
         globalFilter={search}
         filterFields={['serialNumber', 'ipAddress', 'manufacturer', 'model', 'deviceType', 'status']}
@@ -933,6 +1042,14 @@ export default function V2DevicesPage() {
         device={deleteDevice_}
         onClose={() => setDeleteDevice_(null)}
         onDelete={handleDelete}
+      />
+
+      {/* DT-09: Type Change Confirmation Diff */}
+      <TypeChangeDiffModal
+        pending={typeChangePending}
+        onConfirm={() => typeChangePending && applyEdit(typeChangePending.form, typeChangePending.deviceId /* = serialNumber */)}
+
+        onCancel={() => setTypeChangePending(null)}
       />
     </div>
   );

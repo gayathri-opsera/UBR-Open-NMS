@@ -282,7 +282,22 @@ export default function V2DashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, [load]);
+  useEffect(() => {
+    load();
+    // Poll every 10 s so type/status changes propagate quickly
+    const t = setInterval(load, 10_000);
+    // Also refetch whenever the browser tab becomes visible (e.g. switching back from inventory)
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    // Refetch whenever the window regains focus (same tab navigation triggers focus)
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [load]);
 
   const handleDemoDiscovery = useCallback(async () => {
     setScanRunning(true);
@@ -308,8 +323,8 @@ export default function V2DashboardPage() {
 
   const filtered = useMemo(() => devices.filter((d) => {
     if (mode !== 'ALL') {
-      // Match against genericDeviceType first (switch, access_point, gateway…) then legacy deviceType
-      const effectiveType = d.genericDeviceType || d.deviceType || 'Unknown';
+      // Prefer explicit deviceType (user-set) over auto-classified genericDeviceType (SNMP)
+      const effectiveType = d.deviceType || d.genericDeviceType || 'Unknown';
       if (effectiveType.toLowerCase() !== mode.toLowerCase()) return false;
     }
     if (filterCircle && !d.tags?.some((t) => t.key === 'circle' && t.value === filterCircle)) return false;
@@ -350,7 +365,7 @@ export default function V2DashboardPage() {
   const deviceTypeBarData = useMemo(() => {
     const TYPE_COLORS = ['#60a5fa','#a78bfa','#22d3ee','#f59e0b','#22c55e','#fb923c','#f472b6','#34d399'];
     const counts: Record<string, number> = {};
-    devices.forEach((d) => { const t = d.genericDeviceType || d.deviceType || 'Unknown'; counts[t] = (counts[t] ?? 0) + 1; });
+    devices.forEach((d) => { const t = d.deviceType || d.genericDeviceType || 'Unknown'; counts[t] = (counts[t] ?? 0) + 1; });
     return Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .map(([name, count], i) => ({ name, count, fill: TYPE_COLORS[i % TYPE_COLORS.length] }));
@@ -373,7 +388,7 @@ export default function V2DashboardPage() {
     // (matches inventory page — not affected by advanced mode filter)
     const counts: Record<string, { total: number; online: number }> = {};
     devices.forEach((d) => {
-      const t = d.genericDeviceType || d.deviceType || 'Unknown';
+      const t = d.deviceType || d.genericDeviceType || 'Unknown';
       if (!counts[t]) counts[t] = { total: 0, online: 0 };
       counts[t].total++;
       if (d.status === 'ONLINE') counts[t].online++;
@@ -1222,7 +1237,7 @@ export default function V2DashboardPage() {
                 {filtered.filter((d) => d.status === 'OFFLINE').length === 0
                   ? <EmptyFeed icon="🟢" title="All devices online" sub="No unreachable devices" />
                   : filtered.filter((d) => d.status === 'OFFLINE').slice(0, 8).map((d) => {
-                    const displayType = d.genericDeviceType || d.deviceType || 'Unknown';
+                    const displayType = (d.deviceType || d.genericDeviceType || 'Unknown') as string;
                     return (
                     <FeedRow
                       key={d.id || d.serialNumber}
@@ -1238,7 +1253,7 @@ export default function V2DashboardPage() {
                       <span style={{ color: '#ef4444' }}>●</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ color: 'var(--vf-text-primary)', fontSize: 12, fontWeight: 600 }}>
-                          {displayType === 'BTS' ? '🗼 ' : displayType === 'IDU' ? '🔌 ' : displayType === 'switch' ? '🔀 ' : '📡 '}{d.serialNumber}
+                          {displayType === 'BTS' ? '🗼 ' : displayType === 'IDU' ? '🔌 ' : displayType === 'SWITCH' ? '🔀 ' : '📡 '}{d.serialNumber}
                         </div>
                         <div style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontFamily: 'var(--vf-font-mono)' }}>{d.ipAddress} · {displayType}</div>
                       </div>

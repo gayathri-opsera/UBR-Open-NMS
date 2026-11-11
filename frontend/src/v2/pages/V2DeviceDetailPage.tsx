@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { fetchDevices, updateDevice, deleteDevice } from '../../api/devices.api';
 import { pushDeviceParam, getVersionHistory } from '../../api/config.api';
@@ -27,12 +27,14 @@ import type { ParameterCurrentValue, ParameterCurrentValueData } from '../../api
 // ── New wireframe architecture ─────────────────────────────────────────────────
 import { fetchNodeView, fetchLiveStatus, type LiveStatus } from '../../api/nodeView.api';
 import type { NodeViewData } from '../../api/nodeView.types';
+import { fetchDeviceAuditLog, type DeviceTypeAuditEntry } from '../../api/deviceTypeCombinations.api';
 
 const TABS = [
-  { id: 'summary',   label: 'Node View' },
+  { id: 'summary',    label: 'Node View' },
   // Parameters, Wireless, Network, Ethernet, QoS, VLAN, GPS, Birth Cert, Tags hidden
-  { id: 'logs',      label: 'Logs' },
-  { id: 'history',   label: 'Config History' },
+  { id: 'logs',       label: 'Logs' },
+  { id: 'history',    label: 'Config History' },
+  { id: 'type-audit', label: 'Type History' },
 ];
 
 /** Normalise tag objects from any backend format to { key, value } pairs. */
@@ -121,8 +123,15 @@ export default function V2DeviceDetailPage() {
         setNvData(null);
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String((e as { message?: string })?.message ?? e);
-      if (!silent) setNvError(`Failed to load Node View: ${msg}`);
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        // Device or wireframe not found — treat same as NO_ACTIVE_FRAMEWORK (not an error)
+        setNvData(null);
+        setNvError(null);
+      } else {
+        const msg = e instanceof Error ? e.message : String((e as { message?: string })?.message ?? e);
+        if (!silent) setNvError(`Failed to load Node View: ${msg}`);
+      }
     } finally {
       setNvLoading(false);
       setNvRefreshing(false);
@@ -178,12 +187,23 @@ export default function V2DeviceDetailPage() {
     void loadFramework();
   }, [loadFramework, tab]);
 
-  // Auto-refresh every 30 s while the Node View tab is visible.
+  // Auto-refresh while the Node View tab is visible.
+  // Interval = minimum pollIntervalSeconds across all wireframe sections (default 30 s).
+  // This ensures the page-level cache reload honours whatever the admin configured in the
+  // Custom UI Builder, so changing "Default poll" or a per-section "Poll" value here
+  // actually drives how often the Node View re-fetches from the backend.
+  const pageRefreshMs = useMemo(() => {
+    const groups = nvData?.wireframe?.groups;
+    if (!groups?.length) return 30_000;
+    const ms = groups.map((g) => (g.pollIntervalSeconds ?? 30) * 1000);
+    return Math.max(Math.min(...ms), 5_000); // floor at 5 s
+  }, [nvData]);
+
   useEffect(() => {
     if (tab !== 'summary' || !devId) return;
-    const timer = setInterval(() => { void loadNodeView(false, true); }, 30000);
+    const timer = setInterval(() => { void loadNodeView(false, true); }, pageRefreshMs);
     return () => clearInterval(timer);
-  }, [tab, devId, loadNodeView]);
+  }, [tab, devId, loadNodeView, pageRefreshMs]);
 
   // Real-time status: probe the device itself every 5 s while the Node View tab is visible.
   const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null);
@@ -507,8 +527,9 @@ export default function V2DeviceDetailPage() {
         <TabPanel id="gps">       <GpsTab device={device} /></TabPanel>
         <TabPanel id="birth">     <BirthCertTab device={device} addToast={addToast} /></TabPanel>
         <TabPanel id="tags">      <TagsTab device={device} addToast={addToast} onDeviceUpdate={setDevice} /></TabPanel>
-        <TabPanel id="logs">      <LogsTab device={device} addToast={addToast} /></TabPanel>
-        <TabPanel id="history">   <ConfigHistoryTab device={device} /></TabPanel>
+        <TabPanel id="logs">       <LogsTab device={device} addToast={addToast} /></TabPanel>
+        <TabPanel id="history">    <ConfigHistoryTab device={device} /></TabPanel>
+        <TabPanel id="type-audit"> <TypeHistoryTab device={device} /></TabPanel>
       </Tabs>
     </div>
   );
@@ -1087,6 +1108,106 @@ function ConfigHistoryTab({ device }: { device: Device }) {
           );
         })
       )}
+    </div>
+  );
+}
+
+// ── DT-08 / DT-10: Type History Tab ──────────────────────────────────────────
+const STATUS_COLOR: Record<string, string> = {
+  Discovered:     '#94a3b8',
+  'Type assigned':'#60a5fa',
+  Provisioning:   '#f59e0b',
+  Provisioned:    '#22c55e',
+  Failed:         '#ef4444',
+  'Re-provisioning': '#a78bfa',
+  ONLINE:         '#22c55e',
+  OFFLINE:        '#ef4444',
+  DEPROVISIONED:  '#64748b',
+};
+
+function TypeHistoryTab({ device }: { device: Device }) {
+  const [auditLog,     setAuditLog]     = useState<DeviceTypeAuditEntry[]>([]);
+  const [statusHistory, setStatusHistory] = useState<{ status: string; reason?: string; changedBy?: string; timestamp: string }[]>([]);
+  const [loading,      setLoading]      = useState(true);
+
+  useEffect(() => {
+    if (!device?.serialNumber) return;
+    setLoading(true);
+    fetchDeviceAuditLog(device.serialNumber)
+      .then(setAuditLog)
+      .catch(() => setAuditLog([]))
+      .finally(() => setLoading(false));
+    // Status history is embedded on the device object
+    const history = (device as unknown as { statusHistory?: typeof statusHistory }).statusHistory;
+    setStatusHistory(Array.isArray(history) ? [...history].reverse() : []);
+  }, [device?.serialNumber]);
+
+  if (loading) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--vf-text-muted)', fontSize: 13 }}>Loading…</div>;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 28, paddingTop: 16 }}>
+
+      {/* ── Status History (DT-08) ── */}
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--vf-text-primary)', marginBottom: 12 }}>
+          Provisioning Status History
+        </div>
+        {statusHistory.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--vf-text-muted)', padding: '16px 0' }}>No status history recorded yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0, borderLeft: '2px solid var(--vf-border-default)', marginLeft: 8 }}>
+            {statusHistory.map((s, i) => (
+              <div key={i} style={{ display: 'flex', gap: 14, padding: '8px 0 8px 20px', position: 'relative' }}>
+                <div style={{ position: 'absolute', left: -6, top: 12, width: 10, height: 10, borderRadius: '50%', background: STATUS_COLOR[s.status] || '#94a3b8', border: '2px solid var(--vf-bg)' }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: STATUS_COLOR[s.status] || 'var(--vf-text-primary)' }}>{s.status}</span>
+                    {s.reason && <span style={{ fontSize: 11, color: 'var(--vf-text-muted)' }}>— {s.reason}</span>}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginTop: 2 }}>
+                    {s.changedBy || 'system'} · {new Date(s.timestamp).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Type Change Audit Log (DT-10) ── */}
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--vf-text-primary)', marginBottom: 12 }}>
+          Device Type Change Log
+        </div>
+        {auditLog.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--vf-text-muted)', padding: '16px 0' }}>No type changes recorded for this device.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: 'var(--vf-surface-raised)' }}>
+                {['From', 'To', 'Changed by', 'When', 'Reason'].map((h) => (
+                  <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--vf-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--vf-border-default)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {auditLog.map((e, i) => (
+                <tr key={e._id || i} style={{ borderBottom: '1px solid var(--vf-border-subtle)' }}>
+                  <td style={{ padding: '8px 12px', color: '#ef4444', fontWeight: 600 }}>
+                    {e.oldType ? `${e.oldType}${e.oldRole && e.oldRole !== e.oldType ? ' / ' + e.oldRole : ''}` : <span style={{ color: 'var(--vf-text-muted)' }}>Initial</span>}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: '#22c55e', fontWeight: 600 }}>
+                    {e.newType}{e.newRole && e.newRole !== e.newType ? ` / ${e.newRole}` : ''}
+                  </td>
+                  <td style={{ padding: '8px 12px', color: 'var(--vf-text-secondary)' }}>{e.changedBy}</td>
+                  <td style={{ padding: '8px 12px', color: 'var(--vf-text-muted)', fontSize: 11 }}>{new Date(e.changedAt).toLocaleString()}</td>
+                  <td style={{ padding: '8px 12px', color: 'var(--vf-text-muted)', fontSize: 11 }}>{e.reason || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }

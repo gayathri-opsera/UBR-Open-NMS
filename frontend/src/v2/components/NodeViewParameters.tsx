@@ -735,16 +735,26 @@ export function NodeViewParameters({
   const monitorEveryMs = /link/i.test(activeGroup?.uiTab ?? '') ? 2000 : 5000;
 
   // Real-time targets, grouped by interval so one request serves every section that shares a rate:
-  //  • the active Monitor tab of an uploaded definition (2 s on "Link" tabs, otherwise 5 s), and
-  //  • in a MIB Builder screen, every section its author marked "Live" (liveRefreshSeconds).
+  //  • the active Monitor tab of an uploaded definition (2 s on "Link" tabs, otherwise 5 s)
+  //  • in a MIB Builder screen, every section its author marked "Live" (liveRefreshSeconds)
+  //  • in a MIB Builder screen, every section's configured pollIntervalSeconds (≥ 10 s)
+  //    — this is what makes the builder's "Default poll" and per-section "Poll" settings
+  //      actually drive real frontend refresh cycles.
   const liveTargets = useMemo(() => {
     const byMs = new Map<number, string[]>();
     const add = (ms: number, id: string) => byMs.set(ms, [...(byMs.get(ms) ?? []), id]);
     if (monitorGroupId) add(monitorEveryMs, monitorGroupId);
     if (isMibDescriptorMode) {
       for (const g of groups) {
-        const s = g.liveRefreshSeconds;
-        if (s && s >= 2) add(Math.round(s) * 1000, g.groupId);
+        const live = g.liveRefreshSeconds;
+        if (live && live >= 2) {
+          // liveRefreshSeconds takes priority (faster cadence)
+          add(Math.round(live) * 1000, g.groupId);
+        } else {
+          // Fall back to the section's pollIntervalSeconds (min 10 s to avoid hammering)
+          const poll = g.pollIntervalSeconds;
+          if (poll && poll >= 10) add(Math.round(poll) * 1000, g.groupId);
+        }
       }
     }
     return Array.from(byMs.entries()).map(([ms, ids]) => ({ ms, ids: ids.slice(0, 6) }));

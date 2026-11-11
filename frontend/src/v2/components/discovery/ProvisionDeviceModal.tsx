@@ -15,13 +15,14 @@
  *   • macAddress  — requires ARP table walk or physical label
  *   • precise GPS — sysLocation is free-text; auto-parse succeeds only when formatted
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Input } from '../common/Input';
 import type { DiscoveryResult, ProvisionHostRequest, NmsDeviceType } from '../../../api/discovery.api';
 import { mapGenericTypeToDeviceType, buildProvisionRequest } from '../../../api/discovery.api';
+import { listModels, listRolesForModel } from '../../../api/deviceTypeCombinations.api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -321,6 +322,38 @@ export function ProvisionDeviceModal({
    *  'sysLocation', or 'productDefinition'. Drives the badge shown to the operator. */
   const [gpsSource, setGpsSource] = useState('');
 
+  // ── DT-04: Model + Role two-step picker ─────────────────────────────────────
+  const [comboModels,       setComboModels]       = useState<string[]>([]);
+  const [selectedModel,     setSelectedModel]     = useState<string>('');
+  const [modelRoles,        setModelRoles]        = useState<{ role: string; description: string }[]>([]);
+  const [comboLoading,      setComboLoading]      = useState(false);
+  const [showComboPicker,   setShowComboPicker]   = useState(false);
+
+  // Load available models once
+  useEffect(() => {
+    listModels().then(setComboModels).catch(() => setComboModels([]));
+  }, []);
+
+  // Load roles when model is selected
+  const handleModelSelect = useCallback(async (model: string) => {
+    setSelectedModel(model);
+    setComboLoading(true);
+    try {
+      const roles = await listRolesForModel(model);
+      setModelRoles(roles);
+    } catch {
+      setModelRoles([]);
+    } finally {
+      setComboLoading(false);
+    }
+  }, []);
+
+  // Apply selected role
+  const handleRoleSelect = useCallback((role: string) => {
+    setDeviceType(role as DeviceType);
+    setShowComboPicker(false);
+  }, []);
+
   // Reset form whenever a new result is opened.
   useEffect(() => {
     if (result) {
@@ -513,6 +546,71 @@ export function ProvisionDeviceModal({
               </span>
             )}
           </div>
+
+          {/* ── DT-04: Model → Role two-step picker (shown when combinations exist) ── */}
+          {comboModels.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              {!showComboPicker ? (
+                <button
+                  onClick={() => { setShowComboPicker(true); if (!selectedModel && comboModels.length > 0) handleModelSelect(comboModels[0]); }}
+                  style={{ fontSize: 11, color: 'var(--vf-accent)', background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.3)', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  🔧 Pick from Model + Role combinations
+                </button>
+              ) : (
+                <div style={{ background: 'var(--vf-surface-raised)', border: '1px solid var(--vf-border-default)', borderRadius: 8, padding: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--vf-text-primary)' }}>Select Model → Role</span>
+                    <button onClick={() => setShowComboPicker(false)} style={{ background: 'none', border: 'none', color: 'var(--vf-text-muted)', cursor: 'pointer', fontSize: 14 }}>✕</button>
+                  </div>
+                  {/* Step 1: Model */}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--vf-text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Model</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {comboModels.map((m) => (
+                        <button key={m} onClick={() => handleModelSelect(m)}
+                          style={{ padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: 'pointer',
+                            background: selectedModel === m ? 'var(--vf-accent)' : 'var(--vf-surface)',
+                            color:      selectedModel === m ? '#fff' : 'var(--vf-text-secondary)',
+                            border:     selectedModel === m ? '1px solid var(--vf-accent)' : '1px solid var(--vf-border-default)' }}>
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Step 2: Role (filtered by model) */}
+                  {selectedModel && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--vf-text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Role for {selectedModel}
+                      </div>
+                      {comboLoading ? (
+                        <div style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>Loading roles…</div>
+                      ) : modelRoles.length === 0 ? (
+                        <div style={{ fontSize: 12, color: '#f59e0b' }}>No roles defined for this model yet.</div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {modelRoles.map((r) => {
+                            const meta = getTypeMeta(r.role);
+                            return (
+                              <button key={r.role} onClick={() => handleRoleSelect(r.role)}
+                                title={r.description}
+                                style={{ padding: '6px 14px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer',
+                                  background: deviceType === r.role ? meta.color : 'var(--vf-surface)',
+                                  color:      deviceType === r.role ? '#fff' : meta.color,
+                                  border:     `1px solid ${meta.color}` }}>
+                                {meta.emoji} {r.role}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Dynamic type grid — all common types + detected type always visible */}
           {(() => {

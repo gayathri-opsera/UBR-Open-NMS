@@ -32,6 +32,7 @@ const nodeViewDesignRoutes        = require('./routes/nodeViewDesign.routes');
 const descriptors                 = require('./routes/descriptors.routes');
 const uiBuilderRoutes             = require('./routes/uiBuilder.routes');
 const authStub                    = require('./routes/auth.stub');
+const deviceTypeCombinationsStub  = require('./routes/deviceTypeCombinations.stub');
 // Alarms router — proxies to local alarm-service when ALARM_SERVICE_URL is local,
 // otherwise serves stub data to avoid CORS/auth issues with the external Opsera dev env.
 const alarmsRoutes    = require('./routes/alarms.routes');
@@ -126,6 +127,9 @@ function createApp(redisClient) {
   // with app.get() the router's internal router.get('/') never matches because the
   // path is not stripped, causing every request to fall through to the Java proxy.
   app.use('/api/v1/devices', devicesStub);
+
+  // Device Type Combinations — DT-02, DT-04, DT-10 (model+role CRUD + audit log)
+  app.use('/api/v1/device-type-combinations', deviceTypeCombinationsStub);
 
   // Discovery provision stub — intercepts POST /api/v1/discovery/runs/:runId/provision
   // before the discovery-service proxy so SNMP-discovered devices are written to MongoDB

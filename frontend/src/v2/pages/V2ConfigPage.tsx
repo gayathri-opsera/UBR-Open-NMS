@@ -1101,7 +1101,7 @@ function TemplatesTab() {
                       <option value="RADIO">RADIO (Generic Wireless Link)</option>
                     </optgroup>
                     <optgroup label="SNMP-Discovered Network Equipment">
-                      <option value="SWITCH">SWITCH (Cisco / Juniper / Multivendor)</option>
+                      <option value="SWITCH">SWITCH (Layer-2/3 Network Switch)</option>
                       <option value="ROUTER">ROUTER (Edge / Core Router)</option>
                     </optgroup>
                   </select>

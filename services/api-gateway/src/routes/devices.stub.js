@@ -9,6 +9,7 @@ const express  = require('express');
 const mongoose = require('mongoose');
 const http     = require('http');
 const router   = express.Router();
+const { writeAuditEntry, appendStatusHistory, resolveCombination } = require('./deviceTypeCombinations.stub');
 
 const MONGO_URI  = process.env.MONGO_URI
   || process.env.MONGO_URL
@@ -342,11 +343,53 @@ router.post('/', async (req, res) => {
 // ── PUT /api/v1/devices/:id — Update a device ────────────────────────────────
 router.put('/:id', async (req, res) => {
   try {
-    const col = await getCol();
-    const id  = req.params.id;
+    const col    = await getCol();
+    const id     = req.params.id;
+    const prior  = await col.findOne({ $or: [{ _id: id }, { id }, { serialNumber: id }, { deviceId: id }] });
     const updates = { ...req.body, updatedAt: new Date() };
     delete updates._id;
     delete updates.id;
+
+    // When the user explicitly sets deviceType, keep genericDeviceType in sync so
+    // dashboards (which read genericDeviceType first) reflect the change immediately.
+    if (updates.deviceType) {
+      updates.genericDeviceType = updates.deviceType;
+    }
+
+    // ── DT-09 / DT-10: detect device type change, resolve new combination ─────
+    const newType = updates.deviceType || updates.genericDeviceType;
+    const oldType = prior?.deviceType || prior?.genericDeviceType;
+    if (newType && prior && newType !== oldType) {
+      const combo = await resolveCombination(updates.model || prior.model, newType);
+      if (combo) {
+        updates.deviceTypeCombinationId = combo._id;
+        updates.deviceTypeModel         = combo.model;
+        updates.deviceTypeRole          = combo.role;
+        if (combo.productDefinitionId && !updates.productDefinitionId) {
+          updates.productDefinitionId   = combo.productDefinitionId;
+        }
+        if (combo.nodeViewDescriptorId && !updates.nodeViewDescriptorId) {
+          updates.nodeViewDescriptorId  = combo.nodeViewDescriptorId;
+        }
+      }
+      // DT-10: audit log
+      await writeAuditEntry({
+        serialNumber: prior.serialNumber || id,
+        oldType,
+        oldModel:  prior.deviceTypeModel  || prior.model || null,
+        oldRole:   prior.deviceTypeRole   || oldType     || null,
+        newType,
+        newModel:  updates.model           || prior.model || null,
+        newRole:   newType,
+        combinationId: updates.deviceTypeCombinationId || null,
+        changedBy: req.user?.userId || 'admin',
+        reason:    'Device type updated via inventory form',
+      }).catch(() => {});
+      // DT-08: status history
+      await appendStatusHistory(col, id, 'Re-provisioning',
+        `Device type changed from ${oldType} to ${newType}`,
+        req.user?.userId || 'admin').catch(() => {});
+    }
 
     const result = await col.findOneAndUpdate(
       { $or: [{ _id: id }, { id }, { serialNumber: id }, { deviceId: id }] },
@@ -355,6 +398,14 @@ router.put('/:id', async (req, res) => {
     );
 
     if (!result) return res.status(404).json({ code: 'NOT_FOUND', message: `Device '${id}' not found` });
+
+    // If type changed, finalize status back to Provisioned
+    if (newType && prior && newType !== oldType) {
+      await appendStatusHistory(col, id, 'Provisioned',
+        `Re-provisioned with type ${newType}`,
+        req.user?.userId || 'admin').catch(() => {});
+    }
+
     res.json(publicDevice(result));
   } catch (e) {
     console.error('[devices-stub] PUT /devices error:', e.message);

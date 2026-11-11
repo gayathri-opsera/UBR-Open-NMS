@@ -63,6 +63,8 @@ interface UiDescriptorDraft {
   vendor?: string;
   productFamily?: string;
   status: 'draft' | 'published';
+  /** Global default poll interval (seconds) applied to all new sections. Per-section values override this. */
+  defaultPollInterval?: number;
   sections: UiDescriptorSection[];
   generatedXml?: string;
   /** Full MIB object list from Stage 1 — stored so any admin can restore the session. */
@@ -161,7 +163,8 @@ function generateUiXml(descriptor: UiDescriptorDraft): string {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_|_$/g, '') || 'screen';
   const mib = escapeXmlAttr(descriptor.mibModule || 'UNKNOWN-MIB');
-  const lines: string[] = [`<screen id="${screenId}" mib="${mib}">`];
+  const defaultPoll = descriptor.defaultPollInterval ?? 30;
+  const lines: string[] = [`<screen id="${screenId}" mib="${mib}" defaultPollInterval="${defaultPoll}">`];
 
   const sections = [...descriptor.sections].sort((a, b) => a.order - b.order);
   const allFields = sections.flatMap((s) => s.fields);
@@ -1857,6 +1860,7 @@ function emptyDraft(module?: string, profile?: string): UiDescriptorDraft {
     deviceProfile: profile,
     mibModule: module,
     status: 'draft',
+    defaultPollInterval: 30,
     sections: [],
   };
 }
@@ -1977,7 +1981,7 @@ function ScreenBuilderScreen({
           title: 'New section',
           columns: 2,
           writeMode: 'apply-button',
-          pollInterval: 30,
+          pollInterval: d.defaultPollInterval ?? 30,
           order: sections.length,
           fields: [
             {
@@ -2089,12 +2093,12 @@ function ScreenBuilderScreen({
           return { ...sec, fields: [...sec.fields, { ...newField, order: sec.fields.length }] };
         });
       } else {
-        // No section — create one
+        // No section — create one (inherit global default poll interval)
         const newSec: UiDescriptorSection = {
           sectionId: sid(),
           title: obj.name,
           columns: 2,
-          pollInterval: 30,
+          pollInterval: d.defaultPollInterval ?? 30,
           writeMode: 'apply-button',
           order: sections.filter((s) => s.order >= 0).length,
           fields: [newField],
@@ -2402,6 +2406,41 @@ function ScreenBuilderScreen({
           <span style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>
             {draft.deviceProfile || parsedMib?.vendor || 'Device profile'}
           </span>
+
+          {/* ── Global default poll interval ── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--vf-border-default)', background: 'var(--vf-canvas)' }}>
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ color: 'var(--vf-accent)', flexShrink: 0 }}>
+              <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.4"/>
+              <path d="M7 4v3l2 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--vf-text-muted)', whiteSpace: 'nowrap', cursor: 'default' }}
+              title="Default poll interval for all sections (seconds). Each section can override this.">
+              Default poll
+            </label>
+            <input
+              type="number"
+              min={5}
+              max={3600}
+              value={draft.defaultPollInterval ?? 30}
+              onChange={(e) => {
+                const v = Math.max(5, Number(e.target.value));
+                updateDraft({ defaultPollInterval: v });
+              }}
+              title="Default poll interval for all sections (seconds). Each section can override this individually."
+              style={{
+                width: 52,
+                fontSize: 12,
+                fontWeight: 600,
+                padding: '3px 6px',
+                borderRadius: 4,
+                border: '1px solid var(--vf-border-default)',
+                background: 'var(--vf-input-bg)',
+                color: 'var(--vf-text-primary)',
+                textAlign: 'center',
+              }}
+            />
+            <span style={{ fontSize: 11, color: 'var(--vf-text-muted)', fontWeight: 600 }}>s</span>
+          </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button type="button" style={{ ...BTN_SECONDARY, opacity: 0.5, cursor: 'not-allowed' }} disabled>
               Undo
@@ -2595,14 +2634,20 @@ function ScreenBuilderScreen({
                     </button>
 
                     {/* Poll interval */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 6px', borderRadius: 4, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-canvas)' }}
+                      title="Poll interval for this section (seconds). Overrides the global default.">
+                      <svg width="10" height="10" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ color: 'var(--vf-accent)', flexShrink: 0 }}>
+                        <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.5"/>
+                        <path d="M7 4v3l2 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--vf-text-muted)', whiteSpace: 'nowrap' }}>Poll</span>
                       <input
                         type="number"
                         value={sec.pollInterval ?? 30}
                         min={5}
                         onChange={(e) => patchSection(sec.sectionId, { pollInterval: Number(e.target.value) })}
-                        title="Poll interval (seconds)"
-                        style={{ width: 36, fontSize: 9, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-secondary)', textAlign: 'center' }}
+                        title="Poll interval for this section (seconds)"
+                        style={{ width: 36, fontSize: 10, fontWeight: 600, padding: '1px 4px', borderRadius: 4, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)', textAlign: 'center' }}
                       />
                       <span style={{ fontSize: 9, color: 'var(--vf-text-muted)' }}>s</span>
                     </div>

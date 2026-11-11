@@ -502,7 +502,7 @@ function AllDiscoveredTab() {
               {filtered.map((d) => (
                 <tr
                   key={d.id}
-                  onClick={() => navigate(`/v2/devices/${d.id}`)}
+                  onClick={() => navigate(`/v2/devices/${encodeURIComponent(d.serialNumber || d.deviceId || d.id)}`)}
                   style={{ borderBottom: '1px solid var(--vf-border-subtle)', cursor: 'pointer', transition: 'background 0.1s' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(59,130,246,0.06)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = '')}
@@ -882,7 +882,7 @@ function SnmpDiscoveryTab({ initialScope }: SnmpDiscoveryTabProps) {
 
     setDeprovisioningIPs((prev) => new Set([...prev, result.ip]));
     try {
-      await deleteDevice(device.id || device.serialNumber || result.ip);
+      await deleteDevice(device.serialNumber || device.deviceId || device.id || result.ip);
 
       // Remove from inventory map so the card knows it's no longer in inventory.
       setInventoryDeviceMap((prev) => {
@@ -906,8 +906,16 @@ function SnmpDiscoveryTab({ initialScope }: SnmpDiscoveryTabProps) {
         'success',
       );
     } catch (err: unknown) {
-      logger.error('SnmpDiscoveryTab: deprovision failed', err);
-      addToast('Failed to remove device from inventory. Please try again.', 'error');
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        // Device is already gone — treat as successful deprovision (idempotent)
+        setInventoryDeviceMap((prev) => { const m = new Map(prev); m.delete(result.ip); return m; });
+        setDeprovisionedIPs((prev) => new Set([...prev, result.ip]));
+        addToast(`${device.serialNumber || result.ip} was already removed from inventory.`, 'info');
+      } else {
+        logger.error('SnmpDiscoveryTab: deprovision failed', err);
+        addToast('Failed to remove device from inventory. Please try again.', 'error');
+      }
     } finally {
       setDeprovisioningIPs((prev) => {
         const next = new Set(prev);
@@ -1083,7 +1091,7 @@ function SnmpDiscoveryTab({ initialScope }: SnmpDiscoveryTabProps) {
                     onClick={() => {
                       // One device provisioned → its Node View; several → the list.
                       const only = provisionedIPs.size === 1 ? inventoryDeviceMap.get([...provisionedIPs][0]) : undefined;
-                      const id = only?.id || only?.deviceId || only?.serialNumber;
+                      const id = only?.serialNumber || only?.deviceId || only?.id;
                       navigate(id ? `/v2/devices/${encodeURIComponent(String(id))}` : '/v2/discovery?tab=all');
                     }}
                   >

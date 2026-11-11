@@ -258,6 +258,19 @@ export interface DiscoveryResult {
    * Never contains credential material.
    */
   guidedFailure?: GuidedFailure;
+
+  /**
+   * True when this device exists in inventory with isDeprovisioned=true (soft-deleted).
+   * Set by the discovery stub so the frontend can show "Re-provision" instead of "Provision"
+   * even across sessions — the backend knows the device was explicitly deprovisioned.
+   */
+  deprovisionedFlag?: boolean;
+
+  /**
+   * True when this device is already in active inventory (managed).
+   * Set by the discovery stub so the frontend can show the provisioned state correctly.
+   */
+  provisioned?: boolean;
 }
 
 /**

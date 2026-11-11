@@ -20,6 +20,7 @@ const topologyStub  = require('./topology.stub');
 const live          = require('../live/liveParameters');
 const deviceFacts   = require('../live/deviceFacts');
 const runStore      = require('../live/discoveryRunStore');
+const { writeAuditEntry, appendStatusHistory, resolveCombination } = require('./deviceTypeCombinations.stub');
 const { canonicalOid } = require('../live/oidAliases');
 
 const MONGO_URI      = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://mongo:27017/ubrnms';
@@ -430,15 +431,72 @@ async function provisionOne(host, col, ctx = {}) {
       console.log(`[provision-stub] Serial ${serialNumber} was deprovisioned — clearing flag`);
     }
 
+    // ── Resolve device type combination (DT-02) ──────────────────────────────
+    const combo = await resolveCombination(resolvedModel, deviceType || genericDeviceType);
+    if (combo) {
+      doc.deviceTypeCombinationId   = combo._id;
+      doc.deviceTypeModel           = combo.model;
+      doc.deviceTypeRole            = combo.role;
+      if (!productDefinitionId && combo.productDefinitionId) {
+        productDefinitionId = combo.productDefinitionId;
+        doc.productDefinitionId     = productDefinitionId;
+      }
+      if (!doc.nodeViewDescriptorId && combo.nodeViewDescriptorId) {
+        doc.nodeViewDescriptorId    = combo.nodeViewDescriptorId;
+      }
+    }
+
+    // ── Status history — DT-08 ────────────────────────────────────────────────
+    const isReprovision = !!(await col.findOne({ _id: doc._id }));
+    const provStatus    = isReprovision ? 'Re-provisioning' : 'Type assigned';
+    doc.statusHistory   = [
+      { status: 'Discovered',   reason: 'Device found by SNMP discovery',                 changedBy: 'system',  timestamp: doc.createdAt },
+      { status: provStatus,     reason: `Model: ${resolvedModel}, Role: ${deviceType}`,    changedBy: req?.user?.userId || 'admin', timestamp: new Date() },
+      { status: 'Provisioning', reason: 'Configuration being applied',                     changedBy: 'system',  timestamp: new Date() },
+    ];
+
     // Upsert by serialNumber (_id) — idempotent for re-provisioning the same serial.
     await col.replaceOne({ _id: doc._id }, doc, { upsert: true });
-    console.log(`[provision-stub] Provisioned ${serialNumber} (${deviceType}) @ ${ip} productDef=${productDefinitionId || 'none'}`);
+    console.log(`[provision-stub] Provisioned ${serialNumber} (${deviceType}) @ ${ip} productDef=${productDefinitionId || 'none'} combo=${combo ? combo.model + '/' + combo.role : 'none'}`);
 
     // First live read straight away (fire-and-forget) so the Node View has data when opened.
     // A poll outcome left by an earlier record with this id (e.g. UNREACHABLE from its old
     // address) must not be shown as this device's state while that first read runs.
     await live.resetStaleLiveState(doc).catch(() => {});
     if (productDefinitionId) live.refreshDevice(doc).catch(() => {});
+
+    // ── Finalize status to Provisioned + audit log entry (DT-08, DT-10) ──────
+    await appendStatusHistory(col, serialNumber, 'Provisioned', 'Device configuration applied successfully', req?.user?.userId || 'admin').catch(() => {});
+    const prevDoc = await col.findOne({ _id: serialNumber });
+    if (prevDoc?.deviceType && prevDoc.deviceType !== deviceType) {
+      // Type changed — write audit entry
+      await writeAuditEntry({
+        serialNumber,
+        oldType:   prevDoc.deviceType,
+        oldModel:  prevDoc.deviceTypeModel || null,
+        oldRole:   prevDoc.deviceTypeRole  || null,
+        newType:   deviceType,
+        newModel:  resolvedModel,
+        newRole:   deviceType,
+        combinationId: doc.deviceTypeCombinationId || null,
+        changedBy: req?.user?.userId || 'admin',
+        reason:    'Re-provisioned via discovery',
+      }).catch(() => {});
+    } else if (!prevDoc) {
+      // First provision — log as initial assignment
+      await writeAuditEntry({
+        serialNumber,
+        oldType:   null,
+        oldModel:  null,
+        oldRole:   null,
+        newType:   deviceType,
+        newModel:  resolvedModel,
+        newRole:   deviceType,
+        combinationId: doc.deviceTypeCombinationId || null,
+        changedBy: req?.user?.userId || 'admin',
+        reason:    'Initial provision',
+      }).catch(() => {});
+    }
 
     await applyBtsCpeLinks(col, doc, ctx);
 

@@ -48,7 +48,8 @@ const V2SecurityAuditPage = lazy(() => import('./pages/V2SecurityAuditPage'));
 const V2ProductDefinitionPage = lazy(() => import('./pages/V2ProductDefinitionPage'));
 // Descriptor Registry — 9-state lifecycle (Draft→Purged), maker-checker, delete guard, wireframe build
 const V2DescriptorPage = lazy(() => import('./pages/V2DescriptorPage'));
-const V2MibBuilderPage = lazy(() => import('./pages/V2MibBuilderPage'));
+const V2MibBuilderPage     = lazy(() => import('./pages/V2MibBuilderPage'));
+const V2DeviceTypesPage    = lazy(() => import('./pages/V2DeviceTypesPage'));
 // Pre-MIB Node View Designer — design sections/labels/index levels before MIB upload (PV-01→PV-12)
 const V2NodeViewDesignerPage = lazy(() => import('./pages/V2NodeViewDesignerPage'));
 // In-app documentation — search, PDF export, full page coverage
@@ -174,6 +175,14 @@ export function V2App() {
                   }
                 />
                 <Route path="discovery" element={<V2DiscoveryPage />} />
+                <Route
+                  path="device-types"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin']}>
+                      <V2DeviceTypesPage />
+                    </V2ProtectedRoute>
+                  }
+                />
                 {/*
                   WO-014: Adaptive device parameter panels — mounted at
                   /v2/devices/:id/framework-parameters so it is a sub-route

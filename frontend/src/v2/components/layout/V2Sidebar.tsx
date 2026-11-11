@@ -31,7 +31,6 @@ const NAV_GROUPS: NavGroup[] = [
       { path: '/v2/devices',    label: 'Inventory',  icon: <ServerIcon /> },
       { path: '/v2/alarms',     label: 'Alarms',     icon: <BellIcon /> },
       { path: '/v2/topology',   label: 'Topology',   icon: <TopologyIcon /> },
-      // Device Groups and KPI removed
     ],
   },
   {
@@ -44,8 +43,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Admin',
     items: [
-      { path: '/v2/admin', label: 'Admin', icon: <AdminIcon />, allowedRoles: ['Admin'] as Role[] },
-      // Org / Hierarchy and Notifications hidden
+      { path: '/v2/admin',        label: 'Admin',               icon: <AdminIcon />,   allowedRoles: ['Admin'] as Role[] },
+      { path: '/v2/device-types', label: 'Device Type Config',  icon: <DeviceTypeIcon />, allowedRoles: ['Admin'] as Role[] },
     ],
   },
   {
@@ -283,6 +282,7 @@ function DescriptorIcon() { return <svg width="16" height="16" viewBox="0 0 16 1
 function AuditIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M5 7V5a3 3 0 116 0v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M6.5 11l1.5 1.5 2-2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 /** Custom UI Builder — layout grid with widget block */
 function BuilderIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M1 6h14M6 6v9" stroke="currentColor" strokeWidth="1.3"/><rect x="8" y="8" width="5" height="3" rx="0.75" stroke="currentColor" strokeWidth="1.2"/></svg>; }
+function DeviceTypeIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="4" r="2.5" stroke="currentColor" strokeWidth="1.4"/><path d="M4 10h8M5 13h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M8 6.5v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><circle cx="4" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.2"/><circle cx="12" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.2"/></svg>; }
 /** Node View Designer — layers/sections icon */
 function NodeViewIcon() { return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1" y="2" width="14" height="4" rx="1" stroke="currentColor" strokeWidth="1.4"/><rect x="1" y="8" width="9" height="3" rx="1" stroke="currentColor" strokeWidth="1.3"/><rect x="3" y="13" width="6" height="2" rx="0.75" stroke="currentColor" strokeWidth="1.2"/><path d="M12 9.5l2 2-2 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 
