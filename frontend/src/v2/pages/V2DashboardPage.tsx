@@ -18,6 +18,15 @@ const LEGACY_MODEL_MAP: Record<string, string> = {
   'Senao EAP300': 'A61', 'Senao EAP300-AC': 'A61', 'CB-350AC': 'A61',
   'Senao IDU-5000': 'IDU', 'Senao IDU-5000-AC': 'IDU',
 };
+/** One row per physical device — the API can return the same unit twice (e.g. re-discovery). */
+function dedupeDevices(list: Device[]): Device[] {
+  const seen = new Map<string, Device>();
+  for (const d of list) {
+    const key = d.deviceId || d.id || d.serialNumber || d.ipAddress;
+    if (!key || !seen.has(key)) seen.set(key || `__${seen.size}`, d);
+  }
+  return [...seen.values()];
+}
 function normaliseModel(d: Device): Device {
   const mapped = LEGACY_MODEL_MAP[d.model ?? ''];
   return mapped ? { ...d, model: mapped } : d;
@@ -206,7 +215,7 @@ export default function V2DashboardPage() {
     else update(setTab3, 3);
   }, [activeTab]);
 
-  const { mode, filterCircle, filterModel, filterFirmware, visibleWidgets, widgetOrder } = tabState;
+  const { mode, filterCircle, visibleWidgets, widgetOrder } = tabState;
 
   // Ordered visible widgets (use saved order, append any new ones at end)
   const orderedVisible = useMemo(() => {
@@ -236,8 +245,6 @@ export default function V2DashboardPage() {
   const handleDragEnd = useCallback(() => { setDragId(null); setDragOver(null); }, []);
   const setMode          = (m: DashboardMode) => setTabState((p) => ({ ...p, mode: m }));
   const setFilterCircle  = (v: string)        => setTabState((p) => ({ ...p, filterCircle: v }));
-  const setFilterModel   = (v: string)        => setTabState((p) => ({ ...p, filterModel: v }));
-  const setFilterFirmware = (v: string)       => setTabState((p) => ({ ...p, filterFirmware: v }));
   const toggleWidget = (id: WidgetId) => setTabState((p) => ({
     ...p,
     visibleWidgets: p.visibleWidgets.includes(id)
@@ -277,7 +284,7 @@ export default function V2DashboardPage() {
     Promise.all([
       fetchDevices({}).catch(() => [] as Device[]),
       fetchAlarms({}).catch(() => [] as Alarm[]),
-    ]).then(([d, a]) => { setDevices(d.map(normaliseModel)); setAlarms(a); })
+    ]).then(([d, a]) => { setDevices(dedupeDevices(d).map(normaliseModel)); setAlarms(a); })
       .catch((e) => { logger.error('Dashboard fetch', e); setError('Unable to load dashboard data.'); })
       .finally(() => setLoading(false));
   }, []);
@@ -316,11 +323,6 @@ export default function V2DashboardPage() {
 
   // Derived data
   const circles   = useMemo(() => [...new Set(devices.flatMap((d) => (d.tags ?? []).filter((t) => t.key === 'circle' && !!t.value).map((t) => t.value)))].filter(Boolean), [devices]);
-  // Only allowed models — filter out any legacy Senao model names from the backend
-  const ALLOWED_MODELS = ['A60', 'A61', 'IDU'];
-  const models    = useMemo(() => ALLOWED_MODELS.filter((m) => devices.some((d) => d.model === m)), [devices]);
-  const firmwares = useMemo(() => [...new Set(devices.map((d) => d.firmwareVersion).filter(Boolean))], [devices]);
-
   const filtered = useMemo(() => devices.filter((d) => {
     if (mode !== 'ALL') {
       // Prefer explicit deviceType (user-set) over auto-classified genericDeviceType (SNMP)
@@ -328,10 +330,8 @@ export default function V2DashboardPage() {
       if (effectiveType.toLowerCase() !== mode.toLowerCase()) return false;
     }
     if (filterCircle && !d.tags?.some((t) => t.key === 'circle' && t.value === filterCircle)) return false;
-    if (filterModel && d.model !== filterModel) return false;
-    if (filterFirmware && d.firmwareVersion !== filterFirmware) return false;
     return true;
-  }), [devices, mode, filterCircle, filterModel, filterFirmware]);
+  }), [devices, mode, filterCircle]);
 
   const activeAlarms = useMemo(() => alarms.filter((a) => a.state === 'ACTIVE'), [alarms]);
 
@@ -407,12 +407,6 @@ export default function V2DashboardPage() {
 
   const btsDevices   = useMemo(() => filtered.filter((d) => d.deviceType === 'BTS'), [filtered]);
   const cpeDevices   = useMemo(() => filtered.filter((d) => d.deviceType === 'CPE'), [filtered]);
-  // Generic/non-standard device types (RADIO, SWITCH, etc.) — includes EOC640 backhaul radios.
-  // Requires deviceType to be explicitly set (non-null, non-legacy) so Java devices with
-  // deviceType=null don't inflate this count.
-  const radioDevices = useMemo(() => filtered.filter(
-    (d) => d.deviceType != null && (d.deviceType as string) !== '' && !['BTS', 'CPE', 'IDU'].includes(d.deviceType),
-  ), [filtered]);
   const btsChannelData = useMemo(() => {
     const counts: Record<string, number> = {};
     btsDevices.forEach((d) => { const ch = (d as Device & { channel?: string }).channel; if (ch) counts[ch] = (counts[ch] ?? 0) + 1; });
@@ -817,43 +811,6 @@ export default function V2DashboardPage() {
           ))}
         </div>}
 
-        {/* ── Filter bar ────────────────────────────────────────────────────── */}
-        {showAdvancedWidgets && <div style={{
-          background: 'var(--vf-surface)', border: 'var(--vf-card-border)',
-          borderRadius: 10, padding: '12px 18px', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center',
-          boxShadow: 'var(--vf-shadow-low)',
-        }}>
-          {[
-            { label: 'Circle',   value: filterCircle,   options: circles,   set: setFilterCircle },
-            { label: 'Model',    value: filterModel,    options: models,    set: setFilterModel },
-            { label: 'Firmware', value: filterFirmware, options: firmwares, set: setFilterFirmware },
-          ].map(({ label, value, options, set }) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label style={{ color: 'var(--vf-text-muted)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</label>
-              <select value={value} onChange={(e) => set(e.target.value)}
-                style={{
-                  background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)',
-                  borderRadius: 6, color: 'var(--vf-text-primary)', padding: '5px 10px', fontSize: 12, cursor: 'pointer',
-                }}>
-                <option value="">All {label.toLowerCase()}s</option>
-                {options.filter(Boolean).map((o, i) => <option key={`${i}-${o}`} value={o}>{o}</option>)}
-              </select>
-            </div>
-          ))}
-          {(filterCircle || filterModel || filterFirmware) && (
-            <button onClick={() => { setFilterCircle(''); setFilterModel(''); setFilterFirmware(''); }}
-              style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', padding: '4px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
-              Clear ×
-            </button>
-          )}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--vf-text-muted)', fontSize: 12 }}>{mode === 'ALL' ? 'All Devices' : `${mode} View`}</span>
-            <span style={{ background: 'var(--vf-accent-subtle)', border: '1px solid var(--vf-accent)', color: 'var(--vf-accent)', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700, fontFamily: 'var(--vf-font-mono)' }}>
-              {filtered.length} / {devices.length}
-            </span>
-          </div>
-        </div>}
-
         {/* ── Error banner ──────────────────────────────────────────────────── */}
         {error && (
           <div role="alert" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, padding: '12px 16px', color: '#f87171', fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -881,59 +838,11 @@ export default function V2DashboardPage() {
           };
           return (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
-              <KpiTile icon="🟢" label="Online"       value={onlineCount}         total={filtered.length} color="#22c55e" grad="rgba(34,197,94,0.08)"   onClick={() => navigate(dUrl({ status: 'ONLINE' }))} />
-              <KpiTile icon="🔴" label="Offline"      value={offlineCount}        total={filtered.length} color="#ef4444" grad="rgba(239,68,68,0.08)"   onClick={() => navigate(dUrl({ status: 'OFFLINE' }))} />
-              <KpiTile icon="◌"  label="Provisioning" value={provCount}           total={filtered.length} color="#60a5fa" grad="rgba(96,165,250,0.08)"  onClick={() => navigate(dUrl({ status: 'PROVISIONING' }))} />
-              <KpiTile icon="📡" label="Total"         value={filtered.length}                            color="#94a3b8" grad="rgba(148,163,184,0.06)"  onClick={() => navigate(dUrl())} />
+              <KpiTile icon="◌"  label="Provisioning" value={provCount}           total={totalDevices} color="#60a5fa" grad="rgba(96,165,250,0.08)"  onClick={() => navigate(dUrl({ status: 'PROVISIONING' }))} />
               <KpiTile icon="⛔" label="Critical"      value={critCount}                                  color="#ef4444" grad="rgba(239,68,68,0.1)"    onClick={() => navigate(aUrl({ severity: 'CRITICAL' }))} />
               <KpiTile icon="🔶" label="Major Alarms"  value={majorCount}                                 color="#fb923c" grad="rgba(251,146,60,0.08)"   onClick={() => navigate(aUrl({ severity: 'MAJOR' }))} />
               <KpiTile icon="🔔" label="Active Alarms" value={activeAlarms.length}                       color={activeAlarms.length > 0 ? '#f59e0b' : '#22c55e'} grad={activeAlarms.length > 0 ? 'rgba(245,158,11,0.08)' : 'rgba(34,197,94,0.06)'} onClick={() => navigate(aUrl({ state: 'ACTIVE' }))} />
               <KpiTile icon="♥"  label="Fleet Health"  value={onlinePct} suffix="%" color={onlinePct >= 90 ? '#22c55e' : onlinePct >= 70 ? '#f59e0b' : '#ef4444'} grad={onlinePct >= 90 ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.08)'} onClick={() => navigate(dUrl())} />
-            </div>
-          );
-        })()}
-
-        {/* ── Mode-specific KPI extras — BTS/CPE legacy extras + dynamic type total/online/offline ── */}
-        {showAdvancedWidgets && mode === 'BTS' && btsDevices.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
-            <KpiTile icon="🗼" label="BTS Total"    value={btsDevices.length}                                                       color="#60a5fa" grad="rgba(96,165,250,0.08)"  onClick={() => navigate('/v2/devices?deviceType=BTS')} />
-            <KpiTile icon="🟢" label="BTS Online"   value={btsDevices.filter((d) => d.status === 'ONLINE').length}   total={btsDevices.length} color="#22c55e" grad="rgba(34,197,94,0.08)"  onClick={() => navigate('/v2/devices?deviceType=BTS&status=ONLINE')} />
-            <KpiTile icon="⚠"  label="BTS Faulty"   value={btsDevices.filter((d) => d.status === 'OFFLINE').length}               color="#ef4444" grad="rgba(239,68,68,0.08)"  onClick={() => navigate('/v2/devices?deviceType=BTS&status=OFFLINE')} />
-            <KpiTile icon="📡" label="Avg CPEs/BTS" value={Math.round(devices.filter((d) => d.deviceType === 'CPE').length / Math.max(btsDevices.length, 1))} color="#a78bfa" grad="rgba(167,139,250,0.08)" onClick={() => navigate('/v2/devices?deviceType=CPE')} />
-          </div>
-        )}
-        {showAdvancedWidgets && mode === 'CPE' && cpeDevices.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
-            <KpiTile icon="📡" label="CPE Total"   value={cpeDevices.length}                                                      color="#a78bfa" grad="rgba(167,139,250,0.08)" onClick={() => navigate('/v2/devices?deviceType=CPE')} />
-            <KpiTile icon="🟢" label="CPE Online"  value={cpeDevices.filter((d) => d.status === 'ONLINE').length} total={cpeDevices.length} color="#22c55e" grad="rgba(34,197,94,0.08)" onClick={() => navigate('/v2/devices?deviceType=CPE&status=ONLINE')} />
-            <KpiTile icon="⚠"  label="CPE Offline" value={cpeDevices.filter((d) => d.status === 'OFFLINE').length}              color="#ef4444" grad="rgba(239,68,68,0.08)"  onClick={() => navigate('/v2/devices?deviceType=CPE&status=OFFLINE')} />
-            <KpiTile icon="🔌" label="IDU Total"   value={devices.filter((d) => d.deviceType === 'IDU').length}                  color="#22d3ee" grad="rgba(34,211,238,0.08)" onClick={() => navigate('/v2/devices?deviceType=IDU')} />
-          </div>
-        )}
-        {/* Radio / Backhaul section — shows EOC640 and other non-standard device types */}
-        {radioDevices.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
-            <KpiTile icon="📻" label="Radio Total"  value={radioDevices.length}                                                     color="#f59e0b" grad="rgba(245,158,11,0.08)"  onClick={() => navigate('/v2/devices?genericDeviceType=RADIO')} />
-            <KpiTile icon="🟢" label="Radio Online" value={radioDevices.filter((d) => d.status === 'ONLINE').length} total={radioDevices.length} color="#22c55e" grad="rgba(34,197,94,0.08)" onClick={() => navigate('/v2/devices?genericDeviceType=RADIO&status=ONLINE')} />
-            <KpiTile icon="⚠"  label="Radio Faulty" value={radioDevices.filter((d) => d.status === 'OFFLINE').length}              color="#ef4444" grad="rgba(239,68,68,0.08)"  onClick={() => navigate('/v2/devices?genericDeviceType=RADIO&status=OFFLINE')} />
-          </div>
-        )}
-        {/* Generic type extras: when a non-legacy genericDeviceType mode is active, show total/online/offline tiles */}
-        {showAdvancedWidgets && mode !== 'ALL' && !['BTS','CPE','IDU'].includes(mode) && filtered.length > 0 && (() => {
-          const onlineCt = filtered.filter((d) => d.status === 'ONLINE').length;
-          const offlineCt = filtered.filter((d) => d.status === 'OFFLINE').length;
-          const typeCard = deviceTypeCards.find((c) => c.type === mode);
-          const icon = typeCard?.icon ?? '📦';
-          const color = typeCard?.color ?? '#60a5fa';
-          const typeUrl = (extra: Record<string, string> = {}) => {
-            const p = new URLSearchParams({ genericDeviceType: mode, ...extra });
-            return `/v2/devices?${p.toString()}`;
-          };
-          return (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 10 }}>
-              <KpiTile icon={icon}  label={`${mode} Total`}   value={filtered.length} color={color}     grad={`${color}22`}              onClick={() => navigate(typeUrl())} />
-              <KpiTile icon="🟢"   label={`${mode} Online`}  value={onlineCt} total={filtered.length} color="#22c55e" grad="rgba(34,197,94,0.08)"  onClick={() => navigate(typeUrl({ status: 'ONLINE' }))} />
-              {offlineCt > 0 && <KpiTile icon="⚠" label={`${mode} Offline`} value={offlineCt} color="#ef4444" grad="rgba(239,68,68,0.08)"  onClick={() => navigate(typeUrl({ status: 'OFFLINE' }))} />}
             </div>
           );
         })()}
