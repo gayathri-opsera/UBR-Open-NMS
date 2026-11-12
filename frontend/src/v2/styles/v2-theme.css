@@ -571,7 +571,9 @@ html[data-theme="light"] .docs-export-card {
   color: #0a0f1e !important;
 }
 
-/* ── Light mode — MIB Builder left panel ───────────────────────────────────*/
+/* ── Light mode — MIB Builder ───────────────────────────────────────────────*/
+
+/* Left panel */
 html[data-theme="light"] .mib-left-panel {
   background: var(--vf-surface) !important;
   border-right-color: var(--vf-border-default) !important;
@@ -586,6 +588,143 @@ html[data-theme="light"] .mib-left-panel input[type="text"],
 html[data-theme="light"] .mib-left-panel input:not([type]) {
   background: var(--vf-surface) !important;
   border-color: var(--vf-border-default) !important;
+}
+/* MIB object tree buttons readable in light */
+html[data-theme="light"] .mib-left-panel button {
+  color: var(--vf-text-primary) !important;
+}
+
+/* ── Light mode — Build Screen left panel (Layout palette + MIB tree) ───── */
+/* Entire panel — white background, no dark bleed */
+html[data-theme="light"] .mib-builder-left-panel {
+  background: #ffffff !important;
+  border-right-color: var(--vf-border-default) !important;
+}
+/* All buttons and text in the panel — explicit dark text */
+html[data-theme="light"] .mib-builder-left-panel button {
+  color: var(--vf-text-primary) !important;
+}
+html[data-theme="light"] .mib-builder-left-panel button span,
+html[data-theme="light"] .mib-builder-left-panel button div {
+  color: inherit !important;
+}
+/* Layout element palette buttons — use canvas tint so they stand out from white */
+html[data-theme="light"] .mib-builder-left-panel .mib-palette-btn {
+  background: #f1f5f9 !important;
+  border-color: var(--vf-border-default) !important;
+  color: var(--vf-text-primary) !important;
+}
+html[data-theme="light"] .mib-builder-left-panel .mib-palette-btn:hover {
+  background: #e8eef7 !important;
+}
+/* MIB object tree section headers */
+html[data-theme="light"] .mib-builder-left-panel .mib-tree-section-header {
+  color: var(--vf-text-secondary) !important;
+  background: transparent !important;
+}
+html[data-theme="light"] .mib-builder-left-panel .mib-tree-section-header:hover {
+  background: #f1f5f9 !important;
+}
+/* MIB object tree item rows */
+html[data-theme="light"] .mib-builder-left-panel .mib-tree-item {
+  color: var(--vf-text-primary) !important;
+  background: transparent !important;
+}
+html[data-theme="light"] .mib-builder-left-panel .mib-tree-item:hover {
+  background: #f1f5f9 !important;
+}
+html[data-theme="light"] .mib-builder-left-panel .mib-tree-item--bound {
+  background: rgba(22,163,74,0.08) !important;
+  color: var(--vf-text-primary) !important;
+}
+
+/* Canvas background — light canvas uses page wash, not dark elevated */
+html[data-theme="light"] .mib-builder-canvas-bg {
+  background: var(--vf-canvas) !important;
+}
+
+/* Main canvas card — visible card lift in light mode */
+html[data-theme="light"] .mib-builder-canvas-card {
+  background: var(--vf-surface) !important;
+  border-color: var(--vf-border-default) !important;
+  box-shadow: var(--vf-shadow-medium) !important;
+}
+
+/* Section cards — clearly separated from canvas in light mode */
+html[data-theme="light"] .mib-section-card {
+  background: var(--vf-surface) !important;
+  box-shadow: var(--vf-shadow-low);
+}
+/* Section toolbar strip */
+html[data-theme="light"] .mib-section-card > div:first-child {
+  background: #f8f9ff !important;
+  border-bottom-color: var(--vf-border-subtle) !important;
+}
+/* Section toolbar mini-buttons */
+html[data-theme="light"] .mib-section-card button {
+  background: var(--vf-surface) !important;
+  color: var(--vf-text-secondary) !important;
+  border-color: var(--vf-border-default) !important;
+}
+html[data-theme="light"] .mib-section-card button:hover {
+  background: var(--vf-hover) !important;
+}
+
+/* Right properties panel */
+html[data-theme="light"] aside.mib-right-panel,
+html[data-theme="light"] main aside:last-child {
+  background: var(--vf-surface) !important;
+  border-left-color: var(--vf-border-default) !important;
+  box-shadow: var(--vf-shadow-low);
+}
+
+/* Step header tabs */
+html[data-theme="light"] .mib-step-header {
+  background: var(--vf-surface) !important;
+  border-bottom-color: var(--vf-border-default) !important;
+}
+
+/* Add-object picker dropdown */
+html[data-theme="light"] .mib-add-picker {
+  background: var(--vf-surface) !important;
+  border-color: var(--vf-border-default) !important;
+  box-shadow: var(--vf-shadow-high) !important;
+}
+html[data-theme="light"] .mib-add-picker input {
+  background: var(--vf-canvas) !important;
+  color: var(--vf-text-primary) !important;
+  border-color: var(--vf-border-default) !important;
+}
+html[data-theme="light"] .mib-add-picker button {
+  color: var(--vf-text-primary) !important;
+}
+html[data-theme="light"] .mib-add-picker button:hover {
+  background: var(--vf-hover) !important;
+}
+
+/* Field cards inside sections */
+html[data-theme="light"] .mib-field-card {
+  background: var(--vf-canvas) !important;
+  border-color: var(--vf-border-subtle) !important;
+  color: var(--vf-text-primary) !important;
+}
+html[data-theme="light"] .mib-field-card:hover {
+  border-color: var(--vf-accent) !important;
+  box-shadow: 0 0 0 2px var(--vf-accent-subtle) !important;
+}
+
+/* Delete button in danger red — keep red even in light */
+html[data-theme="light"] button[title*="Delete"],
+html[data-theme="light"] button[title*="delete"],
+html[data-theme="light"] button[title*="Remove"] {
+  color: var(--vf-danger) !important;
+}
+
+/* Publish/save button area */
+html[data-theme="light"] .mib-publish-bar {
+  background: var(--vf-surface) !important;
+  border-top-color: var(--vf-border-default) !important;
+  box-shadow: var(--vf-shadow-low);
 }
 
 /* ── Light mode — generic inline rgba(0,0,0,...) overrides via element type  */

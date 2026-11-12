@@ -330,6 +330,7 @@ function StepHeader({ step, onStep }: { step: number; onStep: (n: number) => voi
   ];
   return (
     <div
+      className="mib-step-header"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -1767,7 +1768,7 @@ function MibLibraryScreen({
                           style={{
                             position: 'absolute', bottom: '100%', left: 12, zIndex: 50,
                             background: 'var(--vf-surface)', border: '1px solid var(--vf-border-subtle)',
-                            borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+                            borderRadius: 8, boxShadow: 'var(--vf-shadow-high)',
                             width: 420, maxHeight: 320, display: 'flex', flexDirection: 'column',
                           }}
                         >
@@ -1935,6 +1936,8 @@ function ScreenBuilderScreen({
   const [draggingField, setDraggingField] = useState<{ fieldId: string; sectionId: string } | null>(null);
   /** Drop target for canvas-field reorder drag. */
   const [dropTargetField, setDropTargetField] = useState<{ fieldId: string; sectionId: string; position: 'before' | 'after' } | null>(null);
+  /** Collapsed section names in the left-panel MIB object tree. */
+  const [collapsedMibSections, setCollapsedMibSections] = useState<Set<string>>(new Set());
 
   const draft = descriptor ?? emptyDraft(parsedMib?.moduleName, deviceProfile ?? parsedMib?.vendor);
 
@@ -2318,6 +2321,7 @@ function ScreenBuilderScreen({
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
       <aside
+        className="mib-builder-left-panel"
         style={{
           width: 220,
           borderRight: '1px solid var(--vf-border-subtle)',
@@ -2332,6 +2336,7 @@ function ScreenBuilderScreen({
             <button
               key={item.type}
               type="button"
+              className="mib-palette-btn"
               style={{ ...BTN_SECONDARY, textAlign: 'left' }}
               onClick={() => addLayoutElement(item.type)}
             >
@@ -2344,37 +2349,93 @@ function ScreenBuilderScreen({
         <p style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginTop: 0, marginBottom: 8, lineHeight: 1.4 }}>
           Drag onto a section — or click to bind to selected field.
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {objects.map((obj) => {
-            const isBound = bound.has(obj.name);
-            return (
-              <div
-                key={obj.name}
-                role="button"
-                tabIndex={0}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'mib-object', name: obj.name }));
-                  e.dataTransfer.effectAllowed = 'copy';
-                }}
-                onClick={() => bindObjectToSelected(obj)}
-                onKeyDown={(e) => e.key === 'Enter' && bindObjectToSelected(obj)}
-                style={{
-                  ...BTN_SECONDARY,
-                  textAlign: 'left',
-                  borderColor: isBound ? 'var(--vf-success)' : undefined,
-                  cursor: 'grab',
-                  userSelect: 'none',
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--vf-text-primary)' }}>{obj.name}</div>
-                <div style={{ fontSize: 10, color: isBound ? 'var(--vf-success)' : 'var(--vf-text-muted)', marginTop: 2 }}>
-                  {isBound ? '✓ BOUND' : `${obj.nmsDataType} · ${suggestWidget(obj)}`}
-                </div>
+        {/* ── Collapsible tree grouped by MIB section ── */}
+        {(() => {
+          // Group objects by their section name
+          const groups = new Map<string, MibObjectSummary[]>();
+          for (const obj of objects) {
+            const sec = (obj.section || 'general').trim();
+            if (!groups.has(sec)) groups.set(sec, []);
+            groups.get(sec)!.push(obj);
+          }
+          const boundCount = objects.filter((o) => bound.has(o.name)).length;
+          return (
+            <>
+              {/* Summary line */}
+              <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginBottom: 8 }}>
+                <span style={{ color: 'var(--vf-success)', fontWeight: 700 }}>{boundCount}</span> / {objects.length} bound
               </div>
-            );
-          })}
-        </div>
+              {[...groups.entries()].map(([secName, objs]) => {
+                const isCollapsed = collapsedMibSections.has(secName);
+                const secBound = objs.filter((o) => bound.has(o.name)).length;
+                return (
+                  <div key={secName} style={{ marginBottom: 2 }}>
+                    {/* Section header — collapsible */}
+                    <button
+                      type="button"
+                      className="mib-tree-section-header"
+                      onClick={() => setCollapsedMibSections((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(secName)) next.delete(secName); else next.add(secName);
+                        return next;
+                      })}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        width: '100%', textAlign: 'left',
+                        padding: '4px 6px',
+                        border: 'none', background: 'transparent',
+                        cursor: 'pointer', borderRadius: 4,
+                        fontSize: 10, fontWeight: 700,
+                        color: 'var(--vf-text-secondary)',
+                        textTransform: 'uppercase', letterSpacing: '0.05em',
+                      }}
+                    >
+                      <span style={{ fontSize: 8, opacity: 0.7, minWidth: 8 }}>{isCollapsed ? '▶' : '▼'}</span>
+                      <span style={{ flex: 1 }}>{secName}</span>
+                      <span style={{ fontSize: 9, fontWeight: 400, color: secBound === objs.length ? 'var(--vf-success)' : 'var(--vf-text-muted)' }}>
+                        {secBound}/{objs.length}
+                      </span>
+                    </button>
+                    {/* Objects in this section */}
+                    {!isCollapsed && objs.map((obj) => {
+                      const isBound = bound.has(obj.name);
+                      return (
+                        <button
+                          key={obj.name}
+                          type="button"
+                          className={`mib-tree-item${isBound ? ' mib-tree-item--bound' : ''}`}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'mib-object', name: obj.name }));
+                            e.dataTransfer.effectAllowed = 'copy';
+                          }}
+                          onClick={() => bindObjectToSelected(obj)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 5,
+                            width: '100%', textAlign: 'left',
+                            padding: '3px 6px 3px 18px',
+                            border: 'none',
+                            background: isBound ? 'var(--vf-success-subtle)' : 'transparent',
+                            cursor: 'grab',
+                            fontSize: 11,
+                            fontFamily: 'var(--vf-font-mono)',
+                            color: 'var(--vf-text-primary)',
+                            borderRadius: 4,
+                            userSelect: 'none',
+                          }}
+                        >
+                          <span style={{ opacity: 0.35, fontSize: 9, flexShrink: 0 }}>·</span>
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{obj.name}</span>
+                          {isBound && <span style={{ color: 'var(--vf-success)', fontSize: 9, flexShrink: 0 }}>✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </>
+          );
+        })()}
       </aside>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -2463,6 +2524,7 @@ function ScreenBuilderScreen({
         </div>
 
         <div
+          className="mib-builder-canvas-bg"
           style={{
             flex: 1,
             overflow: 'auto',
@@ -2471,6 +2533,7 @@ function ScreenBuilderScreen({
           }}
         >
           <div
+            className="mib-builder-canvas-card"
             style={{
               maxWidth: 900,
               margin: '0 auto',
@@ -2479,7 +2542,7 @@ function ScreenBuilderScreen({
               borderRadius: 10,
               border: '1px solid var(--vf-border-subtle)',
               padding: 24,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+              boxShadow: 'var(--vf-shadow-low)',
             }}
             /* Canvas-level drop: creates a new section */
             onDragOver={(e) => {
@@ -2540,17 +2603,18 @@ function ScreenBuilderScreen({
               return (
                 <div
                   key={sec.sectionId}
+                  className="mib-section-card"
                   style={{
                     marginBottom: 24,
                     borderRadius: 8,
                     border: `2px solid ${
                       isDropTarget ? 'var(--vf-accent)'
                       : activeSectionId === sec.sectionId ? 'var(--vf-accent)'
-                      : 'var(--vf-border-subtle)'
+                      : 'var(--vf-border-default)'
                     }`,
                     background: isDropTarget ? 'var(--vf-accent-subtle)'
                       : activeSectionId === sec.sectionId ? 'var(--vf-accent-subtle)'
-                      : 'var(--vf-elevated)',
+                      : 'var(--vf-surface)',
                     transition: 'border-color 0.1s, background 0.1s',
                     overflow: 'hidden',
                   }}
@@ -2860,6 +2924,7 @@ function ScreenBuilderScreen({
       </div>
 
       <aside
+        className="mib-right-panel"
         style={{
           width: 280,
           borderLeft: '1px solid var(--vf-border-subtle)',

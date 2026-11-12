@@ -15,25 +15,49 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Sidebar — deep navy with subtle gradient ───────────────────────────────── */
-.vf-root aside {
+/* ── Sidebar — deep navy with subtle gradient (dark mode only) ──────────────── */
+html[data-theme="dark"] .vf-root aside,
+html:not([data-theme="light"]) .vf-root aside {
   background: linear-gradient(180deg, #060e1b 0%, #080f1e 60%, #06101c 100%) !important;
   border-right: 1px solid rgba(77, 158, 255, 0.08) !important;
   box-shadow: 2px 0 24px rgba(0, 0, 0, 0.5);
 }
 
-/* Active nav item — glowing left accent */
-.vf-root aside a[aria-current="page"] {
+/* Light mode sidebar — clean white */
+html[data-theme="light"] .vf-root aside {
+  background: #ffffff !important;
+  border-right: 1px solid #e2e8f0 !important;
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+
+/* Active nav item — glowing left accent (dark mode only) */
+html[data-theme="dark"] .vf-root aside a[aria-current="page"],
+html:not([data-theme="light"]) .vf-root aside a[aria-current="page"] {
   background: linear-gradient(90deg, rgba(77,158,255,0.15) 0%, rgba(77,158,255,0.04) 100%) !important;
   border-left-color: var(--vf-accent) !important;
   color: #ffffff !important;
 }
 
-/* ── Header ─────────────────────────────────────────────────────────────────── */
-.vf-root header {
+/* Active nav item — light mode tint */
+html[data-theme="light"] .vf-root aside a[aria-current="page"] {
+  background: rgba(25,103,210,0.08) !important;
+  border-left-color: #1967d2 !important;
+  color: #1967d2 !important;
+}
+
+/* ── Header (dark mode only) ─────────────────────────────────────────────────── */
+html[data-theme="dark"] .vf-root header,
+html:not([data-theme="light"]) .vf-root header {
   background: linear-gradient(90deg, #0d1b2a 0%, #0f2035 100%) !important;
   border-bottom: 1px solid rgba(77, 158, 255, 0.12) !important;
   box-shadow: 0 1px 0 rgba(77,158,255,0.06), 0 4px 24px rgba(0,0,0,0.4) !important;
+}
+
+/* ── Header (light mode) ─────────────────────────────────────────────────────── */
+html[data-theme="light"] .vf-root header {
+  background: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 0 #e2e8f0 !important;
 }
 
 /* ── Page layout ────────────────────────────────────────────────────────────── */
@@ -305,7 +329,7 @@ input[type="search"],
 select,
 textarea {
   background: var(--vf-input-bg) !important;
-  border: 1px solid rgba(77,158,255,0.12) !important;
+  border: 1px solid var(--vf-border-subtle) !important;
   border-radius: 8px !important;
   color: var(--vf-text-primary) !important;
   font-family: var(--vf-font-sans) !important;
@@ -317,7 +341,7 @@ textarea {
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: rgba(77,158,255,0.5) !important;
+  border-color: var(--vf-accent) !important;
   box-shadow: 0 0 0 3px rgba(77,158,255,0.12) !important;
   outline: none !important;
 }
