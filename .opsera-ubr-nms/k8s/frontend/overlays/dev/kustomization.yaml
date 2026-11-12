@@ -10,7 +10,7 @@ resources:
 images:
 - name: PLACEHOLDER_FRONTEND_ECR_URI
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/ubr-nms-frontend
-  newTag: dev-6a051778-20261111151233
+  newTag: dev-552db7b3-20261112004930
 
 labels:
 - pairs:
