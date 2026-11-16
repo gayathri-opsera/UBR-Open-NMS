@@ -20,7 +20,7 @@
  */
 
 const mongoose = require('mongoose');
-const { walkSubtree, getOids, isUnreachable } = require('./snmpWalk');
+const { walkSubtree, getOids, probeDevice, isUnreachable } = require('./snmpWalk');
 const { rebaseEntries } = require('./oidAliases');
 const { applyFirmwareQuirks } = require('./firmwareQuirks');
 const webSource = require('./webSource');
@@ -603,6 +603,12 @@ async function doRefresh(device) {
     // Poll failed with UNREACHABLE → flip device to OFFLINE in inventory/dashboard
     if (pollStatus === 'UNREACHABLE') {
       setDeviceOperationalStatus(String(device._id), 'OFFLINE').catch(() => {});
+    } else {
+      // Non-timeout failure (partial walk, parse error…): decide by a plain GET so the
+      // inventory/dashboard status never goes stale.
+      probeDevice({ host, port, community: device.snmpCommunity })
+        .then((r) => setDeviceOperationalStatus(String(device._id), r.online ? 'ONLINE' : 'OFFLINE'))
+        .catch(() => {});
     }
     logger.warn({ msg: 'live parameter poll failed', deviceId: base._id, host, port, pollStatus, err: err.message });
     return { pollStatus, error: err.message };
@@ -742,14 +748,20 @@ const probeFailures = new Map(); // deviceId → consecutive failed liveness pro
  * to `newStatus` only if it currently differs, to avoid unnecessary write amplification.
  */
 async function setDeviceOperationalStatus(id, newStatus) {
+  // Lifecycle states that must never be overwritten by a reachability result.
+  const LOCKED = new Set(['DEPROVISIONED', 'PROVISIONING', 'RE-PROVISIONING', 'DISCOVERED']);
   try {
-    const db = nmsDb();
-    if (!db) return;
-    const devCol = db.collection('devices');
-    const current = await devCol.findOne({ _id: id }, { projection: { status: 1 } });
-    if (!current || current.status === newStatus) return;
-    await devCol.updateOne({ _id: id }, { $set: { status: newStatus, updatedAt: new Date() } });
-    logger.info({ msg: 'device operational status updated', deviceId: id, from: current.status, to: newStatus });
+    const c = client();
+    if (!c) return;
+    // IDU devices live in ubrnms_inventory, everything else in ubrnms — keep both in step.
+    for (const dbName of ['ubrnms', 'ubrnms_inventory']) {
+      const devCol = c.db(dbName).collection('devices');
+      const current = await devCol.findOne({ _id: id }, { projection: { status: 1, isDeprovisioned: 1 } });
+      if (!current || current.isDeprovisioned || current.status === newStatus) continue;
+      if (LOCKED.has(String(current.status || '').toUpperCase())) continue;
+      await devCol.updateOne({ _id: id }, { $set: { status: newStatus, updatedAt: new Date() } });
+      logger.info({ msg: 'device operational status updated', deviceId: id, db: dbName, from: current.status, to: newStatus });
+    }
   } catch (e) {
     logger.warn({ msg: 'failed to update device operational status', deviceId: id, error: e.message });
   }
