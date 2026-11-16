@@ -21,6 +21,7 @@
 
 const mongoose = require('mongoose');
 const { walkSubtree, getOids, probeDevice, isUnreachable } = require('./snmpWalk');
+const { fetchDeviceGps } = require('./deviceAttributes');
 const { rebaseEntries } = require('./oidAliases');
 const { applyFirmwareQuirks } = require('./firmwareQuirks');
 const webSource = require('./webSource');
@@ -454,6 +455,42 @@ async function applyGps(device, definition, mapped) {
   return true;
 }
 
+/**
+ * Coordinates the device publishes always win. Each poll reads the device's own GPS (two GETs); when it
+ * reports a usable position it replaces whatever is stored — typed in by an admin, picked on the map, or an
+ * earlier device reading. A device that reports nothing ("-NA-", no fix) leaves the stored position alone,
+ * so a manual / map location stays until the device has a real one.
+ * @returns {Promise<boolean>} true when the stored position changed
+ */
+async function applyDeviceGps(device) {
+  try {
+    const { host, port } = splitHostPort(device);
+    const gps = await fetchDeviceGps({ host, port, community: device.snmpCommunity, sysObjectID: device.sysObjectID, sysLocation: device.sysLocation });
+    if (!gps) return false;
+    const c = client();
+    if (!c) return false;
+    let changed = false;
+    for (const dbName of ['ubrnms_inventory', 'ubrnms']) {
+      const col = c.db(dbName).collection('devices');
+      const cur = await col.findOne({ _id: device._id }, { projection: { latitude: 1, longitude: 1, locationSource: 1 } });
+      if (!cur) continue;
+      const same = Number.isFinite(cur.latitude) && Number.isFinite(cur.longitude) &&
+        Math.abs(cur.latitude - gps.latitude) < 1e-7 && Math.abs(cur.longitude - gps.longitude) < 1e-7;
+      if (same && cur.locationSource === gps.locationSource) continue;
+      await col.updateOne({ _id: device._id }, { $set: { latitude: gps.latitude, longitude: gps.longitude, locationSource: gps.locationSource, updatedAt: new Date() } });
+      if (!same) {
+        changed = true;
+        logger.info({ msg: 'device GPS published by device — stored position replaced', deviceId: String(device._id), db: dbName, from: [cur.latitude, cur.longitude], to: [gps.latitude, gps.longitude] });
+      }
+    }
+    if (changed) { try { require('../routes/topology.stub').bustTopologyCache(); } catch { /* optional */ } }
+    return changed;
+  } catch (e) {
+    logger.warn({ msg: 'device GPS read failed', deviceId: String(device._id), error: e.message });
+    return false;
+  }
+}
+
 /** A successful poll proves the device is reachable — keep "Last seen" current. */
 async function markSeen(device, when) {
   const c = client();
@@ -550,6 +587,7 @@ async function doRefresh(device) {
       try {
         await getOids({ host, port, community: device.snmpCommunity, oids: ['1.3.6.1.2.1.1.1.0'] });
         setDeviceOperationalStatus(String(device._id), 'ONLINE').catch(() => {});
+        await applyDeviceGps(device);
         await col.updateOne({ _id: base._id }, { $set: { ...base, pollStatus: 'NOT_POLLED', pollError: 'no active product definition' } }, { upsert: true });
       } catch (err) {
         if (isUnreachable(err)) {
@@ -592,6 +630,7 @@ async function doRefresh(device) {
     }, { upsert: true });
     await markSeen(device, now);
     await applyGps(device, definition, mapped).catch((e) => logger.warn({ msg: 'live GPS update failed', err: e.message }));
+    await applyDeviceGps(device);
     // Successful poll → ensure device is ONLINE in inventory/dashboard
     setDeviceOperationalStatus(String(device._id), 'ONLINE').catch(() => {});
     logger.info({ msg: 'live parameters refreshed', deviceId: base._id, host, varbinds: varbinds.length, mapped: values.length });
@@ -919,6 +958,6 @@ module.exports = {
   // pure
   normOid, walkRoots, mapVarbinds, scalarGetTargets, mergeScalarGets, isLiveEntry, liveGetTargets, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
   // io
-  loadDefinition, loadEffectiveDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, updateDeviceFields, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, syncWithProbe, pollMonitorGroups, startScheduler, pollAll,
+  loadDefinition, loadEffectiveDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, updateDeviceFields, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, syncWithProbe, applyDeviceGps, pollMonitorGroups, startScheduler, pollAll,
   POLL_INTERVAL_SECONDS,
 };

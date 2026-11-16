@@ -32,6 +32,14 @@ const ATTRIBUTE_PROFILES = [
     enterprisePrefix: '.1.3.6.1.4.1.52619',
     roleOID: '.1.3.6.1.4.1.52619.1.1.1.1.1.2',
     roleValues: { 1: 'BTS', 2: 'CPE' },
+    // sysInfoGeolat / sysInfoGeolong (SENAO-MIB): decimal degrees as text, e.g. "17.431604 N". A unit without a
+    // GPS fix answers the placeholder "-NA-", which parseCoordinate rejects — so "no coordinates", never a guess.
+    latitudeOID:  '.1.3.6.1.4.1.52619.1.2.2.5',
+    longitudeOID: '.1.3.6.1.4.1.52619.1.2.2.6',
+    coordScale: 0,
+    // Second place the MIB publishes a position: management.gps gpsLatitude / gpsLongitude ("17.431604 N"), read-write.
+    // Tried only when sysInfo has none.
+    altCoordinateOIDs: [{ lat: '.1.3.6.1.4.1.52619.1.2.7.4', lng: '.1.3.6.1.4.1.52619.1.2.7.5' }],
     // Used only when the role column answers with a placeholder: the link table never does. wirelessStatsRemotePartners
     // (rows 2, 3 = the two backhaul radios) counts associated stations; assocIP lists the peer addresses.
     topology: {
@@ -226,16 +234,13 @@ async function fetchDeviceAttributes({ host, port = 161, community, sysObjectID,
       const found = await readRole(reader, rebaseOid(profile.roleOID, sysObjectID), profile.roleValues).catch(() => null);
       if (found) { attrs.role = found.role; attrs.roleSource = found.source; }
     }
-    if (profile.latitudeOID && profile.longitudeOID) {
-      const lat = await readFirstInstance(reader, rebaseOid(profile.latitudeOID, sysObjectID)).catch(() => null);
-      const lng = await readFirstInstance(reader, rebaseOid(profile.longitudeOID, sysObjectID)).catch(() => null);
-      const latV = lat && parseCoordinate(lat.value, profile.coordScale, 90);
-      const lngV = lng && parseCoordinate(lng.value, profile.coordScale, 180);
-      if (latV != null && lngV != null && !(latV === 0 && lngV === 0)) {
-        attrs.latitude = latV;
-        attrs.longitude = lngV;
-        attrs.locationSource = `snmp ${profile.latitudeOID},${profile.longitudeOID}`;
-      }
+  }
+
+  // The position the device publishes (GET only — see fetchDeviceGps).
+  if (profile) {
+    const gps = await fetchDeviceGps({ host, port, community, sysObjectID, sysLocation: '', get: reader.get }).catch(() => null);
+    if (gps && gps.locationSource !== 'sysLocation') {
+      attrs.latitude = gps.latitude; attrs.longitude = gps.longitude; attrs.locationSource = gps.locationSource;
     }
   }
 
@@ -258,7 +263,39 @@ async function fetchDeviceAttributes({ host, port = 161, community, sysObjectID,
   return attrs;
 }
 
+/**
+ * The position the device itself publishes — GET only, two scalars (+ sysLocation when the GPS objects are empty).
+ * Used by the poller, so it never walks. Returns null when the device reports no usable coordinates.
+ * `get` ({ oid → value }) can be injected for tests.
+ *
+ * @returns {Promise<{ latitude: number, longitude: number, locationSource: string } | null>}
+ */
+async function fetchDeviceGps({ host, port = 161, community, sysObjectID, sysLocation, get }) {
+  const profile = matchAttributeProfile(sysObjectID);
+  const read = get || snmpGetOids({ host, port, community });
+  if (profile && profile.latitudeOID && profile.longitudeOID) {
+    const pairs = [{ lat: profile.latitudeOID, lng: profile.longitudeOID }, ...(profile.altCoordinateOIDs || [])]
+      .map((p) => ({ lat: withDot(`${rebaseOid(p.lat, sysObjectID)}.0`), lng: withDot(`${rebaseOid(p.lng, sysObjectID)}.0`) }));
+    const got = await read(pairs.flatMap((p) => [p.lat, p.lng])).catch(() => ({}));   // one GET for every candidate
+    for (const p of pairs) {
+      const lat = parseCoordinate(got[p.lat], profile.coordScale, 90);
+      const lng = parseCoordinate(got[p.lng], profile.coordScale, 180);
+      if (lat != null && lng != null && !(lat === 0 && lng === 0)) {
+        return { latitude: lat, longitude: lng, locationSource: `snmp ${p.lat},${p.lng}` };
+      }
+    }
+  }
+  // Some units carry the position as text in sysLocation instead.
+  let loc = sysLocation;
+  if (loc == null) {
+    const SYS_LOCATION = '.1.3.6.1.2.1.1.6.0';
+    loc = (await read([SYS_LOCATION]).catch(() => ({})))[SYS_LOCATION];
+  }
+  const parsed = parseLocationCoordinates(loc);
+  return parsed ? { ...parsed, locationSource: 'sysLocation' } : null;
+}
+
 module.exports = {
-  fetchDeviceAttributes, inferRoleFromLink, matchAttributeProfile, normaliseRole,
+  fetchDeviceGps, fetchDeviceAttributes, inferRoleFromLink, matchAttributeProfile, normaliseRole,
   parseCoordinate, parseLocationCoordinates, readFirstInstance, readRole, ATTRIBUTE_PROFILES,
 };

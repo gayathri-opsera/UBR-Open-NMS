@@ -834,7 +834,7 @@ function SnmpDiscoveryTab({ initialScope }: SnmpDiscoveryTabProps) {
           deviceType:      req.deviceType as DeviceType,
           status:          'ONLINE',
           // Required Device fields — populated with discovered values where available.
-          macAddress:      req.macAddress ?? '',
+          macAddress:      '',
           manufacturer:    req.sysName   ?? '',
           model:           req.sysDescr  ?? '',
           firmwareVersion: '',
@@ -1531,11 +1531,12 @@ function QuickDiscoveryBar() {
     if (!activeRunId) return;
     setProvisioningIP(r.ip);
     try {
-      const serial = `SNMP-${(r.sysName || r.ip).replace(/[^A-Za-z0-9]/g, '-').toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
+      // The device's own serial number when it reports one.
+      const serial = (r.reportedSerialNumber || '').trim()
+        || `SNMP-${(r.sysName || r.ip).replace(/[^A-Za-z0-9]/g, '-').toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
       const req: ProvisionHostRequest = {
         ip:           r.ip,
         serialNumber: serial,
-        macAddress:   '',
         // Device-reported role first; generic-type mapping only when the device doesn't report one.
         deviceType:   r.deviceRole ?? mapGenericTypeToDeviceType(r.genericDeviceType),
         deviceRoleSource: r.deviceRoleSource,
@@ -1984,9 +1985,9 @@ export default function V2DiscoveryPage() {
   const [tab, setTab] = useState<DiscoveryTab>('snmp_discovery');
 
   // Pre-populate scope for the SNMP Discovery trigger form.
-  // Default: 10.10.10.25 (Python snmpsim container static Docker IP).
-  // Updated to a run's scope when the user clicks "Re-run" in the Run History tab (WO-015).
-  const [rerunScope, setRerunScope] = useState<string | undefined>('10.10.10.25');
+  // No default scope — the field starts empty.
+  // Set to a run's scope when the user clicks "Re-run" in the Run History tab (WO-015).
+  const [rerunScope, setRerunScope] = useState<string | undefined>(undefined);
 
   // KPI counts
   const [stats, setStats] = useState({ provisioning: 0, online: 0, offline: 0, authFails: 0 });

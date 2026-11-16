@@ -350,6 +350,13 @@ router.put('/:id', async (req, res) => {
     delete updates._id;
     delete updates.id;
 
+    // A position typed in or picked on the map is recorded as such. The device's own GPS reading
+    // (live poll) replaces it as soon as the device publishes one.
+    if (prior && !req.body.locationSource) {
+      const moved = (k) => updates[k] != null && Number(updates[k]) !== Number(prior[k]);
+      if (moved('latitude') || moved('longitude')) updates.locationSource = 'manual';
+    }
+
     // When the user explicitly sets deviceType, keep genericDeviceType in sync so
     // dashboards (which read genericDeviceType first) reflect the change immediately.
     if (updates.deviceType) {

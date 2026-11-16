@@ -202,6 +202,8 @@ export interface DiscoveryResult {
    * Empty string / undefined when the device doesn't expose IF-MIB or the walk was skipped.
    */
   macAddress?: string;
+  /** Serial number the device itself reports (vendor serial OID). Absent when not reported. */
+  reportedSerialNumber?: string;
 
   /**
    * GPS latitude sourced from the Product Definition's <location> block (uploaded config).
@@ -676,7 +678,7 @@ export interface ProvisionHostRequest {
   /** Device type chosen by the admin — any NmsDeviceType or custom string from a Product Definition. */
   deviceType: NmsDeviceType;
   serialNumber: string;
-  macAddress: string;
+  macAddress?: string;
   networkId?: string;
   vendor?: string;
   model?: string;
@@ -739,8 +741,6 @@ export function buildProvisionRequest(
   overrides: {
     deviceType: NmsDeviceType;
     serialNumber: string;
-    macAddress: string;
-    networkId?: string;
     latitude?: number;
     longitude?: number;
   },
@@ -749,8 +749,6 @@ export function buildProvisionRequest(
     ip:           result.ip,
     deviceType:   overrides.deviceType,
     serialNumber: overrides.serialNumber || deriveSerial(result.ip, result.sysName),
-    macAddress:   overrides.macAddress || '',
-    networkId:    overrides.networkId,
     vendor:       result.vendor,
     model:        result.model,
     sysName:      result.sysName,
@@ -761,8 +759,13 @@ export function buildProvisionRequest(
     longitude:    overrides.longitude,
     // Keep provenance only when the submitted value is still the device-reported one.
     deviceRoleSource: overrides.deviceType === result.deviceRole ? result.deviceRoleSource : undefined,
-    locationSource:   overrides.latitude === result.latitude && overrides.longitude === result.longitude
-      ? result.locationSource : undefined,
+    // A position the admin typed or picked is recorded as 'manual'; the device's own GPS replaces it
+    // as soon as the device publishes one.
+    locationSource:   overrides.latitude == null || overrides.longitude == null
+      ? undefined
+      : overrides.latitude === result.latitude && overrides.longitude === result.longitude
+        ? result.locationSource
+        : 'manual',
   };
 }
 

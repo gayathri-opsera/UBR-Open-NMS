@@ -7,19 +7,20 @@
  *
  * Auto-population logic:
  *   • deviceType  — device-reported role (vendor role OID); admin picks only when not reported
- *   • serialNumber — derived from sysName or IP (overridable)
- *   • networkId   — derived from IP /24 subnet (e.g. 192.168.65.x → net-192-168-65)
- *   • lat/lng     — device-reported GPS (vendor GPS OIDs or a coordinate pair in sysLocation)
+ *   • serialNumber — the serial number the device itself reports (vendor serial OID). Only when
+ *                    the device reports none is a hostname/IP-derived value offered, and editable.
+ *   • lat/lng     — the GPS position the device publishes (vendor GPS OIDs or a coordinate pair
+ *                    in sysLocation).
  *
- * Fields that SNMP MIB-II cannot discover and must be entered by the admin:
- *   • macAddress  — requires ARP table walk or physical label
- *   • precise GPS — sysLocation is free-text; auto-parse succeeds only when formatted
+ * When the device publishes no GPS position the admin sets it here — on the map or by typing
+ * coordinates. A position the device publishes later (live poll) always replaces that one.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Input } from '../common/Input';
+import { GpsMapPicker } from '../common/GpsMapPicker';
 import type { DiscoveryResult, ProvisionHostRequest, NmsDeviceType } from '../../../api/discovery.api';
 import { mapGenericTypeToDeviceType, buildProvisionRequest } from '../../../api/discovery.api';
 import { listModels, listRolesForModel } from '../../../api/deviceTypeCombinations.api';
@@ -95,35 +96,6 @@ function deriveSerialFromResult(r: DiscoveryResult): string {
     if (safe.length >= 4) return `SN-${safe}`;
   }
   return `SNMP-${r.ip.replace(/\./g, '-')}`;
-}
-
-/**
- * Derive a Network ID from the /24 subnet of the discovered IP.
- * e.g. 192.168.65.254 → "net-192-168-65"
- */
-function deriveNetworkId(ip: string): string {
-  const parts = ip.split('.');
-  if (parts.length === 4) return `net-${parts[0]}-${parts[1]}-${parts[2]}`;
-  return '';
-}
-
-/**
- * Attempt to parse a GPS coordinate pair from a free-text sysLocation string.
- * Handles formats like "28.6139,77.2090" or "lat:28.6 lng:77.2" or "(28.61, 77.20)".
- * Returns null if no valid India-range coordinate is detected.
- */
-function parseGpsFromLocation(sysLocation?: string): { lat: number; lng: number } | null {
-  if (!sysLocation) return null;
-  // Match two decimal numbers separated by comma, space, or lat:/lng: labels
-  const m = sysLocation.match(/(-?\d{1,3}\.?\d*)[,\s/]+(-?\d{1,3}\.?\d*)/);
-  if (!m) return null;
-  const lat = parseFloat(m[1]);
-  const lng = parseFloat(m[2]);
-  // Validate rough India bounds (lenient — allow some international deployments)
-  if (!isNaN(lat) && !isNaN(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-    return { lat, lng };
-  }
-  return null;
 }
 
 // ── Field component ───────────────────────────────────────────────────────────
@@ -314,12 +286,12 @@ export function ProvisionDeviceModal({
   // ── Form state ──────────────────────────────────────────────────────────────
   const [deviceType,   setDeviceType]   = useState<DeviceType>('UNKNOWN');
   const [serialNumber, setSerialNumber] = useState('');
-  const [macAddress,   setMacAddress]   = useState('');
-  const [networkId,    setNetworkId]    = useState('');
+  /** True when the serial was read from the device (then it is shown read-only). */
+  const [serialFromDevice, setSerialFromDevice] = useState(false);
   const [latStr,       setLatStr]       = useState('');
   const [lngStr,       setLngStr]       = useState('');
-  /** Where the pre-filled GPS came from ('' = admin must enter it): a device OID source,
-   *  'sysLocation', or 'productDefinition'. Drives the badge shown to the operator. */
+  /** Where the GPS in the form came from ('' = none yet): a device OID source, 'sysLocation',
+   *  or 'manual' once the admin typed or picked it. Drives the badge shown to the operator. */
   const [gpsSource, setGpsSource] = useState('');
 
   // ── DT-04: Model + Role two-step picker ─────────────────────────────────────
@@ -365,32 +337,21 @@ export function ProvisionDeviceModal({
       // all PD types (RADIO, GATEWAY, SWITCH, etc.) not just BTS/CPE/IDU.
       setDeviceType(result.deviceRole ?? mapGenericTypeToDeviceType(result.genericDeviceType));
 
-      setSerialNumber(deriveSerialFromResult(result));
+      // The serial number the device itself reports is its identity. Only a device that reports
+      // none gets a derived value, which the admin may replace with the label on the unit.
+      const reportedSerial = (result.reportedSerialNumber || '').trim();
+      setSerialNumber(reportedSerial || deriveSerialFromResult(result));
+      setSerialFromDevice(!!reportedSerial);
 
-      // Auto-fill MAC if the scanner walked IF-MIB ifPhysAddress; otherwise leave blank.
-      setMacAddress(result.macAddress || '');
-
-      // Auto-derive network ID from IP subnet (e.g. 192.168.65.x → net-192-168-65)
-      setNetworkId(deriveNetworkId(result.ip));
-
-      // ── GPS priority chain ──────────────────────────────────────────────────
-      // 1. Device-reported GPS (vendor GPS OIDs, read by the scanner)
-      // 2. Parse from SNMP sysLocation (device reports its own GPS as free-text)
-      // 3. Fall back to Product Definition location block (operator's planning doc)
-      // 4. Leave blank — operator enters manually
-      const sysLocGps = parseGpsFromLocation(result.sysLocation);
+      // ── GPS ─────────────────────────────────────────────────────────────────
+      // 1. Device-published GPS (vendor GPS OIDs, or a coordinate pair in sysLocation — both read
+      //    by the gateway during discovery and returned as latitude/longitude)
+      // 2. Otherwise blank — the admin picks the location on the map or enters coordinates.
+      //    (Whatever is entered here is replaced by the device's own GPS once it publishes one.)
       if (result.latitude != null && result.longitude != null) {
         setLatStr(String(result.latitude));
         setLngStr(String(result.longitude));
         setGpsSource(result.locationSource || 'device');
-      } else if (sysLocGps) {
-        setLatStr(String(sysLocGps.lat));
-        setLngStr(String(sysLocGps.lng));
-        setGpsSource('sysLocation');
-      } else if (result.defaultLatitude != null && result.defaultLongitude != null) {
-        setLatStr(String(result.defaultLatitude));
-        setLngStr(String(result.defaultLongitude));
-        setGpsSource('productDefinition');
       } else {
         setLatStr('');
         setLngStr('');
@@ -403,14 +364,12 @@ export function ProvisionDeviceModal({
 
   // ── Validation ──────────────────────────────────────────────────────────────
   const serialValid = serialNumber.trim().length >= 4;
-  const macValid    = macAddress.trim() === '' || /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(macAddress.trim());
   const latValid    = latStr === '' || (!isNaN(parseFloat(latStr)) && Math.abs(parseFloat(latStr)) <= 90);
   const lngValid    = lngStr === '' || (!isNaN(parseFloat(lngStr)) && Math.abs(parseFloat(lngStr)) <= 180);
-  const canSubmit   = serialValid && macValid && latValid && lngValid && !saving && !provisioned;
+  const canSubmit   = serialValid && latValid && lngValid && !saving && !provisioned;
 
   const errors: string[] = [];
   if (!serialValid) errors.push('Serial number must be at least 4 characters.');
-  if (!macValid)    errors.push('MAC address must be in XX:XX:XX:XX:XX:XX format.');
   if (!latValid)    errors.push('Latitude must be between -90 and 90.');
   if (!lngValid)    errors.push('Longitude must be between -180 and 180.');
 
@@ -419,8 +378,6 @@ export function ProvisionDeviceModal({
     const req = buildProvisionRequest(result!, {
       deviceType,
       serialNumber: serialNumber.trim(),
-      macAddress:   macAddress.trim(),
-      networkId:    networkId.trim() || undefined,
       latitude:     latStr ? parseFloat(latStr) : undefined,
       longitude:    lngStr ? parseFloat(lngStr) : undefined,
     });
@@ -665,40 +622,19 @@ export function ProvisionDeviceModal({
           </div>
         </div>
 
-        {/* ── Identity Fields ─────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <Field
-            label="Serial Number"
-            value={serialNumber}
-            onChange={setSerialNumber}
-            placeholder="e.g. SN-12345678"
-            mono
-            required
-            badge="auto-filled"
-            hint="Derived from SNMP hostname. Override with the physical label serial."
-          />
-          <Field
-            label="MAC Address"
-            value={macAddress}
-            onChange={setMacAddress}
-            placeholder="AA:BB:CC:DD:EE:FF"
-            mono
-            badge={result.macAddress ? 'auto-filled via IF-MIB' : undefined}
-            hint={result.macAddress
-              ? 'Retrieved via SNMP ifPhysAddress walk. Override if the label differs.'
-              : 'Not found in SNMP scalar walk (IF-MIB ifPhysAddress walk may be needed). Enter from the physical device label.'}
-          />
-        </div>
-
-        {/* ── Network Assignment ─────────────────────────────────────────── */}
+        {/* ── Serial number ───────────────────────────────────────────────── */}
         <Field
-          label="Network ID"
-          value={networkId}
-          onChange={setNetworkId}
-          placeholder="e.g. net-del-001"
+          label="Serial Number"
+          value={serialNumber}
+          onChange={setSerialNumber}
+          placeholder="e.g. SN-12345678"
           mono
-          badge={networkId ? 'auto-filled' : undefined}
-          hint={`Derived from IP subnet (${result.ip.split('.').slice(0, 3).join('.')}.0/24). Edit to assign to a different network segment.`}
+          required
+          readOnly={serialFromDevice}
+          badge={serialFromDevice ? 'reported by device' : undefined}
+          hint={serialFromDevice
+            ? 'Read from the device itself.'
+            : 'The device did not report a serial number. Enter the serial from the label on the unit.'}
         />
 
         {/* ── GPS Location ────────────────────────────────────────────────── */}
@@ -708,21 +644,21 @@ export function ProvisionDeviceModal({
             letterSpacing: '0.06em', color: 'var(--vf-text-muted)', marginBottom: 8,
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            📍 GPS Location (optional — shows device on topology map)
-            {gpsSource !== '' && gpsSource !== 'productDefinition' && (
+            📍 GPS Location
+            {gpsSource !== '' && gpsSource !== 'manual' && (
               <span style={{
                 fontSize: 9, fontWeight: 600, background: 'rgba(34,197,94,0.15)',
                 color: '#22c55e', borderRadius: 4, padding: '1px 5px',
               }}>
-                {gpsSource === 'sysLocation' ? 'parsed from sysLocation' : 'reported by device'}
+                {gpsSource === 'sysLocation' ? 'published by device (sysLocation)' : 'published by device'}
               </span>
             )}
-            {gpsSource === 'productDefinition' && (
+            {gpsSource === 'manual' && (
               <span style={{
                 fontSize: 9, fontWeight: 600, background: 'rgba(96,165,250,0.15)',
                 color: '#60a5fa', borderRadius: 4, padding: '1px 5px',
               }}>
-                📂 from Product Definition
+                set by you
               </span>
             )}
           </div>
@@ -730,38 +666,36 @@ export function ProvisionDeviceModal({
             <Field
               label="Latitude"
               value={latStr}
-              onChange={setLatStr}
+              onChange={(v) => { setLatStr(v); setGpsSource('manual'); }}
               placeholder="e.g. 28.6139"
               type="number"
-              hint="Decimal degrees. India: 6°N – 38°N."
+              hint="Decimal degrees."
             />
             <Field
               label="Longitude"
               value={lngStr}
-              onChange={setLngStr}
+              onChange={(v) => { setLngStr(v); setGpsSource('manual'); }}
               placeholder="e.g. 77.2090"
               type="number"
-              hint="Decimal degrees. India: 67°E – 98°E."
+              hint="Decimal degrees."
             />
           </div>
-          {!gpsAutoFilled && result.sysLocation && (
-            <div style={{
-              marginTop: 8, fontSize: 11, color: 'var(--vf-text-muted)',
-              padding: '7px 10px', borderRadius: 6,
-              background: 'rgba(245,158,11,0.06)',
-              border: '1px solid rgba(245,158,11,0.2)',
-            }}>
-              ⚠ SNMP sysLocation is free-text and could not be parsed as GPS:
-              <em> "{result.sysLocation}"</em>
-              <br />
-              Enter decimal coordinates above to place this device on the topology map.
-            </div>
-          )}
-          {!result.sysLocation && (
-            <div style={{ marginTop: 6, fontSize: 11, color: 'var(--vf-text-muted)' }}>
-              No sysLocation reported by device. Enter coordinates manually to show on map.
-            </div>
-          )}
+          <div style={{ marginTop: 10 }}>
+            <GpsMapPicker
+              lat={latStr !== '' && latValid ? parseFloat(latStr) : undefined}
+              lng={lngStr !== '' && lngValid ? parseFloat(lngStr) : undefined}
+              onPick={(la, lo) => { setLatStr(la.toFixed(6)); setLngStr(lo.toFixed(6)); setGpsSource('manual'); }}
+            />
+          </div>
+          <div style={{
+            marginTop: 8, fontSize: 11, color: 'var(--vf-text-muted)', padding: '7px 10px', borderRadius: 6,
+            background: gpsAutoFilled && gpsSource !== 'manual' ? 'rgba(34,197,94,0.06)' : 'rgba(245,158,11,0.06)',
+            border: `1px solid ${gpsAutoFilled && gpsSource !== 'manual' ? 'rgba(34,197,94,0.2)' : 'rgba(245,158,11,0.2)'}`,
+          }}>
+            {gpsAutoFilled && gpsSource !== 'manual'
+              ? 'The device publishes its own position, and it is used as is.'
+              : 'This device does not publish a GPS position. Pick the location on the map or enter the coordinates. As soon as the device publishes its own position, that replaces what you set here.'}
+          </div>
         </div>
 
         {/* ── Validation errors ────────────────────────────────────────────── */}

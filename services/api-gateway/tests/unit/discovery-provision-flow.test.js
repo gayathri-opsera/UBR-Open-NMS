@@ -156,6 +156,28 @@ describe('Discovery → Provision → Deprovision (stub layer)', () => {
     expect(doc.isDeprovisioned).toBeUndefined();
   });
 
+  test('3b. discovery reports the device\'s own serial number, and provisioning stores it as the serial', async () => {
+    const { runId, hosts } = await discover();
+    expect(hosts[0].reportedSerialNumber).toBe('2381XC71DRXD');
+    const res = await request(app).post(`/api/v1/discovery/runs/${runId}/provision`)
+      .send({ hosts: [PROVISION_HOST({ serialNumber: hosts[0].reportedSerialNumber })] });
+    expect(res.status).toBe(201);
+    expect(res.body.results[0]).toMatchObject({ status: 'provisioned', serialNumber: '2381XC71DRXD' });
+    expect(deviceStore.get('2381XC71DRXD')).toMatchObject({ serialNumber: '2381XC71DRXD', reportedSerialNumber: '2381XC71DRXD' });
+  });
+
+  test('3c. a position the admin set (map / typed) is stored as manual; one the device published keeps its source', async () => {
+    const { runId } = await discover();
+    await request(app).post(`/api/v1/discovery/runs/${runId}/provision`).send({ hosts: [
+      PROVISION_HOST({ serialNumber: 'SN-MANUAL-1', ip: '10.0.150.201', latitude: 17.441641, longitude: 78.357877, locationSource: 'manual' }),
+      PROVISION_HOST({ serialNumber: 'SN-DEVICE-1', ip: '10.0.150.202', latitude: 17.431604, longitude: 78.382536, locationSource: 'snmp .1.3.6.1.4.1.14125.123.1.2.2.5.0,.1.3.6.1.4.1.14125.123.1.2.2.6.0' }),
+      PROVISION_HOST({ serialNumber: 'SN-NOGPS-1', ip: '10.0.150.203' }),
+    ] });
+    expect(deviceStore.get('SN-MANUAL-1')).toMatchObject({ latitude: 17.441641, longitude: 78.357877, locationSource: 'manual' });
+    expect(deviceStore.get('SN-DEVICE-1').locationSource).toMatch(/^snmp /);
+    expect(deviceStore.get('SN-NOGPS-1')).toMatchObject({ latitude: null, longitude: null });
+  });
+
   test('4. re-discovering a managed device refreshes its facts but does not rewrite or duplicate it', async () => {
     const first = await discover();
     await request(app).post(`/api/v1/discovery/runs/${first.runId}/provision`).send({ hosts: [PROVISION_HOST({ deviceType: 'CPE' })] });
