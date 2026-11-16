@@ -99,9 +99,9 @@ const BTN_PRIMARY: React.CSSProperties = {
 };
 
 const BTN_SECONDARY: React.CSSProperties = {
-  background: 'var(--vf-elevated)',
-  color: 'var(--vf-text-secondary)',
-  border: '1px solid var(--vf-border-subtle)',
+  background: 'var(--vf-input-bg, var(--vf-elevated))',
+  color: 'var(--vf-text-primary)',
+  border: '1px solid var(--vf-border-default)',
   padding: '8px 14px',
   borderRadius: 6,
   cursor: 'pointer',
@@ -2324,7 +2324,7 @@ function ScreenBuilderScreen({
         className="mib-builder-left-panel"
         style={{
           width: 220,
-          borderRight: '1px solid var(--vf-border-subtle)',
+          borderRight: '1px solid var(--vf-border-default)',
           padding: 12,
           overflowY: 'auto',
           background: 'var(--vf-surface)',
@@ -2927,15 +2927,15 @@ function ScreenBuilderScreen({
         className="mib-right-panel"
         style={{
           width: 280,
-          borderLeft: '1px solid var(--vf-border-subtle)',
+          borderLeft: '1px solid var(--vf-border-default)',
           padding: 14,
           overflowY: 'auto',
           background: 'var(--vf-surface)',
         }}
       >
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Properties</div>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: 'var(--vf-text-primary)' }}>Properties</div>
         {!selectedField ? (
-          <p style={{ fontSize: 12, color: 'var(--vf-text-muted)' }}>Select a canvas element to edit properties.</p>
+          <p style={{ fontSize: 12, color: 'var(--vf-text-secondary)' }}>Select a canvas element to edit properties.</p>
         ) : (
           <>
             {/* ── Field-level actions bar ── */}
