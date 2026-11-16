@@ -369,7 +369,7 @@ services:
     networks:
       nms-net: {}
       snmp-test-net:
-        ipv4_address: 10.10.10.28
+        ipv4_address: 10.10.10.30
     healthcheck:
       test: ["CMD", "python", "-c",
              "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.sendto(b'\\x30\\x26\\x02\\x01\\x01\\x04\\x06public\\xa0\\x19\\x02\\x04\\x00\\x00\\x00\\x04\\x02\\x01\\x00\\x02\\x01\\x00\\x30\\x0b\\x30\\x09\\x06\\x05\\x2b\\x06\\x01\\x02\\x01\\x05\\x00', ('127.0.0.1',1166)); s.recv(256); exit(0)"]
@@ -464,7 +464,7 @@ services:
     networks:
       nms-net: {}
       snmp-test-net:
-        ipv4_address: 10.10.10.29
+        ipv4_address: 10.10.10.31
     healthcheck:
       test: ["CMD", "python", "-c",
              "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.sendto(b'\\x30\\x26\\x02\\x01\\x01\\x04\\x06public\\xa0\\x19\\x02\\x04\\x00\\x00\\x00\\x05\\x02\\x01\\x00\\x02\\x01\\x00\\x30\\x0b\\x30\\x09\\x06\\x05\\x2b\\x06\\x01\\x02\\x01\\x05\\x00', ('127.0.0.1',1165)); s.recv(256); exit(0)"]

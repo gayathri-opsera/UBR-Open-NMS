@@ -247,6 +247,14 @@ async function writeAuditEntry(entry) {
 
 /**
  * Append a status transition to the device's statusHistory array.
+ *
+ * NOTE: this function intentionally does NOT update the top-level `status` field on the
+ * device document.  That field is the *operational* status (ONLINE / OFFLINE / PROVISIONING /
+ * DEPROVISIONED) used by the dashboard and inventory, and must only be changed by the
+ * provision / health-monitor paths.  The `status` argument here is a *history label*
+ * ('Discovered', 'Provisioning', 'Provisioned', 'Re-provisioning', etc.) — a different
+ * vocabulary — and conflating the two was causing provisioned devices to stay stuck on
+ * the 'Provisioned' label instead of showing ONLINE.
  */
 async function appendStatusHistory(devicesCol, serialNumber, status, reason, changedBy = 'system') {
   try {
@@ -254,7 +262,7 @@ async function appendStatusHistory(devicesCol, serialNumber, status, reason, cha
     await devicesCol.updateOne(
       { $or: [{ _id: serialNumber }, { serialNumber }] },
       {
-        $set:  { status, updatedAt: new Date() },
+        $set:  { updatedAt: new Date() },   // ← do NOT touch top-level status
         $push: { statusHistory: { $each: [entry], $slice: -50 } }, // keep last 50 transitions
       },
     );

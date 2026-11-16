@@ -543,7 +543,23 @@ async function doRefresh(device) {
   }
 
   if (!definition) {
-    await col.updateOne({ _id: base._id }, { $set: { ...base, pollStatus: 'NOT_POLLED', pollError: 'no active product definition' } }, { upsert: true });
+    // No product definition — do a minimal SNMP GET of sysDescr to check reachability
+    // so inventory / dashboard status stays accurate even for unprofiled devices.
+    if (device.snmpCommunity) {
+      const { host, port } = splitHostPort(device);
+      try {
+        await getOids({ host, port, community: device.snmpCommunity, oids: ['1.3.6.1.2.1.1.1.0'] });
+        setDeviceOperationalStatus(String(device._id), 'ONLINE').catch(() => {});
+        await col.updateOne({ _id: base._id }, { $set: { ...base, pollStatus: 'NOT_POLLED', pollError: 'no active product definition' } }, { upsert: true });
+      } catch (err) {
+        if (isUnreachable(err)) {
+          setDeviceOperationalStatus(String(device._id), 'OFFLINE').catch(() => {});
+        }
+        await col.updateOne({ _id: base._id }, { $set: { ...base, pollStatus: isUnreachable(err) ? 'UNREACHABLE' : 'NOT_POLLED', pollError: 'no active product definition' } }, { upsert: true });
+      }
+    } else {
+      await col.updateOne({ _id: base._id }, { $set: { ...base, pollStatus: 'NOT_POLLED', pollError: 'no active product definition' } }, { upsert: true });
+    }
     return { pollStatus: 'NOT_POLLED' };
   }
   base.versionId = definition.versionId;
@@ -576,12 +592,18 @@ async function doRefresh(device) {
     }, { upsert: true });
     await markSeen(device, now);
     await applyGps(device, definition, mapped).catch((e) => logger.warn({ msg: 'live GPS update failed', err: e.message }));
+    // Successful poll → ensure device is ONLINE in inventory/dashboard
+    setDeviceOperationalStatus(String(device._id), 'ONLINE').catch(() => {});
     logger.info({ msg: 'live parameters refreshed', deviceId: base._id, host, varbinds: varbinds.length, mapped: values.length });
     return { pollStatus: 'OK' };
   } catch (err) {
     const pollStatus = isUnreachable(err) ? 'UNREACHABLE' : 'ERROR';
     // keep the previous values/collectedAt so the UI can show them as stale
     await col.updateOne({ _id: base._id }, { $set: { ...base, pollStatus, pollError: err.message } }, { upsert: true });
+    // Poll failed with UNREACHABLE → flip device to OFFLINE in inventory/dashboard
+    if (pollStatus === 'UNREACHABLE') {
+      setDeviceOperationalStatus(String(device._id), 'OFFLINE').catch(() => {});
+    }
     logger.warn({ msg: 'live parameter poll failed', deviceId: base._id, host, port, pollStatus, err: err.message });
     return { pollStatus, error: err.message };
   }
@@ -716,10 +738,28 @@ async function refreshDeviceType(device, host, port) {
 const probeFailures = new Map(); // deviceId → consecutive failed liveness probes
 
 /**
+ * Update devices.status (the operational status visible in inventory and dashboards)
+ * to `newStatus` only if it currently differs, to avoid unnecessary write amplification.
+ */
+async function setDeviceOperationalStatus(id, newStatus) {
+  try {
+    const db = nmsDb();
+    if (!db) return;
+    const devCol = db.collection('devices');
+    const current = await devCol.findOne({ _id: id }, { projection: { status: 1 } });
+    if (!current || current.status === newStatus) return;
+    await devCol.updateOne({ _id: id }, { $set: { status: newStatus, updatedAt: new Date() } });
+    logger.info({ msg: 'device operational status updated', deviceId: id, from: current.status, to: newStatus });
+  } catch (e) {
+    logger.warn({ msg: 'failed to update device operational status', deviceId: id, error: e.message });
+  }
+}
+
+/**
  * Keep the stored poll status in step with the real-time liveness probe, so the Node View
  * does not wait for the 60 s cycle to notice that a device went away or came back.
- *  - 2 consecutive failed probes while stored status is OK → mark UNREACHABLE now
- *  - a successful probe while stored status is not OK      → re-poll in the background
+ *  - 2 consecutive failed probes while stored status is OK → mark UNREACHABLE now + set devices.status=OFFLINE
+ *  - a successful probe while stored status is not OK      → re-poll in the background + set devices.status=ONLINE
  * @returns {Promise<{ pollStatus: string, collectedAt: Date|null }>} the stored state afterwards
  */
 async function syncWithProbe(device, online) {
@@ -732,6 +772,8 @@ async function syncWithProbe(device, online) {
     if (doc && doc.pollStatus && doc.pollStatus !== 'OK' && doc.pollStatus !== 'NOT_POLLED' && !inflight.has(id)) {
       logger.info({ msg: 'live probe: device answering again — re-polling', deviceId: id, was: doc.pollStatus });
       refreshDevice(device).catch(() => {});
+      // Device is reachable again → flip back to ONLINE in inventory/dashboard
+      setDeviceOperationalStatus(id, 'ONLINE').catch(() => {});
     }
   } else {
     const n = (probeFailures.get(id) || 0) + 1;
@@ -740,6 +782,8 @@ async function syncWithProbe(device, online) {
       await col.updateOne({ _id: id }, { $set: { pollStatus: 'UNREACHABLE', pollError: 'device stopped answering SNMP (liveness probe)', lastAttemptAt: new Date() } });
       logger.info({ msg: 'live probe: device stopped answering — poll status set UNREACHABLE', deviceId: id });
       doc = { ...doc, pollStatus: 'UNREACHABLE' };
+      // Device is unreachable → flip to OFFLINE in inventory/dashboard
+      setDeviceOperationalStatus(id, 'OFFLINE').catch(() => {});
     }
   }
   return { pollStatus: (doc && doc.pollStatus) || 'NOT_POLLED', collectedAt: (doc && doc.collectedAt) || null };
