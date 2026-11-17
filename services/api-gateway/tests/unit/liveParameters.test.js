@@ -161,3 +161,24 @@ describe('buildCurrentResponse', () => {
     expect(fresh.data.groups[0].parameters.find((p) => p.parameterId === 'ssid').value).toBeNull();
   });
 });
+
+describe('mapVarbinds: a table column next to a field bound to one row of that column', () => {
+  const { mapVarbinds } = require('../../src/live/liveParameters');
+  const col = '.1.3.6.1.4.1.14125.123.1.1.1.1.1.3';           // wirelessSSID column
+  const entries = [
+    { groupId: 'matrix', parameterId: 'wirelessSSID', snmpOid: col },
+    { groupId: 'radio1', parameterId: 'wirelessSSID', snmpOid: `${col}.2` },
+    { groupId: 'radio24', parameterId: 'wirelessSSID', snmpOid: `${col}.1` },
+  ];
+  const vbs = [{ oid: `${col}.1`, value: 'UBRMGMT0A0BFF' }, { oid: `${col}.2`, value: 'UBR660_R1_TEST' }, { oid: `${col}.3`, value: '-NA-' }];
+  test('the column gets every row, each row field gets its own value', () => {
+    const m = mapVarbinds(entries, vbs);
+    expect(m.get('matrix::wirelessSSID').map((x) => [x.index, x.raw])).toEqual([['1', 'UBRMGMT0A0BFF'], ['2', 'UBR660_R1_TEST'], ['3', '-NA-']]);
+    expect(m.get('radio1::wirelessSSID')).toEqual([{ index: '', raw: 'UBR660_R1_TEST' }]);
+    expect(m.get('radio24::wirelessSSID')).toEqual([{ index: '', raw: 'UBRMGMT0A0BFF' }]);
+  });
+  test('arc boundaries still hold: .1.2.3 does not claim .1.2.30', () => {
+    const m = mapVarbinds([{ groupId: 'g', parameterId: 'a', snmpOid: '.1.2.3' }], [{ oid: '.1.2.30.0', value: 'x' }, { oid: '.1.2.3.0', value: 'y' }]);
+    expect(m.get('g::a')).toEqual([{ index: '', raw: 'y' }]);
+  });
+});

@@ -65,3 +65,18 @@ describe('applyFirmwareQuirks', () => {
     });
   });
 });
+
+describe('applyFirmwareQuirks: a labelled -1 is a value, not a placeholder', () => {
+  const OID = `${ROOT}.1.1.3.1`;                              // radiusStatus (configuration subtree)
+  const e = (enumValues) => [{ groupId: 'g', parameterId: 'radiusStatus', snmpOid: OID, enumValues }];
+  const m = (raw) => new Map([['g::radiusStatus', [{ index: '', raw }]]]);
+  it('an unlabelled -1 is still flagged as a placeholder', () => {
+    expect(applyFirmwareQuirks(e(['Disable(0)', 'Enable(1)']), m('-1'), dev).get('g::radiusStatus')[0].placeholder).toBe(true);
+  });
+  it('when the screen gives -1 a label ("Disable(-1)") it is kept as the real value', () => {
+    expect(applyFirmwareQuirks(e(['Disable(-1)', 'Disable(0)', 'Enable(1)']), m('-1'), dev).get('g::radiusStatus')[0].placeholder).toBeUndefined();
+  });
+  it('-NA- is never labelled away', () => {
+    expect(applyFirmwareQuirks(e(['Disable(-1)']), m('-NA-'), dev).get('g::radiusStatus')[0].placeholder).toBe(true);
+  });
+});

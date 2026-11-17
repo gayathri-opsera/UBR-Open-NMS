@@ -42,6 +42,8 @@ function createApp(redisClient) {
 
   app.use(helmet());
   app.use(cors(config.cors));
+  // Custom UI Builder saves the whole parsed MIB (selectedObjects) with the screen; large MIBs exceed the 100 kb default.
+  app.use('/api/v1/ui-builder', express.json({ limit: '25mb' }));
   app.use(express.json()); // needed for admin stub PUT/POST body parsing
   app.use(correlationId);
   app.use(requestLogger);

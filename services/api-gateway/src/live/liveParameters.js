@@ -81,8 +81,10 @@ function walkRoots(oids) {
 
 /**
  * Assign walked varbinds to definition parameters.
- * A varbind belongs to the parameter whose OID is its longest prefix (exact match or
- * followed by '.'); several parameters may legitimately share one OID.
+ * A varbind belongs to every parameter whose OID is a prefix of it (exact match or followed by '.'); several parameters
+ * may legitimately share one OID. Overlap is normal on a Custom UI screen: a table COLUMN (all rows, e.g. one value per
+ * radio in a "Radio columns" matrix) next to a field bound to ONE ROW of that column (column.2 on a radio's page). Each
+ * gets its own values; the row index is what remains after the parameter's own OID.
  *
  * @returns {Map<string, Array<{index:string, raw:string}>>} keyed by `${groupId}::${parameterId}`
  */
@@ -94,17 +96,18 @@ function mapVarbinds(entries, varbinds) {
     if (!byOid.has(oid)) byOid.set(oid, []);
     byOid.get(oid).push(e);
   }
-  const oidsLongestFirst = Array.from(byOid.keys()).sort((a, b) => b.length - a.length);
+  const oids = Array.from(byOid.keys());
 
   const result = new Map();
   for (const vb of varbinds) {
-    const match = oidsLongestFirst.find((o) => vb.oid === o || vb.oid.startsWith(`${o}.`));
-    if (!match) continue;
-    const rest = vb.oid.slice(match.length).replace(/^\./, '');
-    for (const e of byOid.get(match)) {
-      const key = `${e.groupId}::${e.parameterId}`;
-      if (!result.has(key)) result.set(key, []);
-      result.get(key).push({ index: rest, raw: vb.value });
+    for (const match of oids) {
+      if (!(vb.oid === match || vb.oid.startsWith(`${match}.`))) continue;
+      const rest = vb.oid.slice(match.length).replace(/^\./, '');
+      for (const e of byOid.get(match)) {
+        const key = `${e.groupId}::${e.parameterId}`;
+        if (!result.has(key)) result.set(key, []);
+        result.get(key).push({ index: rest, raw: vb.value });
+      }
     }
   }
   // A lone ".0" is the SNMP scalar instance and carries no row index. When a column has

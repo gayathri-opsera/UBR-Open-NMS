@@ -31,6 +31,11 @@ const { v4: uuidv4 } = require('uuid');
 const logger     = require('../utils/logger');
 const live       = require('../live/liveParameters');
 const { probeDevice } = require('../live/snmpWalk');
+const { applyDerivedValues } = require('../live/derivedValues');
+const { resolveHeader } = require('../live/headerSources');
+const { parseOids, isAdmin } = require('../live/snmpGetRequest');
+const { getOids } = require('../live/snmpWalk');
+const { rebaseOid } = require('../live/oidAliases');
 const { encrypt: encryptSecret } = require('../utils/aesEncrypt');
 const { isBusy } = require('../live/snmpGate');
 const lastProbe = new Map();   // 'host:port' → { at, result } — one liveness probe per device per few seconds
@@ -58,7 +63,8 @@ const router = express.Router();
  * Strip parameters the caller's role cannot see.
  * uiVisibleTo === null/undefined means visible to all roles.
  */
-function applyRoleFilter(groups, callerRole) {
+/** @param keepEmpty  device-layout (Builder v2) screens keep sections without parameters: an empty tab is still a tab */
+function applyRoleFilter(groups, callerRole, keepEmpty = false) {
   const ROLE_RANK = { viewer: 0, operator: 1, admin: 2, superadmin: 3 };
   const rank = ROLE_RANK[(callerRole || '').toLowerCase()] ?? 0;
   return groups
@@ -75,7 +81,7 @@ function applyRoleFilter(groups, callerRole) {
         })
         .map(({ uiVisibleTo, ...rest }) => rest),
     }))
-    .filter((g) => g.parameters.length > 0);
+    .filter((g) => keepEmpty || g.parameters.length > 0);
 }
 
 // ── GET /api/node-view/wireframe/:productDefinitionId ─────────────────────────
@@ -99,7 +105,7 @@ router.get(
       // 1. Redis cache
       const cached = await getFromCache(redis, productDefinitionId);
       if (cached) {
-        const filtered = applyRoleFilter(cached.wireframe?.groups || [], callerRole);
+        const filtered = applyRoleFilter(cached.wireframe?.groups || [], callerRole, cached.wireframe?.layoutMode === 'device');
         return res.json({ status: 'ok', source: 'cache', data: { ...cached, wireframe: { groups: filtered } } });
       }
 
@@ -124,7 +130,7 @@ router.get(
       // Populate cache
       await setInCache(redis, productDefinitionId, doc);
 
-      const filtered = applyRoleFilter(doc.wireframe?.groups || [], callerRole);
+      const filtered = applyRoleFilter(doc.wireframe?.groups || [], callerRole, doc.wireframe?.layoutMode === 'device');
       return res.json({
         status: 'ok',
         source: 'db',
@@ -136,7 +142,7 @@ router.get(
           groupCount:          doc.groupCount,
           createdAt:           doc.createdAt,
           updatedAt:           doc.updatedAt,
-          wireframe:           { groups: filtered },
+          wireframe:           { groups: filtered, deviceUi: doc.wireframe?.deviceUi ?? null, layoutMode: doc.wireframe?.layoutMode ?? null },
         },
       });
     } catch (err) {
@@ -254,6 +260,36 @@ function flattenValues(inner) {
 }
 
 /**
+ * snmpget through the NMS — admin only, GET only. Reads the given instance OIDs from the device with its stored
+ * credential (never returned) and answers { oid, value | null }. For checking what a device really answers.
+ *   POST /api/node-view/:deviceId/snmp-get   { "oids": [".1.3.6.1.2.1.1.3.0", …] }   (≤ 60)
+ */
+router.post(
+  '/:deviceId/snmp-get',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'node-view.snmp-get'),
+  async (req, res) => {
+    if (!isAdmin(req.user && req.user.role)) return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Only an administrator can read OIDs directly.' } });
+    const parsed = parseOids(req.body);
+    if (!parsed.ok) return res.status(400).json({ status: 'error', error: { code: 'BAD_REQUEST', message: parsed.message } });
+    try {
+      const device = await live.findDevice(req.params.deviceId);
+      if (!device) return res.status(404).json({ status: 'error', error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found.' } });
+      if (!device.snmpCommunity) return res.status(409).json({ status: 'error', error: { code: 'NO_CREDENTIALS', message: 'No SNMP credential stored for this device.' } });
+      const { host, port } = live.splitHostPort(device);
+      // addressed under the enterprise root this device really serves (firmware re-rooting), answered under the root asked for
+      const wire = new Map(parsed.oids.map((o) => [rebaseOid(o, device.sysObjectID), o]));
+      const rows = await getOids({ host, port, community: device.snmpCommunity, oids: [...wire.keys()], batchSize: 8, retries: 2 });
+      const got = new Map(rows.map((r) => [r.oid, r.value]));
+      const results = parsed.oids.map((o) => { const w = [...wire.entries()].find(([, v]) => v === o)[0]; return { oid: o, value: got.has(w) ? got.get(w) : null }; });
+      res.set('Cache-Control', 'no-store');
+      return res.json({ status: 'ok', data: { host, results } });
+    } catch (e) {
+      return res.status(500).json({ status: 'error', error: { code: 'SNMP_GET_FAILED', message: e.message } });
+    }
+  },
+);
+
+/**
  * Real-time statistics: fresh SNMP read of the requested Monitor groups only (?groups=a,b).
  * Mirrors the device's own statistics pages, which re-read their counters every 1–5 s.
  */
@@ -267,7 +303,12 @@ router.get(
       const groups = String(req.query.groups || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 6);
       const r = await live.pollMonitorGroups(device, groups);
       res.set('Cache-Control', 'no-store');
-      return res.json({ status: 'ok', data: { pollStatus: r.pollStatus, collectedAt: r.collectedAt, values: flattenValues({ groups: r.groups }), ...(r.error ? { error: r.error } : {}) } });
+      const liveValues = flattenValues({ groups: r.groups });
+      try {
+        const resolvedWf = await resolveWireframe(req.app.get('redis'), device.productDefinitionId);
+        applyDerivedValues(resolvedWf?.doc?.wireframe?.groups || [], liveValues);
+      } catch (e) { logger.warn({ msg: 'monitor-live: derived values failed', err: e.message }); }
+      return res.json({ status: 'ok', data: { pollStatus: r.pollStatus, collectedAt: r.collectedAt, values: liveValues, ...(r.error ? { error: r.error } : {}) } });
     } catch (e) {
       return res.status(500).json({ status: 'error', error: { code: 'MONITOR_POLL_FAILED', message: e.message } });
     }
@@ -509,7 +550,7 @@ router.get(
 
       // Apply role filter to groups
       const filteredGroups = wireframeDoc
-        ? applyRoleFilter(wireframeDoc.wireframe?.groups || [], callerRole)
+        ? applyRoleFilter(wireframeDoc.wireframe?.groups || [], callerRole, wireframeDoc.wireframe?.layoutMode === 'device')
         : [];
 
       // ── Step 3: Get current parameter values (cache only — never block on SNMP) ─
@@ -536,6 +577,11 @@ router.get(
       //       so we must unwrap the `.data` envelope before accessing `groups`.
       const valuesInner = valuesData?.data ?? valuesData ?? {};
       const valuesMap = flattenValues(valuesInner);
+      // Fixed-text and calculated fields of a Custom UI screen (no OID of their own)
+      try { applyDerivedValues(wireframeDoc?.wireframe?.groups || [], valuesMap); } catch (e) { logger.warn({ msg: 'node-view: derived values failed', err: e.message }); }
+      // Device-layout screens: the header bar (name, version, uptime, radio badges) resolved from THIS device's own values
+      let header = null;
+      try { if (wireframeDoc?.wireframe?.layoutMode === 'device') header = resolveHeader(wireframeDoc.wireframe.deviceUi, valuesMap); } catch (e) { logger.warn({ msg: 'node-view: header failed', err: e.message }); }
 
       return res.json({
         status: 'ok',
@@ -554,8 +600,11 @@ router.get(
             parameterCount:  wireframeDoc?.parameterCount || 0,
             groupCount:      wireframeDoc?.groupCount || 0,
             groups:          filteredGroups,
+            deviceUi:        wireframeDoc?.wireframe?.deviceUi ?? null,
+            layoutMode:      wireframeDoc?.wireframe?.layoutMode ?? null,
           },
           values: valuesMap,
+          header,
           writable: { enabled: !!writeCommunityFor(device) },
           pollStatus:  valuesInner.pollStatus  || 'NOT_POLLED',
           collectedAt: valuesInner.collectedAt || null,

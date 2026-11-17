@@ -39,6 +39,15 @@ const ParameterSpecSchema = new mongoose.Schema({
   thresholds:      { type: mongoose.Schema.Types.Mixed, default: null },
   uiVisibleTo:     { type: [String], default: [] },
   sensitive:       { type: Boolean, default: false },
+  // Custom UI Builder: where the value comes from. 'mib' (default, snmpOid) | 'static' (staticValue) | 'calc' (calc.expr over calc.inputs).
+  // Custom UI (device layout): the builder field this parameter came from, what it is, and its position among the section's elements
+  fieldId:         { type: String, default: null },
+  elementType:     { type: String, default: null },
+  uiOrder:         { type: Number, default: 0 },
+  emptyValues:     { type: [String], default: undefined },
+  valueSource:     { type: String, default: null },
+  staticValue:     { type: String, default: null },
+  calc:            { type: mongoose.Schema.Types.Mixed, default: null },
 }, { _id: false });
 
 const GroupSpecSchema = new mongoose.Schema({
@@ -54,10 +63,22 @@ const GroupSpecSchema = new mongoose.Schema({
   uiPage:   { type: String, default: '' },   // 'Wireless' | 'Network' | 'Management' | 'Monitor'
   uiParent: { type: String, default: '' },   // e.g. 'Radio 1' | 'IP Configuration'
   uiTab:    { type: String, default: '' },   // e.g. 'Properties' | 'DFS' | 'DDRS/ATPC'
+  // Device-style view (Custom UI Builder v2)
+  uiTitle:  { type: String, default: '' },
+  uiNote:   { type: String, default: '' },
+  uiLayout: { type: String, default: '' },
+  uiColumn: { type: String, default: '' },
+  uiHideWhenEmpty: { type: Boolean, default: false },
+  uiMatrix: { type: mongoose.Schema.Types.Mixed, default: null },
+  // headings / sub-headings / dividers of the section, ordered together with the parameters (uiOrder)
+  layoutItems: { type: [mongoose.Schema.Types.Mixed], default: [] },
 }, { _id: false });
 
 const WireframeBodySchema = new mongoose.Schema({
   groups: { type: [GroupSpecSchema], default: [] },
+  // Custom UI (device layout): header config and which renderer to use
+  deviceUi:   { type: mongoose.Schema.Types.Mixed, default: null },
+  layoutMode: { type: String, default: null },
 }, { _id: false });
 
 // ── Main schema ───────────────────────────────────────────────────────────────

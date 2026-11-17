@@ -55,7 +55,9 @@ function applyFirmwareQuirks(entries, mapped, device) {
     if (!list) continue;
     const mtu = ETH_MTU.test(oid);
     // Keep the answer but flag it: the UI then says "the device's agent returned a placeholder", not "no such object".
-    mapped.set(key, list.map((i) => (isPlaceholder(i.raw) || (mtu && isZero(i.raw)) ? { ...i, placeholder: true } : i)));
+    // A value the field gives its own label ("-1" → "Disabled") is meant, not a placeholder.
+    const labelled = (raw) => (e.enumValues || []).some((v) => { const m = /\((-?\d+)\)\s*$/.exec(v); return !!m && m[1] === String(raw).trim(); });
+    mapped.set(key, list.map((i) => ((isPlaceholder(i.raw) && !labelled(i.raw)) || (mtu && isZero(i.raw)) ? { ...i, placeholder: true } : i)));
   }
   for (const id of keyOf.keys()) {
     const [col, row] = id.split('.').map(Number);

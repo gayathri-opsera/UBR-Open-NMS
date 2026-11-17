@@ -71,6 +71,11 @@ function generateUiXml(descriptor) {
     sectionParts.push(`poll="${formatPollSeconds(section.pollInterval)}"`);
     const write = writeModeAttr(section.writeMode);
     if (write) sectionParts.push(`write="${write}"`);
+    if (section.uiPage) sectionParts.push(`page="${escapeXmlAttr(section.uiPage)}"`);
+    if (section.uiParent) sectionParts.push(`parent="${escapeXmlAttr(section.uiParent)}"`);
+    if (section.uiTab) sectionParts.push(`tab="${escapeXmlAttr(section.uiTab)}"`);
+    if (section.uiLayout) sectionParts.push(`layout="${escapeXmlAttr(section.uiLayout)}"`);
+    if (section.uiHideWhenEmpty) sectionParts.push('hideWhenEmpty="true"');
 
     lines.push(`  <section ${sectionParts.join(' ')}>`);
 
