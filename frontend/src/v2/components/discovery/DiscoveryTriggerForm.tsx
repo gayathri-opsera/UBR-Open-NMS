@@ -375,7 +375,7 @@ export function DiscoveryTriggerForm({ onRunCreated, initialScope }: DiscoveryTr
                     {s.screenName}
                     {s.mibModule ? ` · ${s.mibModule}` : ''}
                     {s.deviceProfile ? ` · ${s.deviceProfile}` : ''}
-                    {` (${s.sectionCount ?? 0} sections · ${s.objectCount ?? 0} objects)`}
+                    {` (${s.sectionCount ?? 0} sections · ${s.objectCount ?? 0} objects · ${s.layoutMode === 'device' ? 'device look' : 'classic cards'})`}
                   </option>
                 ))}
               </select>

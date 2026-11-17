@@ -692,7 +692,7 @@ interface Props {
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-export function NodeViewParameters({
+function NodeViewParametersInner({
   deviceId, wireframe, values: cachedValues, loading, refreshing, onRefresh, liveStatus,
   productDefinitionId, registryVersion, collectedAt, pollStatus, canEdit, deviceWritable,
   layoutMode, deviceUi, header, screenName,
@@ -1443,6 +1443,46 @@ export function NodeViewParameters({
           No parameters defined in this definition.
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── Node View style: device look or classic cards (per device, remembered in this browser) ──────────────────
+
+export type NodeViewStyle = 'device' | 'classic';
+const styleKey = (deviceId: string) => `nms.nodeview.style.${deviceId}`;
+export function readNodeViewStyle(deviceId: string): NodeViewStyle {
+  try { return localStorage.getItem(styleKey(deviceId)) === 'classic' ? 'classic' : 'device'; } catch { return 'device'; }
+}
+function writeNodeViewStyle(deviceId: string, v: NodeViewStyle) { try { localStorage.setItem(styleKey(deviceId), v); } catch { /* private mode */ } }
+
+/**
+ * A screen built in Builder v2 can be viewed in the device's own look or as the classic cards (same data either way).
+ * The screen sets the default (its "Node View style"); this switch lets whoever is looking at a device choose, and the
+ * choice is remembered for that device. Screens that only have the classic layout show no switch.
+ */
+export function NodeViewParameters(props: Props) {
+  const supportsDevice = props.layoutMode === 'device';
+  const [style, setStyle] = useState<NodeViewStyle>(() => readNodeViewStyle(props.deviceId));
+  useEffect(() => { setStyle(readNodeViewStyle(props.deviceId)); }, [props.deviceId]);
+  const effective: NodeViewStyle = supportsDevice ? style : 'classic';
+  const choose = (v: NodeViewStyle) => { setStyle(v); writeNodeViewStyle(props.deviceId, v); };
+  return (
+    <div>
+      {supportsDevice && (
+        <div role="group" aria-label="Node View style" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 11, color: 'var(--vf-text-muted)' }}>
+          <span>View</span>
+          {([['device', 'Device look'], ['classic', 'Cards']] as const).map(([v, l]) => (
+            <button key={v} type="button" aria-pressed={effective === v} onClick={() => choose(v)}
+              style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
+                border: `1px solid ${effective === v ? 'var(--vf-accent)' : 'var(--vf-border-subtle)'}`,
+                background: effective === v ? 'var(--vf-accent-subtle, rgba(79,142,247,.12))' : 'var(--vf-elevated)',
+                color: effective === v ? 'var(--vf-accent)' : 'var(--vf-text-secondary)', fontWeight: effective === v ? 700 : 500 }}>{l}</button>
+          ))}
+        </div>
+      )}
+      <NodeViewParametersInner {...props} layoutMode={effective === 'device' ? props.layoutMode : null} />
     </div>
   );
 }

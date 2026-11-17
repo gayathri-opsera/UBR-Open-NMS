@@ -256,7 +256,7 @@ const V2MibBuilderV2Page: React.FC = () => {
     setBusy(true);
     try {
       const d = await updateDescriptor(draft.descriptorId, {
-        screenName: draft.screenName, sections: draft.sections, deviceUi: draft.deviceUi ?? null, layoutMode: 'device', defaultPollInterval: draft.defaultPollInterval ?? 30,
+        screenName: draft.screenName, sections: draft.sections, deviceUi: draft.deviceUi ?? null, layoutMode: draft.layoutMode === 'classic' ? 'classic' : 'device', defaultPollInterval: draft.defaultPollInterval ?? 30,
         selectedObjects: draft.selectedObjects, mibModule: draft.mibModule, vendor: draft.vendor, productFamily: draft.productFamily,
         deviceProfile: draft.deviceProfile,
       });
@@ -271,7 +271,7 @@ const V2MibBuilderV2Page: React.FC = () => {
     try {
       const d = await createDescriptor({
         screenName: name, deviceProfile: draft.deviceProfile, vendor: draft.vendor, productFamily: draft.productFamily,
-        mibModule: draft.mibModule, sections: draft.sections.map(({ ...s }) => s), deviceUi: draft.deviceUi ?? undefined, layoutMode: 'device', defaultPollInterval: draft.defaultPollInterval ?? 30,
+        mibModule: draft.mibModule, sections: draft.sections.map(({ ...s }) => s), deviceUi: draft.deviceUi ?? undefined, layoutMode: draft.layoutMode === 'classic' ? 'classic' : 'device', defaultPollInterval: draft.defaultPollInterval ?? 30,
         selectedObjects: draft.selectedObjects,
       });
       setDraftSync(d); resetHistory(); setDirty(false); toast.success('Copy created'); void refreshList();
@@ -288,7 +288,7 @@ const V2MibBuilderV2Page: React.FC = () => {
     try {
       if (dirty) {
         await updateDescriptor(draft.descriptorId, {
-          screenName: draft.screenName, sections: draft.sections, deviceUi: draft.deviceUi ?? null, layoutMode: 'device', defaultPollInterval: draft.defaultPollInterval ?? 30,
+          screenName: draft.screenName, sections: draft.sections, deviceUi: draft.deviceUi ?? null, layoutMode: draft.layoutMode === 'classic' ? 'classic' : 'device', defaultPollInterval: draft.defaultPollInterval ?? 30,
           selectedObjects: draft.selectedObjects, mibModule: draft.mibModule, vendor: draft.vendor, productFamily: draft.productFamily, deviceProfile: draft.deviceProfile,
         });
       }
@@ -717,6 +717,12 @@ const V2MibBuilderV2Page: React.FC = () => {
               <input style={inp} value={draft.screenName} onChange={(e) => update((d) => ({ ...d, screenName: e.target.value }))} />
               <label style={lbl}>Device profile (vendor - product family)</label>
               <input style={inp} value={draft.deviceProfile ?? ''} placeholder="Vendor - Product family" onChange={(e) => update((d) => ({ ...d, deviceProfile: e.target.value }))} />
+              <label style={lbl}>Node View style (default for this screen)</label>
+              <select style={inp} value={draft.layoutMode === 'classic' ? 'classic' : 'device'} onChange={(e) => update((d) => ({ ...d, layoutMode: e.target.value as 'device' | 'classic' }))}>
+                <option value="device">Device look — like the device's own web UI</option>
+                <option value="classic">Classic cards — one card per section</option>
+              </select>
+              <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginTop: 3 }}>Whoever opens a device can still switch between the two on its Node View page. Republish to apply.</div>
               <div style={{ fontSize: 10, color: 'var(--vf-text-muted)', marginTop: 8 }}>The header bar (name, version, uptime, radio badges) is set up in the box below.</div>
             </div>
 
