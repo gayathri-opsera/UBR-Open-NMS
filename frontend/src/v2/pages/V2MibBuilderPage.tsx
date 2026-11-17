@@ -51,6 +51,12 @@ interface UiDescriptorSection {
   pollInterval?: number;
   liveRefreshSeconds?: number;
   writeMode?: 'apply-button' | 'direct' | 'read-only';
+  /** Optional Node View tree position (Page > Parent > Tab), e.g. Wireless > Radio 1 > Properties. */
+  uiPage?: string;
+  uiParent?: string;
+  uiTab?: string;
+  uiLayout?: 'form' | 'card' | 'table' | 'matrix';
+  uiHideWhenEmpty?: boolean;
   fields: UiDescriptorField[];
   order: number;
 }
@@ -156,7 +162,7 @@ function escapeXmlAttr(value: unknown): string {
     .replace(/>/g, '&gt;');
 }
 
-function generateUiXml(descriptor: UiDescriptorDraft): string {
+export function generateUiXml(descriptor: UiDescriptorDraft): string {
   const screenId = (descriptor.screenName || 'screen')
     .trim()
     .toLowerCase()
@@ -187,6 +193,11 @@ function generateUiXml(descriptor: UiDescriptorDraft): string {
     ];
     if (section.writeMode === 'apply-button') sectionParts.push('write="apply"');
     if (section.writeMode === 'direct') sectionParts.push('write="direct"');
+    if (section.uiPage) sectionParts.push(`page="${escapeXmlAttr(section.uiPage)}"`);
+    if (section.uiParent) sectionParts.push(`parent="${escapeXmlAttr(section.uiParent)}"`);
+    if (section.uiTab) sectionParts.push(`tab="${escapeXmlAttr(section.uiTab)}"`);
+    if (section.uiLayout) sectionParts.push(`layout="${escapeXmlAttr(section.uiLayout)}"`);
+    if (section.uiHideWhenEmpty) sectionParts.push('hideWhenEmpty="true"');
 
     lines.push(`  <section ${sectionParts.join(' ')}>`);
     for (const field of fields) {
@@ -2779,6 +2790,22 @@ function ScreenBuilderScreen({
                     >🗑</button>
                   </div>
 
+                  {/* Node View tree position: Page > Parent > Tab (empty = legacy flat layout) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: 'var(--vf-surface)', borderBottom: '1px solid var(--vf-border-subtle)' }}
+                    onClick={(e) => e.stopPropagation()}>
+                    <span style={{ fontSize: 9, color: 'var(--vf-text-muted)', whiteSpace: 'nowrap' }}>Node View path</span>
+                    {([['uiPage', 'Page (Wireless)'], ['uiParent', 'Parent (Radio 1)'], ['uiTab', 'Tab (Properties)']] as const).map(([key, ph]) => (
+                      <input
+                        key={key}
+                        value={sec[key] ?? ''}
+                        placeholder={ph}
+                        title={ph}
+                        onChange={(e) => patchSection(sec.sectionId, { [key]: e.target.value })}
+                        style={{ flex: 1, minWidth: 0, fontSize: 10, padding: '2px 6px', borderRadius: 4, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)', outline: 'none' }}
+                      />
+                    ))}
+                  </div>
+
                   {/* ── Confirm-delete section bar ─────────────────────────── */}
                   {isConfirmDelete && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'rgba(239,68,68,0.08)', borderBottom: '1px solid rgba(239,68,68,0.2)' }}
@@ -3460,7 +3487,7 @@ function XmlCodePanel({ xml }: { xml: string }) {
   );
 }
 
-function WidgetRulesScreen({ descriptor }: { descriptor: UiDescriptorDraft | null }) {
+export function WidgetRulesScreen({ descriptor }: { descriptor: UiDescriptorDraft | null }) {
   const xml      = descriptor?.generatedXml ?? generateUiXml(descriptor ?? emptyDraft()) ?? SAMPLE_UI_XML;
   const fileName =
     (descriptor?.screenName ?? 'radio_overview')

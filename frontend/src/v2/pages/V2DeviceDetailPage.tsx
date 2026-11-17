@@ -471,6 +471,10 @@ export default function V2DeviceDetailPage() {
                   registryVersion={nvData.wireframe.registryVersion}
                   collectedAt={nvData.collectedAt}
                   pollStatus={nvData.pollStatus}
+                  layoutMode={nvData.wireframe.layoutMode}
+                  deviceUi={nvData.wireframe.deviceUi}
+                  header={nvData.header}
+                  screenName={nvData.wireframe.deviceUi?.productName}
                 />
               </>
             )}

@@ -30,6 +30,7 @@ import type {
 import { valueKey } from '../../api/nodeView.types';
 import { applyNodeViewChanges, fetchMonitorLive, type LiveStatus } from '../../api/nodeView.api';
 
+import { DeviceNodeView } from './DeviceNodeView';
 import { Badge }   from './common/Badge';
 import { Button }  from './common/Button';
 import { Card }    from './common/Card';
@@ -271,7 +272,7 @@ interface SidebarPage {
 }
 
 /** Page order mirrors the real device left nav. */
-const PAGE_ORDER = ['Wireless', 'Network', 'Management', 'Monitor'];
+const PAGE_ORDER = ['Quick Start', 'Wireless', 'Network', 'Management', 'Monitor'];
 
 function buildSidebar(groups: WireframeGroup[]): SidebarPage[] {
   const withHierarchy = groups.filter((g) => g.uiPage);
@@ -682,6 +683,11 @@ interface Props {
   canEdit:             boolean;
   /** The gateway can write to this device (a write community is configured). */
   deviceWritable:      boolean;
+  /** Custom UI Builder v2 screens: 'device' = render in the device's own look. */
+  layoutMode?:         string | null;
+  deviceUi?:           import('../../api/uiBuilder.api').DeviceUiConfig | null;
+  header?:             import('../../api/uiBuilder.api').ResolvedHeader | null;
+  screenName?:         string;
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -689,6 +695,7 @@ interface Props {
 export function NodeViewParameters({
   deviceId, wireframe, values: cachedValues, loading, refreshing, onRefresh, liveStatus,
   productDefinitionId, registryVersion, collectedAt, pollStatus, canEdit, deviceWritable,
+  layoutMode, deviceUi, header, screenName,
 }: Props) {
   const { addToast } = useToast();
   const [activeGroupId, setActiveGroupId] = useState<string>('');
@@ -1168,6 +1175,32 @@ export function NodeViewParameters({
   //   • Each parameter: uppercase label → OID below in mono → live value widget
   //   • Apply / Revert per writable section (same as PreviewScreen)
   //
+  // Custom UI Builder v2 screen: the device's own look, same data / edit / Apply machinery as below.
+  if (layoutMode === 'device') {
+    const gidsWithPending = (ids: string[]) => ids.filter((gid) => pendingForScope(gid).length > 0);
+    return (
+      <DeviceNodeView
+        screenName={screenName || deviceUi?.productName || 'Device'}
+        wireframe={wireframe}
+        deviceUi={deviceUi}
+        header={header}
+        values={values}
+        canEdit={editingAllowed}
+        edits={edits}
+        errors={errors}
+        pendingFor={(gid) => pendingForScope(gid).length}
+        onEdit={onEdit}
+        applying={applying}
+        onApplyGroups={(ids) => { void (async () => { for (const gid of gidsWithPending(ids)) await applyScope(gid, gid); })(); }}
+        onRevertGroups={(ids) => ids.forEach((gid) => revertScope(gid))}
+        collectedAt={collectedAt}
+        pollStatus={pollStatus}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+      />
+    );
+  }
+
   if (isMibDescriptorMode) {
     // Screen name = the first group's uiPage (which was set to descriptor.screenName at publish time)
     const screenName = groups[0]?.uiPage || productDefinitionId;

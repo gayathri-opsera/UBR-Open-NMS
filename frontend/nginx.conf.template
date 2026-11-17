@@ -39,6 +39,7 @@ server {
 
     # Proxy API calls to the gateway inside the Docker network
     location /api/ {
+        client_max_body_size 25m;   # Custom UI Builder saves whole parsed MIBs
         proxy_pass http://${API_GATEWAY_UPSTREAM};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

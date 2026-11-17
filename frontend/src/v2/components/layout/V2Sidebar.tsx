@@ -51,6 +51,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Framework',
     items: [
       { path: '/v2/mib-builder', label: 'Custom UI Builder', icon: <BuilderIcon />, allowedRoles: ['Admin'] as Role[] },
+      { path: '/v2/mib-builder-v2', label: 'Custom UI Builder v2', icon: <BuilderIcon />, allowedRoles: ['Admin'] as Role[] },
       // Framework Ops, Product Definitions, Descriptor Registry, Node View Designer, Security & Audit hidden
     ],
   },

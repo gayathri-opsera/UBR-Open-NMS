@@ -21,6 +21,14 @@ export interface UiDescriptorField {
   helpText?: string;
   confirmWrite?: boolean;
   enumMap?: Record<string, string>;
+  /** Where the value comes from: MIB parameter (default), fixed text, or a calculation over device values. */
+  valueSource?: 'mib' | 'static' | 'calc';
+  staticValue?: string;
+  calc?: { expr: string; template?: string | null; fallback?: string | null; format?: string; decimals?: number | null; inputs?: { name: string; oid: string; sample?: string; map?: Record<string, string>; strip?: string; emptyValues?: string[] }[] };
+  /** Values that mean "no value" for this field (default -1, -NA-, NA, -) — shown as an empty value. [] = show them as they are. */
+  emptyValues?: string[];
+  /** How the label was chosen (the label text itself is always stored). */
+  labelSource?: 'custom' | 'mibName' | 'mibDescription';
   order: number;
 }
 
@@ -33,8 +41,70 @@ export interface UiDescriptorSection {
   /** Real-time refresh in Node View, seconds (0/absent = off). Only honoured for read-only sections. */
   liveRefreshSeconds?: number;
   writeMode?: 'apply-button' | 'direct' | 'read-only';
+  /** Optional Node View tree position (Page > Parent > Tab). */
+  uiPage?: string;
+  uiParent?: string;
+  uiTab?: string;
+  /** Device-style view (Builder v2): heading, note under the form, and how the section is drawn. */
+  uiTitle?: string;
+  uiNote?: string;
+  uiLayout?: 'form' | 'card' | 'table' | 'matrix';
+  uiColumn?: 'left' | 'right';
+  /** Skip this section (and an emptied tab / menu item) in Node View when the device returns no data for it. */
+  uiHideWhenEmpty?: boolean;
+  /** 'matrix' layout: one column per table row (e.g. radio), rows = the section's fields. */
+  uiMatrix?: { columns: { index: string; label: string; map?: Record<string, string> }[]; hideEmptyColumns?: boolean };
   fields: UiDescriptorField[];
   order: number;
+}
+
+/**
+ * Where a header value comes from. The design (what is shown, where) is fixed in the builder; the data comes from each
+ * device: typed text, a template over device values ("{fw} SNo. {sn}"), or a calculation. `map` turns a raw device value
+ * into display text ({ ap: 'BTS', sta: 'CPE' }); `sample` is only used by the builder preview.
+ */
+export interface DataSource {
+  kind: 'text' | 'template' | 'calc';
+  text?: string;
+  template?: string;
+  expr?: string;
+  /** template only: used when the main template cannot be computed (a missing / non-numeric value) */
+  fallback?: string | null;
+  format?: string;
+  decimals?: number | null;
+  inputs?: { name: string; oid: string; sample?: string; map?: Record<string, string>; strip?: string; emptyValues?: string[] }[];
+}
+
+export interface HeaderRadio {
+  label: string;
+  mode: string;
+  up?: boolean;
+  /** where the badge text (BTS / CPE / AP …) comes from; a radio whose source returns nothing is left out on that device */
+  modeSource?: DataSource;
+  labelSource?: DataSource;
+  /** the LED is green when the OID's value is one of upValues; `sample` is only for the preview */
+  upSource?: { oid: string; upValues: string[]; sample?: string };
+}
+
+/** Device-style header shown by Builder v2 (all optional). */
+export interface DeviceUiConfig {
+  productName?: string;
+  versionLine?: string;
+  uptime?: string;
+  saveLabel?: string;
+  /** Header items fed by a field of the screen (fixed text, MIB value or calculated), by fieldId. */
+  bind?: { productName?: string; versionLine?: string; uptime?: string };
+  /** Header items read from the device (preferred over `bind` and over the typed text, which then only serves the preview) */
+  sources?: { productName?: DataSource; versionLine?: DataSource; uptime?: DataSource };
+  radios?: HeaderRadio[];
+}
+
+/** The header resolved for ONE device (Node View) or from the samples (builder preview). null = no data → "—". */
+export interface ResolvedHeader {
+  productName: string | null;
+  versionLine: string | null;
+  uptime: string | null;
+  radios: { label: string; mode: string; up: boolean }[];
 }
 
 export interface UiDescriptor {
@@ -47,6 +117,11 @@ export interface UiDescriptor {
   mibModule?: string;
   status: 'draft' | 'published';
   sections: UiDescriptorSection[];
+  deviceUi?: DeviceUiConfig | null;
+  /** 'device' = Builder v2 screen (Node View renders it in the device's own look). */
+  layoutMode?: 'classic' | 'device' | null;
+  /** Screen-wide default poll interval (seconds) for new sections. */
+  defaultPollInterval?: number | null;
   generatedXml?: string;
   /** MIB objects selected during Stage 1; stored for session restore. */
   selectedObjects?: MibObjectSummary[];

@@ -49,6 +49,7 @@ const V2ProductDefinitionPage = lazy(() => import('./pages/V2ProductDefinitionPa
 // Descriptor Registry — 9-state lifecycle (Draft→Purged), maker-checker, delete guard, wireframe build
 const V2DescriptorPage = lazy(() => import('./pages/V2DescriptorPage'));
 const V2MibBuilderPage     = lazy(() => import('./pages/V2MibBuilderPage'));
+const V2MibBuilderV2Page   = lazy(() => import('./pages/V2MibBuilderV2Page'));
 const V2DeviceTypesPage    = lazy(() => import('./pages/V2DeviceTypesPage'));
 // Pre-MIB Node View Designer — design sections/labels/index levels before MIB upload (PV-01→PV-12)
 const V2NodeViewDesignerPage = lazy(() => import('./pages/V2NodeViewDesignerPage'));
@@ -219,6 +220,15 @@ export function V2App() {
                   element={
                     <V2ProtectedRoute allowedRoles={['Admin', 'Operator', 'descriptor_admin', 'descriptor_author']}>
                       <V2DescriptorPage />
+                    </V2ProtectedRoute>
+                  }
+                />
+                {/* Custom UI Builder v2 — device-look screens; the classic builder below is unchanged */}
+                <Route
+                  path="mib-builder-v2"
+                  element={
+                    <V2ProtectedRoute allowedRoles={['Admin']}>
+                      <V2MibBuilderV2Page />
                     </V2ProtectedRoute>
                   }
                 />

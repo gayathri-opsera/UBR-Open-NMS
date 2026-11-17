@@ -37,6 +37,13 @@ export interface WireframeParameter {
   defaultValue:    string | null;
   description:     string | null;
   thresholds:      { high?: number; low?: number } | null;
+  /** Custom UI (device layout): the builder field, what it is, its position, and where its value comes from. */
+  fieldId?:        string | null;
+  elementType?:    string | null;
+  uiOrder?:        number;
+  valueSource?:    'mib' | 'static' | 'calc' | null;
+  emptyValues?:    string[];
+  staticValue?:    string | null;
 }
 
 export interface WireframeGroup {
@@ -52,6 +59,14 @@ export interface WireframeGroup {
   uiPage?:   string;   // top-level nav: 'Wireless' | 'Network' | 'Management' | 'Monitor'
   uiParent?: string;   // sub-item:      'Radio 1' | 'Radio 2' | '2.4 GHz Radio' | 'QoS' | 'IP Configuration' | …
   uiTab?:    string;   // tab label:     'Properties' | 'DDRS/ATPC' | 'DFS' | 'DCS' | …
+  /** Custom UI (device layout) */
+  uiTitle?:  string;
+  uiNote?:   string;
+  uiLayout?: string;
+  uiColumn?: string;
+  uiHideWhenEmpty?: boolean;
+  uiMatrix?: { columns: { index: string; label: string; map?: Record<string, string> }[]; hideEmptyColumns?: boolean } | null;
+  layoutItems?: Array<{ fieldId: string; elementType: 'heading' | 'sub-heading' | 'divider'; label: string; uiOrder: number }>;
 }
 
 export interface NodeViewWireframe {
@@ -61,6 +76,9 @@ export interface NodeViewWireframe {
   parameterCount:      number;
   groupCount:          number;
   groups:              WireframeGroup[];
+  /** Custom UI (device layout): header config; layoutMode 'device' = render in the device's own look. */
+  deviceUi?:           import('./uiBuilder.api').DeviceUiConfig | null;
+  layoutMode?:         string | null;
 }
 
 // ── Live value types (dynamic, from SNMP poll) ────────────────────────────────
@@ -99,6 +117,8 @@ export interface NodeViewData {
   device:      NodeViewDevice;
   wireframe:   NodeViewWireframe;
   values:      NodeViewValues;
+  /** Device-layout screens: the header bar resolved from this device's own values. */
+  header?:     import('./uiBuilder.api').ResolvedHeader | null;
   /** Whether the gateway can write to this device (an SNMP write community is configured). */
   writable?:   { enabled: boolean };
   pollStatus:  string;

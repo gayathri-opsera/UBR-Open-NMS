@@ -1,0 +1,125 @@
+
+.dv-root { position: relative; background: #f0f1f3; color: #333; font: 400 14px/20px 'Segoe UI', SegoeUI, 'Open Sans', 'Helvetica Neue', Arial, sans-serif;
+  min-width: 1180px; padding-top: 110px; min-height: 760px; box-sizing: border-box; text-align: left; }
+.dv-root *, .dv-root *::before, .dv-root *::after { box-sizing: border-box; }
+.dv-root ul { list-style: none; margin: 0; padding: 0; }
+.dv-root .dv-header { position: absolute; top: 0; left: 0; right: 0; height: 92px; background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25), inset 0 -1px 0 rgba(0,0,0,.1); }
+.dv-root .dv-hd-item { position: absolute; font-size: 13px; line-height: 18px; }
+.dv-root .dv-hd-val { color: #1b489c; font-weight: 700; }
+.dv-root .dv-hd-lbl { color: #808080; }
+.dv-root .dv-hd-radio { position: absolute; top: 28px; width: 70px; cursor: pointer; }
+.dv-root .dv-hd-radio .dv-hd-lbl { font-weight: 700; }
+.dv-root .dv-led { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; background: #808080; }
+.dv-root .dv-led.up { background: #7fff00; }
+.dv-root .dv-hd-icon { position: absolute; top: 30px; width: 34px; height: 32px; color: #111; display: flex; align-items: center; justify-content: center; }
+.dv-root .dv-hd-icon svg { width: 26px; height: 26px; fill: currentColor; }
+.dv-root .dv-sidebar { position: absolute; top: 110px; left: 20px; width: 250px; background: #fff; box-shadow: 0 5px 24px rgba(0,0,0,.21); min-height: 560px; }
+.dv-root .dv-top > a, .dv-root .dv-top > .dv-top-a { display: block; position: relative; padding: 20px 40px 20px 60px; font: 600 17px/19px 'Segoe UI Semibold', 'Segoe UI', SegoeUI, 'Open Sans', Arial, sans-serif;
+  color: #111; border-bottom: 1px solid #e1e1e1; cursor: pointer; text-decoration: none; user-select: none; }
+.dv-root .dv-top-a .dv-ico { position: absolute; left: 30px; top: 21px; width: 18px; height: 18px; fill: #111; }
+.dv-root .dv-top-a .dv-chev { position: absolute; right: 22px; top: 22px; width: 14px; height: 14px; fill: #111; }
+.dv-root .dv-sub { background: #fff; padding-bottom: 8px; }
+.dv-root .dv-sub li { padding: 0 30px; }
+.dv-root .dv-sub li a { display: block; padding: 10px 10px 10px 25px; font-size: 15px; line-height: 21.4px; font-weight: 300; color: #444;
+  border-bottom: 1px dashed #e2e2e2; cursor: pointer; position: relative; text-decoration: none; }
+.dv-root .dv-sub li a .dv-ico { position: absolute; left: 0; top: 13px; width: 14px; height: 14px; fill: #444; }
+.dv-root .dv-sub li.active { background: #1b489c; }
+.dv-root .dv-sub li.active a { color: #fff; border-bottom-color: #e2e2e2; }
+.dv-root .dv-sub li.active a .dv-ico { fill: #fff; }
+.dv-root .dv-content { position: absolute; top: 110px; left: 290px; right: 0; margin-right: 12px; background: #fff; padding: 15px; box-shadow: 0 5px 24px rgba(0,0,0,.21); min-height: 560px; }
+.dv-root .dv-h2 { margin: 0 0 20px; font: 400 22px/22px 'Segoe UI Semibold', 'Segoe UI', SegoeUI, 'Open Sans', Arial, sans-serif; color: #1b489c; text-transform: uppercase; }
+.dv-root .dv-h2 span { font-weight: 600; font-size: 20px; }
+.dv-root .dv-tabs { display: flex; margin: 0 0 18px; padding: 0; border-bottom: 1px solid #ddd; height: 36px; }
+.dv-root .dv-tab { margin: 0 4px -1px 0; }
+.dv-root .dv-tab a { display: block; padding: 0 15px; font-size: 17px; line-height: 34px; color: #999; border: 1px solid rgba(153,153,153,.58); border-bottom: 0; border-radius: 4px 4px 0 0; cursor: pointer; text-decoration: none; }
+.dv-root .dv-tab.active a { font-size: 19px; color: #1b489c; background: #fff; border: 1px solid #1b489c; border-bottom: 1px solid transparent; }
+.dv-root .dv-row { margin: 0 0 18px; min-height: 30px; position: relative; }
+.dv-root .dv-row .dv-label { float: left; width: 180px; text-align: right; font: 700 14px/18px 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #404040; padding-top: 6px; margin-bottom: 5px; }
+.dv-root .dv-row .dv-field { margin-left: 200px; line-height: 21px; padding-top: 4px; min-height: 30px; }
+.dv-root .dv-row::after { content: ''; display: table; clear: both; }
+.dv-root .dv-select, .dv-root .dv-input { width: 210px; height: 30px; padding: 0 8px; font: 400 14px 'Segoe UI', SegoeUI, 'Open Sans', Arial, sans-serif; color: #333; background: #fff; border: 1px solid #ccc; border-radius: 0; vertical-align: top; margin-top: -4px; }
+.dv-root .dv-hint { margin-left: 10px; font-size: 13px; color: #404040; vertical-align: top; position: relative; top: 1px; }
+.dv-root .dv-static { display: inline-block; padding-top: 2px; }
+.dv-root .dv-note { margin: 18px 0 25px; font: 600 13px/19.5px Roboto, 'Segoe UI', Arial, sans-serif; color: #1b489c; white-space: pre-line; }
+.dv-root .dv-actions { padding: 17px 20px 18px 150px; margin-bottom: 18px; }
+.dv-root .dv-btn { width: 130px; height: 38px; padding: 0 30px; margin-left: 6px; font-size: 15px; color: #1b489c; background: #fff; border: 1px solid #1b489c; border-radius: 4px; text-align: center; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 1px 2px rgba(0,0,0,.05); }
+.dv-root .dv-btn:hover { background: #1b489c; color: #fff; }
+.dv-root .dv-cards { display: flex; flex-wrap: wrap; gap: 18px 38px; }
+.dv-root .dv-card { flex: 1 1 380px; min-width: 340px; border: 1px solid #9db7ea; margin-top: 10px; padding: 8px 20px 18px; position: relative; }
+.dv-root .dv-card > legend { font: 600 17px/20px 'Segoe UI Semibold', 'Segoe UI', SegoeUI, 'Open Sans', Arial, sans-serif; color: #333; padding: 0 16px; margin-left: 12px; width: auto; border: 0; margin-bottom: 4px; }
+.dv-root .dv-card-row { display: flex; padding: 8px 4px; border-bottom: 1px solid #e8edf6; }
+.dv-root .dv-card-row:nth-child(even) { background: #f7f9fc; }
+.dv-root .dv-card-row .k { width: 190px; color: #333; }
+.dv-root .dv-card-row .v { flex: 1; color: #333; }
+.dv-root .dv-tablewrap { overflow-x: auto; margin: 6px 0 16px; }
+.dv-root .dv-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.dv-root .dv-table th { background: #f7f7f7; font-weight: 700; color: #333; text-align: center; padding: 10px 8px; border: 1px solid #e1e1e1; white-space: nowrap; }
+.dv-root .dv-table td { padding: 10px 8px; border: 1px solid #e1e1e1; text-align: center; color: #333; }
+.dv-root .dv-table td.empty { text-align: left; font-weight: 700; border-left: 0; border-right: 0; }
+.dv-root.dv-design [data-dv-field], .dv-root.dv-design [data-dv-section] { cursor: pointer; }
+.dv-root.dv-design [data-dv-field] .dv-select, .dv-root.dv-design [data-dv-field] .dv-input, .dv-root.dv-design [data-dv-field] input[type=checkbox] { pointer-events: none; }
+.dv-root.dv-design [data-dv-field]:hover { outline: 1px dashed rgba(27,72,156,.45); outline-offset: 3px; }
+.dv-root.dv-design [data-dv-field].sel, .dv-root.dv-design .dv-table th.sel { outline: 2px solid #e8590c; outline-offset: 3px; }
+.dv-root.dv-design [data-dv-section].sel-section { box-shadow: 0 0 0 2px rgba(232,89,12,.55); }
+.dv-root.dv-design .dv-table th { cursor: pointer; }
+
+.dv-root h2.dv-h2, .dv-root h2.dv-h2 span { color: #1b489c !important; text-transform: uppercase; letter-spacing: 0; }
+.dv-root a, .dv-root button, .dv-root label, .dv-root legend, .dv-root th, .dv-root td { font-family: inherit; letter-spacing: 0; text-transform: none; }
+.dv-root .dv-btn { font-family: 'Segoe UI', SegoeUI, 'Open Sans', Arial, sans-serif; line-height: 36px; }
+.dv-root .dv-h2 { text-transform: uppercase; }
+
+/* inline editing + structure controls (Builder v2 design mode only) */
+.dv-root .dv-ed { cursor: text; border-radius: 2px; }
+.dv-root.dv-design .dv-ed:hover { outline: 1px dashed rgba(232,89,12,.8); outline-offset: 1px; }
+.dv-root .dv-ed-empty { opacity: .45; font-style: italic; font-weight: 400; }
+.dv-root .dv-ed-input { font: inherit; color: inherit; background: #fffbe6; border: 1px dashed #e8590c; padding: 0 3px; margin: 0; min-width: 40px; max-width: 100%; outline: none; text-transform: none; border-radius: 2px; }
+.dv-root textarea.dv-ed-input { width: 100%; min-height: 56px; display: block; line-height: 19px; resize: vertical; }
+.dv-root .dv-ctl { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: none; gap: 2px; z-index: 5; line-height: 1; }
+.dv-root .dv-top-a:hover .dv-ctl, .dv-root .dv-sub li:hover .dv-ctl, .dv-root .dv-tab:hover .dv-ctl { display: inline-flex; }
+.dv-root .dv-ctl b { font: 700 11px/1 Arial, sans-serif; padding: 3px 5px; background: #fff; color: #1b489c; border: 1px solid #1b489c; border-radius: 3px; cursor: pointer; }
+.dv-root .dv-ctl b.del { color: #c92a2a; border-color: #c92a2a; }
+.dv-root .dv-sub li, .dv-root .dv-tab { position: relative; }
+.dv-root .dv-tab .dv-ctl { right: -2px; top: -9px; transform: none; }
+.dv-root .dv-add { display: block; margin: 6px 0 6px 0; padding: 7px 14px; font: 600 12px Arial, sans-serif; color: #1b489c; background: transparent; border: 1px dashed #1b489c; border-radius: 4px; cursor: pointer; width: calc(100% - 28px); margin-left: 14px; text-align: center; }
+.dv-root .dv-add.inline { display: inline-block; width: auto; margin: 0 0 0 6px; padding: 0 12px; line-height: 32px; }
+.dv-root .dv-tabs .dv-add { align-self: flex-start; margin: 2px 0 0 6px; }
+.dv-root .dv-hd-radio .dv-led { cursor: pointer; }
+.dv-root .dv-hint-add { margin-left: 10px; font-size: 12px; color: #999; }
+
+.dv-root .dv-cols { display: flex; gap: 38px; align-items: flex-start; }
+.dv-root .dv-col { flex: 1 1 0; min-width: 320px; display: flex; flex-direction: column; gap: 18px; }
+.dv-root .dv-col .dv-card { flex: none; width: 100%; min-width: 0; }
+
+.dv-root .dv-subhead { margin: 6px 0 14px 20px; padding-bottom: 4px; font: 600 15px/20px 'Segoe UI Semibold', 'Segoe UI', SegoeUI, Arial, sans-serif; color: #1b489c; border-bottom: 1px solid #dfe6f5; }
+.dv-root .dv-subhead.lg { font-size: 18px; }
+.dv-root hr.dv-divider { border: 0; border-top: 1px solid #ddd; margin: 4px 0 18px; }
+.dv-root.dv-design hr.dv-divider { padding: 4px 0; background-clip: content-box; cursor: pointer; }
+
+.dv-root .dv-err { margin-top: 4px; color: #c92a2a; font-size: 12px; }
+.dv-root .dv-select.dv-changed, .dv-root .dv-input.dv-changed { border-color: #1b489c; background: #f3f7ff; }
+.dv-root .dv-select:disabled, .dv-root .dv-input:disabled { background: #f6f6f6; color: #555; }
+.dv-root .dv-btn:disabled { opacity: .45; cursor: default; background: #fff; color: #1b489c; }
+
+/* drag & drop indicators (design mode) */
+.dv-root.dv-design [draggable=true] { cursor: grab; }
+.dv-root .dv-row.dv-drop-before, .dv-root .dv-card-row.dv-drop-before, .dv-root .dv-subhead.dv-drop-before, .dv-root hr.dv-drop-before { box-shadow: 0 -3px 0 0 #e8590c; }
+.dv-root .dv-row.dv-drop-after, .dv-root .dv-card-row.dv-drop-after, .dv-root .dv-subhead.dv-drop-after, .dv-root hr.dv-drop-after { box-shadow: 0 3px 0 0 #e8590c; }
+.dv-root .dv-table th.dv-drop-before { box-shadow: inset 4px 0 0 #e8590c; }
+.dv-root .dv-table th.dv-drop-after { box-shadow: inset -4px 0 0 #e8590c; }
+.dv-root .dv-top-a.dv-drop-before, .dv-root .dv-sub li.dv-drop-before { box-shadow: 0 -3px 0 0 #e8590c; }
+.dv-root .dv-top-a.dv-drop-after, .dv-root .dv-sub li.dv-drop-after { box-shadow: 0 3px 0 0 #e8590c; }
+.dv-root .dv-tab.dv-drop-before { box-shadow: -4px 0 0 0 #e8590c; }
+.dv-root .dv-tab.dv-drop-after { box-shadow: 4px 0 0 0 #e8590c; }
+
+/* radio-column matrix (device Summary 'Wireless' box) and the hide-when-empty badge */
+.dv-root .dv-badge { margin-left: 10px; padding: 1px 7px; font: 600 10px Arial, sans-serif; color: #8a5a00; background: #fff4e0; border: 1px solid #f0c987; border-radius: 9px; vertical-align: middle; }
+.dv-root table.dv-mx { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.dv-root table.dv-mx th { padding: 8px 10px; text-align: left; font-weight: 700; color: #333; }
+.dv-root table.dv-mx td { padding: 8px 10px; border-bottom: 1px solid #e8edf6; color: #333; }
+.dv-root table.dv-mx tbody tr:nth-child(even) { background: #f7f9fc; }
+.dv-root table.dv-mx td.k { width: 160px; }
+.dv-root table.dv-mx tr.dv-drop-before { box-shadow: 0 -3px 0 0 #e8590c; }
+.dv-root table.dv-mx tr.dv-drop-after { box-shadow: 0 3px 0 0 #e8590c; }
+.dv-root table.dv-mx tr.sel { outline: 2px solid #e8590c; outline-offset: -2px; }
