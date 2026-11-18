@@ -33,7 +33,9 @@ const RADIO_NUM = { radio24: 0, radio1: 1, radio2: 2 };
 const logger = require('../utils/logger');
 const { deduplicateIds } = require('./wireframeBuilder');
 
-const POLL_INTERVAL_SECONDS = parseInt(process.env.LIVE_POLL_INTERVAL_SECONDS || '60', 10);
+// Background poll: every 5 minutes by default, and (for device-look screens) only the Summary page's OIDs —
+// every other tab is read when somebody opens it (see refreshDevice's `groupIds`).
+const POLL_INTERVAL_SECONDS = parseInt(process.env.LIVE_POLL_INTERVAL_SECONDS || '300', 10);
 const STALE_AFTER_SECONDS   = POLL_INTERVAL_SECONDS * 2;
 /** An on-demand read re-polls the device when the stored values are older than this. */
 const ON_DEMAND_MAX_AGE_SECONDS = 15;
@@ -227,14 +229,18 @@ const titleCase = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 function buildCurrentResponse({ device, definition, doc, now = new Date() }) {
   const stored = new Map();
   for (const v of (doc && doc.values) || []) stored.set(`${v.groupId}::${v.parameterId}`, v);
-  const collectedAt = doc && doc.collectedAt ? new Date(doc.collectedAt) : null;
-  const ageSeconds = collectedAt ? (now - collectedAt) / 1000 : Infinity;
+  const docCollectedAt = doc && doc.collectedAt ? new Date(doc.collectedAt) : null;
   const pollStatus = (doc && doc.pollStatus) || 'NOT_POLLED';
+  // Scoped polls (Summary in the background, one tab when opened) record when each group was last read; a document
+  // without groupReadAt comes from a full poll and every group shares collectedAt.
+  const groupReadAt = doc && doc.groupReadAt ? doc.groupReadAt : null;
 
   const groups = groupEntries(definition.entries).map((g) => ({
     groupId: g.groupId,
     label: titleCase(g.groupId),
     parameters: g.params.map((e) => {
+      const collectedAt = groupReadAt ? (groupReadAt[e.groupId] ? new Date(groupReadAt[e.groupId]) : null) : docCollectedAt;
+      const ageSeconds = collectedAt ? (now - collectedAt) / 1000 : Infinity;
       const key = `${e.groupId}::${e.parameterId}`;
       const hasOid = !!normOid(e.snmpOid);
       const sv = stored.get(key);
@@ -291,7 +297,7 @@ function buildCurrentResponse({ device, definition, doc, now = new Date() }) {
       deviceId: String(device._id),
       productDefinitionId: definition.productDefinitionId,
       registryVersion: definition.registryVersion,
-      collectedAt: collectedAt ? collectedAt.toISOString() : null,
+      collectedAt: docCollectedAt ? docCollectedAt.toISOString() : null,
       pollStatus,
       ...(doc && doc.pollError && pollStatus !== 'OK' ? { pollError: doc.pollError } : {}),
       groups,
@@ -546,19 +552,140 @@ function splitHostPort(device) {
 
 const inflight = new Map(); // deviceId → Promise
 
+const HEADER_GROUP_ID = '__header';
+
 /**
- * Poll one device now: walk the definition's OID subtree, persist the values.
- * Concurrent calls for the same device share one walk. Never throws.
+ * The groups the background poll (and "Refresh" on those screens) reads for a device-look screen: the Quick Start / Summary
+ * page and the Monitor page — nothing else — plus the header bar's values. Every other page/tab is read when it is opened.
+ * A screen with neither page falls back to its first page + any Statistics sub menu. Returns null when the wireframe
+ * carries no page information.
  */
-function refreshDevice(device) {
-  const key = String(device._id);
+function pickSummaryGroups(groups) {
+  const withPage = (groups || []).filter((g) => g && g.groupId && g.groupId !== HEADER_GROUP_ID && g.uiPage);
+  if (!withPage.length) return null;
+  const quick = withPage.filter((g) => /^\s*(quick\s*start|summary)\s*$/i.test(String(g.uiPage)) || /^\s*summary\s*$/i.test(String(g.uiTab || '')));
+  const monitor = withPage.filter((g) => /^\s*monitor\s*$/i.test(String(g.uiPage)));
+  let picked = [...quick, ...monitor];
+  if (!picked.length) {
+    // No Quick Start / Monitor page (e.g. a draft screen "Senao_draft1 > System | Wireless | … | Link Statistics"): the first
+    // menu entry plus every Statistics entry. When all groups share one page, the sub menu is the menu level.
+    const onePage = new Set(withPage.map((g) => g.uiPage)).size === 1;
+    const levelOf = (g) => (onePage ? (g.uiParent || g.uiTab || g.groupId) : g.uiPage);
+    const first = [...withPage].sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0))[0];
+    picked = withPage.filter((g) => levelOf(g) === levelOf(first) || /statistic|monitor/i.test(`${g.uiPage} ${g.uiParent || ''} ${g.uiTab || ''}`));
+  }
+  return new Set(picked.map((g) => g.groupId).concat(HEADER_GROUP_ID));
+}
+
+/**
+ * Exact instance OIDs for the background (Summary/Statistics) poll: the rows the last WALK of each group found, so the poll
+ * is a few plain GETs (~10 ms each on these agents) instead of GETBULKs over whole radio tables (0.4–1.2 s each).
+ * Returns { oids, expect } (expect: rows per parameter that must come back), or null → walk: no recent walk of some group
+ * (first read, new field, older than maxWalkAgeMs — which is also how new table rows get picked up). Values that came from
+ * the device's web UI / standard MIBs are not read by GET. maxWalkAgeMs = Infinity: whatever rows were ever learned.
+ */
+function knownInstanceTargets(entries, stored, now = Date.now(), maxWalkAgeMs = 60 * 60_000) {
+  const anyAge = maxWalkAgeMs === Infinity;       // fallback after a failed walk
+  if (!stored || !Array.isArray(stored.values) || (!anyAge && !stored.walkedAt)) return null;
+  const byKey = new Map(stored.values.map((v) => [`${v.groupId}::${v.parameterId}`, v.instances || []]));
+  const oids = new Set();
+  const expect = new Map();                       // `${groupId}::${parameterId}` → how many rows the last read found
+  for (const e of entries) {
+    const base = normOid(e.snmpOid);
+    if (!base) continue;
+    if (!anyAge) {
+      const at = stored.walkedAt[e.groupId];
+      if (!at || now - new Date(at).getTime() > maxWalkAgeMs) return null;
+    }
+    const key = `${e.groupId}::${e.parameterId}`;
+    for (const i of byKey.get(key) || []) {
+      if (i.web || i.src) continue;
+      if (i.index === '' || i.index == null) { oids.add(base); oids.add(`${base}.0`); }   // the OID itself, or its scalar instance
+      else oids.add(`${base}.${i.index}`);
+      expect.set(key, (expect.get(key) || 0) + 1);
+    }
+  }
+  return oids.size ? { oids: Array.from(oids), expect } : null;
+}
+
+/**
+ * Read exactly the wanted OIDs of a scoped poll without walking the tables around them. Per table (OIDs sharing a parent) the
+ * rows are learned from ONE column (a walk of that column alone: 1–2 requests), then every wanted column of that table is read
+ * by plain GET for those rows. Scalars are asked both as the OID itself and as `.0`. A table whose column walk fails is skipped;
+ * only when every table fails does the whole read fail (so the caller's reachability logic decides, not one slow column).
+ */
+async function readScopedByRows({ entries, host, port, community }) {
+  const tables = new Map();       // parent OID → { first, bases }
+  for (const e of entries) {
+    const base = normOid(e.snmpOid);
+    if (!base) continue;
+    const parent = oidParts(base).slice(0, -1).join('.');
+    if (!tables.has(parent)) tables.set(parent, { first: base, bases: new Set() });
+    tables.get(parent).bases.add(base);
+  }
+  const targets = new Set();
+  let failed = 0; let lastErr = null;
+  for (const { first, bases } of tables.values()) {
+    const rows = new Set();
+    try {
+      const vbs = await walkSubtree({ host, port, community, rootOid: first, timeoutMs: 3000, retries: 2, maxRepetitions: 10, overallTimeoutMs: 10000 });
+      for (const vb of vbs) { const o = normOid(vb.oid); if (o && o.startsWith(`${first}.`)) rows.add(o.slice(first.length + 1)); }
+    } catch (err) { failed += 1; lastErr = err; }
+    for (const b of bases) {
+      for (const r of rows) targets.add(`${b}.${r}`);
+      targets.add(b); targets.add(`${b}.0`);
+    }
+  }
+  if (tables.size && failed === tables.size) throw lastErr;
+  return getOids({ host, port, community, oids: Array.from(targets), timeoutMs: 2000, retries: 1, overallTimeoutMs: 30000 });
+}
+
+const scopeCache = new Map();   // productDefinitionId → { at, set }
+
+/**
+ * Group scope of the background poll: a Set of groupIds for a device-look (layoutMode 'device') screen, or null = poll
+ * the whole definition (classic screens, uploaded definitions, no wireframe).
+ */
+async function backgroundScope(productDefinitionId, definition) {
+  if (!productDefinitionId) return null;
+  const hit = scopeCache.get(productDefinitionId);
+  if (hit && Date.now() - hit.at < 60_000) return hit.set;
+  let set = null;
+  try {
+    const db = nmsDb();
+    const wf = db ? await db.collection('node_view_wireframes').findOne(
+      { productDefinitionId, status: 'ACTIVE' },
+      { projection: { 'wireframe.groups.groupId': 1, 'wireframe.groups.uiPage': 1, 'wireframe.groups.uiParent': 1, 'wireframe.groups.uiTab': 1, 'wireframe.groups.displayOrder': 1 } },
+    ) : null;
+    if (wf && wf.wireframe && Array.isArray(wf.wireframe.groups)) set = pickSummaryGroups(wf.wireframe.groups);
+    // an uploaded definition without a wireframe: its entries carry the page / sub menu / tab themselves
+    if (!set && definition && Array.isArray(definition.entries)) {
+      const byGroup = new Map();
+      for (const e of definition.entries) if (e.groupId && !byGroup.has(e.groupId)) byGroup.set(e.groupId, { groupId: e.groupId, uiPage: e.uiPage, uiParent: e.uiParent, uiTab: e.uiTab, displayOrder: e.groupDisplayOrder });
+      set = pickSummaryGroups([...byGroup.values()]);
+    }
+  } catch { return null; }
+  scopeCache.set(productDefinitionId, { at: Date.now(), set });
+  return set;
+}
+
+/**
+ * Poll one device now: walk the OID subtrees of the wanted groups, persist (merge) the values.
+ *   refreshDevice(device)                     → the background scope: Summary only for a device-look screen, else everything
+ *   refreshDevice(device, { groupIds })       → just those groups (a tab being opened / refreshed)
+ *   refreshDevice(device, { full: true })     → the whole definition (Parameters admin page)
+ * Concurrent calls for the same device and scope share one walk. Never throws.
+ */
+function refreshDevice(device, opts = {}) {
+  const groupIds = Array.isArray(opts.groupIds) && opts.groupIds.length ? [...new Set(opts.groupIds.map(String))].sort() : null;
+  const key = String(device._id) + (groupIds ? `|${groupIds.join(',')}` : opts.full ? '|full' : '');
   if (inflight.has(key)) return inflight.get(key);
-  const p = doRefresh(device).finally(() => inflight.delete(key));
+  const p = doRefresh(device, { groupIds, full: !!opts.full }).finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
 }
 
-async function doRefresh(device) {
+async function doRefresh(device, { groupIds = null, full = false } = {}) {
   const col = valuesCol();
   if (!col) return { pollStatus: 'NOT_POLLED', error: 'database not connected' };
   const now = new Date();
@@ -611,15 +738,60 @@ async function doRefresh(device) {
     return { pollStatus: 'NO_CREDENTIALS' };
   }
 
-  const entries = rebaseEntries(definition.entries, device.sysObjectID);   // OIDs as THIS device serves them
+  // Which groups to read: the ones asked for (a tab), else the background scope (Summary for a device-look screen),
+  // else everything. A scope that matches no OID falls back to everything rather than reading nothing.
+  let groupSet = null;
+  let touchCollected = true;                       // only background/full polls move the device-level collectedAt
+  if (groupIds) { groupSet = new Set(groupIds); touchCollected = false; }
+  else if (!full) groupSet = await backgroundScope(device.productDefinitionId, definition);
+  let scoped = groupSet ? definition.entries.filter((e) => groupSet.has(e.groupId)) : definition.entries;
+  if (groupSet && !scoped.length && groupIds) {
+    // a tab with no OID of its own (fixed text / calculated fields only): nothing to read
+    return { pollStatus: 'NOT_POLLED' };
+  }
+  if (groupSet && !scoped.length) {
+    logger.warn({ msg: 'live poll: scope matches no OID — reading the whole definition', deviceId: base._id, scope: [...groupSet].slice(0, 8) });
+    groupSet = null; scoped = definition.entries; touchCollected = true;
+  }
+  const entries = rebaseEntries(scoped, device.sysObjectID);   // OIDs as THIS device serves them
   const oids = entries.map((e) => normOid(e.snmpOid)).filter(Boolean);
   const { host, port } = splitHostPort(device);
   try {
-    const varbinds = [];
-    for (const rootOid of walkRoots(oids)) {
-      // retries: the agent on some radios is silent for ~8 s at a time; a poll that gave up after one
-      // lost request would flag a healthy device UNREACHABLE until the next cycle.
-      varbinds.push(...await walkSubtree({ host, port, community: device.snmpCommunity, rootOid, retries: 3 }));
+    let varbinds = null;
+    let viaGet = false;
+    let walkFellBack = false;     // the walk was tried and failed; the rows were confirmed by GET instead
+    let prevDoc = null;
+    if (groupSet) prevDoc = await col.findOne({ _id: base._id }, { projection: { values: 1, groupReadAt: 1, walkedAt: 1, collectedAt: 1 } });
+    const bgScope = !!groupSet && !groupIds;                       // the background (Summary) poll
+    const getKnown = async (known) => {
+      if (!known) return null;
+      const got = await getOids({ host, port, community: device.snmpCommunity, oids: known.oids, timeoutMs: 2000, retries: 1, overallTimeoutMs: 20000 }).catch(() => []);
+      const back = mapVarbinds(entries, got);
+      for (const [key, n] of known.expect) if ((back.get(key) || []).length < n) return null;   // a row is gone — the table changed
+      return got;
+    };
+    // Background poll: GET the rows the last walk found (an hour's worth), instead of walking radio tables again.
+    if (bgScope) { varbinds = await getKnown(knownInstanceTargets(entries, prevDoc)); viaGet = !!varbinds; }
+    if (!varbinds) {
+      try {
+        if (groupSet) {
+          // Summary/Monitor in the background, or one tab: read only those OIDs (rows learned per table, then GET)
+          varbinds = await readScopedByRows({ entries, host, port, community: device.snmpCommunity });
+        } else {
+          varbinds = [];
+          for (const rootOid of walkRoots(oids)) {
+            // retries: the agent on some radios is silent for ~8 s at a time; a poll that gave up after one
+            // lost request would flag a healthy device UNREACHABLE until the next cycle.
+            varbinds.push(...await walkSubtree({ host, port, community: device.snmpCommunity, rootOid, retries: 3 }));
+          }
+        }
+      } catch (walkErr) {
+        // A walk this agent cannot finish in time must not blind the poll: read the rows we already know by GET.
+        varbinds = bgScope ? await getKnown(knownInstanceTargets(entries, prevDoc, Date.now(), Infinity)) : null;
+        if (!varbinds) throw walkErr;
+        viaGet = true; walkFellBack = true;
+        logger.warn({ msg: 'live poll: walk failed — read the last known rows by GET instead', deviceId: base._id, host, err: walkErr.message });
+      }
     }
     const mapped = applyFirmwareQuirks(entries, await mapWithGetFallback(entries, varbinds, { host, port, community: device.snmpCommunity }), device);
     await overlayWeb(entries, mapped, device, host, { withConfig: true });
@@ -628,18 +800,49 @@ async function doRefresh(device) {
       const [groupId, parameterId] = k.split('::');
       return { groupId, parameterId, instances };
     });
+    // Merge: groups that were not read this time keep their stored values and their own read time.
+    const readGroups = new Set(entries.map((e) => e.groupId));
+    const prev = prevDoc;
+    const kept = prev && Array.isArray(prev.values) ? prev.values.filter((v) => !readGroups.has(v.groupId)) : [];
+    const groupReadAt = {};
+    if (prev) {
+      const legacyAt = prev.collectedAt || null;      // a full poll before groupReadAt existed: every kept group dates from it
+      for (const v of kept) { const at = (prev.groupReadAt && prev.groupReadAt[v.groupId]) || legacyAt; if (at) groupReadAt[v.groupId] = at; }
+      for (const [g, at] of Object.entries(prev.groupReadAt || {})) if (!readGroups.has(g) && !groupReadAt[g]) groupReadAt[g] = at;
+    }
+    for (const g of readGroups) groupReadAt[g] = now;
+    // when each group's rows were last learned by a walk (the GET fast path above is valid for an hour after it)
+    const walkedAt = { ...((prev && prev.walkedAt) || {}) };
+    // (a walk that failed and was covered by GET counts too: it is retried in an hour, not on every poll)
+    if (!viaGet || walkFellBack) for (const g of readGroups) walkedAt[g] = now;
     await col.replaceOne({ _id: base._id }, {
-      ...base, pollStatus: 'OK', pollError: null, collectedAt: now, values,
+      ...base, pollStatus: 'OK', pollError: null,
+      collectedAt: touchCollected ? now : ((prev && prev.collectedAt) || now),
+      values: [...kept, ...values], groupReadAt, walkedAt,
     }, { upsert: true });
     await markSeen(device, now);
     await applyGps(device, definition, mapped).catch((e) => logger.warn({ msg: 'live GPS update failed', err: e.message }));
     await applyDeviceGps(device);
     // Successful poll → ensure device is ONLINE in inventory/dashboard
     setDeviceOperationalStatus(String(device._id), 'ONLINE').catch(() => {});
-    logger.info({ msg: 'live parameters refreshed', deviceId: base._id, host, varbinds: varbinds.length, mapped: values.length });
+    logger.info({ msg: 'live parameters refreshed', deviceId: base._id, host, scope: groupSet ? (groupIds ? 'groups' : 'summary') : 'full', via: viaGet ? 'get' : 'walk', groups: readGroups.size, varbinds: varbinds.length, mapped: values.length });
     return { pollStatus: 'OK' };
   } catch (err) {
-    const pollStatus = isUnreachable(err) ? 'UNREACHABLE' : 'ERROR';
+    let pollStatus = isUnreachable(err) ? 'UNREACHABLE' : 'ERROR';
+    // A slow or silent walk is not proof the device is down: the radios' agents answer a single GET in ~10 ms while a
+    // GETBULK over a radio table can take a second per request. Decide reachability by a plain GET, never by the walk.
+    if (pollStatus === 'UNREACHABLE') {
+      const probe = await probeDevice({ host, port, community: device.snmpCommunity }).catch(() => ({ online: false }));
+      if (probe.online) {
+        const stored = await col.findOne({ _id: base._id }, { projection: { pollStatus: 1 } }).catch(() => null);
+        // keep an OK status (the stored values are simply aging); otherwise say the read was slow, not that the device is gone
+        const keep = stored && stored.pollStatus === 'OK' ? 'OK' : 'SLOW';
+        await col.updateOne({ _id: base._id }, { $set: { ...base, pollStatus: keep, pollError: err.message } }, { upsert: true });
+        setDeviceOperationalStatus(String(device._id), 'ONLINE').catch(() => {});
+        logger.warn({ msg: 'live parameter read timed out but the device answers SNMP GET — not marking it unreachable', deviceId: base._id, host, port, err: err.message });
+        return { pollStatus: keep, error: err.message };
+      }
+    }
     // keep the previous values/collectedAt so the UI can show them as stale
     await col.updateOne({ _id: base._id }, { $set: { ...base, pollStatus, pollError: err.message } }, { upsert: true });
     // Poll failed with UNREACHABLE → flip device to OFFLINE in inventory/dashboard
@@ -820,10 +1023,12 @@ async function syncWithProbe(device, online) {
   const col = valuesCol();
   if (!col) return { pollStatus: 'NOT_POLLED', collectedAt: null };
   const id = String(device._id);
-  let doc = await col.findOne({ _id: id }, { projection: { pollStatus: 1, collectedAt: 1 } });
+  let doc = await col.findOne({ _id: id }, { projection: { pollStatus: 1, collectedAt: 1, lastAttemptAt: 1 } });
   if (online) {
     probeFailures.delete(id);
-    if (doc && doc.pollStatus && doc.pollStatus !== 'OK' && doc.pollStatus !== 'NOT_POLLED' && !inflight.has(id)) {
+    // not straight after a poll that just failed: a slow agent would otherwise be re-walked on every probe
+    const recentAttempt = doc && doc.lastAttemptAt && Date.now() - new Date(doc.lastAttemptAt).getTime() < 60_000;
+    if (doc && doc.pollStatus && doc.pollStatus !== 'OK' && doc.pollStatus !== 'NOT_POLLED' && doc.pollStatus !== 'SLOW' && !inflight.has(id) && !recentAttempt) {
       logger.info({ msg: 'live probe: device answering again — re-polling', deviceId: id, was: doc.pollStatus });
       refreshDevice(device).catch(() => {});
       // Device is reachable again → flip back to ONLINE in inventory/dashboard
@@ -915,7 +1120,7 @@ async function getCachedOnly(device) {
  * older than ON_DEMAND_MAX_AGE_SECONDS or `force` is set.
  * @returns {Promise<{ http: number, body: object }>}
  */
-async function getCurrent(device, { force = false } = {}) {
+async function getCurrent(device, { force = false, full = true } = {}) {
   await ensureDefinitionLink(device);
   const definition = await loadEffectiveDefinition(device.productDefinitionId);
   if (!definition) {
@@ -926,7 +1131,7 @@ async function getCurrent(device, { force = false } = {}) {
   let doc = col ? await col.findOne({ _id: String(device._id) }) : null;
   const age = doc && doc.lastAttemptAt ? (Date.now() - new Date(doc.lastAttemptAt)) / 1000 : Infinity;
   if (force || age > ON_DEMAND_MAX_AGE_SECONDS) {
-    await refreshDevice(device);
+    await refreshDevice(device, { full });
     doc = col ? await col.findOne({ _id: String(device._id) }) : null;
   }
   return { http: 200, body: buildCurrentResponse({ device, definition, doc }) };
@@ -959,8 +1164,8 @@ function startScheduler() {
 
 module.exports = {
   // pure
-  normOid, walkRoots, mapVarbinds, scalarGetTargets, mergeScalarGets, isLiveEntry, liveGetTargets, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
+  normOid, walkRoots, pickSummaryGroups, knownInstanceTargets, mapVarbinds, scalarGetTargets, mergeScalarGets, isLiveEntry, liveGetTargets, resolveDisplay, groupEntries, buildCurrentResponse, dedupeEntries, splitHostPort,
   // io
-  loadDefinition, loadEffectiveDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, updateDeviceFields, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, syncWithProbe, applyDeviceGps, pollMonitorGroups, startScheduler, pollAll,
+  readScopedByRows, loadDefinition, loadEffectiveDefinition, definitionForDevice, findDefinitionIdByVendor, resolveDefinitionId, ensureDefinitionLink, findDevice, updateDeviceFields, refreshDevice, resetStaleLiveState, getCurrent, getCachedOnly, syncWithProbe, applyDeviceGps, pollMonitorGroups, startScheduler, pollAll,
   POLL_INTERVAL_SECONDS,
 };

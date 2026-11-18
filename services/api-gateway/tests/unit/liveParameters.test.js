@@ -8,7 +8,7 @@
  */
 
 const {
-  normOid, walkRoots, mapVarbinds, resolveDisplay, groupEntries, buildCurrentResponse,
+  normOid, walkRoots, pickSummaryGroups, knownInstanceTargets, mapVarbinds, resolveDisplay, groupEntries, buildCurrentResponse,
 } = require('../../src/live/liveParameters');
 
 const E = '.1.3.6.1.4.1.52619';
@@ -141,7 +141,7 @@ describe('buildCurrentResponse', () => {
     expect(param('missingOnDevice')).toMatchObject({ readStatus: 'NO_SUCH_OBJECT', value: null });
   });
   it('marks values STALE once the last successful poll is old', () => {
-    const late = buildCurrentResponse({ device, definition, doc, now: new Date('2026-10-05T10:10:00Z') });
+    const late = buildCurrentResponse({ device, definition, doc, now: new Date('2026-10-05T10:11:00Z') });
     const p = late.data.groups.flatMap((g) => g.parameters).find((x) => x.parameterId === 'ssid');
     expect(p.freshnessState).toBe('STALE');
   });
@@ -154,6 +154,17 @@ describe('buildCurrentResponse', () => {
     expect(down.data).toMatchObject({ pollStatus: 'UNREACHABLE', pollError: 'timed out' });
     expect(p.value).toBe('UBRMGMT');
     expect(p.freshnessState).toBe('STALE');
+  });
+  it('ages each group by its own read time once scoped polls record groupReadAt', () => {
+    const scoped = buildCurrentResponse({
+      device, definition, now: new Date('2026-10-05T10:03:00Z'),
+      doc: { ...doc, groupReadAt: { network: new Date('2026-10-05T10:02:50Z') } },
+    });
+    const all = scoped.data.groups.flatMap((g) => g.parameters);
+    expect(all.find((p) => p.parameterId === 'ipAddress')).toMatchObject({ freshnessState: 'FRESH', readStatus: 'SUCCESS' });
+    // 'radio' group was never read by a scoped poll: no read time, so not FRESH and not a bogus NO_SUCH_OBJECT
+    expect(all.find((p) => p.parameterId === 'missingOnDevice')).toMatchObject({ readStatus: 'UNKNOWN', collectedAt: null });
+    expect(all.find((p) => p.parameterId === 'ssid').freshnessState).toBe('STALE');
   });
   it('reports NOT_POLLED with no values before the first poll', () => {
     const fresh = buildCurrentResponse({ device, definition, doc: null, now });
@@ -180,5 +191,66 @@ describe('mapVarbinds: a table column next to a field bound to one row of that c
   test('arc boundaries still hold: .1.2.3 does not claim .1.2.30', () => {
     const m = mapVarbinds([{ groupId: 'g', parameterId: 'a', snmpOid: '.1.2.3' }], [{ oid: '.1.2.30.0', value: 'x' }, { oid: '.1.2.3.0', value: 'y' }]);
     expect(m.get('g::a')).toEqual([{ index: '', raw: 'y' }]);
+  });
+});
+
+describe('pickSummaryGroups (background poll scope)', () => {
+  const g = (groupId, uiPage, displayOrder, uiParent = '', uiTab = '') => ({ groupId, uiPage, uiParent, uiTab, displayOrder });
+  it('takes only the Quick Start and Monitor pages plus the header values', () => {
+    const set = pickSummaryGroups([
+      g('qs', 'Quick Start', 1, 'Quick Start', 'Summary'), g('link', 'Monitor', 5, 'Radio 1 Statistics', 'Link'), g('if', 'Monitor', 6, 'Radio 1 Statistics', 'Interface'),
+      g('prop', 'Wireless', 2, 'Radio 1', 'Properties'), g('lan', 'Network', 3, 'Ethernet', 'LAN 1'), g('misc', 'Other', 9), g('__header', '', 0),
+    ]);
+    expect([...set].sort()).toEqual(['__header', 'if', 'link', 'qs']);
+  });
+  it('accepts a page named Summary instead of Quick Start', () => {
+    const set = pickSummaryGroups([g('sys', 'Summary', 2), g('stat', 'Monitor', 1), g('cfg', 'Wireless', 4)]);
+    expect([...set].sort()).toEqual(['__header', 'stat', 'sys']);
+  });
+  it('a single-page draft screen: first sub menu + Statistics sub menus only (Senao_draft1 > System | Wireless | Network | VLAN | Link Statistics | Wireless Statistics)', () => {
+    const set = pickSummaryGroups([g('sys', 'Senao_draft1', 1, 'System'), g('wl', 'Senao_draft1', 2, 'Wireless'), g('net', 'Senao_draft1', 3, 'Network'),
+      g('vlan', 'Senao_draft1', 4, 'VLAN'), g('ls', 'Senao_draft1', 5, 'Link Statistics'), g('ws', 'Senao_draft1', 6, 'Wireless Statistics')]);
+    expect([...set].sort()).toEqual(['__header', 'ls', 'sys', 'ws']);
+  });
+  it('several pages without Quick Start / Monitor: the first page + Statistics', () => {
+    const set = pickSummaryGroups([g('a', 'Home', 1), g('b', 'Home', 2), g('c', 'Radio', 3), g('d', 'Radio Statistics', 4)]);
+    expect([...set].sort()).toEqual(['__header', 'a', 'b', 'd']);
+  });
+  it('returns null when the wireframe has no page information (poll everything)', () => {
+    expect(pickSummaryGroups([g('a', '', 1)])).toBeNull();
+    expect(pickSummaryGroups([])).toBeNull();
+  });
+});
+
+describe('knownInstanceTargets (Summary poll by GET)', () => {
+  const now = Date.parse('2026-11-18T12:00:00Z');
+  const es = [
+    { groupId: 'sys', parameterId: 'model', snmpOid: '.1.3.6.1.4.1.9.1.1' },
+    { groupId: 'sys', parameterId: 'rssi', snmpOid: '.1.3.6.1.4.1.9.3.7' },
+    { groupId: 'sys', parameterId: 'absent', snmpOid: '.1.3.6.1.4.1.9.9.9' },
+    { groupId: 'sys', parameterId: 'fromWeb', snmpOid: '.1.3.6.1.4.1.9.5.5' },
+  ];
+  const stored = (walkedAt) => ({
+    walkedAt: { sys: walkedAt },
+    values: [
+      { groupId: 'sys', parameterId: 'model', instances: [{ index: '', raw: 'UBR655' }] },
+      { groupId: 'sys', parameterId: 'rssi', instances: [{ index: '1', raw: '-40' }, { index: '2', raw: '-41' }] },
+      { groupId: 'sys', parameterId: 'fromWeb', instances: [{ index: '', raw: 'x', web: true }] },
+    ],
+  });
+  it('GETs exactly the rows the last walk found (scalars as .0), skipping parameters with no value or a web source', () => {
+    const k = knownInstanceTargets(es, stored('2026-11-18T11:30:00Z'), now);
+    // a scalar is asked as the OID itself and as .0 (the stored index '' cannot tell which one the agent serves)
+    expect(k.oids.sort()).toEqual(['.1.3.6.1.4.1.9.1.1', '.1.3.6.1.4.1.9.1.1.0', '.1.3.6.1.4.1.9.3.7.1', '.1.3.6.1.4.1.9.3.7.2']);
+    expect([...k.expect]).toEqual([['sys::model', 1], ['sys::rssi', 2]]);
+  });
+  it('with Infinity reads whatever rows were ever learned (fallback after a failed walk)', () => {
+    expect(knownInstanceTargets(es, { values: stored('x').values }, now, Infinity).oids.sort())
+      .toEqual(['.1.3.6.1.4.1.9.1.1', '.1.3.6.1.4.1.9.1.1.0', '.1.3.6.1.4.1.9.3.7.1', '.1.3.6.1.4.1.9.3.7.2']);
+  });
+  it('returns null (walk) when the group was never walked, or the walk is older than an hour', () => {
+    expect(knownInstanceTargets(es, null, now)).toBeNull();
+    expect(knownInstanceTargets(es, { ...stored('x'), walkedAt: {} }, now)).toBeNull();
+    expect(knownInstanceTargets(es, stored('2026-11-18T10:30:00Z'), now)).toBeNull();
   });
 });

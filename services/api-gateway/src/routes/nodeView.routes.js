@@ -316,6 +316,42 @@ router.get(
 );
 
 /**
+ * Read one page/tab when it is opened (or its Refresh is pressed): a walk of just those groups' OIDs, merged into the
+ * stored values — the background poll only reads the Summary page. Answers the groups' values like monitor-live does.
+ *   GET /api/node-view/:deviceId/tab-live?groups=g1,g2,…   (≤ 40 groups)
+ */
+router.get(
+  '/:deviceId/tab-live',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'node-view.tab-live'),
+  async (req, res) => {
+    try {
+      const device = await live.findDevice(req.params.deviceId);
+      if (!device) return res.status(404).json({ status: 'error', error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found.' } });
+      const groups = String(req.query.groups || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 40);
+      if (!groups.length) return res.status(400).json({ status: 'error', error: { code: 'MISSING_GROUPS', message: 'groups is required' } });
+      const r = await live.refreshDevice(device, { groupIds: groups });
+      const cached = (await getCachedOnly(device)).body;
+      const inner = cached?.data ?? {};
+      const all = flattenValues(inner);
+      try {
+        const resolvedWf = await resolveWireframe(req.app.get('redis'), device.productDefinitionId);
+        applyDerivedValues(resolvedWf?.doc?.wireframe?.groups || [], all);
+      } catch (e) { logger.warn({ msg: 'tab-live: derived values failed', err: e.message }); }
+      const wanted = new Set(groups);
+      const values = {};
+      for (const [k, v] of Object.entries(all)) if (wanted.has(k.split('::')[0])) values[k] = v;
+      res.set('Cache-Control', 'no-store');
+      return res.json({ status: 'ok', data: {
+        pollStatus: r.pollStatus, collectedAt: new Date().toISOString(), values,
+        ...(r.error ? { error: r.error } : {}),
+      } });
+    } catch (e) {
+      return res.status(500).json({ status: 'error', error: { code: 'TAB_POLL_FAILED', message: e.message } });
+    }
+  },
+);
+
+/**
  * Per-device web login for firmware whose SNMP agent cannot serve its configuration (see live/webSource.js).
  *   PUT    { username, password }  store it (password AES-256-GCM encrypted on the device record)
  *   GET                            { configured, username }   (the password is never returned)
@@ -561,7 +597,7 @@ router.get(
       try {
         if (refresh) {
           // Explicit refresh requested — do a live SNMP poll (may be slow)
-          valuesData = (await live.getCurrent(device, { force: true })).body;
+          valuesData = (await live.getCurrent(device, { force: true, full: false })).body;   // Summary only for a device-look screen
         } else {
           // Default: return cached values only — instant, no SNMP
           valuesData = (await getCachedOnly(device)).body;

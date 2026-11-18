@@ -53,6 +53,17 @@ export async function fetchMonitorLive(deviceId: string, groupIds: string[], sig
   return res.data.status === 'ok' && res.data.data ? res.data.data : null;
 }
 
+// ── fetchTabLive ──────────────────────────────────────────────────────────────
+/**
+ * Read one page/tab of a device-look screen: the gateway walks just those groups' OIDs and merges them into the stored
+ * values. Called when a tab is opened (if its values are old) and by that tab's Refresh button.
+ */
+export async function fetchTabLive(deviceId: string, groupIds: string[], signal?: AbortSignal): Promise<MonitorLive | null> {
+  const res = await apiClient.get<{ status: string; data?: MonitorLive }>(
+    `${BASE}/${encodeURIComponent(deviceId)}/tab-live?groups=${encodeURIComponent(groupIds.join(','))}`, { signal });
+  return res.data.status === 'ok' && res.data.data ? res.data.data : null;
+}
+
 // ── fetchWireframe ────────────────────────────────────────────────────────────
 /**
  * Load just the static wireframe for a product definition.

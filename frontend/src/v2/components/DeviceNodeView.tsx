@@ -3,7 +3,7 @@
  * A thin adapter: wireframe groups → the renderer's sections, live values / edits / Save → its runtime binding.
  * All the state (polling, live refresh, edits, Apply) stays in NodeViewParameters; nothing is duplicated here.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { DeviceUiConfig, ResolvedHeader, UiDescriptorField, UiDescriptorSection } from '../../api/uiBuilder.api';
 import type { NodeViewValues, ParameterValueRecord, WireframeGroup, WireframeParameter } from '../../api/nodeView.types';
 import { valueKey } from '../../api/nodeView.types';
@@ -93,15 +93,48 @@ export interface DeviceNodeViewProps {
   pollStatus?: string;
   refreshing: boolean;
   onRefresh: () => void;
+  /** read these groups from the device now (the tab that was opened / its Refresh button) */
+  onReadTab?: (groupIds: string[]) => void;
+  tabLoading?: boolean;
 }
+
 
 export const DeviceNodeView: React.FC<DeviceNodeViewProps> = ({
   screenName, wireframe, deviceUi, header, values, canEdit, edits, errors, pendingFor, onEdit, applying,
-  onApplyGroups, onRevertGroups, collectedAt, pollStatus, refreshing, onRefresh,
+  onApplyGroups, onRevertGroups, collectedAt, pollStatus, refreshing, onRefresh, onReadTab, tabLoading,
 }) => {
   const { sections, paramOf } = useMemo(() => wireframeToSections(wireframe), [wireframe]);
   const [active, setActive] = useState<ActivePath>(() => firstPath(buildDeviceTree(screenName, sections)));
   const path = useMemo(() => resolvePath(buildDeviceTree(screenName, sections), active), [screenName, sections, active]);
+
+  // The groups behind the open page/tab. The background poll only reads the Summary page, so a tab is read when opened.
+  const tabGroupIds = useMemo(() => {
+    const tab = buildDeviceTree(screenName, sections).find((p) => p.name === path.page)?.parents.find((r) => r.name === path.parent)?.tabs.find((t) => t.name === path.tab);
+    return (tab?.sections ?? []).map((s) => s.sectionId);
+  }, [screenName, sections, path]);
+  const readAtOf = (gid: string): number | null => {
+    const g = wireframe.find((x) => x.groupId === gid);
+    let latest: number | null = null;
+    for (const p of g?.parameters ?? []) {
+      const at = values[valueKey(gid, p.parameterId)]?.collectedAt;
+      const t = at ? Date.parse(at) : NaN;
+      if (!Number.isNaN(t) && (latest === null || t > latest)) latest = t;
+    }
+    return latest;
+  };
+  /** does this group read anything from the device (an OID that is not fixed text / a calculation)? */
+  const readsDevice = (gid: string) => !!wireframe.find((x) => x.groupId === gid)?.parameters.some((p) => !p.hidden && !!p.snmpOid && p.valueSource !== 'static' && p.valueSource !== 'calc');
+  const tabKey = tabGroupIds.join('|');
+  const ready = Object.keys(values).length > 0;
+  useEffect(() => {
+    if (!onReadTab || !ready) return;
+    // a tab is read from the device only the FIRST time it is opened (never read before); after that only its Refresh button re-reads it
+    const stale = tabGroupIds.filter((gid) => readsDevice(gid) && readAtOf(gid) === null);
+    if (stale.length) onReadTab(stale);
+    // only when the tab changes (or the first reading arrives) — not on every values update
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabKey, ready]);
+  const tabReadAt = tabGroupIds.map(readAtOf).reduce<number | null>((m, t) => (t !== null && (m === null || t > m) ? t : m), null);
 
   const rec = (sid: string, f: UiDescriptorField): ParameterValueRecord | undefined => {
     const p = paramOf.get(`${sid}::${f.fieldId}`);
@@ -144,15 +177,16 @@ export const DeviceNodeView: React.FC<DeviceNodeViewProps> = ({
     },
   };
 
+  const lastReadMs = tabReadAt ?? (collectedAt ? Date.parse(collectedAt) : null);
   const status = pollStatus && pollStatus !== 'OK' ? pollStatus : null;
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: 'var(--vf-text-muted)', padding: '4px 2px 8px' }}>
-        <span>{collectedAt ? `Last read ${new Date(collectedAt).toLocaleTimeString()}` : 'No reading yet'}</span>
+        <span>{lastReadMs !== null ? `Last read ${new Date(lastReadMs).toLocaleTimeString()}` : 'No reading yet'}</span>
         {status && <span style={{ color: 'var(--vf-warning, #b7791f)' }}>· {status}</span>}
-        <button type="button" onClick={onRefresh} disabled={refreshing}
+        <button type="button" onClick={() => (onReadTab ? onReadTab(tabGroupIds.filter(readsDevice)) : onRefresh())} disabled={refreshing || !!tabLoading}
           style={{ fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)', cursor: 'pointer' }}>
-          {refreshing ? 'Refreshing…' : '⟳ Refresh'}
+          {refreshing || tabLoading ? 'Refreshing…' : '⟳ Refresh'}
         </button>
       </div>
       <div style={{ overflowX: 'auto', borderRadius: 8 }}>

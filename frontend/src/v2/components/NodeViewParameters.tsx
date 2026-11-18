@@ -21,14 +21,14 @@
  */
 
 import type React from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type {
   NodeViewChange, NodeViewChangeResult, NodeViewValues, ParameterValueRecord,
   WireframeGroup, WireframeParameter,
 } from '../../api/nodeView.types';
 import { valueKey } from '../../api/nodeView.types';
-import { applyNodeViewChanges, fetchMonitorLive, type LiveStatus } from '../../api/nodeView.api';
+import { applyNodeViewChanges, fetchMonitorLive, fetchTabLive, type LiveStatus } from '../../api/nodeView.api';
 
 import { DeviceNodeView } from './DeviceNodeView';
 import { Badge }   from './common/Badge';
@@ -741,31 +741,10 @@ function NodeViewParametersInner({
   const monitorGroupId = activeGroup?.uiPage === 'Monitor' ? activeGroup.groupId : '';
   const monitorEveryMs = /link/i.test(activeGroup?.uiTab ?? '') ? 2000 : 5000;
 
-  // Real-time targets, grouped by interval so one request serves every section that shares a rate:
-  //  • the active Monitor tab of an uploaded definition (2 s on "Link" tabs, otherwise 5 s)
-  //  • in a MIB Builder screen, every section its author marked "Live" (liveRefreshSeconds)
-  //  • in a MIB Builder screen, every section's configured pollIntervalSeconds (≥ 10 s)
-  //    — this is what makes the builder's "Default poll" and per-section "Poll" settings
-  //      actually drive real frontend refresh cycles.
-  const liveTargets = useMemo(() => {
-    const byMs = new Map<number, string[]>();
-    const add = (ms: number, id: string) => byMs.set(ms, [...(byMs.get(ms) ?? []), id]);
-    if (monitorGroupId) add(monitorEveryMs, monitorGroupId);
-    if (isMibDescriptorMode) {
-      for (const g of groups) {
-        const live = g.liveRefreshSeconds;
-        if (live && live >= 2) {
-          // liveRefreshSeconds takes priority (faster cadence)
-          add(Math.round(live) * 1000, g.groupId);
-        } else {
-          // Fall back to the section's pollIntervalSeconds (min 10 s to avoid hammering)
-          const poll = g.pollIntervalSeconds;
-          if (poll && poll >= 10) add(Math.round(poll) * 1000, g.groupId);
-        }
-      }
-    }
-    return Array.from(byMs.entries()).map(([ms, ids]) => ({ ms, ids: ids.slice(0, 6) }));
-  }, [monitorGroupId, monitorEveryMs, isMibDescriptorMode, groups]);
+  // No timers hitting the device, for any screen: Quick Start / Monitor are refreshed by the 5-minute background poll
+  // (gateway), every other tab is read once when first opened and then only by its Refresh button. The real-time
+  // (monitor-live) targets that used to be built here — 2–5 s for Monitor tabs, per-section poll intervals — are gone.
+  const liveTargets = useMemo(() => [] as Array<{ ms: number; ids: string[] }>, []);
   const liveKey = liveTargets.map((t) => `${t.ms}:${t.ids.join('+')}`).join('|');
 
   useEffect(() => {
@@ -797,7 +776,40 @@ function NodeViewParametersInner({
     // liveKey captures the targets; listing liveTargets itself would restart the timers on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId, liveKey]);
-  const values = useMemo(() => ({ ...cachedValues, ...liveOverlay }), [cachedValues, liveOverlay]);
+  // Device-look screens: the background poll only stores the Summary page; a tab's own values come from one read when
+  // it is opened, kept here (and stored by the gateway) until a newer cached reading of the same value arrives.
+  const [tabOverlay, setTabOverlay] = useState<NodeViewValues>({});
+  const [tabLoading, setTabLoading] = useState(false);
+  useEffect(() => { setTabOverlay({}); }, [deviceId]);
+  const loadTab = useCallback(async (groupIds: string[]) => {
+    if (!groupIds.length) return;
+    setTabLoading(true);
+    try {
+      const r = await fetchTabLive(deviceId, groupIds);
+      if (r) setTabOverlay((prev) => ({ ...prev, ...r.values }));
+    } catch { /* keep what is shown; the tab's Refresh tries again */ }
+    finally { setTabLoading(false); }
+  }, [deviceId]);
+  // Classic (non device-look) screens show one group at a time: read it the first time it is opened, then only on Refresh.
+  const visibleGroupIds = useMemo(() => (activeGroup ? [activeGroup.groupId] : []), [activeGroup]);
+  const refreshVisible = useCallback(() => { void loadTab(visibleGroupIds); }, [loadTab, visibleGroupIds]);
+  const hasCache = Object.keys(cachedValues).length > 0;
+  useEffect(() => {
+    if (layoutMode === 'device' || !activeGroup || !hasCache) return;
+    const never = !activeGroup.parameters.some((p) => cachedValues[valueKey(activeGroup.groupId, p.parameterId)]?.collectedAt);
+    const reads = activeGroup.parameters.some((p) => !p.hidden && !!p.snmpOid && p.valueSource !== 'static' && p.valueSource !== 'calc');
+    if (never && reads) void loadTab([activeGroup.groupId]);
+    // only when the visible group changes (or the first reading arrives) — never on a timer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleGroupIds.join('|'), hasCache]);
+  const values = useMemo(() => {
+    const out: NodeViewValues = { ...cachedValues };
+    for (const [k, v] of Object.entries(tabOverlay)) {
+      const c = out[k];
+      if (!c || !c.collectedAt || (v.collectedAt && v.collectedAt >= c.collectedAt)) out[k] = v;
+    }
+    return { ...out, ...liveOverlay };
+  }, [cachedValues, tabOverlay, liveOverlay]);
 
   const cards = useMemo(() => {
     if (!activeGroup) return [] as Array<{ key: string; title: string; params: WireframeParameter[] }>;
@@ -887,7 +899,11 @@ function NodeViewParametersInner({
       setErrors(Object.fromEntries(failed.map((r) => [editKey(r.groupId, r.parameterId, r.instance), r.error ?? 'Rejected'])));
       if (failed.length === 0) addToast(`Applied ${results.length} change${results.length === 1 ? '' : 's'}.`, 'success');
       else addToast(`${results.length - failed.length} applied, ${failed.length} failed.`, 'error');
-      if (okKeys.size) onRefresh();
+      if (okKeys.size) {
+        onRefresh();                                  // Quick Start / Monitor (background scope)
+        // the edited tab itself: the background poll no longer re-reads it
+        void loadTab([...new Set(results.filter((r) => r.ok).map((r) => r.groupId))]);
+      }
     } catch (e) {
       addToast(e instanceof Error ? e.message : 'Failed to apply changes.', 'error');
     } finally {
@@ -1197,6 +1213,8 @@ function NodeViewParametersInner({
         pollStatus={pollStatus}
         refreshing={refreshing}
         onRefresh={onRefresh}
+        onReadTab={(ids) => { void loadTab(ids); }}
+        tabLoading={tabLoading}
       />
     );
   }
@@ -1278,7 +1296,7 @@ function NodeViewParametersInner({
       <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
         <StatusBar
           liveStatus={liveStatus} statsAt={liveStatsAt} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
-          collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing} onRefresh={onRefresh}
+          collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing || tabLoading} onRefresh={refreshVisible}
         />
         {loading && Object.keys(values).length === 0 && <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>}
 
@@ -1351,7 +1369,7 @@ function NodeViewParametersInner({
       <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
         <StatusBar
           liveStatus={liveStatus} statsAt={liveStatsAt} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
-          collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing} onRefresh={onRefresh}
+          collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing || tabLoading} onRefresh={refreshVisible}
         />
         {loading && Object.keys(values).length === 0 && (
           <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>
@@ -1431,7 +1449,7 @@ function NodeViewParametersInner({
     <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
       <StatusBar
         liveStatus={liveStatus} statsAt={liveStatsAt} productDefinitionId={productDefinitionId} registryVersion={registryVersion}
-        collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing} onRefresh={onRefresh}
+        collectedAt={collectedAt} pollStatus={pollStatus} loading={loading} refreshing={refreshing || tabLoading} onRefresh={refreshVisible}
       />
       {loading && Object.keys(values).length === 0 && (
         <div style={{ padding: 32, textAlign: 'center' }}><Spinner /></div>
