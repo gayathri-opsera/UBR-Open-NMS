@@ -2,6 +2,7 @@
 
 const express  = require('express');
 const mongoose = require('mongoose');
+const topologyFields = require('../live/topologyFields');
 const router   = express.Router();
 
 // ── Inventory service URL (internal Docker network or override) ─────────────
@@ -115,15 +116,60 @@ async function getInventoryDevices(bustCache = false) {
   return all;
 }
 
+// ── Real device readings (SNMP OID values the live poll already stored) ───────
+// Everything the panel shows must come from the device: inventory facts (discovery) or the OID values in
+// device_parameter_values. Nothing is invented — a field the device did not report stays null.
+const _mapCache = new Map(); // productDefinitionId → { at, map }
+async function topologyMapFor(productDefinitionId) {
+  const hit = _mapCache.get(productDefinitionId);
+  if (hit && Date.now() - hit.at < 60_000) return hit.map;
+  let map = null;
+  try {
+    // eslint-disable-next-line global-require
+    const lp = require('../live/liveParameters');
+    const def = await lp.loadEffectiveDefinition(productDefinitionId);
+    if (def) map = topologyFields.resolveTopologyEntries(def.entries);
+  } catch { /* no definition — nothing to map */ }
+  _mapCache.set(productDefinitionId, { at: Date.now(), map });
+  return map;
+}
+async function getLiveMetricsByDevice(devices) {
+  const out = new Map();
+  try {
+    const col = mongoose.connection.readyState === 1 ? mongoose.connection.db.collection('device_parameter_values') : null;
+    if (!col) return out;
+    const keyOf = (d) => [d.id, d.deviceId, d._id, d.serialNumber].filter(Boolean).map(String);
+    const keys = [...new Set(devices.flatMap(keyOf))];
+    const docs = await col.find({ deviceId: { $in: keys } }, { projection: { deviceId: 1, values: 1, collectedAt: 1, productDefinitionId: 1 } }).toArray();
+    const byKey = new Map(docs.map((x) => [String(x.deviceId), x]));
+    for (const d of devices) {
+      const doc = keyOf(d).map((k) => byKey.get(k)).find(Boolean);
+      if (!doc) continue;
+      const map = await topologyMapFor(doc.productDefinitionId || d.productDefinitionId);
+      if (!map) continue;
+      const m = topologyFields.topologyMetrics(map, doc.values);
+      // live uptime: sysUpTime ticks the poll stores under the header group
+      const ticks = (doc.values || []).find((v) => v.parameterId === 'h:uptime:ticks');
+      const raw = ticks && ticks.instances && ticks.instances[0] ? Number(ticks.instances[0].raw) : NaN;
+      m.uptimeSeconds = Number.isFinite(raw) ? Math.floor(raw / 100) : null;
+      out.set(d, m);
+    }
+  } catch (err) {
+    console.warn('[topology.stub] live metrics read failed (non-fatal):', err.message);
+  }
+  return out;
+}
+
 // ── Map an inventory device to a topology node ────────────────────────────────
 // parentNode is passed in a second pass (after buildEdges sets parentDeviceId)
 // so CPE/IDU can inherit coordinates from their BTS when their own GPS is missing.
-function toNode(d, idx, parentNode) {
+function toNode(d, idx, parentNode, live) {
   const type   = d.deviceType || d.type || 'CPE';
   const health = toHealth(d.status || d.health);
   const id     = String(d.id || d.deviceId || d._id || `dev-${idx}`);
-  const rssi   = d.rssi ?? (type !== 'IDU' ? -60 - (idx % 20) : null);
-  const snr    = d.snr  ?? (type !== 'IDU' ? 25  - (idx % 10) : null);
+  const lm     = live || {};
+  const rssi   = lm.rssi ?? d.rssi ?? null;
+  const snr    = lm.snr  ?? d.snr  ?? null;
 
   // Device-reported GPS is used as-is; only devices without coordinates get an
   // approximate placement (flagged so the UI can say so).
@@ -145,20 +191,20 @@ function toNode(d, idx, parentNode) {
     _linkedCpeSerial:    d.linkedCpeSerial    || null,
     type,
     status:          health,
-    ipAddress:       d.ipAddress  || '0.0.0.0',
-    macAddress:      d.macAddress || '00:00:00:00:00:00',
+    ipAddress:       d.ipAddress  || null,
+    macAddress:      (d.macAddress && !/^(00:)+00$/.test(d.macAddress) ? d.macAddress : null) || lm.macAddress || null,
     latitude:        lat,
     longitude:       lng,
     approximateLocation,
-    operatingChannel: d.channel ? `${d.channel} (${d.channelBandwidth || 80} MHz)` : null,
+    operatingChannel: lm.operatingChannel ?? (d.channel ? `${d.channel} (${d.channelBandwidth || 80} MHz)` : null),
     rssi,
-    a1Rssi:          d.a1Rssi ?? (rssi != null ? rssi - 3 : null),
-    a2Rssi:          d.a2Rssi ?? (rssi != null ? rssi - 5 : null),
+    a1Rssi:          lm.a1Rssi ?? d.a1Rssi ?? null,
+    a2Rssi:          lm.a2Rssi ?? d.a2Rssi ?? null,
     snr,
-    ethernetSpeed:   d.ethernetSpeed || (type === 'BTS' ? '1000 Mbps' : '100 Mbps'),
-    duplex:          d.duplex || 'Full',
-    firmwareVersion: d.firmwareVersion || 'v2.3.1',
-    uptime:          fmtUptime(d.uptimeSeconds || d.uptime),
+    ethernetSpeed:   lm.ethernetSpeed ?? d.ethernetSpeed ?? null,
+    duplex:          lm.duplex ?? d.duplex ?? null,
+    firmwareVersion: d.firmwareVersion || null,
+    uptime:          (lm.uptimeSeconds ?? d.uptimeSeconds ?? d.uptime) ? fmtUptime(lm.uptimeSeconds ?? d.uptimeSeconds ?? d.uptime) : null,
     cascadeHop:      type === 'BTS' ? 1 : type === 'CPE' ? 2 : 3,
     pendingCommandCount: 0,
     networkId:       d.networkId || d.organizationId || `net-${(idx % 3) + 1}`,
@@ -338,7 +384,8 @@ function haversine(la1, ln1, la2, ln2) {
 // ── Shared: load + build ──────────────────────────────────────────────────────
 async function loadGraph(bustCache = false) {
   const raw   = await getInventoryDevices(bustCache);
-  const nodes = raw.map((d, i) => toNode(d, i));
+  const live  = await getLiveMetricsByDevice(raw);
+  const nodes = raw.map((d, i) => toNode(d, i, undefined, live.get(d)));
   const edges = buildEdges(nodes);
   return { nodes, edges };
 }

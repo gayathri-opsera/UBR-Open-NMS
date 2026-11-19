@@ -75,28 +75,41 @@ const healthVariant: Record<NodeHealth, 'success' | 'warning' | 'danger' | 'unkn
 
 // ── Clean solid-dot map markers (no glow) ─────────────────────────────────────
 const DOT_COL: Record<string, string> = { BTS: '#3b82f6', CPE: '#22c55e', IDU: '#f59e0b' };
-const DOT_R:   Record<string, number> = { BTS: 8,         CPE: 6,         IDU: 5         };
+// Distinct glyph per device type (24x24 viewBox, drawn in white on a coloured badge).
+const TYPE_GLYPH: Record<string, string> = {
+  // BTS: radio tower with signal arcs
+  BTS: '<path d="M12 10v11M8 21l4-11 4 11M9.5 16h5" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="8" r="1.6" fill="#fff"/><path d="M8.2 5.2a5.4 5.4 0 0 0 0 5.6M15.8 5.2a5.4 5.4 0 0 1 0 5.6" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round"/>',
+  // CPE: customer premises dish / panel antenna
+  CPE: '<path d="M5 8a9 9 0 0 0 9 9" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/><path d="M5 8l9 9" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><path d="M12 20h6M15 17v3" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cx="17.5" cy="6.5" r="1.6" fill="#fff"/>',
+  // IDU: indoor unit box with ports
+  IDU: '<rect x="3.5" y="8" width="17" height="8" rx="1.5" stroke="#fff" stroke-width="1.8" fill="none"/><circle cx="7.5" cy="12" r="1" fill="#fff"/><path d="M11 12h6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>',
+  GENERIC: '<circle cx="12" cy="12" r="3" fill="#fff"/><path d="M6.5 6.5a8 8 0 0 0 0 11M17.5 6.5a8 8 0 0 1 0 11" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round"/>',
+};
+// Badge shape per type so types also differ by silhouette, not only by glyph/colour.
+const TYPE_SHAPE_RADIUS: Record<string, string> = { BTS: '50%', CPE: '8px', IDU: '3px', GENERIC: '50%' };
+const TYPE_SIZE: Record<string, number> = { BTS: 30, CPE: 26, IDU: 26, GENERIC: 24 };
 
 function makeDeviceIcon(node: TopologyNode, highlighted = false): L.DivIcon {
-  const type = node.deviceType;
+  const type = TYPE_GLYPH[node.deviceType] ? node.deviceType : 'GENERIC';
   const base = DOT_COL[type] ?? '#94a3b8';
   const col  = node.health === 'FAULTY'   ? '#ef4444'
              : node.health === 'DEGRADED' ? '#f97316'
              : base;
 
-  const r   = DOT_R[type] ?? 6;
-  const dia = r * 2;
+  const dia = TYPE_SIZE[type];
+  const r   = dia / 2;
   const label = node.deviceName ?? node.serialNumber?.slice(-6) ?? type;
 
   const html = `
     <div style="display:flex;flex-direction:column;align-items:center;pointer-events:none;gap:3px">
       <div style="
-        width:${dia}px;height:${dia}px;border-radius:50%;
+        width:${dia}px;height:${dia}px;border-radius:${TYPE_SHAPE_RADIUS[type]};
         background:${col};
-        border:${highlighted ? `3px solid #fff` : `2px solid rgba(255,255,255,0.4)`};
-        box-shadow:0 1px 3px rgba(0,0,0,0.5);
+        border:${highlighted ? `3px solid #fff` : `2px solid rgba(255,255,255,0.55)`};
+        box-shadow:0 1px 4px rgba(0,0,0,0.55);
+        display:flex;align-items:center;justify-content:center;
         flex-shrink:0;
-      "></div>
+      "><svg viewBox="0 0 24 24" width="${dia - 8}" height="${dia - 8}" aria-hidden="true">${TYPE_GLYPH[type]}</svg></div>
       <div style="
         background:rgba(15,20,35,0.82);
         color:#f1f5f9;
@@ -119,6 +132,23 @@ function makeDeviceIcon(node: TopologyNode, highlighted = false): L.DivIcon {
     iconAnchor: [W / 2, r + 1],
     tooltipAnchor: [0, -(r + 4)],
   });
+}
+
+// ── Link distance from the devices' reported GPS (great-circle / haversine) ──────
+function hasRealGps(n: TopologyNode | undefined): n is TopologyNode & { location: { lat: number; lng: number } } {
+  return !!n && !!n.location && !n.approximateLocation && Number.isFinite(n.location.lat) && Number.isFinite(n.location.lng);
+}
+/** Kilometres between two devices, or null when either has no device-reported GPS (placed approximately). */
+function linkDistanceKm(a: TopologyNode | undefined, b: TopologyNode | undefined): number | null {
+  if (!hasRealGps(a) || !hasRealGps(b)) return null;
+  const R = 6371.0088, rad = (d: number) => (d * Math.PI) / 180;
+  const dLat = rad(b.location.lat - a.location.lat), dLng = rad(b.location.lng - a.location.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.location.lat)) * Math.cos(rad(b.location.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function fmtKm(km: number | null): string {
+  if (km == null) return 'n/a (GPS not reported)';
+  return km < 1 ? `${km.toFixed(3)} km (${Math.round(km * 1000)} m)` : `${km.toFixed(2)} km`;
 }
 
 // ── Fly-to when GPS search center changes ─────────────────────────────────────
@@ -380,6 +410,7 @@ function DevicePanel({ node, onClose, onNavigate, onDeprovision, height }: {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 11, color: 'var(--vf-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.deviceName ?? c.serialNumber}</div>
                     <div style={{ fontSize: 11, color: 'var(--vf-text-muted)' }}>{c.ipAddress}</div>
+                    <div style={{ fontSize: 11, color: 'var(--vf-text-muted)' }}>Distance: <span style={{ color: 'var(--vf-text-primary)', fontFamily: 'var(--vf-font-mono)' }}>{fmtKm(linkDistanceKm(node, c))}</span></div>
                   </div>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: hc, flexShrink: 0 }} />
                 </div>
@@ -660,7 +691,15 @@ function IndiaMapView({ nodes, edges, onNodeClick, gpsResult, mapHeight }: {
               key={e.id}
               positions={[[src.lat, src.lng], [tgt.lat, tgt.lng]]}
               pathOptions={{ color, weight: isWired ? 1 : 2, opacity: isWired ? 0.5 : 0.7, dashArray: dash }}
-            />
+            >
+              <LeafletTooltip sticky direction="top">
+                <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+                  <div style={{ fontWeight: 700 }}>{src.node.deviceName ?? src.node.serialNumber} ↔ {tgt.node.deviceName ?? tgt.node.serialNumber}</div>
+                  <div>{src.node.deviceType} → {tgt.node.deviceType}{e.linkType ? ` · ${e.linkType.toLowerCase()}` : ''}{e.linkQuality ? ` · ${e.linkQuality}` : ''}</div>
+                  <div>Distance: <b>{fmtKm(linkDistanceKm(src.node, tgt.node))}</b></div>
+                </div>
+              </LeafletTooltip>
+            </Polyline>
           );
         })}
 
@@ -706,9 +745,9 @@ function IndiaMapView({ nodes, edges, onNodeClick, gpsResult, mapHeight }: {
       <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 1000, background: 'rgba(6,14,27,0.88)', border: '1px solid rgba(77,158,255,0.15)', borderRadius: 6, padding: '5px 11px', fontSize: 11, color: '#94a3b8', backdropFilter: 'blur(4px)', pointerEvents: 'none', lineHeight: 1.8 }}>
         <div>{nodes.length} nodes · {edges.length} links</div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <span style={{ color: '#3b82f6' }}>▲ {nodes.filter((n) => n.deviceType === 'BTS').length} BTS</span>
-          <span style={{ color: '#22c55e' }}>⬡ {nodes.filter((n) => n.deviceType === 'CPE').length} CPE</span>
-          <span style={{ color: '#f59e0b' }}>■ {nodes.filter((n) => n.deviceType === 'IDU').length} IDU</span>
+          <span style={{ color: '#3b82f6' }}>🗼 {nodes.filter((n) => n.deviceType === 'BTS').length} BTS</span>
+          <span style={{ color: '#22c55e' }}>📡 {nodes.filter((n) => n.deviceType === 'CPE').length} CPE</span>
+          <span style={{ color: '#f59e0b' }}>🔌 {nodes.filter((n) => n.deviceType === 'IDU').length} IDU</span>
         </div>
         {gpsResult && <div style={{ color: '#facc15', marginTop: 2 }}>📍 {gpsResult.nodes.length} in radius</div>}
       </div>

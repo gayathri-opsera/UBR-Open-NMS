@@ -27,6 +27,7 @@ const { applyFirmwareQuirks } = require('./firmwareQuirks');
 const webSource = require('./webSource');
 const standardMib = require('./standardMib');
 const deviceAttributes = require('./deviceAttributes');
+const topologyFields = require('./topologyFields');
 const { aliasOfDevice } = require('./oidAliases');
 
 const RADIO_NUM = { radio24: 0, radio1: 1, radio2: 2 };
@@ -745,6 +746,16 @@ async function doRefresh(device, { groupIds = null, full = false } = {}) {
   if (groupIds) { groupSet = new Set(groupIds); touchCollected = false; }
   else if (!full) groupSet = await backgroundScope(device.productDefinitionId, definition);
   let scoped = groupSet ? definition.entries.filter((e) => groupSet.has(e.groupId)) : definition.entries;
+  // The few parameters the Topology map shows (RSSI, SNR, channel, MAC…) are read with the background poll even when their
+  // group is not on Quick Start / Monitor — only those columns, not their whole tab. Their group's read time is left alone,
+  // so opening that tab still reads it in full.
+  const extraGroups = new Set();
+  if (groupSet && !groupIds) {
+    const keys = topologyFields.topologyKeys(definition.entries);
+    const extra = definition.entries.filter((e) => !groupSet.has(e.groupId) && keys.has(`${e.groupId}::${e.parameterId}`));
+    for (const e of extra) extraGroups.add(e.groupId);
+    scoped = scoped.concat(extra);
+  }
   if (groupSet && !scoped.length && groupIds) {
     // a tab with no OID of its own (fixed text / calculated fields only): nothing to read
     return { pollStatus: 'NOT_POLLED' };
@@ -801,9 +812,13 @@ async function doRefresh(device, { groupIds = null, full = false } = {}) {
       return { groupId, parameterId, instances };
     });
     // Merge: groups that were not read this time keep their stored values and their own read time.
-    const readGroups = new Set(entries.map((e) => e.groupId));
+    const readGroups = new Set(entries.map((e) => e.groupId).filter((g) => !extraGroups.has(g)));
+    const readKeys = new Set(values.map((v) => `${v.groupId}::${v.parameterId}`));
     const prev = prevDoc;
-    const kept = prev && Array.isArray(prev.values) ? prev.values.filter((v) => !readGroups.has(v.groupId)) : [];
+    // whole groups are replaced; a topology-only group is replaced column by column
+    const kept = prev && Array.isArray(prev.values)
+      ? prev.values.filter((v) => (extraGroups.has(v.groupId) ? !readKeys.has(`${v.groupId}::${v.parameterId}`) : !readGroups.has(v.groupId)))
+      : [];
     const groupReadAt = {};
     if (prev) {
       const legacyAt = prev.collectedAt || null;      // a full poll before groupReadAt existed: every kept group dates from it
@@ -814,7 +829,7 @@ async function doRefresh(device, { groupIds = null, full = false } = {}) {
     // when each group's rows were last learned by a walk (the GET fast path above is valid for an hour after it)
     const walkedAt = { ...((prev && prev.walkedAt) || {}) };
     // (a walk that failed and was covered by GET counts too: it is retried in an hour, not on every poll)
-    if (!viaGet || walkFellBack) for (const g of readGroups) walkedAt[g] = now;
+    if (!viaGet || walkFellBack) for (const g of [...readGroups, ...extraGroups]) walkedAt[g] = now;
     await col.replaceOne({ _id: base._id }, {
       ...base, pollStatus: 'OK', pollError: null,
       collectedAt: touchCollected ? now : ((prev && prev.collectedAt) || now),
