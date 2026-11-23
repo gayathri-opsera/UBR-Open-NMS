@@ -43,6 +43,10 @@ export interface WireframeParameter {
   uiOrder?:        number;
   valueSource?:    'mib' | 'static' | 'calc' | null;
   emptyValues?:    string[];
+  uiHideWhenEmpty?: boolean;
+  uiShowWhen?:     { field: string; in?: string[]; notIn?: string[]; required?: boolean }[];
+  uiHidden?:       boolean;
+  optionsFrom?:    string;
   staticValue?:    string | null;
 }
 

@@ -2,7 +2,7 @@
 Each field: web=(page, label, occurrence) is the web-UI field it mirrors (used by the verification)."""
 import json,re,uuid
 OBJS={o['name']:o for o in json.load(open('mib_objects.json'))}
-WEB=json.load(open('web_parsed.json'  # produced by crawl.mjs (not committed: it holds device settings)))
+WEB=json.load(open('web_parsed.json'))  # produced from the crawl (build_web_parsed.py); not committed: it holds device settings
 SECRET='********'
 def _id(): return 'f_'+uuid.uuid4().hex[:8]
 def oid(name,row=None):

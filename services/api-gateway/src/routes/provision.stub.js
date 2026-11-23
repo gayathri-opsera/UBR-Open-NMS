@@ -233,6 +233,7 @@ async function provisionOne(host, col, ctx = {}) {
     sysObjectID, sysDescr, latitude, longitude,
     deviceRoleSource, locationSource,
     productDefinitionId: hostDefinitionId,
+    templateOverrideId,
   } = host;
 
   if (!ip || !serialNumber || !deviceType) {
@@ -275,7 +276,7 @@ async function provisionOne(host, col, ctx = {}) {
     // credential discovery used, so live values can be read from the device afterwards.
     const priv = ctx.priv || null;   // what the discovery run learned about this host (server-side only)
     let productDefinitionId = await live.resolveDefinitionId(
-      [fingerprintMeta?.productDefinitionId, hostDefinitionId, priv && priv.productDefinitionId], resolvedVendor,
+      [templateOverrideId, fingerprintMeta?.productDefinitionId, hostDefinitionId, priv && priv.productDefinitionId], resolvedVendor,
     );
     if (!productDefinitionId) {
       // Nothing supplied a definition (e.g. a host from a subnet scan, whose request carries none, and a

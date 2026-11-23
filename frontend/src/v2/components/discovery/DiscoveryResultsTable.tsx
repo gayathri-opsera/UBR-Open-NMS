@@ -19,6 +19,9 @@ import {
   type DiscoveryResultFilters,
 } from './discoveryResultFilters';
 import { getDiscoveryRunResults } from '../../../api/discovery.api';
+import { listDescriptors } from '../../../api/uiBuilder.api';
+import { assessRadioFit, type RadioFit, type TemplateRadios } from './radioFit';
+import { RadioFitWarning } from './RadioFitWarning';
 import type { DiscoveryResult } from '../../../api/discovery.api';
 import type { Device } from '../../../api/devices.types';
 import { logger } from '../../utils/logger';
@@ -229,8 +232,11 @@ function DeviceCard({
   ignored,
   onIgnore,
   onUnignore,
+  radioFit,
 }: {
   r: DiscoveryResult;
+  /** Template-vs-radio-count check for this device (only 'mismatch' is drawn). */
+  radioFit?: RadioFit;
   onProvision?: (result: DiscoveryResult) => void;
   /** True if provisioned in the current session (not yet persisted to a DB snapshot). */
   provisioned?: boolean;
@@ -274,6 +280,7 @@ function DeviceCard({
     { label: 'Hostname',      value: val(r.sysName) },
     { label: 'MAC Address',   value: val(r.macAddress) },
     { label: 'Device Type',   value: val(r.genericDeviceType) },
+    { label: 'Radios',        value: r.radioCount != null ? String(r.radioCount) : 'Not reported' },
     { label: 'Device Role',   value: r.deviceRole ? r.deviceRole : (r.deviceRoleNote ? `Not reported — ${r.deviceRoleNote}` : 'Not reported') },
     { label: 'GPS',           value: r.latitude != null && r.longitude != null ? `${r.latitude}, ${r.longitude}` : 'Not reported' },
     { label: 'sysObjectID',        value: val(r.sysObjectID) },
@@ -509,6 +516,7 @@ function DeviceCard({
         /* STATE 5: Not yet provisioned — show Provision + Ignore buttons */
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <RadioFitWarning fit={radioFit} />
             {onProvision && (
               <Button
                 variant="primary"
@@ -656,6 +664,16 @@ export function DiscoveryResultsTable({
   // When true, ignored devices are shown (greyed out) at the bottom of the list so admins
   // can review and un-ignore them. When false (default), they are hidden entirely.
   const [showIgnored, setShowIgnored] = useState(false);
+  // Published templates, to flag a template that does not fit the device's radio count (non-fatal when unavailable).
+  const [templates, setTemplates] = useState<TemplateRadios[]>([]);
+  useEffect(() => {
+    listDescriptors().then((all) => setTemplates(all.filter((d) => d.status === 'published'))).catch(() => setTemplates([]));
+  }, []);
+  const radioFitByIp = useMemo(() => {
+    const m = new Map<string, RadioFit>();
+    for (const r of results) m.set(r.ip, assessRadioFit(r.radioCount, r.productDefinitionId, templates));
+    return m;
+  }, [results, templates]);
 
   useEffect(() => {
     let cancelled = false;
@@ -818,6 +836,7 @@ export function DiscoveryResultsTable({
             </div>
           ) : isDeprovisioned ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <RadioFitWarning fit={radioFitByIp.get(row.ip)} compact />
               <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 600 }}>⬇️ Deprovisioned</span>
               <button
                 onClick={(e) => { e.stopPropagation(); onProvision?.(row); }}
@@ -834,7 +853,8 @@ export function DiscoveryResultsTable({
                 🔄 Re-provision
               </button>
             </div>
-          ) : (
+          ) : (<>
+            <RadioFitWarning fit={radioFitByIp.get(row.ip)} compact />
             <button
               onClick={(e) => { e.stopPropagation(); onProvision?.(row); }}
               disabled={!canProvision(row)}
@@ -852,7 +872,7 @@ export function DiscoveryResultsTable({
             >
               🔧 Provision
             </button>
-          )}
+          </>)}
 
           {/* ── Navigation quick-links ─────────────────────────────────── */}
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -866,7 +886,7 @@ export function DiscoveryResultsTable({
       );
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [inventoryDeviceMap, provisionedIPs, onProvision, onDeprovision, navigate]);
+  }), [inventoryDeviceMap, provisionedIPs, onProvision, onDeprovision, navigate, radioFitByIp]);
 
   // ── Early returns (after all hooks) ─────────────────────────────────────────
 
@@ -1019,6 +1039,7 @@ export function DiscoveryResultsTable({
                   deprovisioned={deprovisionedIPs?.has(r.ip) || !!r.deprovisionedFlag}
                   onIgnore={onIgnore}
                   onUnignore={onUnignore}
+                  radioFit={radioFitByIp.get(r.ip)}
                 />
               ))}
             </div>

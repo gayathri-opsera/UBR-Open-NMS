@@ -171,12 +171,22 @@ async function readRole(reader, roleOid, roleValues) {
   if (!rows.length) {
     const hit = await readFirstInstance(reader, roleOid).catch(() => null);
     const role = hit && normaliseRole(hit.value, roleValues);
-    return role ? { role, source: `snmp ${hit.oid}=${hit.value}` } : null;
+    return role ? { role, source: `snmp ${hit.oid}=${hit.value}`, radioCount: null } : null;
   }
   const decisive = rows.find((r) => r.role === 'CPE') || rows[0];
   const rowIndex = (r) => r.oid.slice(r.oid.lastIndexOf('.') + 1);
   const detail = rows.length > 1 ? ` (radios: ${rows.map((r) => `${rowIndex(r)}=${r.raw}`).join(', ')})` : '';
-  return { role: decisive.role, source: `snmp ${decisive.oid}=${decisive.raw}${detail}` };
+  return { role: decisive.role, source: `snmp ${decisive.oid}=${decisive.raw}${detail}`, radioCount: countMainRadios(rows.map((r) => rowIndex(r))) };
+}
+
+/**
+ * Number of main radios from the radio-mode rows that report a real mode. Row 1 of the wireless table is the 2.4 GHz
+ * service radio, rows 2+ are Radio 1, Radio 2 … (a radio the unit lacks answers no mode, so it is not in `rows`).
+ * Null when no row identifies a main radio (placeholder agents) — the count is then unknown, never guessed.
+ */
+function countMainRadios(rowIndexes) {
+  const n = new Set(rowIndexes.map((i) => parseInt(i, 10)).filter((i) => Number.isFinite(i) && i >= 2)).size;
+  return n > 0 ? n : null;
 }
 
 /**
@@ -221,7 +231,7 @@ async function inferRoleFromLink({ host, port = 161, community, sysObjectID, io 
 }
 
 async function fetchDeviceAttributes({ host, port = 161, community, sysObjectID, sysLocation, io, webCredentials }) {
-  const attrs = { role: '', roleSource: '', latitude: null, longitude: null, locationSource: '' };
+  const attrs = { role: '', roleSource: '', radioCount: null, latitude: null, longitude: null, locationSource: '' };
   const reader = io || {
     get:  snmpGetOids({ host, port, community }),
     walk: (rootOid) => walkSubtree({ host, port, community, rootOid, timeoutMs: 2500, retries: 3, overallTimeoutMs: 18000 }),
@@ -232,7 +242,7 @@ async function fetchDeviceAttributes({ host, port = 161, community, sysObjectID,
     if (profile.roleOID) {
       // addressed under the device's own enterprise root (see oidAliases.js)
       const found = await readRole(reader, rebaseOid(profile.roleOID, sysObjectID), profile.roleValues).catch(() => null);
-      if (found) { attrs.role = found.role; attrs.roleSource = found.source; }
+      if (found) { attrs.role = found.role; attrs.roleSource = found.source; attrs.radioCount = found.radioCount == null ? null : found.radioCount; }
     }
   }
 

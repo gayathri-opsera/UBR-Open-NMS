@@ -50,3 +50,26 @@ describe('descriptorToWireframe enum handling', () => {
     expect(resolveDisplay({ enumValues: p.enumValues }, '0')).toBe('disable(0)');
   });
 });
+
+describe('descriptorToWireframe row-visibility options (device layout)', () => {
+  const doc = wf([
+    field({ fieldId: 'mode', mibObject: 'mode' }),
+    field({ fieldId: 'chan', mibObject: 'chan', uiShowWhen: [{ field: 'mode', in: ['ap'] }, { field: 'x', bogus: 1 }, { notAField: true }], uiHideWhenEmpty: true, optionsFrom: 'list' }),
+    field({ fieldId: 'list', mibObject: 'list', uiHidden: true }),
+    field({ fieldId: 'plain', mibObject: 'plain' }),
+  ]);
+  it('carries show-when rules (only well-formed ones), hide-when-empty, hidden and options-from', () => {
+    const p = param(doc, 'chan');
+    expect(p.uiShowWhen).toEqual([{ field: 'mode', in: ['ap'] }]);
+    expect(p.uiHideWhenEmpty).toBe(true);
+    expect(p.optionsFrom).toBe('list');
+    expect(param(doc, 'list').uiHidden).toBe(true);
+  });
+  it('adds nothing to a plain field', () => {
+    const p = param(doc, 'plain');
+    expect(p.uiShowWhen).toBeUndefined();
+    expect(p.uiHidden).toBeUndefined();
+    expect(p.optionsFrom).toBeUndefined();
+    expect(p.uiHideWhenEmpty).toBeUndefined();
+  });
+});

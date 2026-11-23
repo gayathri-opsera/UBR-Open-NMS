@@ -31,6 +31,14 @@ const FieldSchema = new mongoose.Schema({
   labelSource:   String,
   /** Values that mean "no value" for this field (default: -1, -NA-, NA, -) — shown as an empty value. [] = show them as they are. */
   emptyValues:   { type: [String], default: undefined },
+  /** Device layout: leave this row out of Node View while the device has no value for it (rows the device UI itself hides, e.g. by radio mode). */
+  uiHideWhenEmpty: Boolean,
+  /** Device layout: show this row only while sibling fields have these values — [{ field: fieldId, in?: [raw…], notIn?: [raw…] }], all must hold (the device UI shows rows by radio mode / DDRS state). */
+  uiShowWhen:    mongoose.Schema.Types.Mixed,
+  /** Device layout: polled like any field but never drawn (feeds "show when" rules and "options from"). */
+  uiHidden:      Boolean,
+  /** Device layout: dropdown options taken from a sibling field's value (the device's own list, "36( 5180 MHz ),37( 5185 MHz )…") instead of the fixed enumMap. */
+  optionsFrom:   String,
   order:         Number,
 });
 

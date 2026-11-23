@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiDescriptorField, UiDescriptorSection } from '../../api/uiBuilder.api';
-import { buildDeviceTree, matrixCell, sectionHasData, visibleMatrixColumns, visibleSections } from './deviceUiModel';
+import { buildDeviceTree, matrixCell, parseOptionList, rowVisible, sectionHasData, visibleMatrixColumns, visibleSections } from './deviceUiModel';
 import type { CellSource } from './deviceUiModel';
 
 const f = (id: string, label = id): UiDescriptorField => ({ fieldId: id, elementType: 'table-block', label, mibObject: id, access: 'read-only', order: 0 });
@@ -67,5 +67,62 @@ describe('hide when empty', () => {
     const fixed = sec({ sectionId: 'fx', uiHideWhenEmpty: true, fields: [{ ...f('model'), elementType: 'field-label' }] });
     expect(sectionHasData(fixed, device([], { model: 'UBR660' }))).toBe(true);
     expect(sectionHasData(fixed, device([]))).toBe(false);
+  });
+});
+
+describe('device-supplied option lists', () => {
+  it('channel lists: value is the channel, label carries the frequency', () => {
+    expect(parseOptionList('1( 2412 MHz ),77( 6335 MHz )')).toEqual([{ value: '1', label: '1 ( 2412 MHz )' }, { value: '77', label: '77 ( 6335 MHz )' }]);
+  });
+  it('bandwidth lists: value:label pairs', () => {
+    expect(parseOptionList('HT20:20 MHz,HT40+:40 MHz,HT160:160 MHz')).toEqual([{ value: 'HT20', label: '20 MHz' }, { value: 'HT40+', label: '40 MHz' }, { value: 'HT160', label: '160 MHz' }]);
+  });
+  it('nothing / garbage gives an empty list', () => {
+    expect(parseOptionList(null)).toEqual([]);
+    expect(parseOptionList('')).toEqual([]);
+  });
+});
+
+describe('rowVisible', () => {
+  const src = (raw: Record<string, string | null>): CellSource => ({ rows: () => [], display: (_s, x) => raw[x.fieldId] ?? null, rawValue: (_s, x) => raw[x.fieldId] ?? null });
+  const row = (id: string, extra: Partial<UiDescriptorField> = {}): UiDescriptorField => ({ ...f(id), elementType: 'field-label', ...extra });
+  const s = sec({ sectionId: 's', fields: [row('mode'), row('chan', { uiShowWhen: [{ field: 'mode', in: ['ap'] }] }), row('secret', { uiHidden: true })] });
+  it('uiHidden rows are never drawn, whatever their value', () => { expect(rowVisible(s, s.fields[2], src({ secret: 'x' }))).toBe(false); });
+  it('a rule hides the row only for a known, different sibling value', () => {
+    expect(rowVisible(s, s.fields[1], src({ mode: 'ap' }))).toBe(true);
+    expect(rowVisible(s, s.fields[1], src({ mode: 'sta' }))).toBe(false);
+    expect(rowVisible(s, s.fields[1], src({}))).toBe(true);
+  });
+  it('a section whose rows are all hidden has no data', () => {
+    const only = sec({ sectionId: 'o', fields: [row('mode'), row('chan', { uiShowWhen: [{ field: 'mode', in: ['ap'] }] })] });
+    expect(sectionHasData(only, src({ mode: 'sta' }))).toBe(true);   // the mode row itself has a value
+    const dcs = sec({ sectionId: 'd', fields: [row('dcs', { uiShowWhen: [{ field: 'mode', in: ['ap'] }] }), row('mode', { uiHidden: true })] });
+    expect(sectionHasData(dcs, src({ mode: 'sta', dcs: '1' }))).toBe(false);
+    expect(sectionHasData(dcs, src({ mode: 'ap', dcs: '1' }))).toBe(true);
+  });
+});
+
+describe('hide-when-empty and sections not read yet', () => {
+  const row = (id: string): UiDescriptorField => ({ ...f(id), elementType: 'field-label' });
+  const r2 = sec({ sectionId: 'r2', uiHideWhenEmpty: true, fields: [row('ssid')] });
+  const src = (read: boolean): CellSource => ({ rows: () => [], display: () => null, rawValue: () => null, sectionRead: () => read });
+  it('an unread section stays (it cannot be read while hidden)', () => {
+    expect(visibleSections([r2], src(false), true).map((s) => s.sectionId)).toEqual(['r2']);
+  });
+  it('once read and empty it goes', () => {
+    expect(visibleSections([r2], src(true), true)).toEqual([]);
+  });
+  it('without a read tracker the old behaviour holds', () => {
+    expect(visibleSections([r2], { rows: () => [], display: () => null }, true)).toEqual([]);
+  });
+});
+
+describe('fixed text does not count as device data', () => {
+  it('a section holding only fixed text and empty device values is empty', () => {
+    const fixed: UiDescriptorField = { fieldId: 'k', elementType: 'field-label', label: 'Key', valueSource: 'static', staticValue: '********', access: 'read-only', order: 0 };
+    const ssid: UiDescriptorField = { fieldId: 'ssid', elementType: 'field-label', label: 'SSID', mibObject: 'ssid', access: 'read-only', order: 1 };
+    const s = sec({ sectionId: 'r2', fields: [ssid, fixed] });
+    const src: CellSource = { rows: () => [], display: (_x, x) => (x.fieldId === 'k' ? '********' : null) };
+    expect(sectionHasData(s, src)).toBe(false);
   });
 });

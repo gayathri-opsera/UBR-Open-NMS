@@ -8,7 +8,7 @@ import './deviceUi.css';
 import type { DeviceUiConfig, ResolvedHeader, UiDescriptorField, UiDescriptorSection } from '../../api/uiBuilder.api';
 import { hasSource } from './headerPreview';
 import type { ActivePath } from './deviceUiModel';
-import { buildDeviceTree, controlKind, enumOptions, isBindable, matrixCell, resolvePath, visibleMatrixColumns, visibleSections } from './deviceUiModel';
+import { buildDeviceTree, controlKind, enumOptions, isBindable, matrixCell, parseOptionList, resolvePath, rowVisible, visibleMatrixColumns, visibleSections } from './deviceUiModel';
 
 const Svg: React.FC<{ d: string; className?: string; vb?: string }> = ({ d, className, vb = '0 0 24 24' }) => (
   <svg className={className} viewBox={vb} aria-hidden="true"><path d={d} /></svg>
@@ -112,6 +112,8 @@ export interface DeviceUiRuntime {
   byField: (fieldId: string) => string | null;
   /** the first device reading is in — "hide when empty" only applies after that, so nothing flickers away while loading */
   ready: boolean;
+  /** has this section's page been read from the device yet? ("hide when empty" never judges an unread section) */
+  sectionRead?: (sectionId: string) => boolean;
 }
 
 export interface DeviceUiViewProps {
@@ -253,7 +255,11 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
       const errEl = err ? <div className="dv-err">{err}</div> : null;
       const changed = runtime.edited(sec.sectionId, f) !== undefined;
       if (kind === 'select') {
-        const opts = enumOptions(f);
+        const sib = f.optionsFrom ? sec.fields.find((x) => x.fieldId === f.optionsFrom) : undefined;
+        const fromDevice = sib ? parseOptionList(runtime.rawValue(sec.sectionId, sib)) : [];
+        const own = enumOptions(f);
+        // the device's own list wins; the fixed values stay as labels for entries it does not spell out (Auto) and as the fallback
+        const opts = fromDevice.length ? [...own.filter((o) => !fromDevice.some((d) => d.value === o.value) && !/^\d+$/.test(o.value)), ...fromDevice] : own;
         const has = opts.some((o) => o.value === cur);
         return (<>
           <select className={`dv-select ${changed ? 'dv-changed' : ''}`} value={cur} disabled={!writable}
@@ -311,6 +317,10 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
     <Ed value={fieldTitle(f)} onCommit={ed ? (v) => ed.setFieldLabel(sec.sectionId, f.fieldId, v) : undefined} />
   );
 
+  /** A row flagged "hide when empty" is left out of a live Node View while the device has no value for it (the device UI hides such rows by mode). The designer always shows it. */
+  const rowHidden = (sec: UiDescriptorSection, f: UiDescriptorField) =>
+    !!runtime && !design && runtime.ready && !rowVisible(sec, f, runtime);
+
   const renderSection = (sec: UiDescriptorSection) => {
     const fields = [...sec.fields].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).filter(isBindable);
     const forms = fields.filter((f) => f.elementType === 'field-label');
@@ -329,6 +339,7 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
             );
           }
           if (f.elementType !== 'field-label') return null;
+          if (rowHidden(sec, f)) return null;
           return (
             <div key={f.fieldId} className={`dv-row ${selectedFieldId === f.fieldId ? 'sel' : ''} ${hintClass(f.fieldId)}`} {...rowProps(sec, f)}>
               <label className="dv-label">{labelEd(sec, f)}</label>
@@ -413,7 +424,7 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
         data-dv-section={sec.sectionId} onClick={design ? () => onSelectSection?.(sec.sectionId) : undefined} {...sectionDrop(sec)}>
         <legend><Ed value={sec.title} onCommit={ed ? (v) => ed.setSectionTitle(sec.sectionId, v) : undefined} />
           {design && sec.uiHideWhenEmpty && <span className="dv-badge">hidden when empty</span>}</legend>
-        {fields.map((f) => (
+        {fields.filter((f) => !rowHidden(sec, f)).map((f) => (
           <div key={f.fieldId} className={`dv-card-row ${selectedFieldId === f.fieldId ? 'sel' : ''} ${hintClass(f.fieldId)}`} {...rowProps(sec, f)}>
             <div className="k">{labelEd(sec, f)}</div>
             <div className="v">{(runtime ? runtime.display(sec.sectionId, f) : values?.[f.fieldId]) ?? (runtime ? '-' : '—')}</div>

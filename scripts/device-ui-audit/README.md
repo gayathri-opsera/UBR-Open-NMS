@@ -18,3 +18,18 @@ device's settings, including credentials. Run the crawl first; `spec.py` reads `
 Duplicate the screen (a throwaway draft), write its id to `copy_id` and the field/section ids to `ids.json`, then:
 `node edit_test.mjs` (drives the real Inspector controls, 47 edits) → `python3 verify_edits.py` (checks each edit in the stored screen).
 Never run it on the live screen.
+
+## Extending the screen for another model (UBR655, reference device 10.0.150.112)
+1. `crawl.mjs <base-with-stok> <sysauth cookie> <outdir> <pages…>` — now keeps rows the page hides for the device's current mode (`hidden:true`), every select's options (`options`) and the page's tabs. Sessions last ~5 min: log in again per batch of ~9 pages. Crawl a unit in the OTHER radio mode too (a CPE page hides the BTS rows and vice versa).
+2. `python3 build_web_parsed.py ref_crawl.json other_mode_crawl.json` → `web_parsed.json` (reference first; later files only add rows/options).
+3. `spec_ubr655.py` — Radio 1 / Radio 2 / 2.4 GHz sections (Properties, DDRS/ATPC, DCS, DFS, Shaping) with the device's own mode rules; `apply655.py` backs the screen up, swaps the 'Wireless' sections, adds the Radio 2 header badge and publishes.
+4. `NV_CLICK=6000 NV_WAIT=7000 NV_OUT=nv.json node render_nv.mjs <outdir> <deviceId>` — a tab is read from the device the first time it opens, so the walk must wait for it.
+
+### Builder options added for this (all optional, per field)
+- `uiHideWhenEmpty` — leave the row out while the device has no value for it
+- `uiShowWhen: [{ field, in|notIn, required? }]` — show the row only while sibling fields have these raw values (`required`: also hide while the sibling has no value, e.g. a radio the unit does not have)
+- `uiHidden` — polled but never drawn (feeds rules / option lists)
+- `optionsFrom` — dropdown options from a sibling field's value (the device's own `36( 5180 MHz ),…` / `HT20:20 MHz,…` lists), so one screen serves a 6 GHz and a 5 GHz radio
+
+Section-level `uiHideWhenEmpty` now judges a section only after it has been read, ignores fixed text, and ignores rows hidden by their rules.
+Fields with no SNMP object on the device (Bridge, OFDMA, Scheduler host/offload, Beacon/Scan Interval, Force Bandwidth, DCS dwell timers) are not shown.

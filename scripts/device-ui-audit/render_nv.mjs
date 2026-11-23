@@ -20,7 +20,8 @@ const EXTRACT=`(()=>{const t=e=>(e&&e.textContent||'').replace(/\\s+/g,' ').trim
  document.querySelectorAll('table.dv-table').forEach(tb=>o.tables.push({heads:[...tb.querySelectorAll('th')].map(t),rows:[...tb.querySelectorAll('tbody tr')].map(tr=>[...tr.children].map(t)).slice(0,6)}));
  return JSON.stringify(o);})()`;
 const res={};
-const clickEl=async(js)=>{await ev(js); await wait(700);};
+// a tab is read from the device the first time it is opened (a few seconds on a busy radio): wait for it before looking
+const clickEl=async(js)=>{await ev(js); await wait(+process.env.NV_CLICK||2500);};
 // enumerate menu: top items -> sub items -> tabs
 const tops=JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('.dv-top-a')].map(e=>e.textContent.replace(/\\s+/g,' ').trim()))`));
 for (let ti=0; ti<tops.length; ti++){
@@ -35,12 +36,12 @@ for (let ti=0; ti<tops.length; ti++){
     const tabList=tbs.length?tbs:[null];
     for (let bi=0; bi<tabList.length; bi++){
       if (tbs.length) await clickEl(`(()=>{[...document.querySelectorAll('.dv-tab a')][${bi}].click(); return 1})()`);
-      await wait(400);
+      await wait(+process.env.NV_WAIT||5000);
       const key=[topName,subList[si]||topName,tabList[bi]||''].join(' > ');
       try{ res[key]=JSON.parse(await ev(EXTRACT)); }catch(e){ res[key]={error:String(e)}; }
     }
   }
 }
 res.__header=await ev(`[...document.querySelectorAll('.dv-header .dv-hd-val, .dv-header .dv-hd-lbl')].map(e=>e.textContent.trim()).join(' | ')`);
-fs.writeFileSync('nv_render.json',JSON.stringify(res,null,1)); console.log('captured',Object.keys(res).length-1,'tab views');
+fs.writeFileSync(process.env.NV_OUT||'nv_render.json',JSON.stringify(res,null,1)); console.log('captured',Object.keys(res).length-1,'tab views');
 chrome.kill(); process.exit(0);

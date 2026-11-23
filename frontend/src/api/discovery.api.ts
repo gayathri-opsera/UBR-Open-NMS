@@ -204,6 +204,8 @@ export interface DiscoveryResult {
   macAddress?: string;
   /** Serial number the device itself reports (vendor serial OID). Absent when not reported. */
   reportedSerialNumber?: string;
+  /** Main radios (Radio 1, Radio 2 …) the device reports over SNMP; absent when it did not say. */
+  radioCount?: number;
 
   /**
    * GPS latitude sourced from the Product Definition's <location> block (uploaded config).
@@ -694,6 +696,8 @@ export interface ProvisionHostRequest {
   deviceRoleSource?: string;
   /** Provenance of latitude/longitude when they were read from the device. */
   locationSource?: string;
+  /** Provision with this template (published screen id) instead of the one chosen at discovery. */
+  templateOverrideId?: string;
 }
 
 /** Per-host result returned by the provision endpoint. */
@@ -743,6 +747,7 @@ export function buildProvisionRequest(
     serialNumber: string;
     latitude?: number;
     longitude?: number;
+    templateOverrideId?: string;
   },
 ): ProvisionHostRequest {
   return {
@@ -758,6 +763,7 @@ export function buildProvisionRequest(
     latitude:     overrides.latitude,
     longitude:    overrides.longitude,
     // Keep provenance only when the submitted value is still the device-reported one.
+    ...(overrides.templateOverrideId ? { templateOverrideId: overrides.templateOverrideId } : {}),
     deviceRoleSource: overrides.deviceType === result.deviceRole ? result.deviceRoleSource : undefined,
     // A position the admin typed or picked is recorded as 'manual'; the device's own GPS replaces it
     // as soon as the device publishes one.

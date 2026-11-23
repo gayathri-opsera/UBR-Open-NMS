@@ -67,6 +67,27 @@ function toDescriptor(doc) {
   };
 }
 
+/**
+ * How many main radios a screen serves: { min, max } or null when it has no 'Radio n' menu items.
+ * A radio whose rows wait for a known Radio Mode (uiShowWhen.required) or whose section hides when empty is optional —
+ * the screen adapts to a unit without it — so a screen with Radio 1 + optional Radio 2 serves 1..2 radios.
+ */
+function radioRange(sections) {
+  const radios = new Map();   // 'Radio 2' -> optional?
+  for (const s of sections || []) {
+    const m = /^Radio\s+(\d+)$/i.exec(String(s.uiParent || ''));
+    if (!m) continue;
+    const optional = !!s.uiHideWhenEmpty || (s.fields || []).some((f) => (f.uiShowWhen || []).some((c) => c && c.required));
+    const key = Number(m[1]);
+    radios.set(key, (radios.get(key) ?? false) || optional);
+  }
+  if (!radios.size) return null;
+  const total = radios.size;
+  // optional radios are the highest-numbered ones; Radio 1 is always present
+  const required = [...radios.entries()].filter(([n, opt]) => !opt || n === 1).length;
+  return { min: required, max: total };
+}
+
 function toSummary(doc) {
   const full = toDescriptor(doc);
   if (!full) return null;
@@ -75,6 +96,7 @@ function toSummary(doc) {
     ...summary,
     sectionCount:  Array.isArray(sections)        ? sections.length        : 0,
     objectCount:   Array.isArray(selectedObjects)  ? selectedObjects.length : 0,
+    radios:        radioRange(sections),
   };
 }
 
@@ -205,6 +227,12 @@ function descriptorToWireframe(descriptor) {
                 })) },
             } : {}),
             ...(Array.isArray(f.emptyValues) ? { emptyValues: f.emptyValues } : {}),
+            ...(f.uiHideWhenEmpty ? { uiHideWhenEmpty: true } : {}),
+            ...(f.uiHidden ? { uiHidden: true } : {}),
+            ...(f.optionsFrom ? { optionsFrom: String(f.optionsFrom) } : {}),
+            ...(Array.isArray(f.uiShowWhen) && f.uiShowWhen.length ? { uiShowWhen: f.uiShowWhen
+              .filter((c) => c && c.field && (Array.isArray(c.in) || Array.isArray(c.notIn)))
+              .map((c) => ({ field: String(c.field), ...(Array.isArray(c.in) ? { in: c.in.map(String) } : {}), ...(Array.isArray(c.notIn) ? { notIn: c.notIn.map(String) } : {}), ...(c.required ? { required: true } : {}) })) } : {}),
           };
           // A calculated field reads its inputs through hidden helper parameters (one per input OID), which the
           // normal poll collects like any other parameter.
@@ -527,5 +555,6 @@ router.get('/descriptors/:id/xml', async (req, res) => {
 module.exports = router;
 module.exports.validateBoundOids = validateBoundOids;   // for tests
 module.exports.usesDeviceLayout = usesDeviceLayout;
+module.exports.radioRange = radioRange;
 module.exports.descriptorToWireframe = descriptorToWireframe;
 module.exports.liveRefreshFor = liveRefreshFor;   // exposed for unit tests

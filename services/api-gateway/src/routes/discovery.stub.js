@@ -1246,6 +1246,7 @@ router.post('/runs', async (req, res, next) => {
         defaultLongitude: pdLon,
         // Device-reported role / GPS (same fields the Java discovery service returns) — the
         // Provision modal pre-selects the type and coordinates from these.
+        ...(attrs.radioCount ? { radioCount: attrs.radioCount } : {}),
         ...(attrs.role ? { deviceRole: attrs.role, deviceRoleSource: attrs.roleSource }
           : { deviceRoleNote: hostWeb
               ? "The device's SNMP agent did not report its role and its web UI could not be read."
@@ -1761,6 +1762,7 @@ router.post('/snmp-probe', async (req, res) => {
         model:               resolvedModel,
         genericDeviceType:   resolvedGeneric,
         deviceType:          probeAttrs.role || (resolvedGeneric === 'RADIO' ? 'RADIO' : null),
+        ...(probeAttrs.radioCount ? { radioCount: probeAttrs.radioCount } : {}),
         ...(probeAttrs.role ? { deviceRole: probeAttrs.role, deviceRoleSource: probeAttrs.roleSource } : {}),
         ...(probeAttrs.latitude != null ? { latitude: probeAttrs.latitude, longitude: probeAttrs.longitude, locationSource: probeAttrs.locationSource } : {}),
         productDefinitionId,

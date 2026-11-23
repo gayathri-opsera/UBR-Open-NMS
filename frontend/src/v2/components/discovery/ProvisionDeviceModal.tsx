@@ -15,7 +15,7 @@
  * When the device publishes no GPS position the admin sets it here — on the map or by typing
  * coordinates. A position the device publishes later (live poll) always replaces that one.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
@@ -24,6 +24,8 @@ import { GpsMapPicker } from '../common/GpsMapPicker';
 import type { DiscoveryResult, ProvisionHostRequest, NmsDeviceType } from '../../../api/discovery.api';
 import { mapGenericTypeToDeviceType, buildProvisionRequest } from '../../../api/discovery.api';
 import { listModels, listRolesForModel } from '../../../api/deviceTypeCombinations.api';
+import { listDescriptors } from '../../../api/uiBuilder.api';
+import { assessRadioFit, describeRadios, type TemplateRadios } from './radioFit';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -301,6 +303,21 @@ export function ProvisionDeviceModal({
   const [comboLoading,      setComboLoading]      = useState(false);
   const [showComboPicker,   setShowComboPicker]   = useState(false);
 
+  // ── Template ↔ radio count check ────────────────────────────────────────────
+  // A template for two radios on a one-radio unit (or the reverse) is flagged, and the templates that fit are offered.
+  const [templates, setTemplates] = useState<TemplateRadios[]>([]);
+  const [templateOverrideId, setTemplateOverrideId] = useState('');
+  useEffect(() => {
+    listDescriptors()
+      .then((all) => setTemplates(all.filter((d) => d.status === 'published')))
+      .catch(() => setTemplates([]));   // non-fatal: no suggestion is shown
+  }, []);
+  useEffect(() => { setTemplateOverrideId(''); }, [result]);
+  const radioFit = useMemo(
+    () => assessRadioFit(result?.radioCount, result?.productDefinitionId, templates),
+    [result, templates],
+  );
+
   // Load available models once
   useEffect(() => {
     listModels().then(setComboModels).catch(() => setComboModels([]));
@@ -380,6 +397,7 @@ export function ProvisionDeviceModal({
       serialNumber: serialNumber.trim(),
       latitude:     latStr ? parseFloat(latStr) : undefined,
       longitude:    lngStr ? parseFloat(lngStr) : undefined,
+      templateOverrideId: radioFit.status === 'mismatch' && templateOverrideId ? templateOverrideId : undefined,
     });
     onConfirm(req);
   }
@@ -394,6 +412,7 @@ export function ProvisionDeviceModal({
     ['Manufacturer', result.vendor],
     ['Model',        result.model],
     ['Device Role',  result.deviceRole],
+    ['Radios',       result.radioCount != null ? String(result.radioCount) : undefined],
     ['Coordinates',  result.latitude != null && result.longitude != null
       ? `${result.latitude}, ${result.longitude}` : undefined],
     ['Hostname',     result.sysName],
@@ -439,6 +458,41 @@ export function ProvisionDeviceModal({
 
       /* ── Form state ────────────────────────────────────────────────────── */
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        {/* ── Template does not match the device's radio count ───────────── */}
+        {radioFit.status === 'mismatch' && radioFit.templateRadios && (
+          <div role="alert" style={{
+            background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.45)',
+            borderRadius: 8, padding: '12px 14px', fontSize: 12, color: 'var(--vf-text-primary)',
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+              ⚠️ This device has {radioFit.deviceRadios} radio{radioFit.deviceRadios === 1 ? '' : 's'}
+            </div>
+            <div style={{ color: 'var(--vf-text-secondary)', marginBottom: 8 }}>
+              The template chosen at discovery is built for {describeRadios(radioFit.templateRadios)}, so its Node View
+              would {radioFit.deviceRadios! < radioFit.templateRadios.min ? 'show a radio this unit does not have' : 'leave out a radio this unit has'}.
+              {radioFit.suggestions.length > 0 ? ' Consider provisioning it with a template that fits:' : ' No published template fits — build one in the MIB Builder, or provision with the chosen template.'}
+            </div>
+            {radioFit.suggestions.length > 0 && (
+              <select
+                aria-label="Template to provision with"
+                value={templateOverrideId}
+                onChange={(e) => setTemplateOverrideId(e.target.value)}
+                style={{
+                  width: '100%', background: 'var(--vf-input-bg)', border: '1px solid var(--vf-border-default)',
+                  borderRadius: 'var(--vf-radius-md)', color: 'var(--vf-text-primary)', fontSize: 12, padding: '6px 8px',
+                }}
+              >
+                <option value="">Keep the template chosen at discovery</option>
+                {radioFit.suggestions.map((t) => (
+                  <option key={t.descriptorId} value={t.descriptorId}>
+                    {t.screenName} ({describeRadios(t.radios!)})
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
 
         {/* ── SNMP Discovery Summary ──────────────────────────────────────── */}
         <div style={{

@@ -1010,6 +1010,24 @@ const V2MibBuilderV2Page: React.FC = () => {
                     value={curField.emptyValues === undefined ? '' : curField.emptyValues.join(', ')}
                     onChange={(e) => { const t = e.target.value.trim(); patch({ emptyValues: t === '' ? undefined : (t.toLowerCase() === 'none' ? [] : t.split(',').map((x) => x.trim()).filter(Boolean)) }); }} />
                   <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, marginTop: 8 }}>
+                    <input type="checkbox" checked={!!curField.uiHideWhenEmpty} onChange={(e) => patch({ uiHideWhenEmpty: e.target.checked || undefined })} /> Hide this row when the device has no value (rows the device UI hides by radio mode)
+                  </label>
+                  <label style={lbl}>Show this row only when… (one rule per line: <b>Field label = raw1, raw2</b> or <b>Field label != raw</b>; add <b>(required)</b> to hide the row too while that field has no value)</label>
+                  <textarea style={{ ...inp, height: 54, fontFamily: 'monospace' }} placeholder="e.g.  Radio Mode = ap    (rows the device UI shows only for a BTS radio)"
+                    defaultValue={(curField.uiShowWhen ?? []).map((c) => { const sib = curSection?.fields.find((x) => x.fieldId === c.field); return `${sib?.label ?? c.field} ${c.in ? '=' : '!='} ${(c.in ?? c.notIn ?? []).join(', ')}${c.required ? ' (required)' : ''}`; }).join('\n')}
+                    key={curField.fieldId}
+                    onBlur={(e) => {
+                      const rules = e.target.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l): { field: string; in?: string[]; notIn?: string[]; required?: boolean } | null => {
+                        const req = /\(required\)\s*$/i.test(l); l = l.replace(/\s*\(required\)\s*$/i, '');
+                        const m = /^(.*?)\s*(!=|=)\s*(.*)$/.exec(l); if (!m) return null;
+                        const sib = curSection?.fields.find((x) => x.fieldId !== curField.fieldId && x.label.trim().toLowerCase() === m[1].trim().toLowerCase());
+                        if (!sib) return null;
+                        const vals = m[3].split(',').map((x) => x.trim()).filter(Boolean);
+                        return { field: sib.fieldId, ...(m[2] === '=' ? { in: vals } : { notIn: vals }), ...(req ? { required: true } : {}) };
+                      }).filter((x): x is { field: string; in?: string[]; notIn?: string[]; required?: boolean } => !!x);
+                      patch({ uiShowWhen: rules.length ? rules : undefined });
+                    }} />
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, marginTop: 8 }}>
                     <input type="checkbox" checked={!!curField.confirmWrite} onChange={(e) => patch({ confirmWrite: e.target.checked })} /> Ask for confirmation before writing
                   </label>
                   <label style={lbl}>Dropdown options (value=label per line)</label>

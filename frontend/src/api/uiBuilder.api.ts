@@ -27,6 +27,14 @@ export interface UiDescriptorField {
   calc?: { expr: string; template?: string | null; fallback?: string | null; format?: string; decimals?: number | null; inputs?: { name: string; oid: string; sample?: string; map?: Record<string, string>; strip?: string; emptyValues?: string[] }[] };
   /** Values that mean "no value" for this field (default -1, -NA-, NA, -) — shown as an empty value. [] = show them as they are. */
   emptyValues?: string[];
+  /** Device layout: leave this row out of Node View while the device has no value for it (rows the device UI hides by mode). */
+  uiHideWhenEmpty?: boolean;
+  /** Device layout: show this row only while sibling fields have these raw values (all conditions must hold). */
+  uiShowWhen?: { field: string; in?: string[]; notIn?: string[]; required?: boolean }[];
+  /** Device layout: polled but never drawn (feeds "show when" rules and "options from"). */
+  uiHidden?: boolean;
+  /** Device layout: dropdown options come from this sibling field's value ("36( 5180 MHz ),37( 5185 MHz )…"), not the fixed list. */
+  optionsFrom?: string;
   /** How the label was chosen (the label text itself is always stored). */
   labelSource?: 'custom' | 'mibName' | 'mibDescription';
   order: number;
@@ -134,6 +142,8 @@ export interface UiDescriptor {
 export interface UiDescriptorSummary extends Omit<UiDescriptor, 'sections' | 'generatedXml' | 'selectedObjects'> {
   sectionCount: number;
   objectCount: number;
+  /** Main radios the screen serves (min..max); null when it has no 'Radio n' menu. */
+  radios?: { min: number; max: number } | null;
 }
 
 const BASE = '/ui-builder';

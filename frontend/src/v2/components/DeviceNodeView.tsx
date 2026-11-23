@@ -36,6 +36,10 @@ export function wireframeToSections(groups: WireframeGroup[]): { sections: UiDes
         units: p.unit ?? undefined,
         valueSource: p.valueSource ?? undefined,
         emptyValues: p.emptyValues,
+        uiHideWhenEmpty: p.uiHideWhenEmpty || undefined,
+        uiShowWhen: p.uiShowWhen?.length ? p.uiShowWhen : undefined,
+        uiHidden: p.uiHidden || undefined,
+        optionsFrom: p.optionsFrom || undefined,
         staticValue: p.staticValue ?? undefined,
         minValue: p.minValue ?? undefined,
         maxValue: p.maxValue ?? undefined,
@@ -108,14 +112,24 @@ export const DeviceNodeView: React.FC<DeviceNodeViewProps> = ({
   const path = useMemo(() => resolvePath(buildDeviceTree(screenName, sections), active), [screenName, sections, active]);
 
   // The groups behind the open page/tab. The background poll only reads the Summary page, so a tab is read when opened.
-  const tabGroupIds = useMemo(() => {
-    const tab = buildDeviceTree(screenName, sections).find((p) => p.name === path.page)?.parents.find((r) => r.name === path.parent)?.tabs.find((t) => t.name === path.tab);
-    return (tab?.sections ?? []).map((s) => s.sectionId);
+  // Opening a menu item reads ALL its tabs: a tab that "hides when empty" (DCS on a CPE radio, Radio 2 on a one-radio unit)
+  // can only judge itself once it has been read, and it cannot be opened — and so read — while it is hidden. The tab on screen is
+  // read first (its own request), the sibling tabs right behind it, so the page you are looking at never waits for the others.
+  const { tabGroupIds, parentGroupIds } = useMemo(() => {
+    const parent = buildDeviceTree(screenName, sections).find((p) => p.name === path.page)?.parents.find((r) => r.name === path.parent);
+    const tab = parent?.tabs.find((t) => t.name === path.tab);
+    return {
+      tabGroupIds: (tab?.sections ?? []).map((s) => s.sectionId),
+      parentGroupIds: (parent?.tabs ?? []).flatMap((t) => t.sections).map((s) => s.sectionId),
+    };
   }, [screenName, sections, path]);
   const readAtOf = (gid: string): number | null => {
     const g = wireframe.find((x) => x.groupId === gid);
     let latest: number | null = null;
     for (const p of g?.parameters ?? []) {
+      // Fixed-text and calculated fields are stamped "now" by the gateway without any device read; counting them made a
+      // never-read tab look already read, so it stayed blank until Refresh. Only parameters that read the device count.
+      if (!p.snmpOid || p.valueSource === 'static' || p.valueSource === 'calc') continue;
       const at = values[valueKey(gid, p.parameterId)]?.collectedAt;
       const t = at ? Date.parse(at) : NaN;
       if (!Number.isNaN(t) && (latest === null || t > latest)) latest = t;
@@ -129,8 +143,12 @@ export const DeviceNodeView: React.FC<DeviceNodeViewProps> = ({
   useEffect(() => {
     if (!onReadTab || !ready) return;
     // a tab is read from the device only the FIRST time it is opened (never read before); after that only its Refresh button re-reads it
-    const stale = tabGroupIds.filter((gid) => readsDevice(gid) && readAtOf(gid) === null);
-    if (stale.length) onReadTab(stale);
+    const unread = (ids: string[]) => ids.filter((gid) => readsDevice(gid) && readAtOf(gid) === null);
+    const now = unread(tabGroupIds);
+    if (now.length) onReadTab(now);
+    const rest = unread(parentGroupIds.filter((g) => !tabGroupIds.includes(g)));
+    const t = rest.length ? setTimeout(() => onReadTab(rest), 800) : undefined;
+    return () => { if (t) clearTimeout(t); };
     // only when the tab changes (or the first reading arrives) — not on every values update
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabKey, ready]);
@@ -167,6 +185,7 @@ export const DeviceNodeView: React.FC<DeviceNodeViewProps> = ({
     onApply: onApplyGroups,
     onRevert: onRevertGroups,
     ready: Object.keys(values).length > 0,
+    sectionRead: (sid) => !readsDevice(sid) || readAtOf(sid) !== null,
     byField: (fid) => {
       for (const [k, p] of paramOf) {
         if (!k.endsWith(`::${fid}`)) continue;
