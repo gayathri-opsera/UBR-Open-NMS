@@ -8,7 +8,7 @@ import './deviceUi.css';
 import type { DeviceUiConfig, ResolvedHeader, UiDescriptorField, UiDescriptorSection } from '../../api/uiBuilder.api';
 import { hasSource } from './headerPreview';
 import type { ActivePath } from './deviceUiModel';
-import { buildDeviceTree, controlKind, enumOptions, isBindable, matrixCell, parseOptionList, resolvePath, rowVisible, visibleMatrixColumns, visibleSections } from './deviceUiModel';
+import { buildDeviceTree, cascadeOptionResets, controlKind, optionsByList, enumOptions, isBindable, matrixCell, parseOptionList, resolvePath, rowVisible, visibleMatrixColumns, visibleSections } from './deviceUiModel';
 
 const Svg: React.FC<{ d: string; className?: string; vb?: string }> = ({ d, className, vb = '0 0 24 24' }) => (
   <svg className={className} viewBox={vb} aria-hidden="true"><path d={d} /></svg>
@@ -256,14 +256,22 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
       const changed = runtime.edited(sec.sectionId, f) !== undefined;
       if (kind === 'select') {
         const sib = f.optionsFrom ? sec.fields.find((x) => x.fieldId === f.optionsFrom) : undefined;
-        const fromDevice = sib ? parseOptionList(runtime.rawValue(sec.sectionId, sib)) : [];
+        const valueOf = (id: string) => { const p = sec.fields.find((x) => x.fieldId === id); return p ? (runtime.edited(sec.sectionId, p) ?? runtime.rawValue(sec.sectionId, p) ?? '') : ''; };
+        // options that follow other fields' current (even unsaved) values win over the device's own current list
+        const fromDevice = optionsByList(f, valueOf) ?? (sib ? parseOptionList(runtime.rawValue(sec.sectionId, sib)) : []);
         const own = enumOptions(f);
         // the device's own list wins; the fixed values stay as labels for entries it does not spell out (Auto) and as the fallback
         const opts = fromDevice.length ? [...own.filter((o) => !fromDevice.some((d) => d.value === o.value) && !/^\d+$/.test(o.value)), ...fromDevice] : own;
         const has = opts.some((o) => o.value === cur);
         return (<>
           <select className={`dv-select ${changed ? 'dv-changed' : ''}`} value={cur} disabled={!writable}
-            onChange={(e) => runtime.onEdit(sec.sectionId, f, e.target.value)}>
+            onChange={(e) => {
+              runtime.onEdit(sec.sectionId, f, e.target.value);
+              for (const r of cascadeOptionResets(sec, f.fieldId, e.target.value, valueOf)) {
+                const g = sec.fields.find((x) => x.fieldId === r.fieldId);
+                if (g) runtime.onEdit(sec.sectionId, g, r.value);
+              }
+            }}>
             {!has && <option value={cur}>{cur === '' ? '—' : cur}</option>}
             {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>

@@ -35,6 +35,8 @@ export interface UiDescriptorField {
   uiHidden?: boolean;
   /** Device layout: dropdown options come from this sibling field's value ("36( 5180 MHz ),37( 5185 MHz )…"), not the fixed list. */
   optionsFrom?: string;
+  /** Device layout: options that follow sibling fields' current (even unsaved) values — table key = their raw values joined by '|', value = the device's own list ("36( 5180 MHz ),…"). resetOnChange: pick resetTo again whenever one of them changes. */
+  optionsBy?: { dependsOn: string[]; table: Record<string, string>; defaults?: Record<string, string>; resetOnChange?: boolean; resetTo?: string };
   /** How the label was chosen (the label text itself is always stored). */
   labelSource?: 'custom' | 'mibName' | 'mibDescription';
   order: number;

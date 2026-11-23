@@ -230,6 +230,13 @@ function descriptorToWireframe(descriptor) {
             ...(f.uiHideWhenEmpty ? { uiHideWhenEmpty: true } : {}),
             ...(f.uiHidden ? { uiHidden: true } : {}),
             ...(f.optionsFrom ? { optionsFrom: String(f.optionsFrom) } : {}),
+            ...(f.optionsBy && Array.isArray(f.optionsBy.dependsOn) && f.optionsBy.table && typeof f.optionsBy.table === 'object' ? { optionsBy: {
+              dependsOn: f.optionsBy.dependsOn.map(String),
+              table: Object.fromEntries(Object.entries(f.optionsBy.table).map(([k, v]) => [String(k), String(v)])),
+              ...(f.optionsBy.defaults && typeof f.optionsBy.defaults === 'object' ? { defaults: Object.fromEntries(Object.entries(f.optionsBy.defaults).map(([k, v]) => [String(k), String(v)])) } : {}),
+              ...(f.optionsBy.resetOnChange ? { resetOnChange: true } : {}),
+              ...(f.optionsBy.resetTo != null ? { resetTo: String(f.optionsBy.resetTo) } : {}),
+            } } : {}),
             ...(Array.isArray(f.uiShowWhen) && f.uiShowWhen.length ? { uiShowWhen: f.uiShowWhen
               .filter((c) => c && c.field && (Array.isArray(c.in) || Array.isArray(c.notIn)))
               .map((c) => ({ field: String(c.field), ...(Array.isArray(c.in) ? { in: c.in.map(String) } : {}), ...(Array.isArray(c.notIn) ? { notIn: c.notIn.map(String) } : {}), ...(c.required ? { required: true } : {}) })) } : {}),

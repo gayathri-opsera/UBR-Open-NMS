@@ -37,6 +37,21 @@ const box: React.CSSProperties = { border: '1px solid var(--vf-border-subtle)', 
 const lbl: React.CSSProperties = { display: 'block', fontSize: 10, fontWeight: 600, color: 'var(--vf-text-muted)', margin: '8px 0 3px', textTransform: 'uppercase', letterSpacing: 0.3 };
 const inp: React.CSSProperties = { width: '100%', fontSize: 12, padding: '5px 7px', borderRadius: 5, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)', boxSizing: 'border-box' };
 const btn: React.CSSProperties = { fontSize: 11, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--vf-border-subtle)', background: 'var(--vf-elevated)', color: 'var(--vf-text-primary)', cursor: 'pointer' };
+type ShowWhenRule = { field: string; in?: string[]; notIn?: string[]; required?: boolean };
+/** Parse the "Show this row only when…" text: one rule per line. Lines naming no sibling field are returned in `bad`, never dropped silently. */
+function parseShowWhen(text: string, fields: UiDescriptorField[], selfId: string): { rules: ShowWhenRule[]; bad: string[] } {
+  const rules: ShowWhenRule[] = []; const bad: string[] = [];
+  for (const raw of text.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const req = /\(required\)\s*$/i.test(raw); const l = raw.replace(/\s*\(required\)\s*$/i, '');
+    const m = /^(.*?)\s*(!=|=)\s*(.*)$/.exec(l);
+    const sib = m ? fields.find((x) => x.fieldId !== selfId && x.label.trim().toLowerCase() === m[1].trim().toLowerCase()) : undefined;
+    const vals = m ? m[3].split(',').map((x) => x.trim()).filter(Boolean) : [];
+    if (!m || !sib || vals.length === 0) { bad.push(raw); continue; }
+    rules.push({ field: sib.fieldId, ...(m[2] === '=' ? { in: vals } : { notIn: vals }), ...(req ? { required: true } : {}) });
+  }
+  return { rules, bad };
+}
+
 const btnPrimary: React.CSSProperties = { ...btn, background: 'var(--vf-accent)', color: '#fff', border: '1px solid var(--vf-accent)' };
 const h3: React.CSSProperties = { margin: '0 0 6px', fontSize: 12, fontWeight: 700, color: 'var(--vf-text-primary)' };
 
@@ -133,6 +148,7 @@ const V2MibBuilderV2Page: React.FC = () => {
   const [list, setList] = useState<UiDescriptorSummary[]>([]);
   const [draft, setDraft] = useState<UiDescriptor | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [showWhenDraft, setShowWhenDraft] = useState<{ id: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [active, setActive] = useState<ActivePath>({ page: '', parent: '', tab: '' });
   const [selField, setSelField] = useState<{ sectionId: string; fieldId: string } | null>(null);
@@ -1013,20 +1029,40 @@ const V2MibBuilderV2Page: React.FC = () => {
                     <input type="checkbox" checked={!!curField.uiHideWhenEmpty} onChange={(e) => patch({ uiHideWhenEmpty: e.target.checked || undefined })} /> Hide this row when the device has no value (rows the device UI hides by radio mode)
                   </label>
                   <label style={lbl}>Show this row only when… (one rule per line: <b>Field label = raw1, raw2</b> or <b>Field label != raw</b>; add <b>(required)</b> to hide the row too while that field has no value)</label>
-                  <textarea style={{ ...inp, height: 54, fontFamily: 'monospace' }} placeholder="e.g.  Radio Mode = ap    (rows the device UI shows only for a BTS radio)"
-                    defaultValue={(curField.uiShowWhen ?? []).map((c) => { const sib = curSection?.fields.find((x) => x.fieldId === c.field); return `${sib?.label ?? c.field} ${c.in ? '=' : '!='} ${(c.in ?? c.notIn ?? []).join(', ')}${c.required ? ' (required)' : ''}`; }).join('\n')}
-                    key={curField.fieldId}
-                    onBlur={(e) => {
-                      const rules = e.target.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l): { field: string; in?: string[]; notIn?: string[]; required?: boolean } | null => {
-                        const req = /\(required\)\s*$/i.test(l); l = l.replace(/\s*\(required\)\s*$/i, '');
-                        const m = /^(.*?)\s*(!=|=)\s*(.*)$/.exec(l); if (!m) return null;
-                        const sib = curSection?.fields.find((x) => x.fieldId !== curField.fieldId && x.label.trim().toLowerCase() === m[1].trim().toLowerCase());
-                        if (!sib) return null;
-                        const vals = m[3].split(',').map((x) => x.trim()).filter(Boolean);
-                        return { field: sib.fieldId, ...(m[2] === '=' ? { in: vals } : { notIn: vals }), ...(req ? { required: true } : {}) };
-                      }).filter((x): x is { field: string; in?: string[]; notIn?: string[]; required?: boolean } => !!x);
-                      patch({ uiShowWhen: rules.length ? rules : undefined });
-                    }} />
+                  {(() => {
+                    const derived = (curField.uiShowWhen ?? []).map((c) => { const sib = curSection?.fields.find((x) => x.fieldId === c.field); return `${sib?.label ?? c.field} ${c.in ? '=' : '!='} ${(c.in ?? c.notIn ?? []).join(', ')}${c.required ? ' (required)' : ''}`; }).join('\n');
+                    const text = showWhenDraft?.id === curField.fieldId ? showWhenDraft.text : derived;
+                    const { bad } = parseShowWhen(text, curSection?.fields ?? [], curField.fieldId);
+                    return (<>
+                      <textarea style={{ ...inp, height: 54, fontFamily: 'monospace' }} placeholder="e.g.  Radio Mode = ap    (rows the device UI shows only for a BTS radio)"
+                        value={text}
+                        onChange={(e) => {
+                          // commit as you type: the draft turns "unsaved" at once, so Save works without leaving the box first
+                          const t = e.target.value;
+                          setShowWhenDraft({ id: curField.fieldId, text: t });
+                          const { rules } = parseShowWhen(t, curSection?.fields ?? [], curField.fieldId);
+                          patch({ uiShowWhen: rules.length ? rules : undefined });
+                        }}
+                        onBlur={() => { if (bad.length === 0) setShowWhenDraft(null); }} />
+                      {bad.length > 0 && (
+                        <div style={{ fontSize: 11, color: 'var(--vf-warning, #b7791f)', marginTop: 3 }}>
+                          Not saved — no field with that label in this section: {bad.map((b) => `“${b}”`).join(', ')}. Use <b>Field label = value</b> with a label exactly as shown in this section.
+                        </div>
+                      )}
+                    </>);
+                  })()}
+                  {curField.optionsBy && (
+                    <div style={{ marginTop: 8, padding: '6px 8px', border: '1px solid var(--vf-border-subtle)', borderRadius: 5, fontSize: 11 }}>
+                      <b>Options follow other fields</b>
+                      <div style={{ marginTop: 3 }}>
+                        Depends on: {curField.optionsBy.dependsOn.map((id) => curSection?.fields.find((x) => x.fieldId === id)?.label ?? id).join(' → ')}
+                        {' · '}{Object.keys(curField.optionsBy.table).length} combination(s)
+                        {curField.optionsBy.resetOnChange ? ` · resets to “${curField.optionsBy.resetTo ?? 'first option'}” when they change` : ''}
+                      </div>
+                      <button style={{ ...btn, marginTop: 5 }} onClick={() => patch({ optionsBy: undefined })}>Remove</button>
+                      <div style={{ marginTop: 3, color: 'var(--vf-text-muted)' }}>The lists come from the device (crawled) and are set by <code>apply_dependent_options.py</code>.</div>
+                    </div>
+                  )}
                   <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, marginTop: 8 }}>
                     <input type="checkbox" checked={!!curField.confirmWrite} onChange={(e) => patch({ confirmWrite: e.target.checked })} /> Ask for confirmation before writing
                   </label>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiDescriptorField, UiDescriptorSection } from '../../api/uiBuilder.api';
-import { buildDeviceTree, matrixCell, parseOptionList, rowVisible, sectionHasData, visibleMatrixColumns, visibleSections } from './deviceUiModel';
+import { buildDeviceTree, cascadeOptionResets, optionsByList, matrixCell, parseOptionList, rowVisible, sectionHasData, visibleMatrixColumns, visibleSections } from './deviceUiModel';
 import type { CellSource } from './deviceUiModel';
 
 const f = (id: string, label = id): UiDescriptorField => ({ fieldId: id, elementType: 'table-block', label, mibObject: id, access: 'read-only', order: 0 });
@@ -124,5 +124,44 @@ describe('fixed text does not count as device data', () => {
     const s = sec({ sectionId: 'r2', fields: [ssid, fixed] });
     const src: CellSource = { rows: () => [], display: (_x, x) => (x.fieldId === 'k' ? '********' : null) };
     expect(sectionHasData(s, src)).toBe(false);
+  });
+});
+
+describe('optionsBy: Country → Bandwidth → Channel', () => {
+  const country = f('country');
+  const bw: UiDescriptorField = { ...f('bw'), enumMap: {}, optionsBy: { dependsOn: ['country'], table: { '356': 'HT20:20 MHz,HT40+:40 MHz,HT80:80 MHz', '840': 'HT20:20 MHz' } } };
+  const ch: UiDescriptorField = { ...f('ch'), enumMap: { auto: 'Auto' }, optionsBy: { dependsOn: ['country', 'bw'], resetOnChange: true, resetTo: 'auto',
+    table: { '356|HT20': '32( 5160 MHz ),33( 5165 MHz )', '356|HT80': '38( 5190 MHz )', '840|HT20': '1( 2412 MHz )' } } };
+  const s = sec({ sectionId: 'p', fields: [country, bw, ch] });
+  const vals = (o: Record<string, string>) => (id: string) => o[id] ?? '';
+
+  it('lists the options for the parents\' current values', () => {
+    expect(optionsByList(ch, vals({ country: '356', bw: 'HT80' }))?.map((o) => o.value)).toEqual(['38']);
+    expect(optionsByList(ch, vals({ country: '356', bw: 'HT160' }))).toBeNull();
+    expect(optionsByList(bw, vals({ country: '840' }))?.map((o) => o.label)).toEqual(['20 MHz']);
+  });
+  it('changing Bandwidth resets Channel to Auto (the device does the same)', () => {
+    expect(cascadeOptionResets(s, 'bw', 'HT80', vals({ country: '356', bw: 'HT20', ch: '33' }))).toEqual([{ fieldId: 'ch', value: 'auto' }]);
+  });
+  it('changing Country falls back a Bandwidth it does not offer, then resets Channel', () => {
+    expect(cascadeOptionResets(s, 'country', '840', vals({ country: '356', bw: 'HT80', ch: '38' }))).toEqual([{ fieldId: 'bw', value: 'HT20' }, { fieldId: 'ch', value: 'auto' }]);
+  });
+  it('keeps a Bandwidth the new Country still offers', () => {
+    const r = cascadeOptionResets(s, 'country', '356', vals({ country: '840', bw: 'HT20', ch: '1' }));
+    expect(r.find((x) => x.fieldId === 'bw')).toBeUndefined();
+    expect(r).toEqual([{ fieldId: 'ch', value: 'auto' }]);
+  });
+});
+
+describe('optionsBy defaults', () => {
+  const country = f('country');
+  const ch: UiDescriptorField = { ...f('ch'), optionsBy: { dependsOn: ['country'], defaults: { country: '356' }, table: { '356': '38( 5190 MHz )', '840': '1( 2412 MHz )' } } };
+  it('a parent with no value counts as its default (Country: India)', () => {
+    expect(optionsByList(ch, () => '')?.map((o) => o.value)).toEqual(['38']);
+    expect(optionsByList(ch, (id) => (id === 'country' ? '840' : ''))?.map((o) => o.value)).toEqual(['1']);
+  });
+  it('without a default an unanswered parent has no list', () => {
+    expect(optionsByList({ ...ch, optionsBy: { ...ch.optionsBy!, defaults: undefined } }, () => '')).toBeNull();
+    expect(country.fieldId).toBe('country');
   });
 });

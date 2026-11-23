@@ -49,6 +49,7 @@ const ParameterSpecSchema = new mongoose.Schema({
   uiShowWhen:      { type: mongoose.Schema.Types.Mixed, default: undefined },
   uiHidden:        { type: Boolean, default: false },
   optionsFrom:     { type: String, default: undefined },
+  optionsBy:       { type: mongoose.Schema.Types.Mixed, default: undefined },
   valueSource:     { type: String, default: null },
   staticValue:     { type: String, default: null },
   calc:            { type: mongoose.Schema.Types.Mixed, default: null },

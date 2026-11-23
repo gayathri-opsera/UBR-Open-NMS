@@ -76,6 +76,53 @@ export function parseOptionList(raw: string | null | undefined): { value: string
   return out;
 }
 
+/**
+ * Options of a field whose list follows other fields (`optionsBy`): the table entry for the parents' CURRENT values
+ * (pending edit, else the device's value) — Country, Bandwidth → Channel list. null while that combination has no entry.
+ */
+export function optionsByList(f: UiDescriptorField, valueOf: (fieldId: string) => string): { value: string; label: string }[] | null {
+  const by = f.optionsBy;
+  if (!by) return null;
+  // a parent the device has not answered yet (or never will) counts as its default — Country: India
+  const raw = by.table[by.dependsOn.map((id) => valueOf(id) || by.defaults?.[id] || '').join('|')];
+  if (raw == null) return null;
+  const list = parseOptionList(raw);
+  return list.length ? list : null;
+}
+
+/**
+ * A parent field changed to `value`: which dependent fields must change too (the device resets Channel to Auto when Bandwidth
+ * changes; a Bandwidth the new Country does not offer falls back). Follows the chain Country → Bandwidth → Channel.
+ */
+export function cascadeOptionResets(sec: UiDescriptorSection, changedId: string, value: string, valueOf: (fieldId: string) => string): { fieldId: string; value: string }[] {
+  const overlay: Record<string, string> = { [changedId]: value };
+  const get = (id: string) => (id in overlay ? overlay[id] : valueOf(id));   // (optionsByList applies the defaults)
+  const out: { fieldId: string; value: string }[] = [];
+  const queue = [changedId];
+  const seen = new Set<string>();
+  while (queue.length) {
+    const parent = queue.shift() as string;
+    if (seen.has(parent)) continue;
+    seen.add(parent);
+    for (const g of sec.fields) {
+      const by = g.optionsBy;
+      if (!by || !by.dependsOn.includes(parent) || g.fieldId === changedId) continue;
+      const list = optionsByList(g, get);
+      const cur = get(g.fieldId);
+      const own = enumOptions(g).map((o) => o.value).filter((v) => !/^\d+$/.test(v));
+      const valid = !!list && (list.some((o) => o.value === cur) || own.includes(cur));
+      if (!by.resetOnChange && (valid || !list)) continue;
+      const next = by.resetTo ?? list?.[0]?.value ?? cur;
+      if (next === cur && !by.resetOnChange) continue;
+      if (g.fieldId in overlay && overlay[g.fieldId] === next) continue;   // already reset by another parent
+      overlay[g.fieldId] = next;
+      out.push({ fieldId: g.fieldId, value: next });
+      queue.push(g.fieldId);
+    }
+  }
+  return out;
+}
+
 export const isBindable = (f: UiDescriptorField) => f.elementType === 'field-label' || f.elementType === 'table-block';
 
 export const newId = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;

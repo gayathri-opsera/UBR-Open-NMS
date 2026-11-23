@@ -40,6 +40,7 @@ export function wireframeToSections(groups: WireframeGroup[]): { sections: UiDes
         uiShowWhen: p.uiShowWhen?.length ? p.uiShowWhen : undefined,
         uiHidden: p.uiHidden || undefined,
         optionsFrom: p.optionsFrom || undefined,
+        optionsBy: p.optionsBy || undefined,
         staticValue: p.staticValue ?? undefined,
         minValue: p.minValue ?? undefined,
         maxValue: p.maxValue ?? undefined,

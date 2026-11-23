@@ -140,3 +140,38 @@ describe('rows with "show when" rules', () => {
     expect(labels(draw(run({})).container)).toEqual(['Radio Mode', 'Configured Channel', 'DDRS Status', 'Modulation Index']);
   });
 });
+
+describe('dependent dropdowns: Country → Bandwidth → Channel', () => {
+  const f = (id: string, label: string, extra: Partial<UiDescriptorField> = {}): UiDescriptorField => ({ fieldId: id, elementType: 'field-label', label, mibObject: id, access: 'read-write', order: 0, widget: 'select', ...extra });
+  const secs: UiDescriptorSection[] = [{
+    sectionId: 'p', title: 'Properties', columns: 2, order: 0, uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'Properties', uiLayout: 'form',
+    fields: [
+      f('country', 'Country', { uiHidden: true }),
+      f('bw', 'Bandwidth', { enumMap: {}, optionsBy: { dependsOn: ['country'], table: { '356': 'HT20:20 MHz,HT40+:40 MHz,HT80:80 MHz', '840': 'HT20:20 MHz' } } }),
+      f('ch', 'Configured Channel', { enumMap: { auto: 'Auto' }, optionsBy: { dependsOn: ['country', 'bw'], resetOnChange: true, resetTo: 'auto',
+        table: { '356|HT20': '32( 5160 MHz ),33( 5165 MHz )', '356|HT80': '38( 5190 MHz ),42( 5210 MHz )', '840|HT20': '1( 2412 MHz )' } } }),
+    ],
+  }];
+  const raw: Record<string, string> = { country: '356', bw: 'HT20', ch: '33' };
+  const make = (edits: Record<string, string> = {}) => {
+    const onEdit = vi.fn();
+    const rt: DeviceUiRuntime = { ...runtimeFor(['2']), canEdit: true, onEdit,
+      rawValue: (_s, x) => raw[x.fieldId] ?? null, display: (_s, x) => raw[x.fieldId] ?? null, edited: (_s, x) => edits[x.fieldId] };
+    const r = render(<DeviceUiView screenName="UBR" sections={secs} active={{ page: 'Wireless', parent: 'Radio 1', tab: 'Properties' }} onActiveChange={() => undefined} runtime={rt} />);
+    const sel = (label: string) => [...r.container.querySelectorAll('.dv-row')].find((row) => row.querySelector('.dv-label')?.textContent === label)?.querySelector('select') as HTMLSelectElement;
+    return { onEdit, sel, opts: (label: string) => [...sel(label).options].map((o) => o.value) };
+  };
+  it('Channel lists the channels of the device’s current Country + Bandwidth', () => {
+    const v = make();
+    expect(v.opts('Bandwidth')).toEqual(['HT20', 'HT40+', 'HT80']);
+    expect(v.opts('Configured Channel')).toEqual(['auto', '32', '33']);
+  });
+  it('an unsaved Bandwidth choice already changes the Channel list', () => {
+    expect(make({ bw: 'HT80', ch: 'auto' }).opts('Configured Channel')).toEqual(['auto', '38', '42']);
+  });
+  it('picking a Bandwidth also resets the Channel to Auto, like the device', () => {
+    const v = make();
+    fireEvent.change(v.sel('Bandwidth'), { target: { value: 'HT80' } });
+    expect(v.onEdit.mock.calls.map((c) => [c[1].fieldId, c[2]])).toEqual([['bw', 'HT80'], ['ch', 'auto']]);
+  });
+});

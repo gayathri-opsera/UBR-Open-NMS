@@ -14,6 +14,7 @@ the DCS dwell timers) cannot be shown from SNMP and are left out.
 """
 import re
 import spec
+import dependent_options
 from spec import mib, tpl, static, section, NOTE_W, web_enum
 
 WEB = spec.WEB
@@ -101,6 +102,7 @@ def radio_sections(n, parent, hide_when_empty, ghz6=False):
         when(blank('Scan Interval'), (mode, 'in', ['sta'])),
         when(mib('DL/UL Ratio', 'wirelessDlUlRatio', r, enum=opts(P, 'DL/UL Ratio')), (mode, 'in', ['ap'])),
     ]
+    dependent_options.add(props, n, lambda: hidden('Country', 'wirelessCountry', r))   # Link Type -> Radio Mode -> Country -> Bandwidth -> Channel
     S.append(section('Wireless', parent, 'Properties', 'Properties', gate(props, mode) if n == 2 else props,
                      layout='form', heading=f'Radio {n} Configuration', note=NOTE_W, hide=hide_when_empty))
 
@@ -175,7 +177,7 @@ def radio24_section():
     bw['optionsFrom'] = supp_bw['fieldId']
     ch = mib('Configured Channel', 'wirelessChannel', 1, enum={'auto': 'Auto'})
     ch['optionsFrom'] = supp_ch['fieldId']
-    return section('Wireless', '2.4 GHz Radio', 'Properties', 'Properties', [
+    rows = [
         mib('Status', 'wirelessRadioStatus', 1, enum=opts(P, 'Status')),
         blank('Bridge'),
         tpl('Radio Mode', '{m}', [('m', 'wirelessRadioMode', 1, {'map': {'ap': 'AP', 'sta': 'STA'}})]),
@@ -185,7 +187,9 @@ def radio24_section():
         mib('Encryption', 'wirelessSecurityEncryption', 1, enum=opts(P, 'Encryption')),
         static('Key'),
         blank('Scheduler'),
-    ], layout='form', heading='2.4 GHz Configuration', note=NOTE_W)
+    ]
+    dependent_options.add(rows, 0, lambda: hidden('Country', 'wirelessCountry', 1))
+    return section('Wireless', '2.4 GHz Radio', 'Properties', 'Properties', rows, layout='form', heading='2.4 GHz Configuration', note=NOTE_W)
 
 
 def wireless_sections(model='655'):

@@ -47,6 +47,7 @@ export interface WireframeParameter {
   uiShowWhen?:     { field: string; in?: string[]; notIn?: string[]; required?: boolean }[];
   uiHidden?:       boolean;
   optionsFrom?:    string;
+  optionsBy?: { dependsOn: string[]; table: Record<string, string>; defaults?: Record<string, string>; resetOnChange?: boolean; resetTo?: string };
   staticValue?:    string | null;
 }
 

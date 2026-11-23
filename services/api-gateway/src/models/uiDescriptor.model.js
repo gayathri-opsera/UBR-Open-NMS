@@ -39,6 +39,8 @@ const FieldSchema = new mongoose.Schema({
   uiHidden:      Boolean,
   /** Device layout: dropdown options taken from a sibling field's value (the device's own list, "36( 5180 MHz ),37( 5185 MHz )…") instead of the fixed enumMap. */
   optionsFrom:   String,
+  /** Device layout: options that depend on sibling fields' (pending) values — { dependsOn:[fieldId…], table:{ 'raw1|raw2': "36( 5180 MHz ),…" }, resetOnChange?, resetTo? }. */
+  optionsBy:     mongoose.Schema.Types.Mixed,
   order:         Number,
 });
 
