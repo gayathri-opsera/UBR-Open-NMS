@@ -293,15 +293,15 @@ router.post(
 
 /**
  * History of a chart group (Monitor > Graphs): averaged points of every charted metric, up to 6 months back.
- *   GET /api/node-view/:deviceId/history?group=<groupId>&range=1h|1d|1w|1m|3m|6m   or   &from=<ISO>&to=<ISO>   [&params=a,b]
+ *   GET /api/node-view/:deviceId/history?[group=<groupId>&]range=1h|1d|1w|1m|3m|6m   or   &from=<ISO>&to=<ISO>   [&params=a,b]
  * Read-only: answers from the samples the collector stored (live/statsHistory.js); nothing is read from the device.
  */
 router.get(
   '/:deviceId/history',
   requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'node-view.history'),
   async (req, res) => {
-    const group = String(req.query.group || '');
-    if (!/^[\w.-]{1,64}$/.test(group)) return res.status(400).json({ status: 'error', error: { code: 'BAD_REQUEST', message: 'group is required.' } });
+    const group = String(req.query.group || '');   // optional: history is kept per device and metric, whatever screen drew it
+    if (group && !/^[\w.-]{1,64}$/.test(group)) return res.status(400).json({ status: 'error', error: { code: 'BAD_REQUEST', message: 'group is not valid.' } });
     const params = req.query.params ? String(req.query.params).split(',').map((x) => x.trim()).filter(Boolean).slice(0, 40) : null;
     try {
       const device = await live.findDevice(req.params.deviceId);

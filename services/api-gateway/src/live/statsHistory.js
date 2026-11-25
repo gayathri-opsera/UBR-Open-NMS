@@ -158,7 +158,7 @@ async function ensureIndexes(d) {
   indexed = true;
   try {
     await d.collection(RAW_COL).createIndex({ exp: 1 }, { expireAfterSeconds: 0 });
-    await d.collection(RAW_COL).createIndex({ d: 1, g: 1, ts: 1 });
+    await d.collection(RAW_COL).createIndex({ d: 1, ts: 1 });
     await d.collection(HOURLY_COL).createIndex({ exp: 1 }, { expireAfterSeconds: 0 });
     await d.collection(HOURLY_COL).createIndex({ d: 1, g: 1, h: 1 }, { unique: true });
   } catch (e) { indexed = false; logger.warn({ msg: 'stats history: index creation failed', err: e.message }); }
@@ -178,7 +178,10 @@ async function store(deviceId, groupId, metrics, ts) {
   return keys.length;
 }
 
-/** The history of one chart group of a device. */
+/**
+ * The history of a device. Samples are read by device + metric, not by chart group: a metric is `param~instance`, so the history
+ * survives a template change (new group ids) or a re-provision. `groupId` is accepted for compatibility and not used.
+ */
 async function queryHistory({ deviceId, groupId, range, from, to, params }, nowMs = Date.now()) {
   const r = resolveRange({ range, from, to }, nowMs);
   if (!r) return { error: 'BAD_RANGE' };
@@ -187,8 +190,8 @@ async function queryHistory({ deviceId, groupId, range, from, to, params }, nowM
   const raw = r.from >= nowMs - RAW_QUERY_MS;
   const bucketMs = pickBucket(r.to - r.from, raw ? 5 * 60_000 : HOUR_MS);
   const docs = raw
-    ? await d.collection(RAW_COL).find({ d: deviceId, g: groupId, ts: { $gte: new Date(r.from), $lte: new Date(r.to) } }, { projection: { ts: 1, v: 1 } }).sort({ ts: 1 }).toArray()
-    : await d.collection(HOURLY_COL).find({ d: deviceId, g: groupId, h: { $gte: new Date(Math.floor(r.from / HOUR_MS) * HOUR_MS), $lte: new Date(r.to) } }, { projection: { h: 1, sum: 1, cnt: 1 } }).sort({ h: 1 }).toArray();
+    ? await d.collection(RAW_COL).find({ d: deviceId, ts: { $gte: new Date(r.from), $lte: new Date(r.to) } }, { projection: { ts: 1, v: 1 } }).sort({ ts: 1 }).toArray()
+    : await d.collection(HOURLY_COL).find({ d: deviceId, h: { $gte: new Date(Math.floor(r.from / HOUR_MS) * HOUR_MS), $lte: new Date(r.to) } }, { projection: { h: 1, sum: 1, cnt: 1 } }).sort({ h: 1 }).toArray();
   const series = toSeries(raw ? rawToBuckets(docs, bucketMs) : hourlyToBuckets(docs, bucketMs), params);
   return { from: r.from, to: r.to, bucketSeconds: bucketMs / 1000, source: raw ? 'raw' : 'hourly', samples: docs.length, series };
 }
