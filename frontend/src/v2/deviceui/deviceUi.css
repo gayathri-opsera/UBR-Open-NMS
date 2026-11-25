@@ -137,6 +137,9 @@
 
 /* Monitor > Graphs — history charts (SkyPoint-style cards, a range selector on each) */
 .dv-root .dv-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; margin-top: 8px; }
+.dv-root .dv-charts-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 8px 0 0; font-size: 13px; color: #333; }
+.dv-root .dv-charts-bar select { font-size: 13px; padding: 2px 4px; }
+.dv-root .dv-charts-bar small { color: #777; }
 .dv-root .dv-chart { background: #fff; border: 1px solid #d7dbe0; padding: 10px 12px 8px; min-width: 0; }
 .dv-root .dv-chart-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
 .dv-root .dv-chart-head h4 { margin: 0; font: 600 14px 'Segoe UI', SegoeUI, 'Open Sans', Arial, sans-serif; color: #333; }

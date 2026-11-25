@@ -115,7 +115,7 @@ export interface HistoryData {
   /** width of one point */
   bucketSeconds: number;
   /** 'raw' = the 5-minute samples, 'hourly' = hourly averages (ranges older than a week) */
-  source: 'raw' | 'hourly';
+  source: 'raw' | 'hourly' | 'live';
   samples: number;
   series: HistorySeries[];
 }
@@ -129,5 +129,14 @@ export async function fetchNodeViewHistory(deviceId: string, q: HistoryQuery, si
   if (q.to) qs.set('to', q.to);
   if (q.params?.length) qs.set('params', q.params.join(','));
   const res = await apiClient.get<{ status: string; data?: HistoryData }>(`${BASE}/${encodeURIComponent(deviceId)}/history?${qs.toString()}`, { signal, validateStatus: (s) => s === 200 || s === 400 });
+  return res.data.status === 'ok' && res.data.data ? res.data.data : null;
+}
+
+/** One live reading of a radio's chart metrics: `values` is keyed `param~instance` ('wirelessStatsTxThroughput~2', link rows '…~2-1'). */
+export interface LiveStatsSample { ts: number; values: Record<string, number> }
+
+/** Fresh statistics of one radio row (1 = 2.4 GHz, 2 = Radio 1, 3 = Radio 2) — an SNMP GET by the gateway, shared for 3 s. */
+export async function fetchLiveStats(deviceId: string, row: string, signal?: AbortSignal): Promise<LiveStatsSample | null> {
+  const res = await apiClient.get<{ status: string; data?: LiveStatsSample }>(`${BASE}/${encodeURIComponent(deviceId)}/live-stats?row=${encodeURIComponent(row)}`, { signal, validateStatus: (s) => s === 200 || s === 422 });
   return res.data.status === 'ok' && res.data.data ? res.data.data : null;
 }

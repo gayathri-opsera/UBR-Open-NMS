@@ -62,4 +62,54 @@ describe('Monitor > Graphs', () => {
     render(<StatsCharts config={CONFIG} group="g1" />);
     expect(screen.getAllByText(/Chart preview/).length).toBe(2);
   });
+
+  describe('live stream', () => {
+    const sample = (ts: number) => ({ ts, values: { 'tx~2': 1, 'rx~2': 2, 'rtx~2': 3 } });
+    it('starts live at 5 s for every chart and follows the universal frequency', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let t = Date.now();
+      const live = vi.fn().mockImplementation(async () => sample((t += 5000)));
+      render(<StatsCharts config={CONFIG} group="g1" fetcher={vi.fn().mockResolvedValue(EMPTY)} liveFetcher={live} />);
+      expect(screen.getByRole('group', { name: 'Throughput range' }).querySelector('.on')?.textContent).toBe('Live');
+      expect((screen.getByLabelText('Universal live frequency') as HTMLSelectElement).value).toBe('live-5');
+      expect(screen.queryByLabelText('Throughput frequency')).toBeNull();   // one universal selector only
+      await waitFor(() => expect(live).toHaveBeenCalledWith('2'));
+      await act(async () => { fireEvent.change(screen.getByLabelText('Universal live frequency'), { target: { value: 'live-10' } }); });
+      expect((screen.getByLabelText('Universal live frequency') as HTMLSelectElement).value).toBe('live-10');
+      vi.useRealTimers();
+    });
+    it('picking a history range stops the live reading for that chart', async () => {
+      render(<StatsCharts config={CONFIG} group="g1" fetcher={vi.fn().mockResolvedValue(EMPTY)} liveFetcher={vi.fn().mockResolvedValue(null)} />);
+      await act(async () => { fireEvent.click(screen.getByRole('group', { name: 'Throughput range' }).querySelectorAll('button')[2]); });
+      expect(screen.getByRole('group', { name: 'Throughput range' }).querySelector('.on')?.textContent).toBe('1 Day');
+      expect(screen.getByRole('group', { name: 'RTX range' }).querySelector('.on')?.textContent).toBe('Live');
+    });
+    it('the universal selector offers Live 5 s / 10 s and every history range, and sets every graph', async () => {
+      const fetcher = vi.fn().mockResolvedValue(EMPTY);
+      render(<StatsCharts config={CONFIG} group="g1" fetcher={fetcher} liveFetcher={vi.fn().mockResolvedValue(null)} />);
+      const sel = screen.getByLabelText('Universal live frequency') as HTMLSelectElement;
+      expect([...sel.options].map((o) => o.textContent)).toEqual(['Live · 5 s', 'Live · 10 s', '1 Hour', '1 Day', '1 Week', '1 Month', '3 Months', '6 Months']);
+      await act(async () => { fireEvent.change(sel, { target: { value: '1w' } }); });
+      await waitFor(() => expect(fetcher).toHaveBeenCalledWith({ group: 'g1', range: '1w', params: ['tx', 'rx'] }));
+      expect(fetcher).toHaveBeenCalledWith({ group: 'g1', range: '1w', params: ['rtx'] });
+      expect(screen.getByRole('group', { name: 'RTX range' }).querySelector('.on')?.textContent).toBe('1 Week');
+      await act(async () => { fireEvent.change(sel, { target: { value: 'live-5' } }); });
+      expect(screen.getByRole('group', { name: 'RTX range' }).querySelector('.on')?.textContent).toBe('Live');
+    })
+    it('a graph switched to Live after a history range keeps polling, at the last live frequency, and draws on its own live axis', async () => {
+      const calls: number[] = [];
+      let t = Date.now();
+      const live = vi.fn().mockImplementation(async () => { calls.push(Date.now()); return { ts: (t += 10000), values: { 'tx~2': 1, 'rx~2': 2 } }; });
+      render(<StatsCharts config={CONFIG} group="g1" fetcher={vi.fn().mockResolvedValue(EMPTY)} liveFetcher={live} />);
+      const sel = screen.getByLabelText('Universal live frequency') as HTMLSelectElement;
+      await act(async () => { fireEvent.change(sel, { target: { value: 'live-10' } }); });
+      await act(async () => { fireEvent.change(sel, { target: { value: '1h' } }); });
+      live.mockClear();
+      await act(async () => { fireEvent.click(screen.getByRole('group', { name: 'Throughput range' }).querySelectorAll('button')[0]); });
+      expect(screen.getByRole('group', { name: 'Throughput range' }).querySelector('.on')?.textContent).toBe('Live');
+      expect(screen.getByRole('group', { name: 'RTX range' }).querySelector('.on')?.textContent).toBe('1 Hour');
+      await waitFor(() => expect(live).toHaveBeenCalledWith('2'));
+      expect(await screen.findByText(/Live · a reading every 10 s/)).toBeTruthy();
+    });
+  });
 });

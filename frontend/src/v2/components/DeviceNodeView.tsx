@@ -10,7 +10,7 @@ import { valueKey } from '../../api/nodeView.types';
 import { isEmptyRaw } from '../deviceui/calcExpr';
 import DeviceUiView from '../deviceui/DeviceUiView';
 import type { DeviceUiRuntime } from '../deviceui/DeviceUiView';
-import type { HistoryFetcher } from '../deviceui/StatsCharts';
+import type { HistoryFetcher, LiveFetcher } from '../deviceui/StatsCharts';
 import { firstPath, buildDeviceTree, resolvePath } from '../deviceui/deviceUiModel';
 import type { ActivePath } from '../deviceui/deviceUiModel';
 
@@ -106,12 +106,14 @@ export interface DeviceNodeViewProps {
   tabLoading?: boolean;
   /** history of a chart group (Monitor > Graphs) — keep the function stable between renders */
   onHistory?: HistoryFetcher;
+  /** one live reading of a radio's chart metrics (Monitor > Graphs live stream) */
+  onLiveStats?: LiveFetcher;
 }
 
 
 export const DeviceNodeView: React.FC<DeviceNodeViewProps> = ({
   screenName, wireframe, deviceUi, header, values, canEdit, edits, errors, pendingFor, onEdit, applying,
-  onApplyGroups, onRevertGroups, collectedAt, pollStatus, refreshing, onRefresh, onReadTab, tabLoading, onHistory,
+  onApplyGroups, onRevertGroups, collectedAt, pollStatus, refreshing, onRefresh, onReadTab, tabLoading, onHistory, onLiveStats,
 }) => {
   const { sections, paramOf } = useMemo(() => wireframeToSections(wireframe), [wireframe]);
   const [active, setActive] = useState<ActivePath>(() => firstPath(buildDeviceTree(screenName, sections)));
@@ -192,6 +194,7 @@ export const DeviceNodeView: React.FC<DeviceNodeViewProps> = ({
     onRevert: onRevertGroups,
     ready: Object.keys(values).length > 0,
     history: onHistory,
+    liveStats: onLiveStats,
     sectionRead: (sid) => !readsDevice(sid) || readAtOf(sid) !== null,
     byField: (fid) => {
       for (const [k, p] of paramOf) {

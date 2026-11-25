@@ -319,6 +319,31 @@ router.get(
 );
 
 /**
+ * Live stream of a radio's chart metrics (Monitor > Graphs, polled every 5 s while the tab is open).
+ *   GET /api/node-view/:deviceId/live-stats?row=<1|2|3>   (statistics row: 1 = 2.4 GHz, 2 = Radio 1, 3 = Radio 2)
+ * Read-only: SNMP GETs of that radio's statistics columns and link SNR rows; readings are shared for 3 s per device and row.
+ */
+router.get(
+  '/:deviceId/live-stats',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'node-view.live-stats'),
+  async (req, res) => {
+    const row = String(req.query.row || '');
+    if (!/^[1-3]$/.test(row)) return res.status(400).json({ status: 'error', error: { code: 'BAD_REQUEST', message: 'row must be 1, 2 or 3.' } });
+    try {
+      const device = await live.findDevice(req.params.deviceId);
+      if (!device) return res.status(404).json({ status: 'error', error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found.' } });
+      const out = await statsHistory.liveSample(live, device, row);
+      if (!out) return res.status(422).json({ status: 'error', error: { code: 'NOT_SUPPORTED', message: 'This device has no live statistics.' } });
+      res.set('Cache-Control', 'no-store');
+      return res.json({ status: 'ok', data: out });
+    } catch (e) {
+      logger.error({ msg: 'node-view live-stats error', err: e.message });
+      return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: e.message } });
+    }
+  },
+);
+
+/**
  * Real-time statistics: fresh SNMP read of the requested Monitor groups only (?groups=a,b).
  * Mirrors the device's own statistics pages, which re-read their counters every 1–5 s.
  */

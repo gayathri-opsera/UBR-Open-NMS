@@ -63,6 +63,7 @@ export function bucketLabel(seconds: number): string {
 export function tickLabel(ms: number, spanMs: number): string {
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, '0');
+  if (spanMs <= 30 * 60_000) return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;   // live window: seconds matter
   if (spanMs <= 2 * 86400_000) return `${p(d.getHours())}:${p(d.getMinutes())}`;
   return `${d.toLocaleString('en-GB', { month: 'short' })} ${d.getDate()}`;
 }

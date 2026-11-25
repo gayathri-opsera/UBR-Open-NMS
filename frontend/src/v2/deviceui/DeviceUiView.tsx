@@ -8,7 +8,7 @@ import './deviceUi.css';
 import type { DeviceUiConfig, ResolvedHeader, UiDescriptorField, UiDescriptorSection } from '../../api/uiBuilder.api';
 import { hasSource } from './headerPreview';
 import type { ActivePath } from './deviceUiModel';
-import StatsCharts, { type HistoryFetcher } from './StatsCharts';
+import StatsCharts, { type HistoryFetcher, type LiveFetcher } from './StatsCharts';
 import { buildDeviceTree, cascadeOptionResets, checkIdList, formatIdList, parseIdList, controlKind, optionsByList, enumOptions, isBindable, matrixCell, parseOptionList, resolvePath, rowVisible, visibleMatrixColumns, visibleSections } from './deviceUiModel';
 
 const Svg: React.FC<{ d: string; className?: string; vb?: string }> = ({ d, className, vb = '0 0 24 24' }) => (
@@ -117,6 +117,8 @@ export interface DeviceUiRuntime {
   sectionRead?: (sectionId: string) => boolean;
   /** history of a chart group (Monitor > Graphs); absent = the charts show a preview note */
   history?: HistoryFetcher;
+  /** live stream of a radio's chart metrics */
+  liveStats?: LiveFetcher;
 }
 
 export interface DeviceUiViewProps {
@@ -392,7 +394,7 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
       return (
         <div key={sec.sectionId} className={design && selectedSectionId === sec.sectionId ? 'sel-section' : ''} data-dv-section={sec.sectionId}
           onClick={design ? () => onSelectSection?.(sec.sectionId) : undefined}>
-          <StatsCharts config={sec.uiCharts} group={sec.sectionId} fetcher={runtime?.history} />
+          <StatsCharts config={sec.uiCharts} group={sec.sectionId} fetcher={runtime?.history} liveFetcher={runtime?.liveStats} />
         </div>
       );
     }

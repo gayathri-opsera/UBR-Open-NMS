@@ -29,7 +29,7 @@ import type {
 } from '../../api/nodeView.types';
 import { valueKey } from '../../api/nodeView.types';
 import { parseIdList, planIdListChanges } from '../deviceui/deviceUiModel';
-import { applyNodeViewChanges, fetchMonitorLive, fetchNodeViewHistory, fetchTabLive, type LiveStatus } from '../../api/nodeView.api';
+import { applyNodeViewChanges, fetchLiveStats, fetchMonitorLive, fetchNodeViewHistory, fetchTabLive, type LiveStatus } from '../../api/nodeView.api';
 
 import { DeviceNodeView } from './DeviceNodeView';
 import { Badge }   from './common/Badge';
@@ -828,6 +828,7 @@ function NodeViewParametersInner({
   }, [activeGroup]);
 
   // stable between renders: the charts re-read their history only when their range changes
+  const fetchLive = useCallback((row: string) => fetchLiveStats(deviceId, row), [deviceId]);
   const fetchHistory = useCallback((q: Parameters<typeof fetchNodeViewHistory>[1]) => fetchNodeViewHistory(deviceId, q), [deviceId]);
 
   const groupHasWritable = !!activeGroup && activeGroup.parameters.some((p) => !p.hidden && !p.readOnly && !!p.snmpOid);
@@ -1234,6 +1235,7 @@ function NodeViewParametersInner({
         onEdit={onEdit}
         applying={applying}
         onHistory={fetchHistory}
+        onLiveStats={fetchLive}
         onApplyGroups={(ids) => { void (async () => { for (const gid of gidsWithPending(ids)) await applyScope(gid, gid); })(); }}
         onRevertGroups={(ids) => ids.forEach((gid) => revertScope(gid))}
         collectedAt={collectedAt}

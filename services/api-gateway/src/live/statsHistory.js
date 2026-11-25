@@ -307,6 +307,40 @@ async function collectDevice(live, device) {
   return store(String(device._id), HISTORY_KEY, sample.metrics, new Date(ms));
 }
 
+// ── live stream: one fresh GET read of a radio's statistics for the Monitor > Graphs tab (every 5 s while it is open) ─────
+
+const LIVE_CACHE_MS = 3000;       // charts with different frequencies share one device read
+const liveCache = new Map();      // `${deviceId}|${row}` → { at, promise }
+const liveLast = new Map();       // `${deviceId}|${row}` → { ms, counters } (previous live reading, for per-second rates)
+
+/**
+ * The current values of one radio's chart metrics: { ts, values: { 'param~instance': number } }. SNMP GET only (the radio's own
+ * statistics row and link rows), never a walk, and never a write. Counters are rates against the previous live reading, so the
+ * first reading of a counter has no value. Concurrent callers within LIVE_CACHE_MS get the same reading.
+ */
+function liveSample(live, device, row) {
+  const key = `${device._id}|${row}`;
+  const hit = liveCache.get(key);
+  if (hit && Date.now() - hit.at < LIVE_CACHE_MS) return hit.promise;
+  const promise = (async () => {
+    if (!isUbr(device.sysObjectID) || !device.snmpCommunity) return null;
+    const { getOids } = require('./snmpWalk');
+    const targets = builtinTargets(device.sysObjectID).filter((t) => instanceMatches(t.index, row));
+    const { host, port } = live.splitHostPort(device);
+    const got = [];
+    for (let i = 0; i < targets.length; i += 40) {
+      got.push(...(await getOids({ host, port, community: device.snmpCommunity, oids: targets.slice(i, i + 40).map((t) => t.oid), timeoutMs: 2000, retries: 0 }).catch(() => [])));
+    }
+    const ms = Date.now();
+    const sample = sampleFromCatalog(targets, got, ms, liveLast.get(key));
+    if (Object.keys(sample.counters).length) liveLast.set(key, { ms, counters: sample.counters });
+    return { ts: ms, values: sample.metrics };
+  })();
+  liveCache.set(key, { at: Date.now(), promise });
+  promise.catch(() => liveCache.delete(key));
+  return promise;
+}
+
 let running = false;
 async function collectAll(live) {
   const d = db();
@@ -341,6 +375,6 @@ module.exports = {
   // pure
   encodeKey, decodeKey, instanceMatches, numeric, rateOf, chartedParams, extractSample, resolveRange, pickBucket, rawToBuckets, hourlyToBuckets, toSeries,
   // io
-  store, queryHistory, readByGet, builtinTargets, sampleFromCatalog, isUbr, collectDevice, collectAll, startCollector,
+  store, queryHistory, liveSample, readByGet, builtinTargets, sampleFromCatalog, isUbr, collectDevice, collectAll, startCollector,
   RANGES, MAX_POINTS, RAW_QUERY_MS,
 };

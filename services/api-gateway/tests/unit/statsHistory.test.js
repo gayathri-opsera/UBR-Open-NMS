@@ -120,3 +120,20 @@ describe('built-in catalog (template independent)', () => {
     expect(b.metrics['wirelessStatsDataTxTotalPackets~2']).toBe(2);
   });
 });
+
+describe('liveSample (Monitor > Graphs live stream)', () => {
+  const snmp = require('../../src/live/snmpWalk');
+  it('reads only the radio row by GET, shares a reading for 3 s and turns counters into rates on the second reading', async () => {
+    const spy = jest.spyOn(snmp, 'getOids').mockImplementation(async ({ oids }) => oids.map((o) => ({ oid: o, value: o.includes('.1.3.1.1.30.') ? 7 : o.includes('.1.3.1.1.4.') ? Date.now() % 1000 + 1000 : 1 })));
+    const live = { splitHostPort: () => ({ host: '10.0.0.1', port: 161 }) };
+    const dev = { _id: 'd-live-1', sysObjectID: '.1.3.6.1.4.1.14125.123', snmpCommunity: 'x' };
+    const a = await h.liveSample(live, dev, '2');
+    expect(a.values['wirelessStatsTxThroughput~2']).toBe(7);
+    expect(Object.keys(a.values).every((k) => /~2(-\d)?$/.test(k))).toBe(true);   // radio 2 only, never rows 1 or 3
+    expect(a.values['wirelessStatsDataTxTotalPackets~2']).toBeUndefined();         // counter: no rate on the first reading
+    const calls = spy.mock.calls.length;
+    expect(await h.liveSample(live, dev, '2')).toBe(a);                            // cached within 3 s
+    expect(spy.mock.calls.length).toBe(calls);
+    spy.mockRestore();
+  });
+});
