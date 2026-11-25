@@ -17,11 +17,15 @@ export const RANGE_OPTIONS: { id: string; label: string; ms: number }[] = [
 
 export interface ChartLine { key: string; label: string }
 
+/** Table row `instance` belongs to the radio `row`: '2' matches '2' and the link rows '2.1', '2.2'. An empty row matches all. */
+export const instanceInRow = (instance: string, row: string): boolean => !row || instance === row || instance.startsWith(`${row}.`);
+
 /** The lines of one chart: a series per configured field; a per-link series becomes one line per link the history holds. */
-export function chartLines(chart: UiChartDef, data: HistoryData | null): ChartLine[] {
+export function chartLines(chart: UiChartDef, data: HistoryData | null, row = ''): ChartLine[] {
   const out: ChartLine[] = [];
   for (const s of chart.series) {
-    const found = (data?.series ?? []).filter((x) => x.param === s.param);
+    // the history holds every statistics row (1 = 2.4 GHz, 2 = Radio 1, 3 = Radio 2): draw only the radio this section is about
+    const found = (data?.series ?? []).filter((x) => x.param === s.param && instanceInRow(x.instance, row));
     if (s.perLink) {
       for (const x of found) out.push({ key: `${s.param}~${x.instance}`, label: `${s.label} · link ${x.instance.split('.')[1] ?? x.instance}` });
     } else if (found.length) {

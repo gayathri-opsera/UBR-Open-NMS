@@ -30,6 +30,20 @@ describe('chart lines and rows', () => {
     ]);
     expect(chartRows(chartLines(THROUGHPUT, d), d)).toEqual([{ t: 1000, 'tx~2': 5 }, { t: 2000, 'tx~2': 6, 'rx~2': 7 }]);
   });
+  it('draws only the radio’s own statistics row, not row 1 (2.4 GHz) that sorts first', () => {
+    const d = data([
+      { param: 'tx', instance: '1', points: [[1000, 0]] },
+      { param: 'tx', instance: '2', points: [[1000, 102.9]] },
+      { param: 'tx', instance: '3', points: [[1000, 0]] },
+    ]);
+    const lines = chartLines(THROUGHPUT, d, '2');
+    expect(lines[0].key).toBe('tx~2');
+    expect(chartRows(lines, d)).toEqual([{ t: 1000, 'tx~2': 102.9 }]);
+  });
+  it('per-link lines are limited to the radio’s links', () => {
+    const d = data([{ param: 'snr', instance: '2.1', points: [[1, 60]] }, { param: 'snr', instance: '3.1', points: [[1, 50]] }]);
+    expect(chartLines(SNR, d, '2').map((l) => l.key)).toEqual(['snr~2.1']);
+  });
   it('no history → no rows', () => { expect(chartRows(chartLines(THROUGHPUT, null), null)).toEqual([]); });
 });
 

@@ -14,7 +14,7 @@ export type HistoryFetcher = (q: { group: string; range?: string; from?: string;
 const COLORS = ['#1b6ec2', '#e07b00', '#2e9d57', '#c0392b', '#7d4cc7', '#00897b', '#8d6e63', '#546e7a'];
 const toLocalInput = (ms: number) => { const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000); return d.toISOString().slice(0, 16); };
 
-function ChartCard({ chart, group, fetcher }: { chart: UiChartDef; group: string; fetcher?: HistoryFetcher }) {
+function ChartCard({ chart, group, row, fetcher }: { chart: UiChartDef; group: string; row: string; fetcher?: HistoryFetcher }) {
   const [range, setRange] = useState('1d');
   const [custom, setCustom] = useState({ from: toLocalInput(Date.now() - 86400_000), to: toLocalInput(Date.now()) });
   const [data, setData] = useState<HistoryData | null>(null);
@@ -38,7 +38,7 @@ function ChartCard({ chart, group, fetcher }: { chart: UiChartDef; group: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, group, fetcher]);
 
-  const lines = useMemo(() => chartLines(chart, data), [chart, data]);
+  const lines = useMemo(() => chartLines(chart, data, row), [chart, data, row]);
   const rows = useMemo(() => chartRows(lines, data), [lines, data]);
   const decimals = chart.decimals ?? 2;
   const span = data ? data.to - data.from : 86400_000;
@@ -86,5 +86,5 @@ function ChartCard({ chart, group, fetcher }: { chart: UiChartDef; group: string
 
 export default function StatsCharts({ config, group, fetcher }: { config?: UiChartsConfig; group: string; fetcher?: HistoryFetcher }) {
   if (!config || !config.charts?.length) return <div className="dv-note" style={{ opacity: .6 }}>No charts are defined for this section.</div>;
-  return <div className="dv-charts">{config.charts.map((c) => <ChartCard key={c.id} chart={c} group={group} fetcher={fetcher} />)}</div>;
+  return <div className="dv-charts">{config.charts.map((c) => <ChartCard key={c.id} chart={c} group={group} row={config.row ?? ''} fetcher={fetcher} />)}</div>;
 }
