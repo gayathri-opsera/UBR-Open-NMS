@@ -5,6 +5,7 @@ const config = require('./config');
 const logger = require('./utils/logger');
 const { createApp } = require('./app');
 const liveParameters = require('./live/liveParameters');
+const statsHistory = require('./live/statsHistory');
 
 async function start() {
   const redis = new Redis({
@@ -29,6 +30,7 @@ async function start() {
   });
 
   liveParameters.startScheduler();
+  statsHistory.startCollector(liveParameters);
 
   const shutdown = async (signal) => {
     logger.info({ msg: 'Shutting down', signal });

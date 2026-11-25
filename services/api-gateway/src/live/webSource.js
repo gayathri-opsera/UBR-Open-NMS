@@ -252,6 +252,14 @@ function valueFor(entry, src) {
     return Object.entries(ls).map(([id, st]) => ({ index: id, raw: String(LINK_KEY[label](st) ?? ''), display: String(LINK_KEY[label](st) ?? ''), web: true }));
   }
   if (label === 'systemname') return cfg.sysname ? one(cfg.sysname) : undefined;
+  // The VLAN trunk list: SNMP only has the "add one id" / "delete one id" objects (they read back -NA-), the device's own VLAN
+  // page shows the whole list as one string ("10 20 30"). A screen built in the Custom UI Builder binds it to vlanTrunkId.
+  if (entry.parameterId === 'vlanTrunkId' || entry.parameterId === 'vlanTblTrunkId') {
+    // vlanTblTrunkId is a table column: its last OID number is the radio (row 1 = ath1, row 2 = ath2); the scalar form is ath1
+    const row = entry.parameterId === 'vlanTblTrunkId' ? (/\.(\d+)$/.exec(String(entry.snmpOid || '')) || [])[1] : '1';
+    const list = v[`vlan.ath${row || 1}.trunkvlan`];
+    return list === undefined ? undefined : one(String(list).trim());
+  }
   if (!Object.keys(v).length) return undefined;
 
   // ── radio properties ───────────────────────────────────────────────────────
@@ -492,7 +500,10 @@ async function snapshot(device, host, { radios = [0, 1, 2], withConfig = true } 
   });
 }
 
+/** Drop the cached configuration of a host (after a write, so the next read shows what the device now holds). */
+function forgetConfig(host) { cache.delete(host); }
+
 module.exports = {
-  credentialsFor, roleFromHeader, fetchRole, snapshot, overlay, valueFor, parseValues, parseElements, parseJsonBody,
+  forgetConfig, credentialsFor, roleFromHeader, fetchRole, snapshot, overlay, valueFor, parseValues, parseElements, parseJsonBody,
   prefixToMask, etherType, channelLabel, mbps, uptime, norm, mcsSets,
 };

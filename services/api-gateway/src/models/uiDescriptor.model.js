@@ -41,6 +41,8 @@ const FieldSchema = new mongoose.Schema({
   optionsFrom:   String,
   /** Device layout: options that depend on sibling fields' (pending) values — { dependsOn:[fieldId…], table:{ 'raw1|raw2': "36( 5180 MHz ),…" }, resetOnChange?, resetTo? }. */
   optionsBy:     mongoose.Schema.Types.Mixed,
+  /** Device layout: this field edits a LIST of numeric ids (the VLAN trunk list) — { deleteParam: parameterId of the 'delete one id' object, max, minId, maxId }. The field's own object adds one id per SET. */
+  idList:        mongoose.Schema.Types.Mixed,
   order:         Number,
 });
 
@@ -60,13 +62,15 @@ const SectionSchema = new mongoose.Schema({
   /** Device-style view (Builder v2): page heading, note under the form, and how the section is drawn. */
   uiTitle:       String,
   uiNote:        String,
-  uiLayout:      { type: String, enum: ['form', 'card', 'table', 'matrix', null] },
+  uiLayout:      { type: String, enum: ['form', 'card', 'table', 'matrix', 'charts', null] },
   /** Summary cards only: pin the card to the left or right column (empty = flow). */
   uiColumn:      { type: String, enum: ['left', 'right', null] },
   /** Skip this section (and an emptied tab / menu item) in Node View when the device returns no data for it. */
   uiHideWhenEmpty: Boolean,
   /** 'matrix' layout: { columns: [{ index, label }], hideEmptyColumns } — one column per table row (radio), rows = the section's fields. */
   uiMatrix:      mongoose.Schema.Types.Mixed,
+  /** layout 'charts' (Monitor > Graphs): { row, charts:[{ id, title, unit?, decimals?, series:[{ param, label, rate?, perLink? }] }] } — history charts of the fields of this section */
+  uiCharts:      mongoose.Schema.Types.Mixed,
   fields:        [FieldSchema],
   order:         Number,
 });

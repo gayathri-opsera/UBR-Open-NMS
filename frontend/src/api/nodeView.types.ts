@@ -48,6 +48,8 @@ export interface WireframeParameter {
   uiHidden?:       boolean;
   optionsFrom?:    string;
   optionsBy?: { dependsOn: string[]; table: Record<string, string>; defaults?: Record<string, string>; resetOnChange?: boolean; resetTo?: string };
+  /** a LIST of numeric ids (VLAN trunk list): this object adds one id per SET, `deleteParam` removes one */
+  idList?: { deleteParam: string; max: number; minId: number; maxId: number };
   staticValue?:    string | null;
 }
 
@@ -71,6 +73,7 @@ export interface WireframeGroup {
   uiColumn?: string;
   uiHideWhenEmpty?: boolean;
   uiMatrix?: { columns: { index: string; label: string; map?: Record<string, string> }[]; hideEmptyColumns?: boolean } | null;
+  uiCharts?: import('./uiBuilder.api').UiChartsConfig | null;
   layoutItems?: Array<{ fieldId: string; elementType: 'heading' | 'sub-heading' | 'divider'; label: string; uiOrder: number }>;
 }
 

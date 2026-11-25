@@ -47,15 +47,56 @@ export function resolvePath(tree: DevicePage[], want: Partial<ActivePath>): Acti
   return { page: page?.name ?? '', parent: parent?.name ?? '', tab: tab?.name ?? '' };
 }
 
-export type ControlKind = 'select' | 'input' | 'checkbox' | 'text';
+export type ControlKind = 'select' | 'input' | 'checkbox' | 'text' | 'idlist';
 
 export function controlKind(f: UiDescriptorField): ControlKind {
   if (f.valueSource === 'static' || f.valueSource === 'calc') return 'text';   // fixed / calculated values are display-only
+  if (f.idList) return 'idlist';
   const w = (f.widget || '').toLowerCase();
   if (w === 'dropdown' || w === 'select') return 'select';
   if (w === 'toggle switch' || w === 'toggle' || w === 'checkbox') return 'checkbox';
   if (w.includes('input') || w.includes('slider') || w === 'textfield') return 'input';
   return 'text';
+}
+
+// ── a list of numeric ids (the VLAN trunk list: up to 100 ids, 1-4094) ────────
+
+/** "10 20,30" (the device shows the list space separated) → ['10','20','30']; '-NA-' / empty → []. */
+export function parseIdList(raw: string | null | undefined): string[] {
+  return String(raw ?? '').split(/[\s,;]+/).map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map((x) => String(parseInt(x, 10)));
+}
+export const formatIdList = (ids: string[]): string => ids.join(' ');
+
+/** Why this list cannot be applied (null = fine): each id a whole number in range, no duplicates, at most `max` ids. */
+export function checkIdList(ids: string[], cfg: { max: number; minId: number; maxId: number }): string | null {
+  const bad = ids.find((x) => !/^\d+$/.test(x) || +x < cfg.minId || +x > cfg.maxId);
+  if (bad !== undefined) return `VLAN ID ${bad} must be a whole number from ${cfg.minId} to ${cfg.maxId}.`;
+  const dup = ids.find((x, i) => ids.indexOf(x) !== i);
+  if (dup !== undefined) return `VLAN ID ${dup} is already in the list.`;
+  if (ids.length > cfg.max) return `At most ${cfg.max} VLAN IDs are allowed (the list has ${ids.length}).`;
+  return null;
+}
+
+/** What to send to turn `before` into `after`: the device adds / deletes ONE id per SET, so the changes are sets of single ids. */
+export function diffIdList(before: string[], after: string[]): { remove: string[]; add: string[] } {
+  return { remove: before.filter((x) => !after.includes(x)), add: after.filter((x) => !before.includes(x)) };
+}
+
+/**
+ * The SNMP changes that turn the device's id list `before` into `after`: one delete per removed id, then one add per new id
+ * (the device handles one id per SET). `error` when the new list is not acceptable — nothing is sent then.
+ */
+export function planIdListChanges(
+  groupId: string, parameterId: string, instance: string,
+  cfg: { deleteParam: string; max: number; minId: number; maxId: number }, before: string[], after: string[],
+): { error: string | null; changes: { groupId: string; parameterId: string; instance: string; value: string }[] } {
+  const error = checkIdList(after, cfg);
+  if (error) return { error, changes: [] };
+  const { remove, add } = diffIdList(before, after);
+  return { error: null, changes: [
+    ...remove.map((value) => ({ groupId, parameterId: cfg.deleteParam, instance, value })),
+    ...add.map((value) => ({ groupId, parameterId, instance, value })),
+  ] };
 }
 
 export function enumOptions(f: UiDescriptorField): { value: string; label: string }[] {
@@ -94,17 +135,18 @@ export function optionsByList(f: UiDescriptorField, valueOf: (fieldId: string) =
  * A parent field changed to `value`: which dependent fields must change too (the device resets Channel to Auto when Bandwidth
  * changes; a Bandwidth the new Country does not offer falls back). Follows the chain Country → Bandwidth → Channel.
  */
-export function cascadeOptionResets(sec: UiDescriptorSection, changedId: string, value: string, valueOf: (fieldId: string) => string): { fieldId: string; value: string }[] {
+export function cascadeOptionResets(sec: UiDescriptorSection, changedId: string, value: string, valueOf: (fieldId: string) => string, others: UiDescriptorSection[] = []): { fieldId: string; value: string; sectionId: string }[] {
   const overlay: Record<string, string> = { [changedId]: value };
   const get = (id: string) => (id in overlay ? overlay[id] : valueOf(id));   // (optionsByList applies the defaults)
-  const out: { fieldId: string; value: string }[] = [];
+  const out: { fieldId: string; value: string; sectionId: string }[] = [];
+  const all = [sec, ...others.filter((o) => o.sectionId !== sec.sectionId)];   // a dependent may sit in another section (VLAN Mode ← Radio Mode)
   const queue = [changedId];
   const seen = new Set<string>();
   while (queue.length) {
     const parent = queue.shift() as string;
     if (seen.has(parent)) continue;
     seen.add(parent);
-    for (const g of sec.fields) {
+    for (const [gs, g] of all.flatMap((x) => x.fields.map((y) => [x, y] as const))) {
       const by = g.optionsBy;
       if (!by || !by.dependsOn.includes(parent) || g.fieldId === changedId) continue;
       const list = optionsByList(g, get);
@@ -116,7 +158,7 @@ export function cascadeOptionResets(sec: UiDescriptorSection, changedId: string,
       if (next === cur && !by.resetOnChange) continue;
       if (g.fieldId in overlay && overlay[g.fieldId] === next) continue;   // already reset by another parent
       overlay[g.fieldId] = next;
-      out.push({ fieldId: g.fieldId, value: next });
+      out.push({ fieldId: g.fieldId, value: next, sectionId: gs.sectionId });
       queue.push(g.fieldId);
     }
   }
@@ -136,6 +178,8 @@ export interface CellSource {
   display: (sectionId: string, f: UiDescriptorField) => string | null;
   /** raw value of a single field (used by "show when" rules), or null */
   rawValue?: (sectionId: string, f: UiDescriptorField) => string | null;
+  /** the user's pending (unsaved) value of a field, if any — "show when" rules follow it, like the device UI that reacts as you pick */
+  edited?: (sectionId: string, f: UiDescriptorField) => string | undefined;
   /** has this section been read from the device yet? (false = unknown, so "hide when empty" must not judge it) */
   sectionRead?: (sectionId: string) => boolean;
 }
@@ -166,7 +210,7 @@ export function rowVisible(sec: UiDescriptorSection, f: UiDescriptorField, src: 
   if (f.uiHideWhenEmpty && !has(src.display(sec.sectionId, f)) && !has(src.rawValue?.(sec.sectionId, f))) return false;
   for (const c of f.uiShowWhen ?? []) {
     const sib = sec.fields.find((x) => x.fieldId === c.field);
-    const v = sib ? src.rawValue?.(sec.sectionId, sib) : null;
+    const v = sib ? (src.edited?.(sec.sectionId, sib) ?? src.rawValue?.(sec.sectionId, sib)) : null;
     if (!has(v)) { if (c.required) return false; continue; }   // required: a sibling with no value (a radio the unit does not have) hides the row
     if (c.in && !c.in.includes(String(v))) return false;
     if (c.notIn && c.notIn.includes(String(v))) return false;

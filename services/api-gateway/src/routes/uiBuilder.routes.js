@@ -237,6 +237,12 @@ function descriptorToWireframe(descriptor) {
               ...(f.optionsBy.resetOnChange ? { resetOnChange: true } : {}),
               ...(f.optionsBy.resetTo != null ? { resetTo: String(f.optionsBy.resetTo) } : {}),
             } } : {}),
+            ...(f.idList && typeof f.idList.deleteParam === 'string' && f.idList.deleteParam ? { idList: {
+              deleteParam: f.idList.deleteParam,
+              max: Math.max(1, Math.min(1000, parseInt(f.idList.max, 10) || 100)),
+              minId: parseInt(f.idList.minId, 10) || 1,
+              maxId: parseInt(f.idList.maxId, 10) || 4094,
+            } } : {}),
             ...(Array.isArray(f.uiShowWhen) && f.uiShowWhen.length ? { uiShowWhen: f.uiShowWhen
               .filter((c) => c && c.field && (Array.isArray(c.in) || Array.isArray(c.notIn)))
               .map((c) => ({ field: String(c.field), ...(Array.isArray(c.in) ? { in: c.in.map(String) } : {}), ...(Array.isArray(c.notIn) ? { notIn: c.notIn.map(String) } : {}), ...(c.required ? { required: true } : {}) })) } : {}),
@@ -281,6 +287,13 @@ function descriptorToWireframe(descriptor) {
         ...(section.uiLayout === 'matrix' && section.uiMatrix ? { uiMatrix: {
           hideEmptyColumns: section.uiMatrix.hideEmptyColumns !== false,
           columns: (section.uiMatrix.columns || []).filter((c) => c && String(c.index) !== '').map((c) => ({ index: String(c.index), label: String(c.label || c.index), ...(c.map && typeof c.map === 'object' ? { map: c.map } : {}) })),
+        } } : {}),
+        ...(section.uiLayout === 'charts' && section.uiCharts && Array.isArray(section.uiCharts.charts) ? { uiCharts: {
+          row: String(section.uiCharts.row ?? ''),
+          charts: section.uiCharts.charts.filter((c) => c && c.id && Array.isArray(c.series)).map((c) => ({
+            id: String(c.id), title: String(c.title || c.id), ...(c.unit ? { unit: String(c.unit) } : {}), ...(c.decimals != null ? { decimals: Math.max(0, Math.min(6, parseInt(c.decimals, 10) || 0)) } : {}),
+            series: c.series.filter((s) => s && s.param).map((s) => ({ param: String(s.param), label: String(s.label || s.param), ...(s.rate ? { rate: true } : {}), ...(s.perLink ? { perLink: true } : {}) })),
+          })),
         } } : {}),
         ...(tableWithCols ? { columns: tableWithCols.columns } : {}),
       };

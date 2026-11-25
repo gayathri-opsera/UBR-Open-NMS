@@ -10,6 +10,7 @@ import { valueKey } from '../../api/nodeView.types';
 import { isEmptyRaw } from '../deviceui/calcExpr';
 import DeviceUiView from '../deviceui/DeviceUiView';
 import type { DeviceUiRuntime } from '../deviceui/DeviceUiView';
+import type { HistoryFetcher } from '../deviceui/StatsCharts';
 import { firstPath, buildDeviceTree, resolvePath } from '../deviceui/deviceUiModel';
 import type { ActivePath } from '../deviceui/deviceUiModel';
 
@@ -41,6 +42,7 @@ export function wireframeToSections(groups: WireframeGroup[]): { sections: UiDes
         uiHidden: p.uiHidden || undefined,
         optionsFrom: p.optionsFrom || undefined,
         optionsBy: p.optionsBy || undefined,
+        idList: p.idList || undefined,
         staticValue: p.staticValue ?? undefined,
         minValue: p.minValue ?? undefined,
         maxValue: p.maxValue ?? undefined,
@@ -61,6 +63,7 @@ export function wireframeToSections(groups: WireframeGroup[]): { sections: UiDes
       uiColumn: (g.uiColumn || undefined) as UiDescriptorSection['uiColumn'],
       uiHideWhenEmpty: g.uiHideWhenEmpty || undefined,
       uiMatrix: g.uiMatrix ?? undefined,
+      uiCharts: g.uiCharts ?? undefined,
       fields,
     };
   });
@@ -101,12 +104,14 @@ export interface DeviceNodeViewProps {
   /** read these groups from the device now (the tab that was opened / its Refresh button) */
   onReadTab?: (groupIds: string[]) => void;
   tabLoading?: boolean;
+  /** history of a chart group (Monitor > Graphs) — keep the function stable between renders */
+  onHistory?: HistoryFetcher;
 }
 
 
 export const DeviceNodeView: React.FC<DeviceNodeViewProps> = ({
   screenName, wireframe, deviceUi, header, values, canEdit, edits, errors, pendingFor, onEdit, applying,
-  onApplyGroups, onRevertGroups, collectedAt, pollStatus, refreshing, onRefresh, onReadTab, tabLoading,
+  onApplyGroups, onRevertGroups, collectedAt, pollStatus, refreshing, onRefresh, onReadTab, tabLoading, onHistory,
 }) => {
   const { sections, paramOf } = useMemo(() => wireframeToSections(wireframe), [wireframe]);
   const [active, setActive] = useState<ActivePath>(() => firstPath(buildDeviceTree(screenName, sections)));
@@ -186,6 +191,7 @@ export const DeviceNodeView: React.FC<DeviceNodeViewProps> = ({
     onApply: onApplyGroups,
     onRevert: onRevertGroups,
     ready: Object.keys(values).length > 0,
+    history: onHistory,
     sectionRead: (sid) => !readsDevice(sid) || readAtOf(sid) !== null,
     byField: (fid) => {
       for (const [k, p] of paramOf) {

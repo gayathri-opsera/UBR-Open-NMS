@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiDescriptorField, UiDescriptorSection } from '../../api/uiBuilder.api';
-import { buildDeviceTree, cascadeOptionResets, optionsByList, matrixCell, parseOptionList, rowVisible, sectionHasData, visibleMatrixColumns, visibleSections } from './deviceUiModel';
+import { buildDeviceTree, cascadeOptionResets, checkIdList, diffIdList, parseIdList, planIdListChanges, optionsByList, matrixCell, parseOptionList, rowVisible, sectionHasData, visibleMatrixColumns, visibleSections } from './deviceUiModel';
 import type { CellSource } from './deviceUiModel';
 
 const f = (id: string, label = id): UiDescriptorField => ({ fieldId: id, elementType: 'table-block', label, mibObject: id, access: 'read-only', order: 0 });
@@ -141,15 +141,29 @@ describe('optionsBy: Country → Bandwidth → Channel', () => {
     expect(optionsByList(bw, vals({ country: '840' }))?.map((o) => o.label)).toEqual(['20 MHz']);
   });
   it('changing Bandwidth resets Channel to Auto (the device does the same)', () => {
-    expect(cascadeOptionResets(s, 'bw', 'HT80', vals({ country: '356', bw: 'HT20', ch: '33' }))).toEqual([{ fieldId: 'ch', value: 'auto' }]);
+    expect(cascadeOptionResets(s, 'bw', 'HT80', vals({ country: '356', bw: 'HT20', ch: '33' }))).toEqual([{ fieldId: 'ch', value: 'auto', sectionId: 'p' }]);
   });
   it('changing Country falls back a Bandwidth it does not offer, then resets Channel', () => {
-    expect(cascadeOptionResets(s, 'country', '840', vals({ country: '356', bw: 'HT80', ch: '38' }))).toEqual([{ fieldId: 'bw', value: 'HT20' }, { fieldId: 'ch', value: 'auto' }]);
+    expect(cascadeOptionResets(s, 'country', '840', vals({ country: '356', bw: 'HT80', ch: '38' }))).toEqual([{ fieldId: 'bw', value: 'HT20', sectionId: 'p' }, { fieldId: 'ch', value: 'auto', sectionId: 'p' }]);
   });
   it('keeps a Bandwidth the new Country still offers', () => {
     const r = cascadeOptionResets(s, 'country', '356', vals({ country: '840', bw: 'HT20', ch: '1' }));
     expect(r.find((x) => x.fieldId === 'bw')).toBeUndefined();
-    expect(r).toEqual([{ fieldId: 'ch', value: 'auto' }]);
+    expect(r).toEqual([{ fieldId: 'ch', value: 'auto', sectionId: 'p' }]);
+  });
+});
+
+describe('optionsBy across sections: VLAN Mode ← Radio Mode', () => {
+  const rm = f('rm');
+  const vm: UiDescriptorField = { ...f('vm'), optionsBy: { dependsOn: ['rm'], table: { ap: '0(Transparent)', sta: '0(Transparent),1(Access),2(Trunk),3(Q-in-Q)' } } };
+  const wireless = sec({ sectionId: 'w', fields: [rm] });
+  const vlan = sec({ sectionId: 'v', fields: [vm] });
+  const vals = (o: Record<string, string>) => (id: string) => o[id] ?? '';
+  it('a CPE → BTS change drops a VLAN mode the BTS does not offer (the device does the same)', () => {
+    expect(cascadeOptionResets(wireless, 'rm', 'ap', vals({ rm: 'sta', vm: '2' }), [wireless, vlan])).toEqual([{ fieldId: 'vm', value: '0', sectionId: 'v' }]);
+  });
+  it('keeps a VLAN mode that is still offered', () => {
+    expect(cascadeOptionResets(wireless, 'rm', 'sta', vals({ rm: 'ap', vm: '0' }), [wireless, vlan])).toEqual([]);
   });
 });
 
@@ -163,5 +177,39 @@ describe('optionsBy defaults', () => {
   it('without a default an unanswered parent has no list', () => {
     expect(optionsByList({ ...ch, optionsBy: { ...ch.optionsBy!, defaults: undefined } }, () => '')).toBeNull();
     expect(country.fieldId).toBe('country');
+  });
+});
+
+describe('VLAN trunk list (id list, up to 100)', () => {
+  const cfg = { deleteParam: 'vlanTrunkIdDelete', max: 100, minId: 1, maxId: 4094 };
+  it('reads the device string and ignores placeholders', () => {
+    expect(parseIdList('10 20,30;040')).toEqual(['10', '20', '30', '40']);
+    expect(parseIdList('-NA-')).toEqual([]);
+    expect(parseIdList(null)).toEqual([]);
+  });
+  it('accepts 1-4094 without duplicates, at most 100 entries', () => {
+    expect(checkIdList(['1', '4094'], cfg)).toBeNull();
+    expect(checkIdList(['0'], cfg)).toMatch(/1 to 4094/);
+    expect(checkIdList(['4095'], cfg)).toMatch(/1 to 4094/);
+    expect(checkIdList(['10', '10'], cfg)).toMatch(/already in the list/);
+    const hundred = Array.from({ length: 100 }, (_, i) => String(i + 1));
+    expect(checkIdList(hundred, cfg)).toBeNull();
+    expect(checkIdList([...hundred, '101'], cfg)).toMatch(/At most 100/);
+  });
+  it('plans one delete per removed id, then one add per new id', () => {
+    expect(diffIdList(['10', '20', '30'], ['20', '40'])).toEqual({ remove: ['10', '30'], add: ['40'] });
+    const plan = planIdListChanges('g', 'vlanTrunkId', '', cfg, ['10', '20'], ['20', '30', '40']);
+    expect(plan.error).toBeNull();
+    expect(plan.changes.map((c) => `${c.parameterId}=${c.value}`)).toEqual(['vlanTrunkIdDelete=10', 'vlanTrunkId=30', 'vlanTrunkId=40']);
+  });
+  it('sends nothing for an unacceptable list', () => {
+    const plan = planIdListChanges('g', 'vlanTrunkId', '', cfg, [], ['5000']);
+    expect(plan.changes).toEqual([]);
+    expect(plan.error).toBeTruthy();
+  });
+  it('a full replacement of a 100-entry list is 200 single-id changes', () => {
+    const before = Array.from({ length: 100 }, (_, i) => String(i + 1));
+    const after = Array.from({ length: 100 }, (_, i) => String(i + 1001));
+    expect(planIdListChanges('g', 'vlanTrunkId', '', cfg, before, after).changes).toHaveLength(200);
   });
 });

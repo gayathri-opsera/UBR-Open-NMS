@@ -106,3 +106,28 @@ export async function applyNodeViewChanges(
   );
   return res.data;
 }
+
+// ── fetchNodeViewHistory ──────────────────────────────────────────────────────
+/** One charted metric: `param` (field name) at table row `instance` ('2' = Radio 1, '2.1' = its first link), averaged points [ms, value]. */
+export interface HistorySeries { param: string; instance: string; points: [number, number][] }
+export interface HistoryData {
+  from: number; to: number;
+  /** width of one point */
+  bucketSeconds: number;
+  /** 'raw' = the 5-minute samples, 'hourly' = hourly averages (ranges older than a week) */
+  source: 'raw' | 'hourly';
+  samples: number;
+  series: HistorySeries[];
+}
+export interface HistoryQuery { group: string; range?: string; from?: string; to?: string; params?: string[] }
+
+/** History of a chart group (Monitor > Graphs), up to 6 months — read from the NMS's stored samples, not from the device. */
+export async function fetchNodeViewHistory(deviceId: string, q: HistoryQuery, signal?: AbortSignal): Promise<HistoryData | null> {
+  const qs = new URLSearchParams({ group: q.group });
+  if (q.range) qs.set('range', q.range);
+  if (q.from) qs.set('from', q.from);
+  if (q.to) qs.set('to', q.to);
+  if (q.params?.length) qs.set('params', q.params.join(','));
+  const res = await apiClient.get<{ status: string; data?: HistoryData }>(`${BASE}/${encodeURIComponent(deviceId)}/history?${qs.toString()}`, { signal, validateStatus: (s) => s === 200 || s === 400 });
+  return res.data.status === 'ok' && res.data.data ? res.data.data : null;
+}

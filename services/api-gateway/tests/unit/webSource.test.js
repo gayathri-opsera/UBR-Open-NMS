@@ -128,3 +128,20 @@ describe('webSource DDRS / ATPC / DFS / DCS rules', () => {
     expect(v('ddrs', 'Modulation Index')).toMatch(/^MCS0 /);                    // value 3 is not a dual index → first option
   });
 });
+
+describe('VLAN trunk list (a Custom UI Builder screen binds it to vlanTrunkId)', () => {
+  const src = { config: { values: { 'vlan.ath1.trunkvlan': '10 20 30 ' } } };
+  it('reads the device list; SNMP only has the add / delete objects', () => {
+    expect(ws.valueFor({ groupId: 's_abc123', parameterId: 'vlanTrunkId', displayName: 'Trunk VLAN IDs' }, src)).toEqual([{ index: '', raw: '10 20 30', display: '10 20 30', web: true }]);
+  });
+  it('has nothing for it before the VLAN page was read', () => {
+    expect(ws.valueFor({ groupId: 's_abc123', parameterId: 'vlanTrunkId', displayName: 'x' }, { config: { values: { a: '1' } } })).toBeUndefined();
+  });
+  it('forgetConfig exists so a write is followed by a fresh read', () => { expect(typeof ws.forgetConfig).toBe('function'); });
+  it('the vlanTbl column reads the list of its own radio (row = ath number)', () => {
+    const both = { config: { values: { 'vlan.ath1.trunkvlan': '10 20', 'vlan.ath2.trunkvlan': '300' } } };
+    const e = (row) => ({ groupId: 's_x', parameterId: 'vlanTblTrunkId', snmpOid: `.1.3.6.1.4.1.14125.123.1.1.4.18.1.6.${row}` });
+    expect(ws.valueFor(e(1), both)[0].display).toBe('10 20');
+    expect(ws.valueFor(e(2), both)[0].display).toBe('300');
+  });
+});

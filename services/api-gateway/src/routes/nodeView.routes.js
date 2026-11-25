@@ -42,6 +42,8 @@ const lastProbe = new Map();   // 'host:port' → { at, result } — one livenes
 const { getCachedOnly } = live;
 const crypto     = require('crypto');
 const { planChange } = require('../live/parameterWrite');
+const webSource = require('../live/webSource');
+const statsHistory = require('../live/statsHistory');
 const { setValues, writeCommunityFor } = require('../live/snmpSet');
 const { buildWireframe, WIREFRAME_SCHEMA_VERSION } = require('../live/wireframeBuilder');
 const {
@@ -285,6 +287,33 @@ router.post(
       return res.json({ status: 'ok', data: { host, results } });
     } catch (e) {
       return res.status(500).json({ status: 'error', error: { code: 'SNMP_GET_FAILED', message: e.message } });
+    }
+  },
+);
+
+/**
+ * History of a chart group (Monitor > Graphs): averaged points of every charted metric, up to 6 months back.
+ *   GET /api/node-view/:deviceId/history?group=<groupId>&range=1h|1d|1w|1m|3m|6m   or   &from=<ISO>&to=<ISO>   [&params=a,b]
+ * Read-only: answers from the samples the collector stored (live/statsHistory.js); nothing is read from the device.
+ */
+router.get(
+  '/:deviceId/history',
+  requireFrameworkCapability(FRAMEWORK_CAPABILITY.ReadOnly, 'node-view.history'),
+  async (req, res) => {
+    const group = String(req.query.group || '');
+    if (!/^[\w.-]{1,64}$/.test(group)) return res.status(400).json({ status: 'error', error: { code: 'BAD_REQUEST', message: 'group is required.' } });
+    const params = req.query.params ? String(req.query.params).split(',').map((x) => x.trim()).filter(Boolean).slice(0, 40) : null;
+    try {
+      const device = await live.findDevice(req.params.deviceId);
+      if (!device) return res.status(404).json({ status: 'error', error: { code: 'DEVICE_NOT_FOUND', message: 'Device not found.' } });
+      const out = await statsHistory.queryHistory({ deviceId: String(device._id), groupId: group, range: req.query.range, from: req.query.from, to: req.query.to, params });
+      if (out.error === 'BAD_RANGE') return res.status(400).json({ status: 'error', error: { code: 'BAD_RANGE', message: 'Use range=1h|1d|1w|1m|3m|6m, or from (and to) as ISO dates, from before to.' } });
+      if (out.error) return res.status(503).json({ status: 'error', error: { code: out.error, message: 'History is not available right now.' } });
+      res.set('Cache-Control', 'no-store');
+      return res.json({ status: 'ok', data: out });
+    } catch (e) {
+      logger.error({ msg: 'node-view history error', err: e.message });
+      return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: e.message } });
     }
   },
 );
@@ -723,7 +752,7 @@ router.put(
           applied: results.filter((r) => r.ok).map((r) => `${r.groupId}/${r.parameterId}${r.instance ? `#${r.instance}` : ''}`),
           failed: results.filter((r) => !r.ok).length,
         });
-        if (results.some((r) => r.ok)) await live.refreshDevice(device).catch(() => {});
+        if (results.some((r) => r.ok)) { webSource.forgetConfig(host); await live.refreshDevice(device).catch(() => {}); }
       }
 
       const okCount = results.filter((r) => r.ok).length;

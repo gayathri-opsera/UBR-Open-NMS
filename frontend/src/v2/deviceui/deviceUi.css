@@ -123,3 +123,31 @@
 .dv-root table.dv-mx tr.dv-drop-before { box-shadow: 0 -3px 0 0 #e8590c; }
 .dv-root table.dv-mx tr.dv-drop-after { box-shadow: 0 3px 0 0 #e8590c; }
 .dv-root table.dv-mx tr.sel { outline: 2px solid #e8590c; outline-offset: -2px; }
+
+/* a list of numeric ids (VLAN trunk list) */
+.dv-root .dv-idlist { display: inline-flex; flex-direction: column; gap: 6px; max-width: 520px; }
+.dv-root .dv-idlist-chips { display: flex; flex-wrap: wrap; gap: 4px; max-height: 150px; overflow-y: auto; }
+.dv-root .dv-chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; background: #eef1f6; border: 1px solid #ccd3de; font-size: 13px; }
+.dv-root .dv-chip b { cursor: pointer; font-weight: 400; color: #8a2a2a; }
+.dv-root .dv-idlist-add { display: flex; gap: 6px; align-items: center; }
+.dv-root .dv-idlist-add .dv-input { width: 150px; margin-top: 0; }
+.dv-root .dv-idlist-btn { height: 30px; padding: 0 12px; background: #fff; border: 1px solid #1b489c; color: #1b489c; cursor: pointer; }
+.dv-root .dv-idlist-btn:disabled { opacity: .5; cursor: default; }
+.dv-root .dv-idlist.dv-changed .dv-idlist-chips { border-left: 3px solid #1b489c; padding-left: 6px; }
+
+/* Monitor > Graphs — history charts (SkyPoint-style cards, a range selector on each) */
+.dv-root .dv-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; margin-top: 8px; }
+.dv-root .dv-chart { background: #fff; border: 1px solid #d7dbe0; padding: 10px 12px 8px; min-width: 0; }
+.dv-root .dv-chart-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
+.dv-root .dv-chart-head h4 { margin: 0; font: 600 14px 'Segoe UI', SegoeUI, 'Open Sans', Arial, sans-serif; color: #333; }
+.dv-root .dv-chart-head h4 small { font-weight: 400; color: #777; }
+.dv-root .dv-chart-ranges { display: inline-flex; flex-wrap: wrap; }
+.dv-root .dv-chart-ranges button { padding: 3px 9px; font-size: 12px; background: #fff; color: #1b489c; border: 1px solid #1b489c; margin-left: -1px; cursor: pointer; }
+.dv-root .dv-chart-ranges button.on { background: #1b489c; color: #fff; }
+.dv-root .dv-chart-custom { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 4px 0 8px; font-size: 12px; }
+.dv-root .dv-chart-custom input { font-size: 12px; padding: 2px 4px; }
+.dv-root .dv-chart-custom button { padding: 3px 12px; background: #1b489c; color: #fff; border: 0; cursor: pointer; }
+.dv-root .dv-chart-custom button:disabled { opacity: .5; cursor: default; }
+.dv-root .dv-chart-body { min-height: 220px; }
+.dv-root .dv-chart-empty { display: flex; align-items: center; justify-content: center; height: 220px; color: #777; font-size: 13px; text-align: center; padding: 0 16px; }
+.dv-root .dv-chart-foot { font-size: 11px; color: #777; margin-top: 2px; }

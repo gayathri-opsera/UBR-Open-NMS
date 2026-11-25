@@ -28,7 +28,8 @@ import type {
   WireframeGroup, WireframeParameter,
 } from '../../api/nodeView.types';
 import { valueKey } from '../../api/nodeView.types';
-import { applyNodeViewChanges, fetchMonitorLive, fetchTabLive, type LiveStatus } from '../../api/nodeView.api';
+import { parseIdList, planIdListChanges } from '../deviceui/deviceUiModel';
+import { applyNodeViewChanges, fetchMonitorLive, fetchNodeViewHistory, fetchTabLive, type LiveStatus } from '../../api/nodeView.api';
 
 import { DeviceNodeView } from './DeviceNodeView';
 import { Badge }   from './common/Badge';
@@ -826,6 +827,9 @@ function NodeViewParametersInner({
     }));
   }, [activeGroup]);
 
+  // stable between renders: the charts re-read their history only when their range changes
+  const fetchHistory = useCallback((q: Parameters<typeof fetchNodeViewHistory>[1]) => fetchNodeViewHistory(deviceId, q), [deviceId]);
+
   const groupHasWritable = !!activeGroup && activeGroup.parameters.some((p) => !p.hidden && !p.readOnly && !!p.snmpOid);
   const editingAllowed = canEdit && deviceWritable;
 
@@ -874,9 +878,17 @@ function NodeViewParametersInner({
     const pending = pendingForScope(scopeGroupId, paramIds);
     const nextErrors: Record<string, string> = {};
     const changes: NodeViewChange[] = [];
+    const listKeys = new Map<string, { addParam: string; deleteParam: string; groupId: string }>();   // id-list fields (VLAN trunk list) being applied
     for (const [key, value] of pending) {
       const hit = paramFor(key);
       if (!hit) continue;
+      if (hit.param.idList) {
+        // a list is applied as one SET per id (deletes, then adds): the device adds / removes a single id at a time
+        const plan = planIdListChanges(hit.groupId, hit.param.parameterId, hit.instance, hit.param.idList, parseIdList(originals[key]), parseIdList(value));
+        if (plan.error) nextErrors[key] = plan.error;
+        else { changes.push(...plan.changes); listKeys.set(key, { addParam: hit.param.parameterId, deleteParam: hit.param.idList.deleteParam, groupId: hit.groupId }); }
+        continue;
+      }
       const msg = validate(hit.param, value);
       if (msg) nextErrors[key] = msg;
       else changes.push({ groupId: hit.groupId, parameterId: hit.param.parameterId, instance: hit.instance, value });
@@ -889,14 +901,28 @@ function NodeViewParametersInner({
     setApplying(true);
     setApplyingSection(sectionKey);
     try {
-      const resp = await applyNodeViewChanges(deviceId, changes);
-      if (resp.error && !resp.results) { addToast(resp.error.message, 'error'); return; }
-      const results: NodeViewChangeResult[] = resp.results ?? [];
+      // the gateway takes at most 100 changes per request (a 100-entry VLAN list can need 100 deletes and 100 adds)
+      const results: NodeViewChangeResult[] = [];
+      for (let i = 0; i < changes.length; i += 100) {
+        const resp = await applyNodeViewChanges(deviceId, changes.slice(i, i + 100));
+        if (resp.error && !resp.results) { addToast(resp.error.message, 'error'); if (!results.length) return; break; }
+        results.push(...(resp.results ?? []));
+      }
       const failed = results.filter((r) => !r.ok);
       const okKeys = new Set(results.filter((r) => r.ok).map((r) => editKey(r.groupId, r.parameterId, r.instance)));
+      // a list counts as applied only when every one of its adds and deletes went through (an unfinished list stays pending)
+      const listFailures: Record<string, string> = {};
+      for (const [key, l] of listKeys) {
+        const mine = results.filter((r) => r.groupId === l.groupId && (r.parameterId === l.addParam || r.parameterId === l.deleteParam));
+        const bad = mine.find((r) => !r.ok);
+        const sent = changes.filter((c) => c.groupId === l.groupId && (c.parameterId === l.addParam || c.parameterId === l.deleteParam)).length;
+        okKeys.delete(key);
+        if (bad || mine.length < sent) listFailures[key] = bad?.error ?? 'Not every VLAN ID could be applied.';
+        else okKeys.add(key);
+      }
       setEdits((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !okKeys.has(k))));
       setOriginals((o) => Object.fromEntries(Object.entries(o).filter(([k]) => !okKeys.has(k))));
-      setErrors(Object.fromEntries(failed.map((r) => [editKey(r.groupId, r.parameterId, r.instance), r.error ?? 'Rejected'])));
+      setErrors({ ...Object.fromEntries(failed.map((r) => [editKey(r.groupId, r.parameterId, r.instance), r.error ?? 'Rejected'])), ...listFailures });
       if (failed.length === 0) addToast(`Applied ${results.length} change${results.length === 1 ? '' : 's'}.`, 'success');
       else addToast(`${results.length - failed.length} applied, ${failed.length} failed.`, 'error');
       if (okKeys.size) {
@@ -1207,6 +1233,7 @@ function NodeViewParametersInner({
         pendingFor={(gid) => pendingForScope(gid).length}
         onEdit={onEdit}
         applying={applying}
+        onHistory={fetchHistory}
         onApplyGroups={(ids) => { void (async () => { for (const gid of gidsWithPending(ids)) await applyScope(gid, gid); })(); }}
         onRevertGroups={(ids) => ids.forEach((gid) => revertScope(gid))}
         collectedAt={collectedAt}

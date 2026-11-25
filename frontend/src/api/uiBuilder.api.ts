@@ -3,6 +3,10 @@ import type { MibObjectSummary } from './productDefinitions.api';
 
 export type { MibObjectSummary };
 
+/** one history chart: its series read the fields of the section by parameter name; `rate` = the device counter is stored as a per-second rate; `perLink` = one line per link (instance row 'radio.link') */
+export interface UiChartDef { id: string; title: string; unit?: string; decimals?: number; series: { param: string; label: string; rate?: boolean; perLink?: boolean }[] }
+export interface UiChartsConfig { row: string; charts: UiChartDef[] }
+
 export interface UiDescriptorField {
   fieldId: string;
   elementType: 'heading' | 'sub-heading' | 'field-label' | 'table-block' | 'divider';
@@ -37,6 +41,8 @@ export interface UiDescriptorField {
   optionsFrom?: string;
   /** Device layout: options that follow sibling fields' current (even unsaved) values — table key = their raw values joined by '|', value = the device's own list ("36( 5180 MHz ),…"). resetOnChange: pick resetTo again whenever one of them changes. */
   optionsBy?: { dependsOn: string[]; table: Record<string, string>; defaults?: Record<string, string>; resetOnChange?: boolean; resetTo?: string };
+  /** Device layout: edits a LIST of numeric ids (the VLAN trunk list). This field's object adds one id per SET; `deleteParam` (a parameterId of a hidden field in the same section) removes one. */
+  idList?: { deleteParam: string; max: number; minId: number; maxId: number };
   /** How the label was chosen (the label text itself is always stored). */
   labelSource?: 'custom' | 'mibName' | 'mibDescription';
   order: number;
@@ -58,12 +64,14 @@ export interface UiDescriptorSection {
   /** Device-style view (Builder v2): heading, note under the form, and how the section is drawn. */
   uiTitle?: string;
   uiNote?: string;
-  uiLayout?: 'form' | 'card' | 'table' | 'matrix';
+  uiLayout?: 'form' | 'card' | 'table' | 'matrix' | 'charts';
   uiColumn?: 'left' | 'right';
   /** Skip this section (and an emptied tab / menu item) in Node View when the device returns no data for it. */
   uiHideWhenEmpty?: boolean;
   /** 'matrix' layout: one column per table row (e.g. radio), rows = the section's fields. */
   uiMatrix?: { columns: { index: string; label: string; map?: Record<string, string> }[]; hideEmptyColumns?: boolean };
+  /** layout 'charts': history charts of this section's fields (Monitor > Graphs). `row` = the radio's row of the statistics tables ('2' = Radio 1). */
+  uiCharts?: UiChartsConfig;
   fields: UiDescriptorField[];
   order: number;
 }

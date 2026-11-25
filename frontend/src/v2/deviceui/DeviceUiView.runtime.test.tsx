@@ -175,3 +175,82 @@ describe('dependent dropdowns: Country → Bandwidth → Channel', () => {
     expect(v.onEdit.mock.calls.map((c) => [c[1].fieldId, c[2]])).toEqual([['bw', 'HT80'], ['ch', 'auto']]);
   });
 });
+
+describe('VLAN Mode follows the Radio Mode (another section, like the device)', () => {
+  const f = (id: string, label: string, extra: Partial<UiDescriptorField> = {}): UiDescriptorField => ({ fieldId: id, elementType: 'field-label', label, mibObject: id, access: 'read-write', order: 0, widget: 'select', ...extra });
+  const secs: UiDescriptorSection[] = [
+    { sectionId: 'w', title: 'Properties', columns: 2, order: 0, uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'Properties', uiLayout: 'form', fields: [f('rm', 'Radio Mode', { enumMap: { ap: 'BTS', sta: 'CPE' } })] },
+    { sectionId: 'v', title: 'VLAN', columns: 2, order: 1, uiPage: 'Network', uiParent: 'VLAN', uiTab: 'VLAN', uiLayout: 'form',
+      fields: [f('vm', 'Mode', { enumMap: { '0': 'Transparent' }, optionsBy: { dependsOn: ['rm'], table: { ap: '0(Transparent)', sta: '0(Transparent),1(Access),2(Trunk),3(Q-in-Q)' } } })] },
+  ];
+  const make = (raw: Record<string, string>, edits: Record<string, string> = {}) => {
+    const rt: DeviceUiRuntime = { ...runtimeFor(['2']), canEdit: true, rawValue: (_s, x) => raw[x.fieldId] ?? null, display: (_s, x) => raw[x.fieldId] ?? null, edited: (_s, x) => edits[x.fieldId] };
+    const r = render(<DeviceUiView screenName="UBR" sections={secs} active={{ page: 'Network', parent: 'VLAN', tab: 'VLAN' }} onActiveChange={() => undefined} runtime={rt} />);
+    return [...(r.container.querySelector('select') as HTMLSelectElement).options].map((o) => o.value);
+  };
+  it('a BTS offers Transparent only', () => { expect(make({ rm: 'ap', vm: '0' })).toEqual(['0']); });
+  it('a CPE offers Transparent, Access, Trunk and Q-in-Q', () => { expect(make({ rm: 'sta', vm: '1' })).toEqual(['0', '1', '2', '3']); });
+  it('rows that depend on the Mode follow an unsaved Mode pick', () => {
+    const sec2: UiDescriptorSection = { ...secs[1], fields: [...secs[1].fields, f('acc', 'Access VLAN ID', { widget: 'Text input', uiShowWhen: [{ field: 'vm', in: ['1'] }] })] };
+    const run = (edits: Record<string, string>) => {
+      const rt: DeviceUiRuntime = { ...runtimeFor(['2']), canEdit: true, rawValue: (_s, x) => ({ rm: 'sta', vm: '0' } as Record<string, string>)[x.fieldId] ?? null, display: () => null, edited: (_s, x) => edits[x.fieldId] };
+      const r = render(<DeviceUiView screenName="UBR" sections={[secs[0], sec2]} active={{ page: 'Network', parent: 'VLAN', tab: 'VLAN' }} onActiveChange={() => undefined} runtime={rt} />);
+      return [...r.container.querySelectorAll('.dv-label')].map((l) => l.textContent);
+    };
+    expect(run({})).toEqual(['Mode']);
+    expect(run({ vm: '1' })).toEqual(['Mode', 'Access VLAN ID']);
+  });
+  it('an unsaved Radio Mode change already changes the VLAN modes', () => { expect(make({ rm: 'ap', vm: '0' }, { rm: 'sta' })).toEqual(['0', '1', '2', '3']); });
+});
+
+describe('VLAN trunk list editor', () => {
+  const f = (id: string, label: string, extra: Partial<UiDescriptorField> = {}): UiDescriptorField => ({ fieldId: id, elementType: 'field-label', label, mibObject: id, access: 'read-write', order: 0, widget: 'Text input', ...extra });
+  const secs: UiDescriptorSection[] = [{
+    sectionId: 'v', title: 'VLAN', columns: 2, order: 0, uiPage: 'Network', uiParent: 'VLAN', uiTab: 'VLAN', uiLayout: 'form',
+    fields: [
+      f('mode', 'Mode', { widget: 'Dropdown', enumMap: { '0': 'Transparent', '2': 'Trunk' } }),
+      f('opt', 'Trunk Option', { widget: 'Dropdown', enumMap: { '1': 'List', '2': 'All' }, uiShowWhen: [{ field: 'mode', in: ['2'] }] }),
+      f('ids', 'Trunk VLAN IDs', { idList: { deleteParam: 'del', max: 3, minId: 1, maxId: 4094 }, uiShowWhen: [{ field: 'mode', in: ['2'] }, { field: 'opt', in: ['1'] }] }),
+      f('del', 'Trunk ID Delete', { uiHidden: true }),
+    ],
+  }];
+  const make = (raw: Record<string, string>, edits: Record<string, string> = {}) => {
+    const onEdit = vi.fn();
+    const rt: DeviceUiRuntime = { ...runtimeFor(['2']), canEdit: true, onEdit, rawValue: (_s, x) => raw[x.fieldId] ?? null, display: (_s, x) => raw[x.fieldId] ?? null, edited: (_s, x) => edits[x.fieldId] };
+    const r = render(<DeviceUiView screenName="UBR" sections={secs} active={{ page: 'Network', parent: 'VLAN', tab: 'VLAN' }} onActiveChange={() => undefined} runtime={rt} />);
+    const chips = () => [...r.container.querySelectorAll('.dv-chip')].map((c) => c.textContent?.replace('✕', ''));
+    return { r, onEdit, chips };
+  };
+  it('shows the device list as entries, only in Trunk mode with the List option', () => {
+    expect(make({ mode: '2', opt: '1', ids: '10 20' }).chips()).toEqual(['10', '20']);
+    expect(make({ mode: '2', opt: '2', ids: '10 20' }).chips()).toEqual([]);
+    expect(make({ mode: '0', opt: '1', ids: '10 20' }).chips()).toEqual([]);
+  });
+  it('adding an id is a pending edit of the whole list; entries are counted', () => {
+    const v = make({ mode: '2', opt: '1', ids: '10 20' });
+    fireEvent.change(v.r.getByLabelText('Add VLAN ID'), { target: { value: '30' } });
+    fireEvent.click(v.r.getByText('Add'));
+    expect(v.onEdit).toHaveBeenCalledWith('v', expect.objectContaining({ fieldId: 'ids' }), '10 20 30');
+    expect(v.r.getByText('2 / 3 entries')).toBeTruthy();
+  });
+  it('refuses a duplicate, an out-of-range id and a list over the limit', () => {
+    const v = make({ mode: '2', opt: '1', ids: '10 20 30' });
+    fireEvent.change(v.r.getByLabelText('Add VLAN ID'), { target: { value: '40' } });
+    expect((v.r.getByLabelText('Add VLAN ID') as HTMLInputElement).disabled).toBe(true);   // full: 3 / 3
+    const w = make({ mode: '2', opt: '1', ids: '10' });
+    const input = w.r.getAllByLabelText('Add VLAN ID').pop() as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '10' } }); fireEvent.click(w.r.getAllByText('Add').pop() as HTMLElement);
+    expect(w.r.getByText(/already in the list/)).toBeTruthy();
+    fireEvent.change(input, { target: { value: '4095' } }); fireEvent.click(w.r.getAllByText('Add').pop() as HTMLElement);
+    expect(w.r.getByText(/1 to 4094/)).toBeTruthy();
+    expect(w.onEdit).not.toHaveBeenCalled();
+  });
+  it('removing an id edits the list; going back to the device list clears the edit', () => {
+    const v = make({ mode: '2', opt: '1', ids: '10 20' });
+    fireEvent.click(v.r.getByLabelText('Remove 10'));
+    expect(v.onEdit).toHaveBeenCalledWith('v', expect.objectContaining({ fieldId: 'ids' }), '20');
+    const u = make({ mode: '2', opt: '1', ids: '10 20' }, { ids: '10 20 30' });
+    fireEvent.click(u.r.getAllByLabelText('Remove 30').pop() as HTMLElement);
+    expect(u.onEdit).toHaveBeenCalledWith('v', expect.objectContaining({ fieldId: 'ids' }), '10 20');
+  });
+});

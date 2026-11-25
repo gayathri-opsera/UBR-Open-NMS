@@ -8,7 +8,8 @@ import './deviceUi.css';
 import type { DeviceUiConfig, ResolvedHeader, UiDescriptorField, UiDescriptorSection } from '../../api/uiBuilder.api';
 import { hasSource } from './headerPreview';
 import type { ActivePath } from './deviceUiModel';
-import { buildDeviceTree, cascadeOptionResets, controlKind, optionsByList, enumOptions, isBindable, matrixCell, parseOptionList, resolvePath, rowVisible, visibleMatrixColumns, visibleSections } from './deviceUiModel';
+import StatsCharts, { type HistoryFetcher } from './StatsCharts';
+import { buildDeviceTree, cascadeOptionResets, checkIdList, formatIdList, parseIdList, controlKind, optionsByList, enumOptions, isBindable, matrixCell, parseOptionList, resolvePath, rowVisible, visibleMatrixColumns, visibleSections } from './deviceUiModel';
 
 const Svg: React.FC<{ d: string; className?: string; vb?: string }> = ({ d, className, vb = '0 0 24 24' }) => (
   <svg className={className} viewBox={vb} aria-hidden="true"><path d={d} /></svg>
@@ -114,6 +115,8 @@ export interface DeviceUiRuntime {
   ready: boolean;
   /** has this section's page been read from the device yet? ("hide when empty" never judges an unread section) */
   sectionRead?: (sectionId: string) => boolean;
+  /** history of a chart group (Monitor > Graphs); absent = the charts show a preview note */
+  history?: HistoryFetcher;
 }
 
 export interface DeviceUiViewProps {
@@ -135,6 +138,41 @@ export interface DeviceUiViewProps {
   runtime?: DeviceUiRuntime;
   /** header bar values: resolved from the device (Node View) or from the sample inputs (builder preview); absent = typed text */
   header?: ResolvedHeader | null;
+}
+
+/** A list of numeric ids (the VLAN trunk list): chips with ✕, one box to add ids; edits are pending until Apply. */
+function IdListEditor({ ids, cfg, editable, changed, unread, onChange }: {
+  ids: string[]; cfg: { max: number; minId: number; maxId: number }; editable: boolean; changed: boolean; unread?: boolean; onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const [msg, setMsg] = useState('');
+  const add = () => {
+    const incoming = parseIdList(draft);
+    if (!incoming.length) { setMsg(draft.trim() ? 'Enter whole numbers, e.g. 10 or 10 20 30.' : ''); return; }
+    const next = [...ids, ...incoming];
+    const why = checkIdList(next, cfg);
+    if (why) { setMsg(why); return; }
+    setMsg(''); setDraft(''); onChange(next);
+  };
+  return (
+    <div className={`dv-idlist ${changed ? 'dv-changed' : ''}`}>
+      <div className="dv-idlist-chips" aria-label="VLAN IDs">
+        {ids.length === 0 && <span className="dv-hint">{unread ? 'The device did not report its current list — IDs you add are appended to it' : 'No VLAN IDs in the list'}</span>}
+        {ids.map((id) => (
+          <span key={id} className="dv-chip">{id}{editable && <b title={`Remove ${id}`} role="button" aria-label={`Remove ${id}`} onClick={() => { setMsg(''); onChange(ids.filter((x) => x !== id)); }}>✕</b>}</span>
+        ))}
+      </div>
+      {editable && (
+        <div className="dv-idlist-add">
+          <input className="dv-input" type="text" value={draft} placeholder={`VLAN ID (${cfg.minId} - ${cfg.maxId})`} aria-label="Add VLAN ID"
+            onChange={(e) => { setDraft(e.target.value); setMsg(''); }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} disabled={ids.length >= cfg.max} />
+          <button type="button" className="dv-idlist-btn" onClick={add} disabled={ids.length >= cfg.max}>Add</button>
+        </div>
+      )}
+      <span className="dv-hint">{ids.length} / {cfg.max} entries</span>
+      {msg && <div className="dv-err">{msg}</div>}
+    </div>
+  );
 }
 
 const fieldTitle = (f: UiDescriptorField) => f.label || f.mibObject || f.fieldId;
@@ -254,9 +292,27 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
       const err = runtime.error(sec.sectionId, f);
       const errEl = err ? <div className="dv-err">{err}</div> : null;
       const changed = runtime.edited(sec.sectionId, f) !== undefined;
+      if (kind === 'idlist' && f.idList) {
+        const raw = runtime.rawValue(sec.sectionId, f);
+        const e0 = runtime.edited(sec.sectionId, f);
+        const ids = parseIdList(e0 ?? raw);
+        const cfg = f.idList;
+        return (<>
+          <IdListEditor ids={ids} cfg={cfg} editable={writable} changed={changed} unread={raw == null || /^-?NA-?$/i.test(String(raw).trim())}
+            onChange={(next) => runtime.onEdit(sec.sectionId, f, formatIdList(next) === formatIdList(parseIdList(raw)) ? (raw ?? '') : formatIdList(next))} />
+          {hintEl}{errEl}
+        </>);
+      }
       if (kind === 'select') {
         const sib = f.optionsFrom ? sec.fields.find((x) => x.fieldId === f.optionsFrom) : undefined;
-        const valueOf = (id: string) => { const p = sec.fields.find((x) => x.fieldId === id); return p ? (runtime.edited(sec.sectionId, p) ?? runtime.rawValue(sec.sectionId, p) ?? '') : ''; };
+        // a parent may sit in another section of the screen (VLAN Mode follows the Radio Mode on the Wireless page)
+        const valueOf = (id: string) => {
+          for (const s of [sec, ...sections]) {
+            const p = s.fields.find((x) => x.fieldId === id);
+            if (p) return runtime.edited(s.sectionId, p) ?? runtime.rawValue(s.sectionId, p) ?? '';
+          }
+          return '';
+        };
         // options that follow other fields' current (even unsaved) values win over the device's own current list
         const fromDevice = optionsByList(f, valueOf) ?? (sib ? parseOptionList(runtime.rawValue(sec.sectionId, sib)) : []);
         const own = enumOptions(f);
@@ -267,9 +323,10 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
           <select className={`dv-select ${changed ? 'dv-changed' : ''}`} value={cur} disabled={!writable}
             onChange={(e) => {
               runtime.onEdit(sec.sectionId, f, e.target.value);
-              for (const r of cascadeOptionResets(sec, f.fieldId, e.target.value, valueOf)) {
-                const g = sec.fields.find((x) => x.fieldId === r.fieldId);
-                if (g) runtime.onEdit(sec.sectionId, g, r.value);
+              for (const r of cascadeOptionResets(sec, f.fieldId, e.target.value, valueOf, sections)) {
+                const gs = r.sectionId === sec.sectionId ? sec : sections.find((x) => x.sectionId === r.sectionId);
+                const g = gs?.fields.find((x) => x.fieldId === r.fieldId);
+                if (gs && g) runtime.onEdit(gs.sectionId, g, r.value);
               }
             }}>
             {!has && <option value={cur}>{cur === '' ? '—' : cur}</option>}
@@ -294,6 +351,7 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
     }
 
     const editable = f.access === 'read-write' || kind !== 'text';
+    if (kind === 'idlist' && f.idList) return <IdListEditor ids={parseIdList(val)} cfg={f.idList} editable={false} changed={false} onChange={() => undefined} />;
     if (kind === 'select') {
       const opts = enumOptions(f);
       return (<>
@@ -330,6 +388,14 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
     !!runtime && !design && runtime.ready && !rowVisible(sec, f, runtime);
 
   const renderSection = (sec: UiDescriptorSection) => {
+    if (sec.uiLayout === 'charts') {
+      return (
+        <div key={sec.sectionId} className={design && selectedSectionId === sec.sectionId ? 'sel-section' : ''} data-dv-section={sec.sectionId}
+          onClick={design ? () => onSelectSection?.(sec.sectionId) : undefined}>
+          <StatsCharts config={sec.uiCharts} group={sec.sectionId} fetcher={runtime?.history} />
+        </div>
+      );
+    }
     const fields = [...sec.fields].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).filter(isBindable);
     const forms = fields.filter((f) => f.elementType === 'field-label');
     const tables = fields.filter((f) => f.elementType === 'table-block');

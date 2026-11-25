@@ -50,6 +50,7 @@ const ParameterSpecSchema = new mongoose.Schema({
   uiHidden:        { type: Boolean, default: false },
   optionsFrom:     { type: String, default: undefined },
   optionsBy:       { type: mongoose.Schema.Types.Mixed, default: undefined },
+  idList:          { type: mongoose.Schema.Types.Mixed, default: undefined },
   valueSource:     { type: String, default: null },
   staticValue:     { type: String, default: null },
   calc:            { type: mongoose.Schema.Types.Mixed, default: null },
@@ -75,6 +76,7 @@ const GroupSpecSchema = new mongoose.Schema({
   uiColumn: { type: String, default: '' },
   uiHideWhenEmpty: { type: Boolean, default: false },
   uiMatrix: { type: mongoose.Schema.Types.Mixed, default: null },
+  uiCharts: { type: mongoose.Schema.Types.Mixed, default: null },
   // headings / sub-headings / dividers of the section, ordered together with the parameters (uiOrder)
   layoutItems: { type: [mongoose.Schema.Types.Mixed], default: [] },
 }, { _id: false });
