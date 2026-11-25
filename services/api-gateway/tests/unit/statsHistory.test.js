@@ -96,3 +96,27 @@ describe('averaging into points', () => {
     expect(h.toSeries(h.rawToBuckets([], 300_000), null)).toEqual([]);
   });
 });
+
+describe('built-in catalog (template independent)', () => {
+  const h2 = require('../../src/live/statsHistory');
+  test('targets cover the statistics rows and the links of both radios; old firmware root is used for 52619 units', () => {
+    const t = h2.builtinTargets('1.3.6.1.4.1.14125.123');
+    expect(t.length).toBe(13 * 3 + 4 * 2 * 8);
+    expect(t.find((x) => x.param === 'wirelessStatsTxThroughput' && x.index === '2').oid).toBe('1.3.6.1.4.1.14125.123.1.3.1.1.30.2');
+    expect(t.find((x) => x.param === 'assocLocalSNRA1' && x.index === '3.1').oid).toBe('1.3.6.1.4.1.14125.123.1.3.3.1.13.3.1');
+    expect(h2.builtinTargets('.1.3.6.1.4.1.52619')[0].oid.startsWith('1.3.6.1.4.1.52619.1.3.1.1.')).toBe(true);
+  });
+  test('only UBR trees are collected', () => {
+    expect(h2.isUbr('1.3.6.1.4.1.14125.123')).toBe(true);
+    expect(h2.isUbr('.1.3.6.1.4.1.52619')).toBe(true);
+    expect(h2.isUbr('1.3.6.1.4.1.9')).toBe(false);
+  });
+  test('gauges are stored, counters become rates from the second reading', () => {
+    const t = h2.builtinTargets('1.3.6.1.4.1.14125.123');
+    const read = (v) => [{ oid: '1.3.6.1.4.1.14125.123.1.3.1.1.30.2', value: '9' }, { oid: '1.3.6.1.4.1.14125.123.1.3.1.1.4.2', value: String(v) }];
+    const a = h2.sampleFromCatalog(t, read(1000), 0, null);
+    expect(a.metrics).toEqual({ 'wirelessStatsTxThroughput~2': 9 });
+    const b = h2.sampleFromCatalog(t, read(1600), 300_000, { ms: 0, counters: a.counters });
+    expect(b.metrics['wirelessStatsDataTxTotalPackets~2']).toBe(2);
+  });
+});

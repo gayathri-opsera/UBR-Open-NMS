@@ -3,14 +3,14 @@
 /**
  * Statistics history — the numbers behind the Monitor > Graphs tab (up to 6 months).
  *
- * What is collected: every group whose published screen has layout "charts" (Custom UI Builder, Monitor > <radio> Statistics > Graphs).
- * Its `uiCharts` says which fields (by parameter name) are charted, whether a field is a device COUNTER (stored as a per-second
- * rate) and which row of the statistics tables belongs to the radio. The values are read with the same GET-only Monitor read the
- * Node View uses (pollMonitorGroups) — nothing is written to a device.
+ * What is collected: a built-in catalog (statistics + link SNR) of every UBR650/655/660, whatever template the device uses; the
+ * Graphs charts of a template only choose which of these metrics to draw. Read with SNMP GETs only.
+ * Counters are stored as per-second rates. A template's `uiCharts` says which of these metrics a chart draws and which statistics
+ * row belongs to its radio. Nothing is written to a device.
  *
  * Storage (MongoDB, db of the NMS):
- *   stats_raw     one document per device + group + sample, every STATS_HISTORY_INTERVAL_SECONDS (default 5 min), kept 8 days
- *   stats_hourly  one document per device + group + hour with the sum and count of every metric, kept 200 days (6 months + margin)
+ *   stats_raw     one document per device + sample, every STATS_HISTORY_INTERVAL_SECONDS (default 5 min), kept 8 days
+ *   stats_hourly  one document per device + hour with the sum and count of every metric, kept 200 days (6 months + margin)
  * A query picks the resolution by range: a start within the last 7 days is read from raw samples, older ranges from the hourly
  * averages, and either is averaged into at most MAX_POINTS points. A metric is `param~instance` ('wirelessStatsTxThroughput~2',
  * link rows '2.1' are written '2-1' because a field name cannot contain a dot).
@@ -238,26 +238,73 @@ async function readByGet(live, device, groupId, uiCharts) {
   return params.size ? { groupId, parameters: [...params].map(([parameterId, instances]) => ({ parameterId, instances })) } : null;
 }
 
-async function collectDevice(live, device) {
-  const { NodeViewWireframe } = require('../models/nodeViewWireframe.model');
-  await live.ensureDefinitionLink(device);
-  if (!device.productDefinitionId) return 0;
-  const doc = await NodeViewWireframe.findOne({ productDefinitionId: device.productDefinitionId, status: 'ACTIVE' }, { 'wireframe.groups': 1 }).lean();
-  const groups = ((doc && doc.wireframe && doc.wireframe.groups) || []).filter((g) => g.uiLayout === 'charts' && g.uiCharts && Array.isArray(g.uiCharts.charts));
-  if (!groups.length) return 0;
-  const res = await live.pollMonitorGroups(device, groups.map((g) => g.groupId));
-  const walked = res.pollStatus === 'OK';
-  const ts = new Date(walked ? res.collectedAt : Date.now());
-  let stored = 0;
-  for (const g of groups) {
-    const lk = `${device._id}|${g.groupId}`;
-    // a walk that timed out (agents that only answer GETs) → the GET-only read of the known rows
-    const groupResponse = walked ? (res.groups || []).find((x) => x.groupId === g.groupId) : await readByGet(live, device, g.groupId, g.uiCharts).catch(() => null);
-    const sample = extractSample(g.uiCharts, groupResponse, ts.getTime(), lastByGroup.get(lk));
-    if (Object.keys(sample.counters).length) lastByGroup.set(lk, { ms: ts.getTime(), counters: sample.counters });
-    stored += await store(String(device._id), g.groupId, sample.metrics, ts);
+// ── built-in catalog: collected for every UBR650/655/660 whatever template the device uses ─────────────────────────────
+
+const STATS_ROOT = '.1.3.6.1.4.1.14125.123';
+const OLD_ROOT = '.1.3.6.1.4.1.52619';   // older UBR650/655 firmware serves the same tree under this root (see oidAliases.js)
+/** Statistics table (one row per radio: 1 = 2.4 GHz, 2 = Radio 1, 3 = Radio 2) and link table columns; `rate` = counter → per-second rate. */
+const STATS_COLUMNS = [
+  ['wirelessStatsTxThroughput', 30], ['wirelessStatsRxThroughput', 31], ['wirelessStatsRTXPercent', 37],
+  ['wirelessStatsDataTxTotalPackets', 4, true], ['wirelessStatsDataRxTotalPackets', 5, true],
+  ['wirelessStatsDataTxMulticastPackets', 6, true], ['wirelessStatsDataRxMulticastPackets', 7, true],
+  ['wirelessStatsDataTxUnicastPackets', 8, true], ['wirelessStatsDataRxUnicastPackets', 9, true],
+  ['wirelessStatsDataTxBroadcastPackets', 32, true], ['wirelessStatsDataRxBroadcastPackets', 33, true],
+  ['wirelessStatsCRCErrors', 28, true], ['wirelessStatsFrameErrors', 29, true],
+];
+const LINK_COLUMNS = [['assocLocalSNRA1', 13], ['assocLocalSNRA2', 14], ['assocRemoteSNRA1', 15], ['assocRemoteSNRA2', 16]];
+const STATS_ROWS = [1, 2, 3];
+const LINK_RADIOS = [2, 3];
+const LINKS_PER_RADIO = MAX_LINKS_BY_GET;
+
+const isUbr = (sysObjectID) => /^\.?1\.3\.6\.1\.4\.1\.(14125\.123|52619)(\.|$)/.test(String(sysObjectID || ''));
+
+/** The catalog's targets for a device: [{ param, index, oid, rate }]. */
+function builtinTargets(sysObjectID) {
+  const root = /^\.?1\.3\.6\.1\.4\.1\.52619/.test(String(sysObjectID || '')) ? OLD_ROOT : STATS_ROOT;
+  const out = [];
+  for (const [param, col, rate] of STATS_COLUMNS) for (const r of STATS_ROWS) out.push({ param, index: String(r), oid: `${root}.1.3.1.1.${col}.${r}`.replace(/^\./, ''), rate: !!rate });
+  for (const [param, col] of LINK_COLUMNS) for (const r of LINK_RADIOS) for (let k = 1; k <= LINKS_PER_RADIO; k += 1) out.push({ param, index: `${r}.${k}`, oid: `${root}.1.3.3.1.${col}.${r}.${k}`.replace(/^\./, ''), rate: false });
+  return out;
+}
+
+/** Raw readings [{ oid, value }] of the catalog → { metrics, counters } (counters become per-second rates against `last`). */
+function sampleFromCatalog(targets, got, nowMs, last) {
+  const byOid = new Map((got || []).map((r) => [String(r.oid || '').replace(/^\./, ''), r.value]));
+  const metrics = {};
+  const counters = {};
+  for (const t of targets) {
+    if (!byOid.has(t.oid)) continue;
+    const n = numeric(byOid.get(t.oid));
+    if (n === null) continue;
+    const key = encodeKey(t.param, t.index);
+    if (t.rate) {
+      counters[key] = n;
+      if (last && last.counters && key in last.counters) {
+        const r = rateOf(last.counters[key], n, last.ms, nowMs);
+        if (r !== null) metrics[key] = r;
+      }
+    } else metrics[key] = n;
   }
-  return stored;
+  return { metrics, counters };
+}
+
+const lastByDevice = new Map();   // deviceId → { ms, counters }
+const HISTORY_KEY = 'device';     // samples are stored per device, not per template group
+
+/** GET-only read of the catalog (never a table walk, so it is safe on agents that struggle with walks, like the UBR660). */
+async function collectDevice(live, device) {
+  if (!isUbr(device.sysObjectID) || !device.snmpCommunity) return 0;
+  const { getOids } = require('./snmpWalk');
+  const targets = builtinTargets(device.sysObjectID);
+  const { host, port } = live.splitHostPort(device);
+  const got = [];
+  for (let i = 0; i < targets.length; i += 40) {
+    got.push(...(await getOids({ host, port, community: device.snmpCommunity, oids: targets.slice(i, i + 40).map((t) => t.oid), timeoutMs: 2000, retries: 1 }).catch(() => [])));
+  }
+  const ms = Date.now();
+  const sample = sampleFromCatalog(targets, got, ms, lastByDevice.get(String(device._id)));
+  if (Object.keys(sample.counters).length) lastByDevice.set(String(device._id), { ms, counters: sample.counters });
+  return store(String(device._id), HISTORY_KEY, sample.metrics, new Date(ms));
 }
 
 let running = false;
@@ -294,6 +341,6 @@ module.exports = {
   // pure
   encodeKey, decodeKey, instanceMatches, numeric, rateOf, chartedParams, extractSample, resolveRange, pickBucket, rawToBuckets, hourlyToBuckets, toSeries,
   // io
-  store, queryHistory, readByGet, collectDevice, collectAll, startCollector,
+  store, queryHistory, readByGet, builtinTargets, sampleFromCatalog, isUbr, collectDevice, collectAll, startCollector,
   RANGES, MAX_POINTS, RAW_QUERY_MS,
 };
