@@ -25,6 +25,7 @@ import { Modal } from '../components/common/Modal';
 import { useToast } from '../components/common/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { logger } from '../utils/logger';
+import { useTemplateNames } from '../hooks/useTemplateNames';
 
 // ── Geo helpers ───────────────────────────────────────────────────────────────
 /**
@@ -634,6 +635,7 @@ export default function V2DevicesPage() {
   };
 
   // ── Table columns ─────────────────────────────────────────────────────────
+  const templateNames = useTemplateNames();
   const columns: ColumnDef<Device>[] = [
     {
       key: 'serialNumber', header: 'Serial', sortable: true,
@@ -650,6 +652,12 @@ export default function V2DevicesPage() {
       render: (d) => <Badge variant={statusVariant(d.status)} dot>{d.status}</Badge>, width: 120,
     },
     { key: 'ipAddress', header: 'IP', sortable: true, render: (d) => <span style={{ fontFamily: 'var(--vf-font-mono)', fontSize: 12 }}>{d.ipAddress}</span> },
+    {
+      key: 'productDefinitionId', header: 'Template', sortable: true,
+      render: (d) => (d.productDefinitionId
+        ? <span title={`Node View template ${d.productDefinitionId}`}>{templateNames.get(d.productDefinitionId) ?? `${d.productDefinitionId.slice(0, 8)}…`}</span>
+        : <span style={{ color: 'var(--vf-text-muted)' }}>—</span>),
+    },
     { key: 'manufacturer', header: 'Manufacturer', sortable: true },
     { key: 'model', header: 'Model', sortable: true },
     { key: 'firmwareVersion', header: 'Firmware', sortable: true },

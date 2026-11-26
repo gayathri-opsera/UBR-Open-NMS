@@ -27,6 +27,7 @@ import type { ParameterCurrentValue, ParameterCurrentValueData } from '../../api
 // ── New wireframe architecture ─────────────────────────────────────────────────
 import { fetchNodeView, fetchLiveStatus, type LiveStatus } from '../../api/nodeView.api';
 import type { NodeViewData } from '../../api/nodeView.types';
+import { useTemplateNames } from '../hooks/useTemplateNames';
 import { fetchDeviceAuditLog, type DeviceTypeAuditEntry } from '../../api/deviceTypeCombinations.api';
 
 const TABS = [
@@ -73,6 +74,7 @@ export default function V2DeviceDetailPage() {
 
   // ── Node View tab state (new wireframe architecture) ─────────────────────
   const [nvData, setNvData]                 = useState<NodeViewData | null>(null);
+  const templateNames = useTemplateNames();
   const [nvLoading, setNvLoading]           = useState(false);
   const [nvRefreshing, setNvRefreshing]     = useState(false);
   const [nvError, setNvError]               = useState<string | null>(null);
@@ -455,6 +457,11 @@ export default function V2DeviceDetailPage() {
                         Upload &amp; activate a definition
                       </button>.
                     </span>
+                  </div>
+                )}
+                {nvData.wireframe.productDefinitionId && (
+                  <div data-testid="nv-template" style={{ fontSize: 12, color: 'var(--vf-text-muted)', margin: '0 0 8px' }}>
+                    Node View template: <strong style={{ color: 'var(--vf-text)' }}>{templateNames.get(nvData.wireframe.productDefinitionId) ?? nvData.wireframe.productDefinitionId}</strong>
                   </div>
                 )}
                 <NodeViewParameters

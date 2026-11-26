@@ -318,6 +318,10 @@ export function ProvisionDeviceModal({
     [result, templates],
   );
 
+  // The Custom UI Builder v2 template this device will be provisioned with: the one picked above, else the one chosen at discovery
+  const chosenTemplateId = (radioFit.status === 'mismatch' && templateOverrideId) ? templateOverrideId : (result?.productDefinitionId ?? '');
+  const chosenTemplateName = chosenTemplateId ? (templates.find((t) => t.descriptorId === chosenTemplateId)?.screenName ?? `${chosenTemplateId.slice(0, 8)}…`) : '';
+
   // Load available models once
   useEffect(() => {
     listModels().then(setComboModels).catch(() => setComboModels([]));
@@ -512,6 +516,12 @@ export function ProvisionDeviceModal({
               <span style={{ fontSize: 11, color: 'var(--vf-text-muted)' }}>IP Address</span>
               <div style={{ fontFamily: 'var(--vf-font-mono)', fontWeight: 700, fontSize: 13, color: '#60a5fa' }}>
                 {result.ip}
+              </div>
+            </div>
+            <div data-testid="provision-template">
+              <span style={{ fontSize: 11, color: 'var(--vf-text-muted)' }}>Node View template (Custom UI Builder v2)</span>
+              <div style={{ fontSize: 12, fontWeight: 700, color: chosenTemplateName ? 'var(--vf-text-primary)' : 'var(--vf-text-muted)' }}>
+                {chosenTemplateName || 'None matched this device'}
               </div>
             </div>
             {snmpRows.map(([label, val]) =>
