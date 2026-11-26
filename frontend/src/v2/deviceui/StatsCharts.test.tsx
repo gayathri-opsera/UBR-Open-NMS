@@ -88,7 +88,7 @@ describe('Monitor > Graphs', () => {
       const fetcher = vi.fn().mockResolvedValue(EMPTY);
       render(<StatsCharts config={CONFIG} group="g1" fetcher={fetcher} liveFetcher={vi.fn().mockResolvedValue(null)} />);
       const sel = screen.getByLabelText('Universal live frequency') as HTMLSelectElement;
-      expect([...sel.options].map((o) => o.textContent)).toEqual(['Live · 5 s', 'Live · 10 s', '1 Hour', '1 Day', '1 Week', '1 Month', '3 Months', '6 Months']);
+      expect([...sel.options].map((o) => o.textContent)).toEqual(['Live · 3 s', 'Live · 5 s', 'Live · 10 s', '1 Hour', '1 Day', '1 Week', '1 Month', '3 Months', '6 Months']);
       await act(async () => { fireEvent.change(sel, { target: { value: '1w' } }); });
       await waitFor(() => expect(fetcher).toHaveBeenCalledWith({ group: 'g1', range: '1w', params: ['tx', 'rx'] }));
       expect(fetcher).toHaveBeenCalledWith({ group: 'g1', range: '1w', params: ['rtx'] });
@@ -111,5 +111,12 @@ describe('Monitor > Graphs', () => {
       await waitFor(() => expect(live).toHaveBeenCalledWith('2'));
       expect(await screen.findByText(/Live · a reading every 10 s/)).toBeTruthy();
     });
+  });
+});
+
+import { smooth } from './StatsCharts';
+describe('live smoothing', () => {
+  it('plots each point as the average of itself and the two readings before it', () => {
+    expect(smooth([[1, 0], [2, 6], [3, 3], [4, 9]])).toEqual([[1, 0], [2, 3], [3, 3], [4, 6]]);
   });
 });

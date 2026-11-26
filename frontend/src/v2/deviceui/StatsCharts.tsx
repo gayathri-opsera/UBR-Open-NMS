@@ -4,7 +4,7 @@
  * for older ranges); a chart with no samples yet says so instead of drawing an empty frame.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { UiChartDef, UiChartsConfig } from '../../api/uiBuilder.api';
 import type { HistoryData, LiveStatsSample } from '../../api/nodeView.api';
 import { RANGE_OPTIONS, bucketLabel, chartLines, chartRows, formatValue, tickLabel } from './statsChartsModel';
@@ -13,10 +13,15 @@ export type LiveFetcher = (row: string) => Promise<LiveStatsSample | null>;
 export type HistoryFetcher = (q: { group: string; range?: string; from?: string; to?: string; params?: string[] }) => Promise<HistoryData | null>;
 
 /** Live stream: frequencies on offer (seconds), the one every chart starts with, and how many points a chart keeps (a rolling window). */
-export const LIVE_FREQUENCIES = [5, 10];
+export const LIVE_FREQUENCIES = [3, 5, 10];
 export const DEFAULT_LIVE_FREQ = 5;
-export const LIVE_MAX_POINTS = 120;
+export const LIVE_MAX_POINTS = 61;   // like SkyPoint's live graphs (about 3 minutes at 3 s)
+export const SMOOTH_POINTS = 3;      // live values are plotted as a moving average of the last 3 readings
 const freqLabel = (s: number) => (s >= 60 ? `${s / 60} min` : `${s} s`);
+/** moving average of each point with the (up to) n-1 readings before it */
+export function smooth(points: [number, number][], n = SMOOTH_POINTS): [number, number][] {
+  return points.map(([t], i) => { const w = points.slice(Math.max(0, i - n + 1), i + 1); return [t, w.reduce((a, [, v]) => a + v, 0) / w.length] as [number, number]; });
+}
 type LiveBuffer = Record<string, [number, number][]>;   // `param~instance` → points
 
 const COLORS = ['#1b6ec2', '#e07b00', '#2e9d57', '#c0392b', '#7d4cc7', '#00897b', '#8d6e63', '#546e7a'];
@@ -56,7 +61,7 @@ function ChartCard({ chart, group, row, fetcher, range, setRange, live }: { char
   const liveData = useMemo<HistoryData | null>(() => {
     if (!isLive) return null;
     const series = Object.entries(live!.buffer ?? {}).filter(([k]) => chart.series.some((s) => s.param === k.slice(0, k.lastIndexOf('~'))))
-      .map(([k, points]) => { const i = k.lastIndexOf('~'); return { param: k.slice(0, i), instance: k.slice(i + 1).replace(/-/g, '.'), points }; });
+      .map(([k, points]) => { const i = k.lastIndexOf('~'); return { param: k.slice(0, i), instance: k.slice(i + 1).replace(/-/g, '.'), points: smooth(points) }; });
     const to = series.reduce((m, x) => Math.max(m, x.points[x.points.length - 1]?.[0] ?? 0), 0) || Date.now();
     const first = series.reduce((m, x) => Math.min(m, x.points[0]?.[0] ?? to), to);
     return { from: Math.max(first, to - LIVE_MAX_POINTS * live!.freq * 1000), to, bucketSeconds: live!.freq, source: 'live', samples: series.length, series };
@@ -95,18 +100,18 @@ function ChartCard({ chart, group, row, fetcher, range, setRange, live }: { char
           : empty ? <div className="dv-chart-empty">{state === 'loading' ? 'Loading…' : 'No history for this period yet — a sample is stored every 5 minutes.'}</div>
           : (
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={rows} margin={{ top: 6, right: 14, bottom: 0, left: 0 }}>
+              <AreaChart data={rows} margin={{ top: 6, right: 14, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e3e6ea" />
                 <XAxis dataKey="t" type="number" scale="time" domain={[shown?.from ?? 'dataMin', shown?.to ?? 'dataMax']} tickFormatter={(v: number) => tickLabel(v, span)} tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} width={52} tickFormatter={(v: number) => formatValue(v, decimals > 1 ? 1 : decimals)} />
+                <YAxis domain={[0, 'auto']} tick={{ fontSize: 11 }} width={52} tickFormatter={(v: number) => formatValue(v, decimals > 1 ? 1 : decimals)} />
                 <Tooltip labelFormatter={(v) => new Date(Number(v)).toLocaleString()} formatter={(v) => (typeof v === 'number' ? `${formatValue(v, decimals)}${chart.unit ? ` ${chart.unit}` : ''}` : String(v))} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                {lines.map((l, i) => <Line key={l.key} type="monotone" dataKey={l.key} name={l.label} stroke={COLORS[i % COLORS.length]} dot={false} strokeWidth={1.6} connectNulls isAnimationActive={false} />)}
-              </LineChart>
+                {lines.map((l, i) => <Area key={l.key} type="linear" dataKey={l.key} name={l.label} stroke={COLORS[i % COLORS.length]} fill={COLORS[i % COLORS.length]} fillOpacity={0.25} dot={false} strokeWidth={1.6} connectNulls isAnimationActive={false} />)}
+              </AreaChart>
             </ResponsiveContainer>
           )}
       </div>
-      {shown && !empty && <footer className="dv-chart-foot">{shown.source === 'live' ? `Live · a reading every ${freqLabel(shown.bucketSeconds)} · last ${LIVE_MAX_POINTS} readings` : `Average per ${bucketLabel(shown.bucketSeconds)} · ${shown.source === 'raw' ? '5-minute samples' : 'hourly averages'}`}</footer>}
+      {shown && !empty && <footer className="dv-chart-foot">{shown.source === 'live' ? `Live · a reading every ${freqLabel(shown.bucketSeconds)} · average of the last ${SMOOTH_POINTS} readings` : `Average per ${bucketLabel(shown.bucketSeconds)} · ${shown.source === 'raw' ? '5-minute samples' : 'hourly averages'}`}</footer>}
     </section>
   );
 }

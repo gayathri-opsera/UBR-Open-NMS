@@ -321,7 +321,7 @@ router.get(
 /**
  * Live stream of a radio's chart metrics (Monitor > Graphs, polled every 5 s while the tab is open).
  *   GET /api/node-view/:deviceId/live-stats?row=<1|2|3>   (statistics row: 1 = 2.4 GHz, 2 = Radio 1, 3 = Radio 2)
- * Read-only: SNMP GETs of that radio's statistics columns and link SNR rows; readings are shared for 3 s per device and row.
+ * Read-only: SNMP GETs of that radio's statistics columns and link SNR rows; readings are shared for 2 s per device and row.
  */
 router.get(
   '/:deviceId/live-stats',

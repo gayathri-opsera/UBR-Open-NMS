@@ -309,14 +309,14 @@ async function collectDevice(live, device) {
 
 // ── live stream: one fresh GET read of a radio's statistics for the Monitor > Graphs tab (every 5 s while it is open) ─────
 
-const LIVE_CACHE_MS = 3000;       // charts with different frequencies share one device read
+const LIVE_CACHE_MS = 2000;       // charts with different frequencies share one device read
 const liveCache = new Map();      // `${deviceId}|${row}` → { at, promise }
 const liveLast = new Map();       // `${deviceId}|${row}` → { ms, counters } (previous live reading, for per-second rates)
 
 /**
  * The current values of one radio's chart metrics: { ts, values: { 'param~instance': number } }. SNMP GET only (the radio's own
  * statistics row and link rows), never a walk, and never a write. Counters are rates against the previous live reading, so the
- * first reading of a counter has no value. Concurrent callers within LIVE_CACHE_MS get the same reading.
+ * first reading of a counter has no value. Concurrent callers within LIVE_CACHE_MS (2 s, so a 3 s poll always gets a fresh reading) get the same reading.
  */
 function liveSample(live, device, row) {
   const key = `${device._id}|${row}`;
