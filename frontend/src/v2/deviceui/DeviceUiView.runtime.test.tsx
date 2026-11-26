@@ -254,3 +254,23 @@ describe('VLAN trunk list editor', () => {
     expect(u.onEdit).toHaveBeenCalledWith('v', expect.objectContaining({ fieldId: 'ids' }), '10 20');
   });
 });
+
+describe('left menu accordion', () => {
+  const two: UiDescriptorSection[] = [
+    { sectionId: 'a', title: 'A', columns: 2, order: 0, uiPage: 'Wireless', uiParent: 'Radio 1', uiTab: 'Properties', fields: [col('ssid', 'SSID')] },
+    { sectionId: 'b', title: 'B', columns: 2, order: 1, uiPage: 'Network', uiParent: 'Ethernet', uiTab: 'LAN 1', fields: [col('ssid', 'SSID')] },
+    { sectionId: 'c', title: 'C', columns: 2, order: 2, uiPage: 'Management', uiParent: 'System', uiTab: 'General', fields: [col('ssid', 'SSID')] },
+  ];
+  const subs = (c: HTMLElement) => [...c.querySelectorAll('.dv-sub li')].map((l) => l.textContent?.trim());
+  it('opening one section collapses the others; only the selected section stays expanded', () => {
+    const { container } = render(<DeviceUiView screenName="UBR" sections={two} active={{ page: 'Wireless', parent: 'Radio 1', tab: 'Properties' }} onActiveChange={() => undefined} />);
+    expect(subs(container)).toEqual(['Radio 1']);                       // Wireless is open
+    fireEvent.click(screen.getByText('Network'));                         // open Network: Wireless collapses
+    expect(subs(container)).toEqual(['Ethernet']);
+    fireEvent.click(screen.getByText('Management'));
+    expect(subs(container)).toEqual(['System']);
+    fireEvent.click(screen.getByText('Management'));                      // click the open one: all collapsed
+    expect(subs(container)).toEqual([]);
+  });
+});
+

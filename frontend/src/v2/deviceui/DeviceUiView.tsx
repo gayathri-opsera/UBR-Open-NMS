@@ -189,7 +189,8 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
   const tree = buildDeviceTree(screenName, viewSections);
   const path = resolvePath(tree, active);
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  useEffect(() => { setOpen((o) => ({ ...o, [path.page]: true })); }, [path.page]);
+  // accordion, like the device's own menu: only the section of the selected page is expanded
+  useEffect(() => { setOpen({ [path.page]: true }); }, [path.page]);
 
   const page = tree.find((p) => p.name === path.page);
   const parent = page?.parents.find((r) => r.name === path.parent);
@@ -578,7 +579,7 @@ export const DeviceUiView: React.FC<DeviceUiViewProps> = ({
               <li key={p.name} className="dv-top">
                 <div className={`dv-top-a ${nodeProps('page', { page: p.name, parent: '', tab: '' }).cls}`} {...nodeProps('page', { page: p.name, parent: '', tab: '' }).rest} onClick={() => {
                   if (p.direct) pick({ page: p.name, parent: p.parents[0].name, tab: p.parents[0].tabs[0]?.name });
-                  else setOpen((o) => ({ ...o, [p.name]: !o[p.name] }));
+                  else setOpen((o) => (o[p.name] ? {} : { [p.name]: true }));   // opening one section collapses the others
                 }}>
                   <Svg className="dv-ico" d={TOP_ICON(p.name, pi)} />
                   <Ed value={p.name} onCommit={ed ? (v) => ed.renamePage(p.name, v) : undefined} />
